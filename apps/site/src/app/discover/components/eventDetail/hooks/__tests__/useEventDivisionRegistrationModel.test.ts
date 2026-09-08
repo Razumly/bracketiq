@@ -53,6 +53,21 @@ function renderModel({
 }
 
 describe('useEventDivisionRegistrationModel', () => {
+    it('closes registration on a later render after the Event starts', () => {
+        jest.useFakeTimers();
+        try {
+            jest.setSystemTime(new Date('2099-08-01T18:59:00Z'));
+            const { result, rerender } = renderModel();
+            expect(result.current.eventHasStarted).toBe(false);
+            jest.setSystemTime(new Date('2099-08-01T19:01:00Z'));
+            rerender();
+            expect(result.current.eventHasStarted).toBe(true);
+            expect(result.current.selfRegistrationBlockedReason).toContain('already started');
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
     it('derives the selected division, labels, and registration payload', () => {
         const { result } = renderModel({
             selectedWeeklyOccurrence: {

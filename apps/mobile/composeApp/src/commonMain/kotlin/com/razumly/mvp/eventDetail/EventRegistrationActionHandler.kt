@@ -102,8 +102,18 @@ internal class EventRegistrationActionHandler(
             if (resumePendingSignatureFlowIfNeeded()) {
                 return@launch
             }
-            if (!selectedEvent().teamSignup) {
-                val children = loadJoinableChildren("Failed to load linked children before join flow.")
+            registrationFlowCoordinator.selectCheckoutRegistrant(currentUser().id)
+            if (!selectedEvent().teamSignup && !currentUser().isMinor) {
+                val linkedChildren = try {
+                    loadJoinableChildren("Failed to load linked children before join flow.")
+                } catch (failure: Exception) {
+                    if (failure is kotlinx.coroutines.CancellationException) throw failure
+                    setError("Could not load your children. Try opening registration again.")
+                    return@launch
+                }
+                val children = linkedChildren
+                    .filter { isChildEligibleForEvent(it, selectedEvent(), selectedDivision()) }
+                    .map { it.copy(ageAtEvent = childAgeAtEvent(it, selectedEvent())) }
                 if (children.isNotEmpty()) {
                     registrationFlowCoordinator.showJoinChoiceDialog(children)
                     return@launch
@@ -221,6 +231,7 @@ internal class EventRegistrationActionHandler(
     }
 
     fun confirmJoinAsSelf() {
+        registrationFlowCoordinator.selectCheckoutRegistrant(currentUser().id)
         registrationFlowCoordinator.clearJoinDialogs()
         scope.launch {
             runSelfJoinFlow()
@@ -248,9 +259,18 @@ internal class EventRegistrationActionHandler(
             setError("Unable to find that child profile.")
             return
         }
+        if (currentUser().isMinor || !isChildEligibleForEvent(selectedChild, selectedEvent(), selectedDivision())) {
+            setError("This child is not eligible for the selected Event and division.")
+            return
+        }
 
+        registrationFlowCoordinator.selectCheckoutRegistrant(selectedChild.userId)
         registrationFlowCoordinator.clearJoinDialogs()
-        if (!ensureEventRegistrationQuestionsAnswered { selectChildForJoin(childUserId) }) {
+        if (!registrationFlowCoordinator.ensureQuestionsAnswered(
+                eventName = selectedEvent().name,
+                registrantName = selectedChild.fullName,
+                onReady = { selectChildForJoin(childUserId) },
+            )) {
             return
         }
         scope.launch {
@@ -595,7 +615,7 @@ internal class EventRegistrationActionHandler(
         val accountId = currentUser().id
         val occurrence = currentWeeklyOccurrenceSelection()
         val divisionId = selectedDivision()
-        val price = if ((team == null && event.teamSignup) || (canManageSelectedEvent(event, currentUser()) && !currentUser().isMinor)) 0 else
+        val price = if ((team == null && event.teamSignup) || (!isChild && canManageSelectedEvent(event, currentUser()) && !currentUser().isMinor)) 0 else
             resolveEffectivePaymentPlan(event, selectedDivision()).priceCents
         val action = registrationFlowCoordinator.determineJoinExecutionAction(
             paymentPlan = resolveEffectivePaymentPlan(event, divisionId),
@@ -604,7 +624,7 @@ internal class EventRegistrationActionHandler(
             isTeamSignup = event.teamSignup,
             forTeamJoin = team != null,
             manualPayment = event.usesManualRegistrationPayments(),
-            currentUserCanManageEvent = canManageSelectedEvent(event, currentUser()),
+            currentUserCanManageEvent = !isChild && canManageSelectedEvent(event, currentUser()),
         )
         registrationFlowCoordinator.checkout.prepare(
             EventCheckoutReviewState(
@@ -642,6 +662,10 @@ internal class EventRegistrationActionHandler(
     private suspend fun executeChildRegistration(child: JoinChildOption) {
         if (!ensureRegistrationOpen()) return
         val event = selectedEvent()
+        if (currentUser().isMinor || !isChildEligibleForEvent(child, event, selectedDivision())) {
+            setError("This child is not eligible for the selected Event and division.")
+            return
+        }
         val weeklyOccurrence = if (isWeeklyParentEvent(event)) {
             requireSelectedWeeklyOccurrence(
                 event,
@@ -650,13 +674,38 @@ internal class EventRegistrationActionHandler(
         } else {
             null
         }
+        val paymentPlan = resolveEffectivePaymentPlan(event, selectedDivision())
+        val childPrice = paymentPlan.priceCents
+        if (!isEventFull() && childPrice == null) {
+            setError("Set a price for this division before checkout.")
+            return
+        }
+        if (!isEventFull() && childPrice != null && childPrice > 0) {
+            if (event.usesManualRegistrationPayments() || paymentPlan.allowPaymentPlans) {
+                setError("Child checkout does not support manual payments or payment plans yet.")
+                return
+            }
+            if (!ensureBillingAddressOrPrompt { scope.launch { executeChildRegistration(child) } }) return
+            val operation = loadingHandler().newOperation()
+            operation.showLoading("Preparing child checkout...")
+            try {
+                billingRepository.createChildPurchaseIntent(event, child.userId, childPrice,
+                    weeklyOccurrence, selectedDivision(), registrationFlowCoordinator.answersForRequest())
+                    .onSuccess(::processPurchaseIntent)
+                    .onFailure { setError(it.userMessage("Could not prepare child checkout.")) }
+            } finally { operation.hideLoading() }
+            return
+        }
         val loadingOperation = loadingHandler().newOperation()
         joinExecutionCoordinator.executeChildRegistration(
             event = event,
             child = child,
             isEventFull = isEventFull(),
             weeklyOccurrence = weeklyOccurrence,
-            registerChildForEvent = eventRepository::registerChildForEvent,
+            registerChildForEvent = { eventId, childId, waitlist, occurrence ->
+                eventRepository.registerChildForEvent(eventId, childId, waitlist, occurrence,
+                    selectedDivision(), registrationFlowCoordinator.answersForRequest())
+            },
             refreshAfterParticipantMutation = refreshEventAfterParticipantMutation,
             showLoading = loadingOperation::showLoading,
             hideLoading = loadingOperation::hideLoading,

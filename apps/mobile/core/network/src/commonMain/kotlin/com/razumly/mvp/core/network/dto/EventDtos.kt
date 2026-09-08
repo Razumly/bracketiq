@@ -762,6 +762,8 @@ data class EventChildRegistrationRequestDto(
     val childId: String,
     val slotId: String? = null,
     val occurrenceDate: String? = null,
+    val divisionId: String? = null,
+    val answers: List<RegistrationQuestionAnswerDto> = emptyList(),
 )
 
 @Serializable
@@ -1037,7 +1039,6 @@ data class EventDetailBootstrapResponseDto(
     val teamCompliance: EventTeamComplianceResponseDto? = null,
     val userCompliance: EventUserComplianceResponseDto? = null,
 )
-
 
 
 

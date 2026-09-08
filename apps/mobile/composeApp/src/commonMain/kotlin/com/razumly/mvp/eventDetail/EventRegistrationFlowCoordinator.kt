@@ -214,6 +214,17 @@ internal class EventRegistrationFlowCoordinator {
     private var pendingSignatureContexts: List<SignerContext> = emptyList()
     private var pendingSignatureContextIndex = 0
     private var pendingSignatureChild: JoinChildOption? = null
+    private var checkoutRegistrantId: String? = null
+
+    fun selectCheckoutRegistrant(userId: String) {
+        if (checkoutRegistrantId != null && checkoutRegistrantId != userId) {
+            _answers.value = emptyMap()
+            questionsConfirmed = false
+        }
+        checkoutRegistrantId = userId
+    }
+
+    fun signatureRegistrantName(): String? = pendingSignatureChild?.fullName
     private var pendingSignatureTeamId: String? = null
     private var pendingSignaturePollJob: Job? = null
 
@@ -396,7 +407,7 @@ internal class EventRegistrationFlowCoordinator {
             answers = _answers.value,
         )
 
-    fun ensureQuestionsAnswered(eventName: String, onReady: () -> Unit): Boolean {
+    fun ensureQuestionsAnswered(eventName: String, registrantName: String? = null, onReady: () -> Unit): Boolean {
         val questions = _questions.value
         if (questions.isEmpty()) return true
         val missingQuestion = missingRegistrationQuestion()
@@ -407,6 +418,7 @@ internal class EventRegistrationFlowCoordinator {
         _questionsExpanded.value = true
         _questionDialog.value = EventRegistrationQuestionDialogState(
             eventName = eventName.ifBlank { "this event" },
+            registrantName = registrantName,
             questions = questions,
             answers = _answers.value,
         )

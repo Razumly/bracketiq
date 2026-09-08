@@ -1094,7 +1094,7 @@ internal fun EventDetailOverlayHost(
     }
     state.webSignaturePrompt?.let { prompt ->
         EmbeddedWebModal(
-            title = prompt.step?.title ?: "Sign required document",
+            title = listOfNotNull(prompt.registrantName, prompt.step?.title ?: "Sign required document").joinToString(" · "),
             url = prompt.url,
             description = webSignatureDescription(prompt),
             onDismiss = actions.onDismissWebSignature,

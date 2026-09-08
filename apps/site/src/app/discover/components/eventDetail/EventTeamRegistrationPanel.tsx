@@ -3,6 +3,7 @@ import { Alert, Button, Paper, Select as MantineSelect, Text } from '@mantine/co
 
 import type { Team } from '@/types';
 import { formatPrice } from '@/types';
+import TeamCard from '@/components/ui/TeamCard';
 
 type EventTeamRegistrationPanelProps = {
     eventHasStarted: boolean;
@@ -38,6 +39,7 @@ type EventTeamRegistrationPanelProps = {
     onSelectedTeamChange: (teamId: string) => void;
     onManageTeams: () => void;
     onAddPlayers?: () => void;
+    onEditTeam?: () => void;
     hasDraft?: boolean;
     onJoinTeamWaitlist: () => void;
     onJoinAsTeam: () => void;
@@ -81,6 +83,7 @@ export function EventTeamRegistrationPanel({
     onSelectedTeamChange,
     onManageTeams,
     onAddPlayers,
+    onEditTeam,
     hasDraft,
     onJoinTeamWaitlist,
     onJoinAsTeam,
@@ -122,10 +125,13 @@ export function EventTeamRegistrationPanel({
                                     searchable
                                     comboboxProps={comboboxProps}
                                 />
-                            </div> : <Text fw={600}>{userTeams.find((team) => team.$id === selectedTeamId)?.name}</Text>}
+                            </div> : userTeams.filter((team) => team.$id === selectedTeamId).map((team) => (
+                                <TeamCard key={team.$id} team={team} showTeamMetadata={false} />
+                            ))}
 
                             <div className="flex flex-wrap gap-2">
                                 <Button variant="subtle" onClick={() => setChangingTeam(true)}>Change team</Button>
+                                {onEditTeam ? <Button variant="default" onClick={onEditTeam} disabled={!selectedTeamId || joining || eventHasStarted}>Edit team</Button> : null}
                                 <Button variant="default" onClick={onAddPlayers} disabled={!selectedTeamId || joining || eventHasStarted || weeklySelectionRequired}>Add players</Button>
                                 <Button variant="subtle" onClick={onManageTeams} disabled={joining || eventHasStarted || weeklySelectionRequired}>Create team</Button>
                             </div>

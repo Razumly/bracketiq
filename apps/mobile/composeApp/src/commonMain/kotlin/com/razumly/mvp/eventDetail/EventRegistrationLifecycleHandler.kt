@@ -387,6 +387,11 @@ internal class EventRegistrationLifecycleHandler(
         .map(FamilyChild::toJoinChildOption)
         .toList()
 
+    suspend fun loadChildrenForRegistration(warningMessage: String): List<JoinChildOption> =
+        userRepository.listChildren().onFailure { Napier.w(warningMessage, it) }.getOrThrow()
+            .filter { it.userId.isNotBlank() && it.linkStatus?.equals("active", ignoreCase = true) == true }
+            .map(FamilyChild::toJoinChildOption)
+
     suspend fun refreshScheduleTrackedUserIds() {
         val ids = linkedSetOf<String>()
         val currentUserId = currentUser().id.trim()
@@ -497,5 +502,6 @@ private fun FamilyChild.toJoinChildOption(): JoinChildOption {
         fullName = fullName,
         email = normalizedEmail,
         hasEmail = hasEmail ?: (normalizedEmail != null),
+        dateOfBirth = dateOfBirth,
     )
 }

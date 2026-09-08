@@ -17,43 +17,35 @@ function child(overrides: Partial<FamilyChild> = {}): FamilyChild {
     } as FamilyChild;
 }
 
-function renderModel({
-    event = buildEvent({
-        start: futureStart.toISOString(),
-        teamSignup: false,
-        maxParticipants: 4,
-    }),
-    user = buildUser({ $id: 'viewer-one' }),
-    players = [] as ReturnType<typeof buildUser>[],
-    teams = [] as ReturnType<typeof buildTeam>[],
-    freeAgents = [] as ReturnType<typeof buildUser>[],
-    children = [] as FamilyChild[],
-    selectedChildId = '',
-    childRegistrationChildId = null as string | null,
-    canRegisterChild = true,
-}: Partial<Parameters<typeof useEventParticipantModel>[0]> = {}) {
-    return renderHook(() => useEventParticipantModel({
-        event,
-        user,
-        players,
-        teams,
-        freeAgents,
-        children,
-        childrenLoading: false,
-        childrenError: null,
-        selectedChildId,
-        childRegistrationChildId,
-        eventStartDate: futureStart,
-        eventMinAge: undefined,
-        eventMaxAge: undefined,
-        hasAgeLimits: false,
-        isTeamSignup: Boolean(event.teamSignup),
-        selectedDivisionOption: null,
-        canRegisterChild,
-    }));
+function renderModel(overrides: Partial<Parameters<typeof useEventParticipantModel>[0]> = {}) {
+    const args = {
+        event: buildEvent({ start: futureStart.toISOString(), teamSignup: false, maxParticipants: 4 }),
+        user: buildUser({ $id: 'viewer-one' }), players: [], teams: [], freeAgents: [], children: [],
+        childrenLoading: false, childrenError: null, selectedChildId: '', childRegistrationChildId: null,
+        eventStartDate: futureStart, hasAgeLimits: false, selectedDivisionOption: null, canRegisterChild: true,
+        ...overrides,
+    };
+    return renderHook(() => useEventParticipantModel({ ...args, isTeamSignup: Boolean(args.event.teamSignup) }));
 }
-
 describe('useEventParticipantModel', () => {
+    it('does not offer child entry for Team Events or unknown birthdates', () => {
+        const team = renderModel({ event: buildEvent({ teamSignup: true }), children: [child()] });
+        expect(team.result.current.shouldShowChildRegistrationPanel).toBe(false);
+        const unknown = renderModel({ children: [child({ dateOfBirth: undefined })] });
+        expect(unknown.result.current.shouldShowChildRegistrationPanel).toBe(false);
+        expect(unknown.result.current.childOptions).toEqual([]);
+    });
+
+    it('checks division age even when the child meets the Event age range', () => {
+        const { result } = renderModel({ children: [child()], selectedChildId: 'child-one',
+            eventMinAge: 10, eventMaxAge: 15, hasAgeLimits: true,
+            selectedDivisionOption: { id: 'junior', key: 'junior', name: 'Junior', divisionTypeId: 'u10',
+                divisionTypeName: 'U10', divisionTypeKey: 'u10', ratingType: 'AGE', gender: 'C' },
+        });
+        expect(result.current.childOptions).toEqual([]);
+        expect(result.current.selectedChildEligible).toBe(false);
+        expect(result.current.shouldShowChildRegistrationPanel).toBe(false);
+    });
     it('derives participant capacity and merges normalized free-agent sources', () => {
         const event = buildEvent({
             teamSignup: false,

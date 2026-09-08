@@ -198,7 +198,7 @@ fun TextSignatureDialog(
     EventCheckoutDialog(
         step = EventCheckoutStep.REQUIREMENTS,
         onDismissRequest = { if (!isSyncing) onDismiss() },
-        title = { Text(prompt.step.title ?: "Required Document Signature") },
+        title = { Text(listOfNotNull(prompt.registrantName, prompt.step.title ?: "Required Document Signature").joinToString(" · ")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(

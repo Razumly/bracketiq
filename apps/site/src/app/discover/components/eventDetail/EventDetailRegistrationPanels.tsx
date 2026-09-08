@@ -34,6 +34,7 @@ type EventDetailRegistrationPanelsProps = {
     joinFinalizationController: ReturnType<typeof useEventJoinFinalizationController>;
     onManageTeams: () => void;
     onAddPlayers?: () => void;
+    onEditTeam?: () => void;
     hasDraft?: boolean;
     onResumePreparation?: () => void;
     onSelectedChildChange: (childId: string) => void;
@@ -93,6 +94,7 @@ export const EventDetailRegistrationPanels = ({
     joinFinalizationController,
     onManageTeams,
     onAddPlayers,
+    onEditTeam,
     hasDraft,
     onResumePreparation,
     onSelectedChildChange,
@@ -227,6 +229,7 @@ export const EventDetailRegistrationPanels = ({
                 onSelectedTeamChange={onSelectedTeamChange}
                 onManageTeams={onManageTeams}
                 onAddPlayers={onAddPlayers}
+                onEditTeam={onEditTeam}
                 hasDraft={hasDraft}
                 onJoinTeamWaitlist={() => { void joinActions.handleJoinTeamWaitlist(); }}
                 onJoinAsTeam={onResumePreparation ?? (() => { void joinActions.handleJoinAsTeam(); })}
@@ -240,6 +243,8 @@ export const EventDetailRegistrationPanels = ({
 
     return (
         <EventIndividualRegistrationPanel
+            canChooseChild={participantModel.shouldShowChildRegistrationPanel && participantModel.childOptions.length > 0}
+            onChooseSelf={() => onSelectedChildChange('')}
             selfRegistrationBlockedReason={divisionModel.selfRegistrationBlockedReason}
             isMinor={divisionModel.isMinor}
             showSelfWaitlistActions={showSelfWaitlistActions}

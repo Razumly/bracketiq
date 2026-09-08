@@ -240,6 +240,8 @@ describe('EventDetailSheet payment-plan join conflicts', () => {
     await act(async () => {
       await Promise.resolve();
     });
+    fireEvent.click(await screen.findByRole('button', { name: /^(Register|Continue registration)$/i }));
+    expect(registrationService.registerSelfForEvent).not.toHaveBeenCalled();
     fireEvent.click(await screen.findByRole('button', { name: /Join Event/i }));
 
     const questionsDialog = await screen.findByRole('dialog', { name: 'Registration questions' });
@@ -329,6 +331,8 @@ describe('EventDetailSheet payment-plan join conflicts', () => {
     await waitFor(() => {
       expect(teamService.getRegistrationQuestions).toHaveBeenCalledWith('EVENT', event.$id);
     });
+    fireEvent.click(await screen.findByRole('button', { name: /^(Register|Continue registration)$/i }));
+    expect(registrationService.registerSelfForEvent).not.toHaveBeenCalled();
     fireEvent.click(await screen.findByRole('button', { name: /Join Event/i }));
 
     const passwordDialog = await screen.findByRole('dialog', { name: 'Confirm your password' });
@@ -398,11 +402,13 @@ describe('EventDetailSheet payment-plan join conflicts', () => {
       <EventDetailSheet event={event} isOpen={true} onClose={jest.fn()} renderInline={true} />,
     );
 
+    fireEvent.click(await screen.findByRole('button', { name: /^(Register|Continue registration)$/i }));
     const joinButton = await screen.findByRole('button', { name: /Join Event/i });
     fireEvent.click(joinButton);
     expect(await screen.findByText(/Payment plan preview/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Continue with Payment Plan/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Confirm registration/i }));
 
     await waitFor(() => {
       expect(screen.getByText(/payment plan already exists/i)).toBeInTheDocument();
@@ -451,6 +457,8 @@ describe('EventDetailSheet payment-plan join conflicts', () => {
       <EventDetailSheet event={event} isOpen={true} onClose={jest.fn()} renderInline={true} />,
     );
 
+    fireEvent.click(await screen.findByRole('button', { name: /^(Register|Continue registration)$/i }));
+    expect(registrationService.registerSelfForEvent).not.toHaveBeenCalled();
     fireEvent.click(await screen.findByRole('button', { name: /Join Event/i }));
     expect(await screen.findByText(/Payment plan preview/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /^Cancel$/i }));
@@ -502,7 +510,10 @@ describe('EventDetailSheet payment-plan join conflicts', () => {
       <EventDetailSheet event={event} isOpen={true} onClose={jest.fn()} renderInline={true} />,
     );
 
+    fireEvent.click(await screen.findByRole('button', { name: /^(Register|Continue registration)$/i }));
+    expect(registrationService.registerSelfForEvent).not.toHaveBeenCalled();
     fireEvent.click(await screen.findByRole('button', { name: /Join Event/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Confirm registration/i }));
     fireEvent.click(await screen.findByRole('button', { name: /^Checkout$/i }));
 
     await waitFor(() => {

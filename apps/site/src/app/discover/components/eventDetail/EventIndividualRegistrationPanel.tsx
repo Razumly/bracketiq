@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react';
-import { Alert, Button, Text } from '@mantine/core';
+import { useState, type ReactNode } from 'react';
+import { Alert, Button, Group, Text } from '@mantine/core';
 
 import { formatPrice } from '@/types';
 
@@ -19,6 +19,8 @@ type EventIndividualRegistrationPanelProps = {
     canShowScheduleButton: boolean;
     hostManageQrActions: ReactNode;
     childRegistrationPanel: ReactNode;
+    canChooseChild?: boolean;
+    onChooseSelf?: () => void;
     onLeaveWaitlist: () => void;
     onJoinWaitlist: () => void;
     onJoinEvent: () => void;
@@ -40,12 +42,21 @@ export function EventIndividualRegistrationPanel({
     canShowScheduleButton,
     hostManageQrActions,
     childRegistrationPanel,
+    canChooseChild = false,
+    onChooseSelf,
     onLeaveWaitlist,
     onJoinWaitlist,
     onJoinEvent,
 }: EventIndividualRegistrationPanelProps) {
+    const [childEntry, setChildEntry] = useState(false);
+    const showingChild = canChooseChild && childEntry;
     return (
         <div className="space-y-3">
+            {canChooseChild ? <Group grow>
+                <Button variant={showingChild ? 'default' : 'filled'} onClick={() => { setChildEntry(false); onChooseSelf?.(); }}>Register myself</Button>
+                <Button variant={showingChild ? 'filled' : 'default'} onClick={() => setChildEntry(true)}>Register my child</Button>
+            </Group> : null}
+            {showingChild ? childRegistrationPanel : <>
             {selfRegistrationBlockedReason ? (
                 <Alert color="yellow" variant="light">
                     {selfRegistrationBlockedReason}
@@ -116,7 +127,7 @@ export function EventIndividualRegistrationPanel({
                 <div className="mt-2">{hostManageQrActions}</div>
             ) : null}
 
-            {childRegistrationPanel}
+            </>}
         </div>
     );
 }

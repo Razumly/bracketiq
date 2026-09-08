@@ -71,14 +71,18 @@ describe('EventIndividualRegistrationPanel', () => {
         expect(screen.getByRole('button', { name: 'Complete payment' })).toBeInTheDocument();
     });
 
-    it('composes host and linked-child presentation slots', () => {
-        renderPanel({
-            canShowScheduleButton: true,
-            hostManageQrActions: <button type="button">Manage schedule</button>,
-            childRegistrationPanel: <div>Register Avery</div>,
-        });
-
-        expect(screen.getByRole('button', { name: 'Manage schedule' })).toBeInTheDocument();
-        expect(screen.getByText('Register Avery')).toBeInTheDocument();
+    it('switches registrants without submitting and clears the child when returning to self', () => {
+        const onChooseSelf = jest.fn();
+        const onChild = jest.fn();
+        const actions = renderPanel({ canChooseChild: true, onChooseSelf,
+            childRegistrationPanel: <button onClick={onChild}>Continue with Avery</button> });
+        fireEvent.click(screen.getByRole('button', { name: 'Register my child' }));
+        expect(actions.onJoinEvent).not.toHaveBeenCalled();
+        expect(screen.queryByRole('button', { name: 'Join Event - $25.00' })).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Continue with Avery' }));
+        expect(onChild).toHaveBeenCalledTimes(1);
+        fireEvent.click(screen.getByRole('button', { name: 'Register myself' }));
+        expect(onChooseSelf).toHaveBeenCalledTimes(1);
+        expect(screen.queryByRole('button', { name: 'Continue with Avery' })).not.toBeInTheDocument();
     });
 });
