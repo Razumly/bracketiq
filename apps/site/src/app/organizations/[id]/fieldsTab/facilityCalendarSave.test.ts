@@ -178,7 +178,7 @@ it('omits missing timeslots and retains null rate values in assignment requests'
 it.each([
   { change: { ...draft, fieldIds: ['missing'] }, error: 'One draft no longer has a valid resource.' },
   { change: { ...draft, end: start }, error: 'A draft has an invalid end time.' },
-  { change: { ...draft, end: new Date(2026, 8, 9, 11) }, error: 'Drafts must stay within a single day.' },
+  { change: { ...draft, end: new Date(2026, 8, 9, 11) }, error: 'Drafts must not exceed one local day.' },
 ])('rejects an invalid first draft before any write', async ({ change, error }) => {
   await expect(saveFacilityCalendarChanges(input({ drafts: [change] }))).rejects.toThrow(error);
   expect(apiMock).not.toHaveBeenCalled();
