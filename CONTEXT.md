@@ -108,6 +108,70 @@ _Avoid_: Team signup
 An Event-scoped Team identity used by Matches. Its competition state is Placeholder, Registered, or Withdrawn.
 _Avoid_: Team Registration, Match Team
 
+**User Profile**:
+A durable identity for one person in BracketIQ. It can exist without an Account and one Account can later claim it.
+_Avoid_: UserData, placeholder account, invitee
+
+**Account**:
+An authenticated identity that lets a person control their own User Profile and use BracketIQ directly. It can also act for children through active Guardian Relationships.
+_Avoid_: User Profile, player record
+
+**Profile Claim**:
+An authenticated Account's explicit acceptance of an unclaimed User Profile as its own identity. Its proof is verification of the person's attached email address, or a valid claim URL when no personal email is attached.
+_Avoid_: Account creation, invitation acceptance, login link
+
+**Profile Merge**:
+A verified, explicitly confirmed combination of an unclaimed User Profile with an Account's existing claimed User Profile. The claimed profile remains primary, its personal details remain unchanged, and both histories remain traceable through a merge record.
+_Avoid_: Account merge, name matching
+
+**Guardian Relationship**:
+An authorization for an Account holder to act for a child's User Profile without claiming that profile as their own. Access granted solely by this relationship ends when the Player turns 18, but its history remains.
+_Avoid_: Profile Claim, Profile Merge, shared Account
+
+**Guardian Declaration**:
+An authenticated Account holder's recorded confirmation of parental or guardian authority for a named child. It records the confirmation time but is not independent proof of guardianship.
+_Avoid_: Guardian Relationship, verified guardianship
+
+**Guardian Contact**:
+The email address used to invite a guardian to act for one child's User Profile. It can be shared by siblings and is not the child's personal email or proof of a Guardian Relationship.
+_Avoid_: Player email, child login, Guardian Relationship
+
+**Player**:
+A person assigned to a Team through a Team Roster Entry, whether or not an Account controls the person's User Profile.
+_Avoid_: Account, invitee
+
+**Team Roster Entry**:
+A Team's current assignment of one User Profile as a Player. It reserves one Team roster slot when created, including while Team Membership awaits acceptance.
+_Avoid_: Team Invitation, pending invite
+
+**Event Team Roster Entry**:
+An Event-specific assignment of one User Profile as a Player on an Event Team. It can exist before Team Membership is accepted and does not change solely because another Event's roster changes.
+_Avoid_: Team Roster Entry, Team Invitation
+
+**Team Membership**:
+An accepted relationship between one User Profile and one Team. It permits Team access through that person's Account or an Account with an authorized Guardian Relationship.
+_Avoid_: Team Roster Entry, Team Invitation
+
+**Team Invitation**:
+A recorded request to accept Team Membership for one User Profile, directly or through an active Guardian Relationship. Each invitation attempt keeps its own outcome and does not define the Player's identity.
+_Avoid_: Player record, Team Roster Entry
+
+**Invitation Reminder**:
+Another delivery of the same pending Team Invitation. It has its own delivery history but is not a new invitation attempt.
+_Avoid_: New invitation, reinvitation
+
+**Team Block**:
+A recipient's restriction that prevents one Team from adding, inviting, or sending Invitation Reminders to that Player, regardless of which manager acts. The Player or an authorized guardian can remove it.
+_Avoid_: User Block, Team withdrawal, invitation decline
+
+**User Block**:
+An Account holder's restriction on social contact and Team Invitation actions from another active Account. It applies to the sender across Teams and cannot target an unclaimed User Profile.
+_Avoid_: Team Block, invitation decline
+
+**Managed Player**:
+A Player whose User Profile has not been claimed as an Account holder's own identity. An authorized manager or guardian maintains the User Profile.
+_Avoid_: Fake User, guest Player, accountless invite
+
 **Withdrawn Event Team**:
 An Event Team whose accepted Participant Registration ended after protected Match history began. It retains its historical Match identity and does not consume Registration Capacity.
 _Avoid_: Placeholder Team, deleted Team
@@ -115,6 +179,10 @@ _Avoid_: Placeholder Team, deleted Team
 **Participant Registration**:
 An accepted registration through which an individual or Team joins an Event, whether entered by the participant, imported, or created manually by an authorized organizer. The first Participant Registration locks the Event Type and Registration Unit, including after cancellation or refund.
 _Avoid_: Checkout attempt, waitlist entry, free-agent application
+
+**Event Registration Draft**:
+An Account's saved, unfinished registration for one Event, including its selected Team and completed steps. It is separate from an accepted Participant Registration and from Teams or Players already saved during the journey.
+_Avoid_: Participant Registration, Team draft, completed registration
 
 **Registration Capacity**:
 The maximum number of Registration Units an Event or Registration Division accepts. Team roster members and Phase Division entrants do not consume additional Registration Capacity.
@@ -354,7 +422,7 @@ An Imported Signed Document whose attestation was withdrawn to correct an error.
 _Avoid_: Deleted document, edited document
 
 **Event Participation**:
-A User's participation in one Event through direct registration or membership on one or more registered Teams. It is specific to the User and does not satisfy requirements for teammates.
+A User Profile's participation in one Event through direct registration or an Event Team Roster Entry on one or more registered Teams. It is specific to the User Profile and does not require an Account.
 _Avoid_: Event Registration, Team Registration
 
 **Document Requirement Assignment**:
