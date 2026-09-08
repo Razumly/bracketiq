@@ -51,9 +51,9 @@ The current database migrations have no execution-class enum or check constraint
 
 OMP 18.1.13 contains the Luna model. Its broker-backed discovery queries each account and combines the advertised models. The model gateway ignores client `models.yml` overrides. Require exact `openai-codex/gpt-5.6-luna` in authenticated `/v1/models` before a claim. Do not substitute another provider or model.
 
-The initial four tool tests pass. They cover reviewer write denial, model-supplied authority denial, terminal/effect ordering, schema correction, Unicode pages, and corrupt evidence. A separate real schema-conversion check accepts the declarative commit shape and rejects an arbitrary execution command. The new pending-command idempotency check still requires the integrated test run.
+The initial focused tool checks were followed by the final integrated source gate. All 440 tests now pass, including pending-command idempotency, terminal deadline replay, full evidence context, and preflight capture boundaries.
 
-The production status check shows the existing BracketIQ Gateway healthy. The runner, producer 1, and reviewer 1 are stopped. The other workers and coverage helpers are created but not running. No OMP service has been started.
+The initial production status check showed the existing BracketIQ Gateway healthy and canary workers stopped. The approved auth setup later started only the OMP broker. The latest measured state is recorded in the Auth setup checkpoint below.
 
 ## Decision Log
 
@@ -73,7 +73,7 @@ Decision: Keep an invocation-local idempotency key for each identical operation.
 ## Outcomes & Retrospective
 
 
-The design is selected. OMP is not yet deployed. The two new logins and the OMP canary are not complete. No runtime change is authorized by this plan alone. Earlier Codex publication and process-control approvals do not authorize new OMP service changes.
+The source is implemented, verified, reviewed, and pushed. The approved images are published, and the OMP auth broker is healthy. Two browser logins, model-gateway startup, and model checks remain pending. The workload runtime and canary still require separate approval. No runtime change is authorized by this plan alone; only the explicit approval record permits the completed auth setup operations.
 
 ## Context and Orientation
 
@@ -165,6 +165,66 @@ The final unified source gate passed `npx tsc --noEmit --pretty false` and 440 t
 
 A real isolated OMP 18.1.13 session on Bun 1.3.14 exposed exactly the three trusted tools. It included all three opaque evidence references from the fixture manifest. It had no session file, persistent artifacts, MCP manager, model fallback, or WebSocket preference. Native schema conversion accepted the declarative command and rejected arbitrary execution. No provider request was made.
 
-The new bearer preparation module parses with the pinned Bun transpiler. Both shell entrypoints pass syntax checks. The two-account wizard is `/tmp/issue70-omp-login.sh`, mode `0700`; it has not been executed. ShellCheck is not installed. No OMP image, auth service, or account login has been published or started yet.
+The new bearer preparation module parses with the pinned Bun transpiler. Both shell entrypoints pass syntax checks. The two-account wizard is `/tmp/issue70-omp-login.sh`, mode `0700`; it has not been executed. ShellCheck is not installed. These source checks ran before the approved image publication and broker startup recorded below.
 
 The repaired capture programs were exercised with credential-free transformation fixtures. They remove bearer text, retain the normalized fingerprint, distinguish internal from external networks, retain an unmanaged broker-volume consumer, reject a stale worker topology and forbidden model bearer environment, preserve a complete refreshed inventory, and reject relabeled stale process data. The updated evidence-path manifest includes the new capture artifacts and uses the documented newline-inclusive SHA-256 convention.
+
+## Auth setup checkpoint
+
+
+Source commit `146c58ccaa222035c75279d1c891367fdf2c77d8` is integrated and pushed
+to `main`. Site CI completed successfully at
+`https://github.com/Razumly/bracketiq/actions/runs/34179072169`.
+
+The approved images were built on the Linux x86_64 VPS and published:
+
+- Agent: `ghcr.io/razumly/bracketiq-affiliate-governed@sha256:fa224b1058cfefc0556e46dc23693630e63b4c162d3c2ed81e76c8a963497bb4`.
+- Gateway: `ghcr.io/razumly/bracketiq-affiliate-gateway@sha256:6c056ebe1d8c1c27527eb8683d77c14dfc7850a9d4c11404d14c6e30b0d8ca38`.
+
+Both image builds completed. npm reported 35 dependency advisories during
+installation: 1 low, 18 moderate, and 16 high. No automatic dependency update
+was applied. This count is not an exploitability assessment.
+
+Two distinct generated internal bearer files now exist under the approved
+private configuration directory. Their owner is `0:1003`, mode `0640`, and
+each file is 65 bytes including its final newline. The shipped helper
+verified regular-file identity, permissions, UTF-8 value, and distinct
+normalized fingerprints without printing the values.
+
+The auth-only environment is
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-auth-setup.146c58cca.env`.
+It is mode `0600`. The canonical `governed-deployment.env` remains unchanged.
+Only the two model containers were created. The broker was started and is
+healthy. Its container ID is
+`83dd08b3b5498f7d0c37ee09dcfa5569e4d9c663d931197d599870880712500a`.
+It runs as `1003:1003`, reports Bun `1.3.14` and OMP `18.1.13`, and has zero
+stored ChatGPT accounts. The model gateway remains `created`, not running;
+its ID is `ddff3bf5ba780f7d75e301463473966e422ddf44d9316c91d48315b25617a10e`.
+
+Actual Docker inspection confirmed the two internal model networks, separate
+egress, no production database network intersection, no host-published
+ports, read-only root filesystems, dropped capabilities, restart policy
+`no`, and the expected private mounts. The broker is the only current
+consumer of `bracketiq-affiliate-model-auth-broker-state`.
+
+This Docker 29 containerd image store reports the container image ID as the
+same manifest-list digest used by the image reference. Always capture the
+Docker-reported ID. Do not substitute the image build's configuration digest
+or assume that the two identifiers must differ.
+
+The host has no `node` command. For the privileged bearer capture, a private
+Bun binary was copied from the reviewed broker image to
+`/home/bracketiq/.cache/affiliate-governed-builds/146c58ccaa222035c75279d1c891367fdf2c77d8/operator-bun`.
+The source and copy both hash to
+`a8f9ebd1770ddc8e55dab7a68d4ec1ec1eebf374bb97cc65cf2c3cb373fc6791`.
+The copy is root-owned. It is not installed on the global PATH. Use this
+reviewed runtime for the host capture helper instead of assuming Node is
+installed.
+
+The operator must now run the local `/tmp/issue70-omp-login.sh` wizard with
+the exact agent image, broker container ID, and broker volume above. Both
+browser logins are still pending. Start the model gateway only after those
+logins complete, then verify account health and the exact Luna model.
+The existing BracketIQ Gateway remains healthy. Mapping workers, the root
+runner, coverage, and replenishment were not started or reconfigured.
+No new mapping claim ran.

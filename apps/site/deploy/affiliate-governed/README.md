@@ -3013,9 +3013,18 @@ files (normally run this capture as root via `sudo -n`); source paths are the
 only command-line arguments and bearer values must never appear in argv or
 logs.
 
+Set `OMP_OPERATOR_JS_RUNTIME` to a verified Node 20+ or Bun 1.3.14+ executable
+on the operator host. The runtime inside a Docker image does not imply that
+the host has one. The current VPS uses a private Bun copy from the reviewed
+broker image; its source/copy fingerprints and exact path are recorded in the
+OMP ExecPlan. Verify the copy before privileged use. Do not silently install
+a global runtime or change the host PATH.
+
 ```text
 export OMP_BEARER_SOURCE_CAPTURE=/path/to/affiliate-governed-private/omp-bearer-sources.redacted.json
 export OMP_BEARER_PREPARATION_HELPER=/path/to/repository/apps/site/deploy/affiliate-governed/prepare-omp-bearers.mjs
+export OMP_OPERATOR_JS_RUNTIME=/path/to/verified/operator-runtime
+test -x "$OMP_OPERATOR_JS_RUNTIME"
 export OMP_AUTH_BROKER_TOKEN_SOURCE="$(
   sed -n 's/^AFFILIATE_MODEL_AUTH_BROKER_TOKEN_FILE=//p' \
     /path/to/affiliate-governed-private/deployment.env
@@ -3027,7 +3036,7 @@ export OMP_MODEL_GATEWAY_TOKEN_SOURCE="$(
 test -n "$OMP_AUTH_BROKER_TOKEN_SOURCE"
 test -n "$OMP_MODEL_GATEWAY_TOKEN_SOURCE"
 test ! -e "$OMP_BEARER_SOURCE_CAPTURE"
-(umask 077; sudo -n node "$OMP_BEARER_PREPARATION_HELPER" capture \
+(umask 077; sudo -n "$OMP_OPERATOR_JS_RUNTIME" "$OMP_BEARER_PREPARATION_HELPER" capture \
   "$OMP_AUTH_BROKER_TOKEN_SOURCE" "$OMP_MODEL_GATEWAY_TOKEN_SOURCE" \
   > "$OMP_BEARER_SOURCE_CAPTURE")
 test -s "$OMP_BEARER_SOURCE_CAPTURE"
