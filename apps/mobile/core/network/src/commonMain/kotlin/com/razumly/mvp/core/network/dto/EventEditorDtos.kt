@@ -1436,8 +1436,6 @@ data class EventEditorScheduleDto(
     val mode: String,
     val endConstraint: String? = null,
     val generatedScheduleEnd: String? = null,
-    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
-    @kotlinx.serialization.json.JsonNames("automatedScheduling")
     val isAutomatedScheduling: Boolean = true,
 )
 
@@ -1678,14 +1676,6 @@ object EventEditorCreateProposalGraphDtoSerializer : KSerializer<EventEditorCrea
         val jsonDecoder = decoder as? JsonDecoder
             ?: throw SerializationException("Create graph can only be decoded from JSON.")
         val payload = jsonDecoder.decodeJsonElement().jsonObject
-        val event = payload.getValue("event").jsonObject
-        // Preserve the supported legacy graph shape used by older Create responses.
-        if ("officialSchedulingMode" !in event) {
-            return EventEditorCreateProposalGraphDto(
-                event = jsonMVP.decodeFromJsonElement(EventApiDto.serializer(), event),
-                matches = jsonMVP.decodeFromJsonElement(ListSerializer(MatchApiDto.serializer()), payload.getValue("matches")),
-            )
-        }
         val graph = jsonMVP.decodeFromJsonElement(EventEditorMaintenanceGraphDtoSerializer, payload)
         return EventEditorCreateProposalGraphDto(
             event = graph.event,

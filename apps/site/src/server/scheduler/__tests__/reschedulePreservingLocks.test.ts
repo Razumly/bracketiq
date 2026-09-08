@@ -210,7 +210,7 @@ const createTeamDutyReflowFixture = (existingTeamOfficialId?: string): TeamDutyR
     },
     officials: [],
     doTeamsOfficiate: true,
-    officialSchedulingMode: 'TEAM_STAFFING',
+    staffingPriority: 'TEAM_COVERAGE_REQUIRED',
     includePlayoffs: true,
     playoffDivisions: [playoffDivision],
     doubleElimination: false,
@@ -2462,7 +2462,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
     }))).toEqual(originalPlacements);
   });
 
-  it('legacy SCHEDULE clears stale conflicts and preserves the unbound named-position slot', () => {
+  it('BEST_AVAILABLE_COVERAGE clears stale conflicts and preserves the unbound named-position slot', () => {
     const division = new Division('open', 'Open');
     const field1 = new PlayingField({
       id: 'field_schedule_mode_1',
@@ -2584,7 +2584,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       usesSets: false,
       setDurationMinutes: 0,
       doTeamsOfficiate: false,
-      officialSchedulingMode: 'SCHEDULE',
+      staffingPriority: 'BEST_AVAILABLE_COVERAGE',
       officialPositions: [{ id: 'r1', name: 'R1', count: 1, order: 0 }],
       eventOfficials: [{
         id: 'event_official_schedule_mode',
@@ -2626,7 +2626,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
     expect(result.matches.some((match) => match.officialAssignments.some((assignment) => assignment.hasConflict))).toBe(false);
   });
 
-  it('OFF mode reassigns overlaps and marks conflicts during lock-preserving reschedule', () => {
+  it('FULL_COVERAGE_WITH_CONFLICTS_ALLOWED reassigns overlaps and marks conflicts during lock-preserving reschedule', () => {
     const division = new Division('open', 'Open');
     const field1 = new PlayingField({
       id: 'field_off_mode_1',
@@ -2727,7 +2727,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       usesSets: false,
       setDurationMinutes: 0,
       doTeamsOfficiate: false,
-      officialSchedulingMode: 'OFF',
+      staffingPriority: 'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED',
       officialPositions: [{ id: 'r1', name: 'R1', count: 1, order: 0 }],
       eventOfficials: [{
         id: 'event_official_off_mode',
@@ -2766,7 +2766,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
     expect(result.matches.some((match) => match.officialAssignments.some((assignment) => assignment.hasConflict))).toBe(true);
   });
 
-  it('STAFFING mode fills all required official positions when rescheduling existing matches', () => {
+  it('OFFICIAL_COVERAGE_REQUIRED fills all required official positions when rescheduling existing matches', () => {
     const division = new Division('open', 'Open');
     const field = new PlayingField({
       id: 'field_staffing_reschedule',
@@ -2893,7 +2893,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       usesSets: false,
       setDurationMinutes: 0,
       doTeamsOfficiate: false,
-      officialSchedulingMode: 'STAFFING',
+      staffingPriority: 'OFFICIAL_COVERAGE_REQUIRED',
       officialPositions: [
         { id: 'r1', name: 'R1', count: 1, order: 0 },
         { id: 'r2', name: 'R2', count: 1, order: 1 },

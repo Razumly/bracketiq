@@ -20,12 +20,10 @@ import kotlin.test.assertTrue
 class EventEditorDtosTest {
     @Test
     fun given_site_schedule_when_decoded_then_explicit_automation_state_survives_reload() {
-        for (key in listOf("isAutomatedScheduling", "automatedScheduling")) {
-            val schedule = jsonMVP.decodeFromString<EventEditorScheduleDto>(
-                """{"mode":"FIXED_END","endConstraint":"2026-09-01T14:00:00Z","$key":false}""",
-            )
-            assertFalse(schedule.isAutomatedScheduling)
-        }
+        val schedule = jsonMVP.decodeFromString<EventEditorScheduleDto>(
+            """{"mode":"FIXED_END","endConstraint":"2026-09-01T14:00:00Z","isAutomatedScheduling":false}""",
+        )
+        assertFalse(schedule.isAutomatedScheduling)
     }
 
     @Test
@@ -135,7 +133,7 @@ class EventEditorDtosTest {
                       "matchRulesOverride":null,
                       "leagueScoringConfig":null
                     },
-                    "schedule":{"mode":"FIXED_END","endConstraint":"2026-09-01T14:00:00Z","automatedScheduling":true},
+                    "schedule":{"mode":"FIXED_END","endConstraint":"2026-09-01T14:00:00Z","isAutomatedScheduling":true},
                     "resources":{"fieldIds":[],"fields":[],"timeSlotIds":[],"timeSlots":[],"requiredTemplateIds":[],"immutableFieldIds":[],"rentalBookingId":null,"rentalBookingItemId":null},
                     "staff": {
                       "staffingPriority":"BEST_AVAILABLE_COVERAGE",
@@ -649,7 +647,6 @@ class EventEditorDtosTest {
                   "fieldIds": ["field-1"],
                   "timeSlotIds": ["slot-1"],
                   "officialIds": ["user-1"],
-                  "officialSchedulingMode": "SCHEDULE",
                   "staffingPriority": "BEST_AVAILABLE_COVERAGE",
                   "officialPositions": [
                     {"id":"position-referee","name":"Referee","count":1,"order":0}

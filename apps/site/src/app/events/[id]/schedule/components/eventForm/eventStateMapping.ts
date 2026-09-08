@@ -22,8 +22,6 @@ import {
 } from '@/lib/manualRegistrationPayments';
 import type { Event, EventState, Division as CoreDivision, LeagueScoringConfig, Sport } from '@/types';
 import {
-    isStaffingPriority,
-    normalizeOfficialSchedulingMode,
     normalizeStaffingPriority,
 } from '@/server/officials/config';
 
@@ -399,11 +397,8 @@ export const mapEventToFormState = (event: Event): EventFormState => {
     const explicitStaffingPriority = typeof event.staffingPriority === 'string'
         ? event.staffingPriority.trim().toUpperCase()
         : null;
-    const hasExplicitStaffingPriority = isStaffingPriority(explicitStaffingPriority);
-    const legacyOfficialSchedulingMode = normalizeOfficialSchedulingMode(event.officialSchedulingMode);
-    const staffingPriority = normalizeStaffingPriority(explicitStaffingPriority, legacyOfficialSchedulingMode);
-    const doTeamsOfficiate = Boolean(event.doTeamsOfficiate)
-        || (!hasExplicitStaffingPriority && legacyOfficialSchedulingMode === 'TEAM_STAFFING');
+    const staffingPriority = normalizeStaffingPriority(explicitStaffingPriority);
+    const doTeamsOfficiate = Boolean(event.doTeamsOfficiate);
 
     const existingAffiliateUrl = event.affiliateUrl ?? '';
 
@@ -488,11 +483,7 @@ export const mapEventToFormState = (event: Event): EventFormState => {
         : false,
     isAutomatedScheduling: normalizeAutomatedSchedulingForEventType(
         normalizedEventType,
-        (event as Event & {
-            isAutomatedScheduling?: unknown;
-            automatedScheduling?: unknown;
-        }).isAutomatedScheduling
-            ?? (event as Event & { automatedScheduling?: unknown }).automatedScheduling,
+        event.isAutomatedScheduling,
     ),
     requiredTemplateIds: Array.isArray(event.requiredTemplateIds)
         ? event.requiredTemplateIds

@@ -183,7 +183,6 @@ enum EventsEventTypeEnum {
   LEAGUE
   WEEKLY_EVENT
   TRYOUT
-  AFFILIATE
 }
 
 enum OrganizationFeatureEnum {
@@ -220,12 +219,6 @@ enum RegistrationPaymentModeEnum {
   MANUAL
 }
 
-enum EventsOfficialSchedulingModeEnum {
-  STAFFING
-  TEAM_STAFFING
-  SCHEDULE
-  OFF
-}
 
 enum StaffingPriorityEnum {
   FULL_COVERAGE_REQUIRED
@@ -3394,7 +3387,6 @@ model Events {
   parentEvent                   String?
   autoCancellation              Boolean?
   eventType                     EventsEventTypeEnum?
-  officialSchedulingMode        EventsOfficialSchedulingModeEnum @default(SCHEDULE)
   staffingPriority              StaffingPriorityEnum             @default(BEST_AVAILABLE_COVERAGE)
   doTeamsOfficiate              Boolean?
   teamOfficialsMaySwap          Boolean?
@@ -3761,7 +3753,6 @@ model EventTemplates {
   restTimeMinutes                Int?
   pointsToVictory                Int[]                            @default([])
   sportIds                       String[]                         @default([])
-  officialSchedulingMode         EventsOfficialSchedulingModeEnum @default(SCHEDULE)
   staffingPriority               StaffingPriorityEnum             @default(BEST_AVAILABLE_COVERAGE)
   doTeamsOfficiate               Boolean?
   teamOfficialsMaySwap           Boolean?

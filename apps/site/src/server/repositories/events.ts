@@ -79,7 +79,6 @@ import {
   normalizeEventOfficials,
   normalizeEventOfficialPositions,
   normalizeMatchOfficialAssignments,
-  normalizeOfficialSchedulingMode,
   normalizeStaffingPriority,
   normalizeSportOfficialPositionTemplates,
   type EventOfficialRecord,
@@ -6999,14 +6998,11 @@ const resolveLoadedTeamCheckInMode = (
     : "OFF";
 
 const resolveLoadedDoTeamsOfficiate = (
-  event: any,
-  legacyOfficialSchedulingMode: ReturnType<
-    typeof normalizeOfficialSchedulingMode
-  >,
+  event: { doTeamsOfficiate?: unknown },
 ): boolean =>
   typeof event.doTeamsOfficiate === "boolean"
     ? event.doTeamsOfficiate
-    : legacyOfficialSchedulingMode === "TEAM_STAFFING";
+    : false;
 
 const buildLoadedEventBaseParams = (params: {
   event: any;
@@ -7240,17 +7236,10 @@ const buildLoadedEventModel = (params: {
     matchDurationMinutes: params.event.matchDurationMinutes,
     officialPositions: params.officialPositions,
   });
-  const legacyOfficialSchedulingMode = normalizeOfficialSchedulingMode(
-    params.event.officialSchedulingMode,
-  );
   const staffingPriority = normalizeStaffingPriority(
     params.event.staffingPriority,
-    legacyOfficialSchedulingMode,
   );
-  const doTeamsOfficiate = resolveLoadedDoTeamsOfficiate(
-    params.event,
-    legacyOfficialSchedulingMode,
-  );
+  const doTeamsOfficiate = resolveLoadedDoTeamsOfficiate(params.event);
   const schedulerPlayoffTeamCount =
     resolveLoadedSchedulerPlayoffTeamCount(params.event);
   const baseParams = buildLoadedEventBaseParams({
@@ -10769,7 +10758,6 @@ const eventUpsertExistingEventSelect = {
   parentEvent: true,
   location: true,
   officialPositions: true as any,
-  officialSchedulingMode: true as any,
   staffingPriority: true as any,
   doTeamsOfficiate: true as any,
   matchRulesOverride: true as any,
@@ -11780,9 +11768,7 @@ const resolveEventUpsertAutomatedScheduling = (
     nextEventType,
     Object.prototype.hasOwnProperty.call(payload, "isAutomatedScheduling")
       ? payload.isAutomatedScheduling
-      : Object.prototype.hasOwnProperty.call(payload, "automatedScheduling")
-        ? payload.automatedScheduling
-        : existingEvent?.automatedScheduling,
+      : existingEvent?.automatedScheduling,
   );
 
 const resolveEventUpsertSplitLeaguePlayoffDivisions = (params: {
@@ -12272,22 +12258,9 @@ const resolveEventUpsertDivisionPricingDefaults = (params: {
 const resolveEventUpsertStaffingPriority = (params: {
   payload: any;
   existingEvent: any;
-  hasLegacyOfficialSchedulingModeInput: boolean;
-}) => {
-  const staffingPriorityInput =
-    params.payload.staffingPriority ??
-    (params.hasLegacyOfficialSchedulingModeInput
-      ? undefined
-      : params.existingEvent?.staffingPriority);
-  const officialSchedulingModeInput =
-    params.hasLegacyOfficialSchedulingModeInput
-      ? params.payload.officialSchedulingMode
-      : params.existingEvent?.officialSchedulingMode;
-  return normalizeStaffingPriority(
-    staffingPriorityInput,
-    officialSchedulingModeInput,
-  );
-};
+}) => normalizeStaffingPriority(
+  params.payload.staffingPriority ?? params.existingEvent?.staffingPriority,
+);
 
 const resolveEventUpsertDoTeamsOfficiate = (params: {
   payload: any;
@@ -12356,16 +12329,9 @@ const resolveEventUpsertStaffing = (params: {
   normalizedTeamSignupInput: unknown;
   nextEventType: string | null;
 }) => {
-  const hasLegacyOfficialSchedulingModeInput =
-    Object.prototype.hasOwnProperty.call(params.payload, "officialSchedulingMode");
-  const legacyOfficialSchedulingMode = normalizeOfficialSchedulingMode(
-    params.payload.officialSchedulingMode,
-    normalizeOfficialSchedulingMode(params.existingEvent?.officialSchedulingMode),
-  );
   const staffingPriority = resolveEventUpsertStaffingPriority({
     payload: params.payload,
     existingEvent: params.existingEvent,
-    hasLegacyOfficialSchedulingModeInput,
   });
   const normalizedDoTeamsOfficiate = params.nextEventType === "TRYOUT"
     ? false
@@ -12401,8 +12367,6 @@ const resolveEventUpsertStaffing = (params: {
     normalizedTeamSignup,
   );
   return {
-    hasLegacyOfficialSchedulingModeInput,
-    legacyOfficialSchedulingMode,
     staffingPriority,
     normalizedDoTeamsOfficiate,
     normalizedTeamOfficialsMaySwap,
@@ -12525,15 +12489,10 @@ const buildEventUpsertAssignmentFields = (params: {
 const buildEventUpsertOptionalFields = (params: {
   payload: any;
   isAffiliateExternalEvent: boolean;
-  hasLegacyOfficialSchedulingModeInput: boolean;
-  legacyOfficialSchedulingMode: string;
   staffingPriority: string;
   normalizedMatchRulesOverride: any;
   normalizedAutoCreatePointMatchIncidents: boolean | undefined;
 }) => ({
-  ...(params.hasLegacyOfficialSchedulingModeInput
-    ? { officialSchedulingMode: params.legacyOfficialSchedulingMode }
-    : {}),
   staffingPriority: params.staffingPriority,
   ...(params.normalizedMatchRulesOverride !== undefined
     ? { matchRulesOverride: params.normalizedMatchRulesOverride }
@@ -12581,8 +12540,6 @@ type EventUpsertDataParams = {
   timeSlotIds: string[];
   resolvedLeagueScoringConfigId: string | null;
   normalizedParentEvent: string | null;
-  hasLegacyOfficialSchedulingModeInput: boolean;
-  legacyOfficialSchedulingMode: string;
   staffingPriority: string;
   normalizedDoTeamsOfficiate: boolean | null | undefined;
   normalizedTeamOfficialsMaySwap: boolean;
@@ -12739,9 +12696,6 @@ const buildEventUpsertData = (params: EventUpsertDataParams) => ({
   ...buildEventUpsertOptionalFields({
     payload: params.payload,
     isAffiliateExternalEvent: params.isAffiliateExternalEvent,
-    hasLegacyOfficialSchedulingModeInput:
-      params.hasLegacyOfficialSchedulingModeInput,
-    legacyOfficialSchedulingMode: params.legacyOfficialSchedulingMode,
     staffingPriority: params.staffingPriority,
     normalizedMatchRulesOverride: params.normalizedMatchRulesOverride,
     normalizedAutoCreatePointMatchIncidents:
@@ -13771,8 +13725,6 @@ const allowedFieldIdSet = new Set(fieldIds);
     nextEventType,
   });
   const {
-    hasLegacyOfficialSchedulingModeInput,
-    legacyOfficialSchedulingMode,
     staffingPriority,
     normalizedDoTeamsOfficiate,
     normalizedTeamOfficialsMaySwap,
@@ -13827,8 +13779,6 @@ const allowedFieldIdSet = new Set(fieldIds);
     timeSlotIds,
     resolvedLeagueScoringConfigId,
     normalizedParentEvent,
-    hasLegacyOfficialSchedulingModeInput,
-    legacyOfficialSchedulingMode,
     staffingPriority,
     normalizedDoTeamsOfficiate,
     normalizedTeamOfficialsMaySwap,

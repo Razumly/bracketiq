@@ -152,7 +152,7 @@ private inline fun <reified T> encodeRoomMaintenanceResponse(value: T): String {
             key !in setOf(
                 "address",
                 "affiliateUrl",
-                "automatedScheduling",
+                "isAutomatedScheduling",
                 "registrationByDivisionType",
                 "timeZone",
             )
@@ -3238,7 +3238,7 @@ class EventRepositoryRoomPersistenceTest {
                         key !in setOf(
                             "address",
                             "affiliateUrl",
-                            "automatedScheduling",
+                            "isAutomatedScheduling",
                             "registrationByDivisionType",
                             "timeZone",
                         )

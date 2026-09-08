@@ -243,7 +243,6 @@ const buildOfficiatingSetup = (
     })),
     doTeamsOfficiate: isTeamOfficiating,
     teamOfficialsMaySwap: isTeamOfficiating,
-    officialSchedulingMode: isTeamOfficiating ? 'TEAM_STAFFING' : 'STAFFING',
     staffingPriority: isTeamOfficiating
       ? 'BEST_AVAILABLE_COVERAGE'
       : 'OFFICIAL_COVERAGE_REQUIRED',
@@ -313,7 +312,6 @@ const buildPoolTournament = (scenario: PoolScenario) => {
     officials: officiating.officials,
     doTeamsOfficiate: officiating.doTeamsOfficiate,
     teamOfficialsMaySwap: officiating.teamOfficialsMaySwap,
-    officialSchedulingMode: officiating.officialSchedulingMode,
     staffingPriority: officiating.staffingPriority,
     officialPositions: officiating.officialPositions,
     eventOfficials: officiating.eventOfficials,

@@ -112,8 +112,8 @@ describe('GET /api/events pagination', () => {
       event('event_1', {
         end: null,
         noFixedEndDateTime: true,
-        staffingPriority: undefined,
-        officialSchedulingMode: 'TEAM_STAFFING',
+        staffingPriority: 'TEAM_COVERAGE_REQUIRED',
+        doTeamsOfficiate: true,
       }),
       event('event_2', { staffingPriority: 'FULL_COVERAGE_REQUIRED' }),
       event('event_3'),
@@ -148,7 +148,6 @@ describe('GET /api/events pagination', () => {
       staffingPriority: 'TEAM_COVERAGE_REQUIRED',
       doTeamsOfficiate: true,
     }));
-    expect(payload.events[0]).toHaveProperty('officialSchedulingMode', 'TEAM_STAFFING');
   });
 
   it('normalizes malformed limits and negative offsets without removing existing list access', async () => {

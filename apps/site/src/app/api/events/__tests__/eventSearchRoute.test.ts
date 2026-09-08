@@ -106,8 +106,8 @@ describe('POST /api/events/search', () => {
     prismaMock.eventRegistrations.findMany.mockResolvedValue([{ eventId: 'event_registered_canonical' }]);
     prismaMock.events.findMany.mockResolvedValue([
       eventRow('event_team', 'Unrelated event', {
-        staffingPriority: null,
-        officialSchedulingMode: 'TEAM_STAFFING',
+        staffingPriority: 'TEAM_COVERAGE_REQUIRED',
+        doTeamsOfficiate: true,
       }),
       eventRow('event_canonical'),
       eventRow('event_registered_canonical'),
@@ -151,7 +151,6 @@ describe('POST /api/events/search', () => {
       staffingPriority: 'TEAM_COVERAGE_REQUIRED',
       doTeamsOfficiate: true,
     }));
-    expect(json.events[0]).toHaveProperty('officialSchedulingMode', 'TEAM_STAFFING');
   });
 
   it('includes real affiliate events in discover search results', async () => {

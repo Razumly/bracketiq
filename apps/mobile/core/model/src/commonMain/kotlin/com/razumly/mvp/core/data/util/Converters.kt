@@ -93,7 +93,7 @@ class Converters {
     fun fromEventType(eventType: EventType): String = eventType.name
 
     @TypeConverter
-    fun toEventType(value: String): EventType = EventType.valueOf(value)
+    fun toEventType(value: String): EventType = EventType.valueOf(value.trim().uppercase())
 
     @TypeConverter
     fun fromEventOfficialPositions(value: List<EventOfficialPosition>): String =

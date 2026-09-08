@@ -1429,13 +1429,6 @@ export type EnumEventsEventTypeEnumNullableFilter<$PrismaModel = never> = {
   not?: Prisma.NestedEnumEventsEventTypeEnumNullableFilter<$PrismaModel> | $Enums.EventsEventTypeEnum | null
 }
 
-export type EnumEventsOfficialSchedulingModeEnumFilter<$PrismaModel = never> = {
-  equals?: $Enums.EventsOfficialSchedulingModeEnum | Prisma.EnumEventsOfficialSchedulingModeEnumFieldRefInput<$PrismaModel>
-  in?: $Enums.EventsOfficialSchedulingModeEnum[] | Prisma.ListEnumEventsOfficialSchedulingModeEnumFieldRefInput<$PrismaModel>
-  notIn?: $Enums.EventsOfficialSchedulingModeEnum[] | Prisma.ListEnumEventsOfficialSchedulingModeEnumFieldRefInput<$PrismaModel>
-  not?: Prisma.NestedEnumEventsOfficialSchedulingModeEnumFilter<$PrismaModel> | $Enums.EventsOfficialSchedulingModeEnum
-}
-
 export type EnumStaffingPriorityEnumFilter<$PrismaModel = never> = {
   equals?: $Enums.StaffingPriorityEnum | Prisma.EnumStaffingPriorityEnumFieldRefInput<$PrismaModel>
   in?: $Enums.StaffingPriorityEnum[] | Prisma.ListEnumStaffingPriorityEnumFieldRefInput<$PrismaModel>
@@ -1471,16 +1464,6 @@ export type EnumEventsEventTypeEnumNullableWithAggregatesFilter<$PrismaModel = n
   _count?: Prisma.NestedIntNullableFilter<$PrismaModel>
   _min?: Prisma.NestedEnumEventsEventTypeEnumNullableFilter<$PrismaModel>
   _max?: Prisma.NestedEnumEventsEventTypeEnumNullableFilter<$PrismaModel>
-}
-
-export type EnumEventsOfficialSchedulingModeEnumWithAggregatesFilter<$PrismaModel = never> = {
-  equals?: $Enums.EventsOfficialSchedulingModeEnum | Prisma.EnumEventsOfficialSchedulingModeEnumFieldRefInput<$PrismaModel>
-  in?: $Enums.EventsOfficialSchedulingModeEnum[] | Prisma.ListEnumEventsOfficialSchedulingModeEnumFieldRefInput<$PrismaModel>
-  notIn?: $Enums.EventsOfficialSchedulingModeEnum[] | Prisma.ListEnumEventsOfficialSchedulingModeEnumFieldRefInput<$PrismaModel>
-  not?: Prisma.NestedEnumEventsOfficialSchedulingModeEnumWithAggregatesFilter<$PrismaModel> | $Enums.EventsOfficialSchedulingModeEnum
-  _count?: Prisma.NestedIntFilter<$PrismaModel>
-  _min?: Prisma.NestedEnumEventsOfficialSchedulingModeEnumFilter<$PrismaModel>
-  _max?: Prisma.NestedEnumEventsOfficialSchedulingModeEnumFilter<$PrismaModel>
 }
 
 export type EnumStaffingPriorityEnumWithAggregatesFilter<$PrismaModel = never> = {
@@ -3355,13 +3338,6 @@ export type NestedEnumEventsEventTypeEnumNullableFilter<$PrismaModel = never> = 
   not?: Prisma.NestedEnumEventsEventTypeEnumNullableFilter<$PrismaModel> | $Enums.EventsEventTypeEnum | null
 }
 
-export type NestedEnumEventsOfficialSchedulingModeEnumFilter<$PrismaModel = never> = {
-  equals?: $Enums.EventsOfficialSchedulingModeEnum | Prisma.EnumEventsOfficialSchedulingModeEnumFieldRefInput<$PrismaModel>
-  in?: $Enums.EventsOfficialSchedulingModeEnum[] | Prisma.ListEnumEventsOfficialSchedulingModeEnumFieldRefInput<$PrismaModel>
-  notIn?: $Enums.EventsOfficialSchedulingModeEnum[] | Prisma.ListEnumEventsOfficialSchedulingModeEnumFieldRefInput<$PrismaModel>
-  not?: Prisma.NestedEnumEventsOfficialSchedulingModeEnumFilter<$PrismaModel> | $Enums.EventsOfficialSchedulingModeEnum
-}
-
 export type NestedEnumStaffingPriorityEnumFilter<$PrismaModel = never> = {
   equals?: $Enums.StaffingPriorityEnum | Prisma.EnumStaffingPriorityEnumFieldRefInput<$PrismaModel>
   in?: $Enums.StaffingPriorityEnum[] | Prisma.ListEnumStaffingPriorityEnumFieldRefInput<$PrismaModel>
@@ -3397,16 +3373,6 @@ export type NestedEnumEventsEventTypeEnumNullableWithAggregatesFilter<$PrismaMod
   _count?: Prisma.NestedIntNullableFilter<$PrismaModel>
   _min?: Prisma.NestedEnumEventsEventTypeEnumNullableFilter<$PrismaModel>
   _max?: Prisma.NestedEnumEventsEventTypeEnumNullableFilter<$PrismaModel>
-}
-
-export type NestedEnumEventsOfficialSchedulingModeEnumWithAggregatesFilter<$PrismaModel = never> = {
-  equals?: $Enums.EventsOfficialSchedulingModeEnum | Prisma.EnumEventsOfficialSchedulingModeEnumFieldRefInput<$PrismaModel>
-  in?: $Enums.EventsOfficialSchedulingModeEnum[] | Prisma.ListEnumEventsOfficialSchedulingModeEnumFieldRefInput<$PrismaModel>
-  notIn?: $Enums.EventsOfficialSchedulingModeEnum[] | Prisma.ListEnumEventsOfficialSchedulingModeEnumFieldRefInput<$PrismaModel>
-  not?: Prisma.NestedEnumEventsOfficialSchedulingModeEnumWithAggregatesFilter<$PrismaModel> | $Enums.EventsOfficialSchedulingModeEnum
-  _count?: Prisma.NestedIntFilter<$PrismaModel>
-  _min?: Prisma.NestedEnumEventsOfficialSchedulingModeEnumFilter<$PrismaModel>
-  _max?: Prisma.NestedEnumEventsOfficialSchedulingModeEnumFilter<$PrismaModel>
 }
 
 export type NestedEnumStaffingPriorityEnumWithAggregatesFilter<$PrismaModel = never> = {

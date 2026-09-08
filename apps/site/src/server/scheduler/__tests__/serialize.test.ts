@@ -395,7 +395,7 @@ describe('scheduler API serialization', () => {
     ]);
   });
 
-  it('keeps canonical Team-duty policy independent from a stale legacy staffing mode', () => {
+  it('serializes canonical Team-duty policy independently', () => {
     const event = new Tournament({
       id: 'event_canonical_staffing',
       name: 'Canonical staffing',
@@ -404,7 +404,6 @@ describe('scheduler API serialization', () => {
       maxParticipants: 3,
       teamSignup: true,
       eventType: 'TOURNAMENT',
-      officialSchedulingMode: 'TEAM_STAFFING',
       staffingPriority: 'BEST_AVAILABLE_COVERAGE',
       doTeamsOfficiate: false,
       teamOfficialsMaySwap: true,
@@ -414,7 +413,6 @@ describe('scheduler API serialization', () => {
 
     expect(event.doTeamsOfficiate).toBe(false);
     expect(serialized.staffingPriority).toBe('BEST_AVAILABLE_COVERAGE');
-    expect(serialized.officialSchedulingMode).toBe('SCHEDULE');
     expect(serialized.doTeamsOfficiate).toBe(false);
     expect(serialized.teamOfficialsMaySwap).toBe(false);
   });

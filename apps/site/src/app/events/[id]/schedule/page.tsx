@@ -387,23 +387,6 @@ export const getFreshCreateOperationId = (
     ? generateOperationId()
     : nextOperationId;
 };
-const EDITOR_SCHEDULE_ERROR_CODES = new Set([
-  "EDITOR_SCHEDULE_UNSUPPORTED",
-  "EDITOR_SCHEDULE_INPUT_INVALID",
-  "EDITOR_SCHEDULE_FAILED",
-]);
-
-const isEditorScheduleCreateFailure = (error: unknown): boolean => {
-  if (
-    !isApiRequestError(error) ||
-    !error.data ||
-    typeof error.data !== "object"
-  ) {
-    return false;
-  }
-  const code = "code" in error.data ? String(error.data.code) : "";
-  return EDITOR_SCHEDULE_ERROR_CODES.has(code);
-};
 const EDITOR_MAINTENANCE_CAPABILITY_ERROR_CODES = new Set([
   "EDITOR_MAINTENANCE_INVALID",
   "EDITOR_MAINTENANCE_NOT_FOUND",
@@ -711,10 +694,6 @@ function EventScheduleContent() {
     string | null
   >(null);
 
-  const [
-    showCreateWithoutScheduleRecovery,
-    setShowCreateWithoutScheduleRecovery,
-  ] = useState(false);
   const [eventTypeTransitionConfirmation, setEventTypeTransitionConfirmation] =
     useState<EventTypeTransitionConfirmation | null>(null);
   const [contentTermsState, setContentTermsState] =
@@ -5534,23 +5513,9 @@ function EventScheduleContent() {
     [buildCreateEditorBootstrapQuery, isCreateMode],
   );
   const getDraftFromForm = useCallback(
-    async ({
-      allowCurrentEventFallback = false,
-    }: {
-      allowCurrentEventFallback?: boolean;
-    } = {}): Promise<EventEditorDraft | null> => {
+    async (): Promise<EventEditorDraft | null> => {
       const formApi = eventFormRef.current;
-      if (allowCurrentEventFallback && activeTab !== "details") {
-        return editorDraftRef.current
-          ? (cloneValue(editorDraftRef.current) as EventEditorDraft)
-          : editorSnapshot
-            ? (cloneValue(editorSnapshot.draft) as EventEditorDraft)
-            : null;
-      }
       if (!formApi) {
-        if (allowCurrentEventFallback && editorSnapshot) {
-          return cloneValue(editorSnapshot.draft) as EventEditorDraft;
-        }
         setSubmitError("Form is not ready to submit.");
         return null;
       }
@@ -5585,7 +5550,7 @@ function EventScheduleContent() {
 
       return cloneValue(capturedConfiguration.draft) as EventEditorDraft;
     },
-    [activeTab, editorDraftRef, editorSnapshot, eventFormRef, setSubmitError],
+    [eventFormRef, setSubmitError],
   );
 
   const handlePreviewEventUpdate = useCallback((preview: Event) => {
@@ -6107,7 +6072,6 @@ function EventScheduleContent() {
       setError(null);
       setInfoMessage(null);
       setWarningMessage(null);
-      setShowCreateWithoutScheduleRecovery(false);
 
       try {
         const createResult = await saveEditorConfiguration(
@@ -6141,9 +6105,6 @@ function EventScheduleContent() {
         );
       } catch (err) {
         console.error("Failed to create event:", err);
-        setShowCreateWithoutScheduleRecovery(
-          isEditorScheduleCreateFailure(err),
-        );
         setError(formatActionErrorMessage("Failed to create event.", err));
       } finally {
         setPublishing(false);
@@ -6168,7 +6129,6 @@ function EventScheduleContent() {
       setPublishing(true);
       setError(null);
       setInfoMessage(null);
-      setShowCreateWithoutScheduleRecovery(false);
 
       try {
         const createResult = await saveEditorConfiguration(
@@ -6203,9 +6163,6 @@ function EventScheduleContent() {
         return persistedEvent;
       } catch (err) {
         console.error("Failed to create event:", err);
-        setShowCreateWithoutScheduleRecovery(
-          isEditorScheduleCreateFailure(err),
-        );
         setError(formatActionErrorMessage("Failed to create event.", err));
         return null;
       } finally {
@@ -6215,12 +6172,6 @@ function EventScheduleContent() {
     [router, saveEditorConfiguration, searchParams],
   );
 
-  const handleCreateWithoutSchedule = useCallback(async () => {
-    if (publishing) return;
-    const draft = await getDraftFromForm();
-    if (!draft) return;
-    await scheduleRegularEvent(draft, "CREATE_ONLY");
-  }, [getDraftFromForm, publishing, scheduleRegularEvent]);
 
   const { rentalCheckout, startRentalCheckoutFlow } = useRentalCheckoutFlow({
     eventId,
@@ -8380,36 +8331,6 @@ function EventScheduleContent() {
           formId={createFormId}
           rentalCheckout={rentalCheckout}
         />
-        <Modal
-          opened={showCreateWithoutScheduleRecovery}
-          onClose={() => setShowCreateWithoutScheduleRecovery(false)}
-          title="Schedule could not be built"
-          centered
-        >
-          <Stack gap="md">
-            <Text size="sm">
-              Nothing was saved. Return to the editor to fix the schedule
-              settings and retry, or create the event without a schedule.
-            </Text>
-            <Group justify="flex-end">
-              <Button
-                variant="default"
-                onClick={() => setShowCreateWithoutScheduleRecovery(false)}
-                disabled={publishing}
-              >
-                Return to editor
-              </Button>
-              <Button
-                onClick={() => {
-                  void handleCreateWithoutSchedule();
-                }}
-                loading={publishing}
-              >
-                Save as draft without a schedule
-              </Button>
-            </Group>
-          </Stack>
-        </Modal>
         <Modal
           opened={Boolean(scheduleProposal)}
           onClose={() => undefined}

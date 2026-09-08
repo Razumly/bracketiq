@@ -27,7 +27,6 @@ import {
   getEventOfficialUserIds,
   normalizeEventOfficials,
   normalizeEventOfficialPositions,
-  normalizeOfficialSchedulingMode,
   normalizeSportOfficialPositionTemplates,
 } from '../eventForm/officials';
 import {
@@ -200,7 +199,6 @@ const makeAffiliateEventFormValues = (overrides: Record<string, unknown> = {}) =
   teams: [],
   officials: [],
   officialIds: ['official_1'],
-  officialSchedulingMode: 'SCHEDULE',
   officialPositions: [{ id: 'ref', name: 'Referee', count: 1, order: 0 }],
   eventOfficials: [{ id: 'event_official_1', userId: 'official_1', positionIds: ['ref'], fieldIds: [], isActive: true }],
   pendingStaffInvites: [{ firstName: 'Ava', lastName: 'Ref', email: 'ava@test.com', roles: ['OFFICIAL'] }],
@@ -1551,10 +1549,7 @@ describe('event form official helpers', () => {
     expect(buildAvailableOfficialFieldOptions([owned], []).map((option) => option.value)).toEqual(['owned_1']);
   });
 
-  it('normalizes scheduling mode aliases and position templates', () => {
-    expect(normalizeOfficialSchedulingMode('NONE')).toBe('OFF');
-    expect(normalizeOfficialSchedulingMode('STAFFING')).toBe('STAFFING');
-    expect(normalizeOfficialSchedulingMode('bad')).toBe('SCHEDULE');
+  it('normalizes position templates', () => {
     expect(normalizeSportOfficialPositionTemplates([
       { name: ' Referee ', count: 2.8 },
       { name: 'Scorekeeper', count: 0 },

@@ -310,8 +310,8 @@ export default function ScheduleCalendarPanel({
       const team2Name = getTeamName(match, 'team2', teamsById);
       const fieldId = typeof match.fieldId === 'string' ? match.fieldId.trim() : '';
       const fieldName = fieldId
-        ? getEntityName(fieldsById.get(fieldId), 'Field')
-        : getEntityName(match.field, 'Field');
+        ? getEntityName(fieldsById.get(fieldId), 'Resource')
+        : getEntityName(match.field, 'Resource');
 
       return [{
         id: `match-${match.$id}`,

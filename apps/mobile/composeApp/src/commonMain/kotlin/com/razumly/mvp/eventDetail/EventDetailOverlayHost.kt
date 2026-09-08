@@ -271,13 +271,13 @@ internal fun maintenanceMatchFieldLabel(
     canonicalFieldName: String? = null,
 ): String {
     val fieldId = match.fieldId?.trim()?.takeIf(String::isNotBlank)
-        ?: return "Field: unassigned"
+        ?: return "Resource: unassigned"
     val fieldLabel = canonicalFieldName?.trim()?.takeIf(String::isNotBlank)
         ?: fieldLabelsById[fieldId]?.trim()?.takeIf(String::isNotBlank)
     return if (fieldLabel == null || fieldLabel == fieldId) {
-        "Field: $fieldId"
+        "Resource: $fieldId"
     } else {
-        "Field: $fieldLabel ($fieldId)"
+        "Resource: $fieldLabel ($fieldId)"
     }
 }
 
@@ -298,7 +298,7 @@ internal fun maintenanceMatchFieldLabelsById(
 ): Map<String, String> = fields.associate { field ->
     field.id to (
         field.name?.trim()?.takeIf(String::isNotBlank)
-            ?: "Field ${field.fieldNumber}"
+            ?: "Resource ${field.fieldNumber}"
         )
 }
 

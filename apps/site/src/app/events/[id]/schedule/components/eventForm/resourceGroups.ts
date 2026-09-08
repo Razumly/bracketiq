@@ -352,7 +352,7 @@ export const isEventLocalField = (field?: Field | null): boolean => !fieldHasOrg
 export const isGeneratedLocalFieldPlaceholder = (
     field?: Field | null,
     index?: number,
-    resourceSingular = 'Field',
+    resourceSingular = 'Resource',
 ): boolean => {
     if (!field) {
         return false;

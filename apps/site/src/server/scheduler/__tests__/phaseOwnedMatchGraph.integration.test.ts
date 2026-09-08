@@ -378,7 +378,6 @@ const leaguePayload = (eventId: string) => {
     requiredTemplateIds: [],
     eventOfficials: [],
     officialPositions: [],
-    officialSchedulingMode: "OFF",
     staffingPriority: "BEST_AVAILABLE_COVERAGE",
     assistantHostIds: [],
   };

@@ -359,7 +359,6 @@ const serializedProposalEvent = (eventId: string) => ({
   fieldIds: [],
   timeSlotIds: [],
   officialIds: [],
-  officialSchedulingMode: "SCHEDULE",
   staffingPriority: "BEST_AVAILABLE_COVERAGE",
   officialPositions: [],
   eventOfficials: [],

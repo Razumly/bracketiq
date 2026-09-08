@@ -1052,7 +1052,7 @@ describe('affiliate import service', () => {
       rawPayload: {
         dateTimeInputs: { timeZone: 'America/Los_Angeles' },
         ...currentScheduledDateTimeProvenance('America/Los_Angeles', '2099-07-01T18:00:00.000Z'),
-        officialSchedulingMode: 'TEAM_STAFFING',
+        staffingPriority: 'TEAM_COVERAGE_REQUIRED',
       },
       scheduleText: 'Friday and Sunday games.',
       priceText: '$850 per team.',
@@ -1101,7 +1101,6 @@ describe('affiliate import service', () => {
       }),
     });
     const createdEventPayload = prismaMock.events.create.mock.calls[0]?.[0]?.data;
-    expect(createdEventPayload).not.toHaveProperty('officialSchedulingMode');
     expect(geocodeAddressToCoordinatesMock).toHaveBeenCalledWith('819 NW Corporate Dr, Troutdale, OR 97060');
     expect(prismaMock.organizations.update).not.toHaveBeenCalled();
     expect(prismaMock.affiliateImportCandidates.update).toHaveBeenCalledWith({

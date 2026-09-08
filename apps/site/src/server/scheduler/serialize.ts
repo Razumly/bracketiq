@@ -1,10 +1,9 @@
 import { isDeepStrictEqual } from 'node:util';
 import { resolveDivisionCompetitionPhase } from '@/lib/divisionPhaseSettings';
 import { Division, League, Match, PlayingField, Team, TimeSlot, Tournament, UserData } from './types';
-import {
-  LEGACY_OFFICIAL_SCHEDULING_MODE_BY_PRIORITY,
-  type EventOfficialPosition,
-  type MatchOfficialAssignment,
+import type {
+  EventOfficialPosition,
+  MatchOfficialAssignment,
 } from '@/server/officials/config';
 
 const valueOr = <T>(value: T | null | undefined, fallback: T): T => value ?? fallback;
@@ -489,7 +488,6 @@ const serializeEventBase = (event: Tournament | League) => {
     fieldIds: Object.keys(event.fields),
     timeSlotIds: event.timeSlots.map((slot) => slot.id),
     officialIds: event.officials.map((official) => official.id),
-    officialSchedulingMode: LEGACY_OFFICIAL_SCHEDULING_MODE_BY_PRIORITY[event.staffingPriority],
     staffingPriority: event.staffingPriority,
     officialPositions: valueOr(event.officialPositions, [])
       .map((position) => ({ ...position })),

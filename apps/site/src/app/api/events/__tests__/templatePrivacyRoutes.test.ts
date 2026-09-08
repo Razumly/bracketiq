@@ -299,8 +299,7 @@ describe("event template privacy routes", () => {
       hostId: "host_1",
       end: null,
       noFixedEndDateTime: true,
-      staffingPriority: null,
-      officialSchedulingMode: "STAFFING",
+      staffingPriority: "OFFICIAL_COVERAGE_REQUIRED",
     });
 
     const res = await eventGet(
@@ -320,7 +319,6 @@ describe("event template privacy routes", () => {
       }),
     );
     expect(payload).not.toHaveProperty("$id");
-    expect(payload).toHaveProperty("officialSchedulingMode", "STAFFING");
   });
 
   it("projects an anonymous published Event through the public allowlist", async () => {

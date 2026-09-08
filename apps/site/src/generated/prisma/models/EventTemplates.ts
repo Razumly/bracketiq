@@ -134,7 +134,6 @@ export type EventTemplatesMinAggregateOutputType = {
   setDurationMinutes: number | null
   setsPerMatch: number | null
   restTimeMinutes: number | null
-  officialSchedulingMode: $Enums.EventsOfficialSchedulingModeEnum | null
   staffingPriority: $Enums.StaffingPriorityEnum | null
   doTeamsOfficiate: boolean | null
   teamOfficialsMaySwap: boolean | null
@@ -196,7 +195,6 @@ export type EventTemplatesMaxAggregateOutputType = {
   setDurationMinutes: number | null
   setsPerMatch: number | null
   restTimeMinutes: number | null
-  officialSchedulingMode: $Enums.EventsOfficialSchedulingModeEnum | null
   staffingPriority: $Enums.StaffingPriorityEnum | null
   doTeamsOfficiate: boolean | null
   teamOfficialsMaySwap: boolean | null
@@ -265,7 +263,6 @@ export type EventTemplatesCountAggregateOutputType = {
   restTimeMinutes: number
   pointsToVictory: number
   sportIds: number
-  officialSchedulingMode: number
   staffingPriority: number
   doTeamsOfficiate: number
   teamOfficialsMaySwap: number
@@ -397,7 +394,6 @@ export type EventTemplatesMinAggregateInputType = {
   setDurationMinutes?: true
   setsPerMatch?: true
   restTimeMinutes?: true
-  officialSchedulingMode?: true
   staffingPriority?: true
   doTeamsOfficiate?: true
   teamOfficialsMaySwap?: true
@@ -459,7 +455,6 @@ export type EventTemplatesMaxAggregateInputType = {
   setDurationMinutes?: true
   setsPerMatch?: true
   restTimeMinutes?: true
-  officialSchedulingMode?: true
   staffingPriority?: true
   doTeamsOfficiate?: true
   teamOfficialsMaySwap?: true
@@ -528,7 +523,6 @@ export type EventTemplatesCountAggregateInputType = {
   restTimeMinutes?: true
   pointsToVictory?: true
   sportIds?: true
-  officialSchedulingMode?: true
   staffingPriority?: true
   doTeamsOfficiate?: true
   teamOfficialsMaySwap?: true
@@ -694,7 +688,6 @@ export type EventTemplatesGroupByOutputType = {
   restTimeMinutes: number | null
   pointsToVictory: number[]
   sportIds: string[]
-  officialSchedulingMode: $Enums.EventsOfficialSchedulingModeEnum
   staffingPriority: $Enums.StaffingPriorityEnum
   doTeamsOfficiate: boolean | null
   teamOfficialsMaySwap: boolean | null
@@ -796,7 +789,6 @@ export type EventTemplatesWhereInput = {
   restTimeMinutes?: Prisma.IntNullableFilter<"EventTemplates"> | number | null
   pointsToVictory?: Prisma.IntNullableListFilter<"EventTemplates">
   sportIds?: Prisma.StringNullableListFilter<"EventTemplates">
-  officialSchedulingMode?: Prisma.EnumEventsOfficialSchedulingModeEnumFilter<"EventTemplates"> | $Enums.EventsOfficialSchedulingModeEnum
   staffingPriority?: Prisma.EnumStaffingPriorityEnumFilter<"EventTemplates"> | $Enums.StaffingPriorityEnum
   doTeamsOfficiate?: Prisma.BoolNullableFilter<"EventTemplates"> | boolean | null
   teamOfficialsMaySwap?: Prisma.BoolNullableFilter<"EventTemplates"> | boolean | null
@@ -875,7 +867,6 @@ export type EventTemplatesOrderByWithRelationInput = {
   restTimeMinutes?: Prisma.SortOrderInput | Prisma.SortOrder
   pointsToVictory?: Prisma.SortOrder
   sportIds?: Prisma.SortOrder
-  officialSchedulingMode?: Prisma.SortOrder
   staffingPriority?: Prisma.SortOrder
   doTeamsOfficiate?: Prisma.SortOrderInput | Prisma.SortOrder
   teamOfficialsMaySwap?: Prisma.SortOrderInput | Prisma.SortOrder
@@ -957,7 +948,6 @@ export type EventTemplatesWhereUniqueInput = Prisma.AtLeast<{
   restTimeMinutes?: Prisma.IntNullableFilter<"EventTemplates"> | number | null
   pointsToVictory?: Prisma.IntNullableListFilter<"EventTemplates">
   sportIds?: Prisma.StringNullableListFilter<"EventTemplates">
-  officialSchedulingMode?: Prisma.EnumEventsOfficialSchedulingModeEnumFilter<"EventTemplates"> | $Enums.EventsOfficialSchedulingModeEnum
   staffingPriority?: Prisma.EnumStaffingPriorityEnumFilter<"EventTemplates"> | $Enums.StaffingPriorityEnum
   doTeamsOfficiate?: Prisma.BoolNullableFilter<"EventTemplates"> | boolean | null
   teamOfficialsMaySwap?: Prisma.BoolNullableFilter<"EventTemplates"> | boolean | null
@@ -1036,7 +1026,6 @@ export type EventTemplatesOrderByWithAggregationInput = {
   restTimeMinutes?: Prisma.SortOrderInput | Prisma.SortOrder
   pointsToVictory?: Prisma.SortOrder
   sportIds?: Prisma.SortOrder
-  officialSchedulingMode?: Prisma.SortOrder
   staffingPriority?: Prisma.SortOrder
   doTeamsOfficiate?: Prisma.SortOrderInput | Prisma.SortOrder
   teamOfficialsMaySwap?: Prisma.SortOrderInput | Prisma.SortOrder
@@ -1123,7 +1112,6 @@ export type EventTemplatesScalarWhereWithAggregatesInput = {
   restTimeMinutes?: Prisma.IntNullableWithAggregatesFilter<"EventTemplates"> | number | null
   pointsToVictory?: Prisma.IntNullableListFilter<"EventTemplates">
   sportIds?: Prisma.StringNullableListFilter<"EventTemplates">
-  officialSchedulingMode?: Prisma.EnumEventsOfficialSchedulingModeEnumWithAggregatesFilter<"EventTemplates"> | $Enums.EventsOfficialSchedulingModeEnum
   staffingPriority?: Prisma.EnumStaffingPriorityEnumWithAggregatesFilter<"EventTemplates"> | $Enums.StaffingPriorityEnum
   doTeamsOfficiate?: Prisma.BoolNullableWithAggregatesFilter<"EventTemplates"> | boolean | null
   teamOfficialsMaySwap?: Prisma.BoolNullableWithAggregatesFilter<"EventTemplates"> | boolean | null
@@ -1202,7 +1190,6 @@ export type EventTemplatesCreateInput = {
   restTimeMinutes?: number | null
   pointsToVictory?: Prisma.EventTemplatesCreatepointsToVictoryInput | number[]
   sportIds?: Prisma.EventTemplatesCreatesportIdsInput | string[]
-  officialSchedulingMode?: $Enums.EventsOfficialSchedulingModeEnum
   staffingPriority?: $Enums.StaffingPriorityEnum
   doTeamsOfficiate?: boolean | null
   teamOfficialsMaySwap?: boolean | null
@@ -1281,7 +1268,6 @@ export type EventTemplatesUncheckedCreateInput = {
   restTimeMinutes?: number | null
   pointsToVictory?: Prisma.EventTemplatesCreatepointsToVictoryInput | number[]
   sportIds?: Prisma.EventTemplatesCreatesportIdsInput | string[]
-  officialSchedulingMode?: $Enums.EventsOfficialSchedulingModeEnum
   staffingPriority?: $Enums.StaffingPriorityEnum
   doTeamsOfficiate?: boolean | null
   teamOfficialsMaySwap?: boolean | null
@@ -1360,7 +1346,6 @@ export type EventTemplatesUpdateInput = {
   restTimeMinutes?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   pointsToVictory?: Prisma.EventTemplatesUpdatepointsToVictoryInput | number[]
   sportIds?: Prisma.EventTemplatesUpdatesportIdsInput | string[]
-  officialSchedulingMode?: Prisma.EnumEventsOfficialSchedulingModeEnumFieldUpdateOperationsInput | $Enums.EventsOfficialSchedulingModeEnum
   staffingPriority?: Prisma.EnumStaffingPriorityEnumFieldUpdateOperationsInput | $Enums.StaffingPriorityEnum
   doTeamsOfficiate?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   teamOfficialsMaySwap?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
@@ -1439,7 +1424,6 @@ export type EventTemplatesUncheckedUpdateInput = {
   restTimeMinutes?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   pointsToVictory?: Prisma.EventTemplatesUpdatepointsToVictoryInput | number[]
   sportIds?: Prisma.EventTemplatesUpdatesportIdsInput | string[]
-  officialSchedulingMode?: Prisma.EnumEventsOfficialSchedulingModeEnumFieldUpdateOperationsInput | $Enums.EventsOfficialSchedulingModeEnum
   staffingPriority?: Prisma.EnumStaffingPriorityEnumFieldUpdateOperationsInput | $Enums.StaffingPriorityEnum
   doTeamsOfficiate?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   teamOfficialsMaySwap?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
@@ -1518,7 +1502,6 @@ export type EventTemplatesCreateManyInput = {
   restTimeMinutes?: number | null
   pointsToVictory?: Prisma.EventTemplatesCreatepointsToVictoryInput | number[]
   sportIds?: Prisma.EventTemplatesCreatesportIdsInput | string[]
-  officialSchedulingMode?: $Enums.EventsOfficialSchedulingModeEnum
   staffingPriority?: $Enums.StaffingPriorityEnum
   doTeamsOfficiate?: boolean | null
   teamOfficialsMaySwap?: boolean | null
@@ -1597,7 +1580,6 @@ export type EventTemplatesUpdateManyMutationInput = {
   restTimeMinutes?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   pointsToVictory?: Prisma.EventTemplatesUpdatepointsToVictoryInput | number[]
   sportIds?: Prisma.EventTemplatesUpdatesportIdsInput | string[]
-  officialSchedulingMode?: Prisma.EnumEventsOfficialSchedulingModeEnumFieldUpdateOperationsInput | $Enums.EventsOfficialSchedulingModeEnum
   staffingPriority?: Prisma.EnumStaffingPriorityEnumFieldUpdateOperationsInput | $Enums.StaffingPriorityEnum
   doTeamsOfficiate?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   teamOfficialsMaySwap?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
@@ -1676,7 +1658,6 @@ export type EventTemplatesUncheckedUpdateManyInput = {
   restTimeMinutes?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   pointsToVictory?: Prisma.EventTemplatesUpdatepointsToVictoryInput | number[]
   sportIds?: Prisma.EventTemplatesUpdatesportIdsInput | string[]
-  officialSchedulingMode?: Prisma.EnumEventsOfficialSchedulingModeEnumFieldUpdateOperationsInput | $Enums.EventsOfficialSchedulingModeEnum
   staffingPriority?: Prisma.EnumStaffingPriorityEnumFieldUpdateOperationsInput | $Enums.StaffingPriorityEnum
   doTeamsOfficiate?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   teamOfficialsMaySwap?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
@@ -1755,7 +1736,6 @@ export type EventTemplatesCountOrderByAggregateInput = {
   restTimeMinutes?: Prisma.SortOrder
   pointsToVictory?: Prisma.SortOrder
   sportIds?: Prisma.SortOrder
-  officialSchedulingMode?: Prisma.SortOrder
   staffingPriority?: Prisma.SortOrder
   doTeamsOfficiate?: Prisma.SortOrder
   teamOfficialsMaySwap?: Prisma.SortOrder
@@ -1856,7 +1836,6 @@ export type EventTemplatesMaxOrderByAggregateInput = {
   setDurationMinutes?: Prisma.SortOrder
   setsPerMatch?: Prisma.SortOrder
   restTimeMinutes?: Prisma.SortOrder
-  officialSchedulingMode?: Prisma.SortOrder
   staffingPriority?: Prisma.SortOrder
   doTeamsOfficiate?: Prisma.SortOrder
   teamOfficialsMaySwap?: Prisma.SortOrder
@@ -1918,7 +1897,6 @@ export type EventTemplatesMinOrderByAggregateInput = {
   setDurationMinutes?: Prisma.SortOrder
   setsPerMatch?: Prisma.SortOrder
   restTimeMinutes?: Prisma.SortOrder
-  officialSchedulingMode?: Prisma.SortOrder
   staffingPriority?: Prisma.SortOrder
   doTeamsOfficiate?: Prisma.SortOrder
   teamOfficialsMaySwap?: Prisma.SortOrder
@@ -2108,7 +2086,6 @@ export type EventTemplatesSelect<ExtArgs extends runtime.Types.Extensions.Intern
   restTimeMinutes?: boolean
   pointsToVictory?: boolean
   sportIds?: boolean
-  officialSchedulingMode?: boolean
   staffingPriority?: boolean
   doTeamsOfficiate?: boolean
   teamOfficialsMaySwap?: boolean
@@ -2187,7 +2164,6 @@ export type EventTemplatesSelectCreateManyAndReturn<ExtArgs extends runtime.Type
   restTimeMinutes?: boolean
   pointsToVictory?: boolean
   sportIds?: boolean
-  officialSchedulingMode?: boolean
   staffingPriority?: boolean
   doTeamsOfficiate?: boolean
   teamOfficialsMaySwap?: boolean
@@ -2266,7 +2242,6 @@ export type EventTemplatesSelectUpdateManyAndReturn<ExtArgs extends runtime.Type
   restTimeMinutes?: boolean
   pointsToVictory?: boolean
   sportIds?: boolean
-  officialSchedulingMode?: boolean
   staffingPriority?: boolean
   doTeamsOfficiate?: boolean
   teamOfficialsMaySwap?: boolean
@@ -2345,7 +2320,6 @@ export type EventTemplatesSelectScalar = {
   restTimeMinutes?: boolean
   pointsToVictory?: boolean
   sportIds?: boolean
-  officialSchedulingMode?: boolean
   staffingPriority?: boolean
   doTeamsOfficiate?: boolean
   teamOfficialsMaySwap?: boolean
@@ -2367,7 +2341,7 @@ export type EventTemplatesSelectScalar = {
   leagueScoringConfigId?: boolean
 }
 
-export type EventTemplatesOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "archivedAt" | "schemaVersion" | "name" | "description" | "sourceEventId" | "ownerUserId" | "organizationId" | "createdByUserId" | "eventType" | "timeZone" | "endOffsetMinutesFromEventStart" | "scheduleEndConstraint" | "generatedScheduleEnd" | "location" | "address" | "affiliateUrl" | "winnerSetCount" | "loserSetCount" | "doubleElimination" | "rating" | "teamSizeLimit" | "maxParticipants" | "minAge" | "maxAge" | "assistantHostIds" | "noFixedEndDateTime" | "price" | "registrationPaymentMode" | "manualPaymentLinks" | "manualPaymentInstructions" | "taxHandling" | "organizerManualTaxRateBps" | "singleDivision" | "registrationByDivisionType" | "cancellationRefundHours" | "teamSignup" | "prize" | "registrationCutoffHours" | "seedColor" | "imageId" | "winnerBracketPointsToVictory" | "loserBracketPointsToVictory" | "coordinates" | "gamesPerOpponent" | "includePlayoffs" | "playoffTeamCount" | "usesSets" | "matchDurationMinutes" | "setDurationMinutes" | "setsPerMatch" | "restTimeMinutes" | "pointsToVictory" | "sportIds" | "officialSchedulingMode" | "staffingPriority" | "doTeamsOfficiate" | "teamOfficialsMaySwap" | "officialPositions" | "matchRulesOverride" | "autoCreatePointMatchIncidents" | "allowPaymentPlans" | "installmentCount" | "installmentDueDates" | "installmentDueRelativeDays" | "installmentAmounts" | "allowTeamSplitDefault" | "splitLeaguePlayoffDivisions" | "requiredTemplateIds" | "divisions" | "divisionDetails" | "playoffDivisionDetails" | "divisionResourceIds" | "leagueScoringConfigId", ExtArgs["result"]["eventTemplates"]>
+export type EventTemplatesOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "archivedAt" | "schemaVersion" | "name" | "description" | "sourceEventId" | "ownerUserId" | "organizationId" | "createdByUserId" | "eventType" | "timeZone" | "endOffsetMinutesFromEventStart" | "scheduleEndConstraint" | "generatedScheduleEnd" | "location" | "address" | "affiliateUrl" | "winnerSetCount" | "loserSetCount" | "doubleElimination" | "rating" | "teamSizeLimit" | "maxParticipants" | "minAge" | "maxAge" | "assistantHostIds" | "noFixedEndDateTime" | "price" | "registrationPaymentMode" | "manualPaymentLinks" | "manualPaymentInstructions" | "taxHandling" | "organizerManualTaxRateBps" | "singleDivision" | "registrationByDivisionType" | "cancellationRefundHours" | "teamSignup" | "prize" | "registrationCutoffHours" | "seedColor" | "imageId" | "winnerBracketPointsToVictory" | "loserBracketPointsToVictory" | "coordinates" | "gamesPerOpponent" | "includePlayoffs" | "playoffTeamCount" | "usesSets" | "matchDurationMinutes" | "setDurationMinutes" | "setsPerMatch" | "restTimeMinutes" | "pointsToVictory" | "sportIds" | "staffingPriority" | "doTeamsOfficiate" | "teamOfficialsMaySwap" | "officialPositions" | "matchRulesOverride" | "autoCreatePointMatchIncidents" | "allowPaymentPlans" | "installmentCount" | "installmentDueDates" | "installmentDueRelativeDays" | "installmentAmounts" | "allowTeamSplitDefault" | "splitLeaguePlayoffDivisions" | "requiredTemplateIds" | "divisions" | "divisionDetails" | "playoffDivisionDetails" | "divisionResourceIds" | "leagueScoringConfigId", ExtArgs["result"]["eventTemplates"]>
 
 export type $EventTemplatesPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "EventTemplates"
@@ -2429,7 +2403,6 @@ export type $EventTemplatesPayload<ExtArgs extends runtime.Types.Extensions.Inte
     restTimeMinutes: number | null
     pointsToVictory: number[]
     sportIds: string[]
-    officialSchedulingMode: $Enums.EventsOfficialSchedulingModeEnum
     staffingPriority: $Enums.StaffingPriorityEnum
     doTeamsOfficiate: boolean | null
     teamOfficialsMaySwap: boolean | null
@@ -2928,7 +2901,6 @@ export interface EventTemplatesFieldRefs {
   readonly restTimeMinutes: Prisma.FieldRef<"EventTemplates", 'Int'>
   readonly pointsToVictory: Prisma.FieldRef<"EventTemplates", 'Int[]'>
   readonly sportIds: Prisma.FieldRef<"EventTemplates", 'String[]'>
-  readonly officialSchedulingMode: Prisma.FieldRef<"EventTemplates", 'EventsOfficialSchedulingModeEnum'>
   readonly staffingPriority: Prisma.FieldRef<"EventTemplates", 'StaffingPriorityEnum'>
   readonly doTeamsOfficiate: Prisma.FieldRef<"EventTemplates", 'Boolean'>
   readonly teamOfficialsMaySwap: Prisma.FieldRef<"EventTemplates", 'Boolean'>

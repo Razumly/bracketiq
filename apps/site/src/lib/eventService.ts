@@ -74,10 +74,7 @@ import {
   normalizeOrganizationOwnershipStatus,
 } from "@/lib/organizationOwnership";
 import type { EventAuthorityCapabilities } from "@/server/accessControl";
-import {
-  normalizeOfficialSchedulingMode,
-  normalizeStaffingPriority,
-} from "@/server/officials/config";
+import { normalizeStaffingPriority } from "@/server/officials/config";
 
 const readApiEntityId = (value: unknown): string | undefined => {
   if (!value || typeof value !== "object") {
@@ -1072,17 +1069,11 @@ class EventService {
     const normalizedResolvedMatchRules = normalizeObjectValue(
       row.resolvedMatchRules,
     ) as Event["resolvedMatchRules"];
-    const legacyOfficialSchedulingMode = normalizeOfficialSchedulingMode(
-      row.officialSchedulingMode,
-    );
-    const staffingPriority = normalizeStaffingPriority(
-      row.staffingPriority,
-      legacyOfficialSchedulingMode,
-    );
+    const staffingPriority = normalizeStaffingPriority(row.staffingPriority);
     const doTeamsOfficiate =
       typeof row.doTeamsOfficiate === "boolean"
         ? row.doTeamsOfficiate
-        : legacyOfficialSchedulingMode === "TEAM_STAFFING";
+        : false;
     const nextOccurrence = (() => {
       if (!row.nextOccurrence || typeof row.nextOccurrence !== "object" || Array.isArray(row.nextOccurrence)) {
         return null;
@@ -1887,9 +1878,7 @@ class EventService {
     event.officialIds = officialIds;
     event.staffingPriority = normalizeStaffingPriority(
       data.staffingPriority ?? event.staffingPriority,
-      data.officialSchedulingMode ?? event.officialSchedulingMode,
     );
-    delete event.officialSchedulingMode;
     event.officialPositions = officialPositions;
     event.eventOfficials = eventOfficials;
     event.officials = officials;
