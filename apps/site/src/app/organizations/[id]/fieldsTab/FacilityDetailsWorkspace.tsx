@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft } from 'lucide-react';
 import {
   Alert,
   Badge,
@@ -22,6 +23,7 @@ import { createId } from '@/lib/id';
 import { fieldService } from '@/lib/fieldService';
 import { facilityService } from '@/lib/facilityService';
 import { sportsService } from '@/lib/sportsService';
+import { getFieldFacilityId } from './facilityCalendarResources';
 import type { Facility, Field, Organization } from '@/types';
 import {
   DEFAULT_FACILITY_CLOSE_TIME,
@@ -91,19 +93,6 @@ const normalizeText = (value: unknown): string => (
   typeof value === 'string' ? value.trim() : ''
 );
 
-const getResourceFacilityId = (field: Field): string | null => {
-  if (typeof field.facilityId === 'string' && field.facilityId.trim()) {
-    return field.facilityId.trim();
-  }
-  if (typeof field.facility === 'string' && field.facility.trim()) {
-    return field.facility.trim();
-  }
-  if (field.facility && typeof field.facility === 'object' && typeof field.facility.$id === 'string') {
-    return field.facility.$id;
-  }
-  return null;
-};
-
 const hasSelectedCoordinates = (lat: unknown, lng: unknown): boolean => {
   const normalizedLat = Number(lat);
   const normalizedLng = Number(lng);
@@ -137,8 +126,12 @@ const facilityToDraft = (facility: Facility, index: number): FacilityDraft => {
   };
 };
 
+const coordinateInput = (value: unknown): number | '' => (
+  typeof value === 'number' && Number.isFinite(value) ? value : ''
+);
+
 const fieldToResourceDraft = (field: Field, fallbackFacilityId: string | null): ResourceDraft | null => {
-  const facilityDraftId = getResourceFacilityId(field) ?? fallbackFacilityId;
+  const facilityDraftId = getFieldFacilityId(field) ?? fallbackFacilityId;
   if (!facilityDraftId) {
     return null;
   }
@@ -150,8 +143,8 @@ const fieldToResourceDraft = (field: Field, fallbackFacilityId: string | null): 
     name: field.name || '',
     facilityDraftId,
     location: field.location || '',
-    lat: typeof field.lat === 'number' && Number.isFinite(field.lat) ? field.lat : '',
-    long: typeof field.long === 'number' && Number.isFinite(field.long) ? field.long : '',
+    lat: coordinateInput(field.lat),
+    long: coordinateInput(field.long),
     locationSelected: Boolean((field.location || '').trim()) && hasSelectedCoordinates(field.lat, field.long),
     sportIds: normalizeSportIds(field.sportIds),
   };
@@ -274,6 +267,101 @@ const formatResourceSubtitle = (resource: ResourceDraft, facility?: FacilityDraf
   resource.location.trim() || facility?.location.trim() || 'No location set'
 );
 
+const validateFacilityDraft = (facility: FacilityDraft): string | null => {
+  if (!facility.name.trim()) return 'Facility name is required.';
+  if (!facility.location.trim()) return FACILITY_LOCATION_REQUIRED_ERROR;
+  if (!facility.locationSelected || !facilityCoordinatesFromInput(facility.coordinates)) {
+    return FACILITY_LOCATION_SELECTION_ERROR;
+  }
+  return null;
+};
+
+const validateResourceDraft = (resource: ResourceDraft, facilityIds: Set<string>): string | null => {
+  if (!resource.name.trim()) return 'Resource name is required.';
+  if (!facilityIds.has(resource.facilityDraftId)) return 'Choose a facility for every resource.';
+  if (resource.location.trim() && !resource.locationSelected) {
+    return 'Select a resource address from suggestions or the map, or leave it blank to use the facility location.';
+  }
+  return null;
+};
+
+const validateSnapshotForSave = (snapshot: FacilityDetailsSnapshot) => {
+  const facilityOperatingHoursById = new Map<string, Facility['operatingHours'] | null>();
+  for (const facility of snapshot.facilities) {
+    const locationError = validateFacilityDraft(facility);
+    if (locationError) return { facilityOperatingHoursById, error: locationError };
+    const { operatingHours, error } = buildOperatingHoursFromFormRows(facility.weeklyHours);
+    if (error) return { facilityOperatingHoursById, error };
+    facilityOperatingHoursById.set(facility.id, operatingHours);
+  }
+  const facilityIds = new Set(snapshot.facilities.map((facility) => facility.id));
+  for (const resource of snapshot.resources) {
+    const error = validateResourceDraft(resource, facilityIds);
+    if (error) return { facilityOperatingHoursById, error };
+  }
+  return { facilityOperatingHoursById, error: null };
+};
+
+const saveFacilityDraft = async (
+  facility: FacilityDraft,
+  operatingHours: Facility['operatingHours'] | null,
+  organizationId: string,
+) => {
+  const coordinates = facilityCoordinatesFromInput(facility.coordinates);
+  if (!coordinates) throw new Error(FACILITY_LOCATION_SELECTION_ERROR);
+  const payload = {
+    name: facility.name.trim(),
+    location: facility.location.trim(),
+    address: facility.address.trim() || null,
+    affiliateUrl: facility.affiliateUrl.trim() || null,
+    coordinates,
+    operatingHours,
+    isDefault: facility.isDefault,
+    sortOrder: facility.sortOrder,
+  };
+  return facility.persistedId
+    ? facilityService.updateFacility(facility.persistedId, payload)
+    : facilityService.createFacility({ organizationId, ...payload });
+};
+
+const saveResourceDraft = async (
+  resource: ResourceDraft,
+  facilityId: string | undefined,
+  organization: Organization,
+) => {
+  if (!facilityId) throw new Error('Choose a facility for every resource.');
+  const location = resource.location.trim();
+  const payload = {
+    name: resource.name.trim(),
+    location: location || null,
+    lat: location && resource.lat !== '' ? Number(resource.lat) : undefined,
+    long: location && resource.long !== '' ? Number(resource.long) : undefined,
+    facilityId,
+    sportIds: normalizeSportIds(resource.sportIds),
+  };
+  return resource.persistedId
+    ? fieldService.updateField({ $id: resource.persistedId, ...payload })
+    : fieldService.createField({ ...payload, organization });
+};
+
+const selectedResourceDraft = (snapshot: FacilityDetailsSnapshot) => {
+  const selection = snapshot.selection;
+  if (selection?.type !== 'resource') return null;
+  return snapshot.resources.find((resource) => resource.id === selection.id) ?? null;
+};
+
+const selectedFacilityDetails = (snapshot: FacilityDetailsSnapshot) => {
+  const facilitiesById = new Map(snapshot.facilities.map((facility) => [facility.id, facility]));
+  const selectedResource = selectedResourceDraft(snapshot);
+  const activeFacilityId = selectedResource?.facilityDraftId
+    ?? (snapshot.selection?.type === 'facility' ? snapshot.selection.id : snapshot.facilities[0]?.id ?? null);
+  const selectedFacility = activeFacilityId ? facilitiesById.get(activeFacilityId) ?? null : null;
+  const visibleResources = activeFacilityId
+    ? snapshot.resources.filter((resource) => resource.facilityDraftId === activeFacilityId)
+    : [];
+  return { selectedResource, activeFacilityId, selectedFacility, visibleResources };
+};
+
 export default function FacilityDetailsWorkspace({
   organization,
   facilities,
@@ -292,6 +380,7 @@ export default function FacilityDetailsWorkspace({
   const [sportsLoading, setSportsLoading] = useState(false);
   const [sportsError, setSportsError] = useState<string | null>(null);
   const [sportOptions, setSportOptions] = useState<ResourceSportOption[]>([]);
+  const sourceSnapshotKeyRef = useRef(initialSnapshotKey);
   const lastHistoryChangeKeyRef = useRef<string | null>(null);
   const snapshotRef = useRef(snapshot);
   snapshotRef.current = snapshot;
@@ -309,12 +398,14 @@ export default function FacilityDetailsWorkspace({
   }, [baselineSnapshot, snapshot]);
 
   useEffect(() => {
+    if (sourceSnapshotKeyRef.current === initialSnapshotKey) return;
+    sourceSnapshotKeyRef.current = initialSnapshotKey;
     setBaselineSnapshot(initialSnapshot);
     setSnapshot(initialSnapshot);
     snapshotRef.current = initialSnapshot;
     setHistory([]);
     lastHistoryChangeKeyRef.current = null;
-  }, [initialSnapshotKey]);
+  }, [initialSnapshot, initialSnapshotKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -361,19 +452,7 @@ export default function FacilityDetailsWorkspace({
     () => new Map(baselineSnapshot.resources.map((resource) => [resource.id, resource])),
     [baselineSnapshot.resources],
   );
-  const facilitiesById = useMemo(
-    () => new Map(snapshot.facilities.map((facility) => [facility.id, facility])),
-    [snapshot.facilities],
-  );
-  const selectedResource = snapshot.selection?.type === 'resource'
-    ? snapshot.resources.find((resource) => resource.id === snapshot.selection?.id) ?? null
-    : null;
-  const activeFacilityId = selectedResource?.facilityDraftId
-    ?? (snapshot.selection?.type === 'facility' ? snapshot.selection.id : snapshot.facilities[0]?.id ?? null);
-  const selectedFacility = activeFacilityId ? facilitiesById.get(activeFacilityId) ?? null : null;
-  const visibleResources = activeFacilityId
-    ? snapshot.resources.filter((resource) => resource.facilityDraftId === activeFacilityId)
-    : [];
+  const { selectedResource, activeFacilityId, selectedFacility, visibleResources } = selectedFacilityDetails(snapshot);
   const facilityOptions = snapshot.facilities.map((facility) => ({
     value: facility.id,
     label: facility.name.trim() || 'New facility',
@@ -471,46 +550,6 @@ export default function FacilityDetailsWorkspace({
     }), changeKey);
   };
 
-  const validateSnapshotForSave = (): {
-    facilityOperatingHoursById: Map<string, Facility['operatingHours'] | null>;
-    error: string | null;
-  } => {
-    const facilityOperatingHoursById = new Map<string, Facility['operatingHours'] | null>();
-    for (const facility of snapshot.facilities) {
-      if (!facility.name.trim()) {
-        return { facilityOperatingHoursById, error: 'Facility name is required.' };
-      }
-      if (!facility.location.trim()) {
-        return { facilityOperatingHoursById, error: FACILITY_LOCATION_REQUIRED_ERROR };
-      }
-      if (!facility.locationSelected || !facilityCoordinatesFromInput(facility.coordinates)) {
-        return { facilityOperatingHoursById, error: FACILITY_LOCATION_SELECTION_ERROR };
-      }
-      const { operatingHours, error } = buildOperatingHoursFromFormRows(facility.weeklyHours);
-      if (error) {
-        return { facilityOperatingHoursById, error };
-      }
-      facilityOperatingHoursById.set(facility.id, operatingHours);
-    }
-
-    for (const resource of snapshot.resources) {
-      if (!resource.name.trim()) {
-        return { facilityOperatingHoursById, error: 'Resource name is required.' };
-      }
-      if (!resource.facilityDraftId || !facilitiesById.has(resource.facilityDraftId)) {
-        return { facilityOperatingHoursById, error: 'Choose a facility for every resource.' };
-      }
-      if (resource.location.trim() && !resource.locationSelected) {
-        return {
-          facilityOperatingHoursById,
-          error: 'Select a resource address from suggestions or the map, or leave it blank to use the facility location.',
-        };
-      }
-    }
-
-    return { facilityOperatingHoursById, error: null };
-  };
-
   const buildSavedSnapshot = (
     savedFacilityByDraftId: Map<string, Facility>,
     savedResourceByDraftId: Map<string, Field>,
@@ -569,7 +608,7 @@ export default function FacilityDetailsWorkspace({
       return;
     }
 
-    const validation = validateSnapshotForSave();
+    const validation = validateSnapshotForSave(snapshot);
     if (validation.error) {
       setFormError(validation.error);
       return;
@@ -591,26 +630,9 @@ export default function FacilityDetailsWorkspace({
       ));
       const savedFacilityByDraftId = new Map<string, Facility>();
       for (const facility of changedFacilities) {
-        const coordinates = facilityCoordinatesFromInput(facility.coordinates);
-        if (!coordinates) {
-          throw new Error(FACILITY_LOCATION_SELECTION_ERROR);
-        }
-        const payload = {
-          name: facility.name.trim(),
-          location: facility.location.trim(),
-          address: facility.address.trim() || null,
-          affiliateUrl: facility.affiliateUrl.trim() || null,
-          coordinates,
-          operatingHours: validation.facilityOperatingHoursById.get(facility.id) ?? null,
-          isDefault: facility.isDefault,
-          sortOrder: facility.sortOrder,
-        };
-        const saved = facility.persistedId
-          ? await facilityService.updateFacility(facility.persistedId, payload)
-          : await facilityService.createFacility({
-              organizationId: organization.$id,
-              ...payload,
-            });
+        const saved = await saveFacilityDraft(
+          facility, validation.facilityOperatingHoursById.get(facility.id) ?? null, organization.$id,
+        );
         facilityIdByDraftId.set(facility.id, saved.$id);
         savedFacilityByDraftId.set(facility.id, saved);
       }
@@ -620,28 +642,9 @@ export default function FacilityDetailsWorkspace({
       ));
       const savedResourceByDraftId = new Map<string, Field>();
       for (const resource of changedResources) {
-        const facilityId = facilityIdByDraftId.get(resource.facilityDraftId);
-        if (!facilityId) {
-          throw new Error('Choose a facility for every resource.');
-        }
-        const normalizedLocation = resource.location.trim();
-        const payload = {
-          name: resource.name.trim(),
-          location: normalizedLocation || null,
-          lat: normalizedLocation && resource.lat !== '' ? Number(resource.lat) : undefined,
-          long: normalizedLocation && resource.long !== '' ? Number(resource.long) : undefined,
-          facilityId,
-          sportIds: normalizeSportIds(resource.sportIds),
-        };
-        const saved = resource.persistedId
-          ? await fieldService.updateField({
-              $id: resource.persistedId,
-              ...payload,
-            })
-          : await fieldService.createField({
-              ...payload,
-              organization,
-            });
+        const saved = await saveResourceDraft(
+          resource, facilityIdByDraftId.get(resource.facilityDraftId), organization,
+        );
         savedResourceByDraftId.set(resource.id, saved);
       }
 
@@ -806,14 +809,10 @@ export default function FacilityDetailsWorkspace({
     );
   };
 
-  const renderResourceEditor = (resource: ResourceDraft) => {
-    const facility = facilitiesById.get(resource.facilityDraftId);
+  const renderResourceHeading = (resource: ResourceDraft) => {
+    const facility = snapshot.facilities.find((entry) => entry.id === resource.facilityDraftId);
     const pendingLabel = getResourcePendingLabel(resource, baselineResourcesById);
-    const hasResourceLocation = resource.location.trim().length > 0;
-    const isLocationValid = !hasResourceLocation || resource.locationSelected;
-
     return (
-      <Stack gap="md">
         <Group justify="space-between" align="flex-start" wrap="wrap">
           <div>
             <Group gap="xs" align="center">
@@ -825,6 +824,44 @@ export default function FacilityDetailsWorkspace({
             </Text>
           </div>
         </Group>
+    );
+  };
+
+  const renderResourceLocation = (resource: ResourceDraft) => {
+    const isLocationValid = !resource.location.trim() || resource.locationSelected;
+    return (
+        <LocationSelector
+          value={resource.location}
+          coordinates={{
+            lat: resource.lat === '' ? 0 : Number(resource.lat),
+            lng: resource.long === '' ? 0 : Number(resource.long),
+          }}
+          label="Location (optional, defaults to Facility location)"
+          onChange={(location, lat, lng, _address, meta?: LocationSelectionMeta) => {
+            const nextSelected = Boolean(meta?.selected);
+            updateResourceDraft(resource.id, (draft) => ({
+              ...draft,
+              location,
+              lat: nextSelected ? lat : '',
+              long: nextSelected ? lng : '',
+              locationSelected: nextSelected,
+            }), `resource:${resource.id}:location`);
+          }}
+          isValid={isLocationValid}
+          errorMessage="Select a resource address from suggestions or the map, or leave it blank to use the facility location."
+          requireSelection
+          selected={resource.locationSelected}
+          selectionErrorMessage="Select a resource address from suggestions or the map, or leave it blank to use the facility location."
+          disabled={!canManage || saving}
+        />
+    );
+  };
+
+  const renderResourceEditor = (resource: ResourceDraft) => {
+
+    return (
+      <Stack gap="md">
+        {renderResourceHeading(resource)}
 
         <div className="grid gap-3 lg:grid-cols-3">
           <TextInput
@@ -872,57 +909,16 @@ export default function FacilityDetailsWorkspace({
             {sportsError}
           </Alert>
         ) : null}
-        <LocationSelector
-          value={resource.location}
-          coordinates={{
-            lat: resource.lat === '' ? 0 : Number(resource.lat),
-            lng: resource.long === '' ? 0 : Number(resource.long),
-          }}
-          label="Location (optional, defaults to Facility location)"
-          onChange={(location, lat, lng, _address, meta?: LocationSelectionMeta) => {
-            const nextSelected = Boolean(meta?.selected);
-            updateResourceDraft(resource.id, (draft) => ({
-              ...draft,
-              location,
-              lat: nextSelected ? lat : '',
-              long: nextSelected ? lng : '',
-              locationSelected: nextSelected,
-            }), `resource:${resource.id}:location`);
-          }}
-          isValid={isLocationValid}
-          errorMessage="Select a resource address from suggestions or the map, or leave it blank to use the facility location."
-          requireSelection
-          selected={resource.locationSelected}
-          selectionErrorMessage="Select a resource address from suggestions or the map, or leave it blank to use the facility location."
-          disabled={!canManage || saving}
-        />
+        {renderResourceLocation(resource)}
       </Stack>
     );
   };
 
-  const selectedDetailNode = selectedResource
-    ? renderResourceEditor(selectedResource)
-    : selectedFacility
-      ? renderFacilityEditor(selectedFacility)
-      : (
-          <Stack gap="xs">
-            <Title order={5}>Facility details</Title>
-            <Text size="sm" c="dimmed">Create a facility to start adding resources.</Text>
-          </Stack>
-        );
-
-  return (
-    <Stack gap="md">
-      <Group justify="space-between" align="flex-start" wrap="wrap">
-        <div>
-          <Title order={5}>Facility details</Title>
-          <Text size="sm" c="dimmed">
-            Manage facilities and the resources assigned to each one.
-          </Text>
-        </div>
+  const renderWorkspaceActions = () => (
         <Group gap="xs" justify="flex-end">
           <Button size="xs" variant="light" onClick={onSwitchToSchedule}>
-            Schedule
+            <ArrowLeft size={15} aria-hidden="true" />
+            Back to schedule
           </Button>
           <Button size="xs" variant="light" onClick={handleAddFacility} disabled={!canManage || saving}>
             + Facility
@@ -951,6 +947,29 @@ export default function FacilityDetailsWorkspace({
             {pendingChangeCount ? `Save changes (${pendingChangeCount})` : 'Save changes'}
           </Button>
         </Group>
+  );
+
+  const selectedDetailNode = selectedResource
+    ? renderResourceEditor(selectedResource)
+    : selectedFacility
+      ? renderFacilityEditor(selectedFacility)
+      : (
+          <Stack gap="xs">
+            <Title order={5}>Facility details</Title>
+            <Text size="sm" c="dimmed">Create a facility to start adding resources.</Text>
+          </Stack>
+        );
+
+  return (
+    <Stack gap="md">
+      <Group justify="space-between" align="flex-start" wrap="wrap">
+        <div>
+          <Title order={5}>Facility details</Title>
+          <Text size="sm" c="dimmed">
+            Manage facilities and the resources assigned to each one.
+          </Text>
+        </div>
+        {renderWorkspaceActions()}
       </Group>
 
       {formError ? (

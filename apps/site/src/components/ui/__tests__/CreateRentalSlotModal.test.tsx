@@ -31,6 +31,45 @@ jest.mock('@/lib/apiClient', () => ({
 jest.mock('@/components/ui/PriceWithFeesPreview', () => () => null);
 
 describe('CreateRentalSlotModal multi-field creation', () => {
+  const editField: Field = { $id: 'court', name: 'Court', location: '', lat: 0, long: 0 };
+  const editableSlot: TimeSlot = { $id: 'slot', dayOfWeek: 0, daysOfWeek: [0], repeating: false,
+    startDate: '2035-06-11T22:00:00Z', endDate: '2035-06-12T02:00:00Z', timeZone: 'UTC',
+    startTimeMinutes: 1320, endTimeMinutes: 120 };
+
+  it('keeps one overnight interval when editing a non-repeating rental time', async () => {
+    const submit = jest.fn();
+    const user = userEvent.setup();
+    render(<CreateRentalSlotModal opened field={editField} slot={editableSlot} onClose={() => undefined} onSubmitOverride={submit} />);
+    await user.click(screen.getByRole('combobox', { name: 'End time hour' }));
+    await user.click(screen.getByRole('option', { name: '3', exact: true }));
+    await user.click(screen.getByRole('button', { name: 'Save Rental Slot' }));
+    await waitFor(() => expect(submit).toHaveBeenCalledWith(expect.objectContaining({ payload: expect.objectContaining({
+      repeating: false, startDate: '2035-06-11T22:00:00', endDate: '2035-06-12T03:00:00', endTimeMinutes: 180,
+    }) })));
+  });
+
+  it('rejects an expired non-repeating rental without submitting', async () => {
+    const submit = jest.fn();
+    const user = userEvent.setup();
+    render(<CreateRentalSlotModal opened field={editField} slot={{ ...editableSlot, startDate: '2020-06-11T22:00:00Z', endDate: '2020-06-12T02:00:00Z' }} onClose={() => undefined} onSubmitOverride={submit} />);
+    await user.click(screen.getByRole('button', { name: 'Save Rental Slot' }));
+    expect(await screen.findByText(/end date and time must be in the future/)).toBeInTheDocument();
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it('saves several selected repeating weekdays', async () => {
+    const submit = jest.fn();
+    const user = userEvent.setup();
+    render(<CreateRentalSlotModal opened field={editField} slot={{ ...editableSlot, repeating: true, endDate: null }} onClose={() => undefined} onSubmitOverride={submit} />);
+    await user.click(screen.getByRole('combobox', { name: 'Repeat on' }));
+    await user.click(screen.getByRole('option', { name: 'Wednesday' }));
+    await user.click(screen.getByRole('button', { name: 'Save Rental Slot' }));
+    await waitFor(() => expect(submit).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({ daysOfWeek: [0, 2], repeating: true }),
+      updatePayload: expect.objectContaining({ daysOfWeek: [0, 2] }),
+    })));
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
     apiRequestMock.mockResolvedValue({ templates: [] });

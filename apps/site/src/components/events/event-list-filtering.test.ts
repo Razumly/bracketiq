@@ -5,6 +5,7 @@ import {
   filterLoadedEvents,
   eventListFilterKey,
   useEventListFiltering,
+  hasEventListFilters,
   type EventListFilterState,
 } from './event-list-filtering';
 
@@ -54,6 +55,71 @@ const filters: EventListFilterState = {
 };
 
 describe('event list filtering', () => {
+  it('returns to local filtering after the full unfiltered cache is restored', async () => {
+    const onFilterChange = jest.fn().mockResolvedValue(undefined);
+    const { rerender } = renderHook(({ filterKey, hasMoreEvents, hasScopedEventCache, events }) => useEventListFiltering({
+      events, filters, filterKey, hasMoreEvents, hasScopedEventCache, onFilterChange, debounceMs: 0,
+    }), { initialProps: { filterKey: 'all', hasMoreEvents: true, hasScopedEventCache: false, events: [] as Event[] } });
+    const page = [] as Event[];
+    rerender({ filterKey: 'basketball', hasMoreEvents: true, hasScopedEventCache: false, events: page });
+    await act(async () => { await Promise.resolve(); });
+    rerender({ filterKey: 'basketball', hasMoreEvents: false, hasScopedEventCache: true, events: page });
+    rerender({ filterKey: 'all', hasMoreEvents: false, hasScopedEventCache: true, events: page });
+    await act(async () => { await Promise.resolve(); });
+    const fullCache = [] as Event[];
+    rerender({ filterKey: 'all', hasMoreEvents: false, hasScopedEventCache: false, events: fullCache });
+    rerender({ filterKey: 'soccer', hasMoreEvents: false, hasScopedEventCache: false, events: fullCache });
+    await act(async () => { await Promise.resolve(); });
+    expect(onFilterChange).toHaveBeenCalledTimes(2);
+  });
+
+  it('fetches when a date filter expands an otherwise complete cache into the past', async () => {
+    const onFilterChange = jest.fn().mockResolvedValue(undefined);
+    const { rerender } = renderHook(({ selectedStartDate }: { selectedStartDate: Date | null }) => {
+      const activeFilters = { ...filters, selectedStartDate };
+      return useEventListFiltering({
+        events: [], filters: activeFilters, filterKey: eventListFilterKey(activeFilters),
+        hasMoreEvents: false, cacheStartDate: new Date(2026, 8, 4).toISOString(),
+        onFilterChange, debounceMs: 0,
+      });
+    }, { initialProps: { selectedStartDate: null as Date | null } });
+    rerender({ selectedStartDate: new Date(2026, 8, 1) });
+    await act(async () => { await Promise.resolve(); });
+    expect(onFilterChange).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps rental classification without changing the event type', () => {
+    const rental = makeEvent({ $id: 'rental', eventType: 'EVENT' });
+    const hosted = makeEvent({ $id: 'hosted', eventType: 'EVENT' });
+    const rentalFilters = { ...filters, selectedEventTypes: ['RENTAL'], eventTypeOptions: ['EVENT', 'RENTAL'], rentalEventIds: ['rental'] };
+    expect(filterLoadedEvents([rental, hosted], rentalFilters)).toEqual([rental]);
+    expect(rental.eventType).toBe('EVENT');
+  });
+
+  it('records a constrained query scope and refreshes after the filter UI remounts', async () => {
+    expect(hasEventListFilters(filters)).toBe(false);
+    const scopedFilters = { ...filters, searchTerm: 'Basketball' };
+    const onFilterChange = jest.fn().mockResolvedValue(undefined);
+    const { rerender } = renderHook(({ filterKey }) => useEventListFiltering({
+      events: [], filters, filterKey, hasMoreEvents: false,
+      hasScopedEventCache: hasEventListFilters(scopedFilters), onFilterChange, debounceMs: 0,
+    }), { initialProps: { filterKey: 'basketball' } });
+    rerender({ filterKey: 'all' });
+    await act(async () => { await Promise.resolve(); });
+    expect(onFilterChange).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a failed refresh and releases its loading state', async () => {
+    const { rerender, result } = renderHook(({ filterKey }) => useEventListFiltering({
+      events: [], filters, filterKey, hasMoreEvents: true,
+      onFilterChange: async () => { throw new Error('Events are unavailable'); }, debounceMs: 0,
+    }), { initialProps: { filterKey: 'all' } });
+    rerender({ filterKey: 'basketball' });
+    await act(async () => { await Promise.resolve(); });
+    expect(result.current.refreshError).toBe('Events are unavailable');
+    expect(result.current.isRefreshing).toBe(false);
+  });
+
   it('filters the loaded cache without waiting for a server request', () => {
     const events = [
       makeEvent({ $id: 'basketball', name: 'Basketball night' }),
@@ -112,5 +178,37 @@ describe('event list filtering', () => {
       await Promise.resolve();
     });
     expect(onFilterChange).not.toHaveBeenCalled();
+  });
+
+  it('reloads after clearing a server filter even when that filtered page is complete', async () => {
+    const onFilterChange = jest.fn().mockResolvedValue(undefined);
+    const { rerender } = renderHook(
+      ({ filterKey, hasMoreEvents }) => useEventListFiltering({
+        events: [], filters, filterKey, hasMoreEvents, onFilterChange, debounceMs: 0,
+      }),
+      { initialProps: { filterKey: 'all', hasMoreEvents: true } },
+    );
+    rerender({ filterKey: 'basketball', hasMoreEvents: true });
+    await act(async () => { await Promise.resolve(); });
+    rerender({ filterKey: 'basketball', hasMoreEvents: false });
+    rerender({ filterKey: 'all', hasMoreEvents: false });
+    await act(async () => { await Promise.resolve(); });
+    expect(onFilterChange).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not cancel a pending refresh when the caller renders with a new callback', async () => {
+    jest.useFakeTimers();
+    const refresh = jest.fn().mockResolvedValue(undefined);
+    try {
+      const { rerender } = renderHook(({ filterKey }) => useEventListFiltering({
+        events: [], filters, filterKey, hasMoreEvents: true, onFilterChange: () => refresh(),
+      }), { initialProps: { filterKey: 'all' } });
+      rerender({ filterKey: 'basketball' });
+      rerender({ filterKey: 'basketball' });
+      await act(async () => { jest.advanceTimersByTime(250); });
+      expect(refresh).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

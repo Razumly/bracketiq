@@ -6,36 +6,26 @@ import {
   Badge,
   Button,
   Checkbox,
-  DateTimePicker,
   Group,
   Loader,
   Modal,
-  MultiSelect,
   NumberInput,
   Paper,
   Select,
   SegmentedControl,
   SimpleGrid,
   Stack,
-  Switch,
   Table,
   Text,
   TextInput,
-  Textarea,
   Title,
 } from '@/components/organization/organization-operation-ui';
-import {
-  Calendar as BigCalendar,
-  dateFnsLocalizer,
-} from 'react-big-calendar';
-import type { EventProps, View } from 'react-big-calendar';
-import 'react-big-calendar/lib/css/react-big-calendar.css';
-import { addDays, endOfDay, endOfMonth, endOfWeek, format, getDay, parse, startOfDay, startOfMonth, startOfWeek } from 'date-fns';
-import { Plus } from 'lucide-react';
-import SharedCalendarEvent from '@/components/calendar/SharedCalendarEvent';
+import { Plus, Mail, ShieldCheck, Users, UserCheck } from 'lucide-react';
+import { OrganizationStatStrip, OrganizationTabHeading } from '@/components/organization/OrganizationTabLayout';
+import { OrganizationDataPlaceholder, OrganizationLoadingValue, OrganizationTableBody, useOrganizationDataLoading } from '@/components/organization/OrganizationDataLoading';
+import OrganizationStaffDetails from './OrganizationStaffDetails';
 import UserCard from '@/components/ui/UserCard';
 import { apiRequest, isApiRequestError } from '@/lib/apiClient';
-import { buildUniqueColorReferenceList } from '@/lib/calendarColorReferences';
 import { ORGANIZATION_PERMISSION_OPTIONS } from '@/lib/organizationPermissions';
 import { getStaffMemberTypesForOrganizationRole } from '@/lib/staff';
 import { formatBillAmount, type OrganizationRole, type StaffMemberType, type UserData } from '@/types';
@@ -89,98 +79,8 @@ type RoleRosterManagerProps = {
   canManageCompensation?: boolean;
 };
 
-type ManagerView = 'staff' | 'schedule' | 'roles' | 'compensation';
+type ManagerView = 'staff' | 'roles' | 'compensation';
 type CompensationWageType = 'HOURLY' | 'SALARY' | 'FLAT_PER_EVENT';
-type StaffScheduleAssignmentKind = 'STAFF_SHIFT' | 'OFFICIAL_SHIFT';
-
-type StaffScheduleFacility = {
-  id?: string;
-  $id?: string;
-  name?: string | null;
-  location?: string | null;
-};
-
-type StaffScheduleField = {
-  id?: string;
-  $id?: string;
-  name?: string | null;
-  facilityId?: string | null;
-};
-
-type StaffScheduleStaffMember = {
-  staffMemberId: string;
-  userId: string;
-  fullName: string;
-  userName?: string | null;
-  types: StaffMemberType[];
-  roleId?: string | null;
-  roleName?: string | null;
-};
-
-type StaffScheduleTimeSlot = {
-  id?: string;
-  startDate: string;
-  endDate?: string | null;
-  repeating: boolean;
-  daysOfWeek?: number[] | null;
-  startTimeMinutes?: number | null;
-  endTimeMinutes?: number | null;
-};
-
-type StaffScheduleAssignment = {
-  id: string;
-  parentAssignmentId?: string | null;
-  staffMemberId?: string | null;
-  userId?: string | null;
-  userName: string;
-  isOpen?: boolean;
-  isChildAssignment?: boolean;
-  assignmentKind: StaffScheduleAssignmentKind;
-  facilityId?: string | null;
-  facilityName?: string | null;
-  fieldId?: string | null;
-  fieldName?: string | null;
-  timeSlotId: string;
-  timeSlot?: StaffScheduleTimeSlot | null;
-  plannedStart?: string | null;
-  plannedEnd?: string | null;
-  plannedMinutes?: number | null;
-  rateOverrideType?: CompensationWageType | null;
-  rateOverrideCents?: number | null;
-  status?: string | null;
-  notes?: string | null;
-};
-
-type StaffScheduleResponse = {
-  assignments?: StaffScheduleAssignment[];
-  facilities?: StaffScheduleFacility[];
-  fields?: StaffScheduleField[];
-  staffMembers?: StaffScheduleStaffMember[];
-};
-
-type StaffScheduleDraft = {
-  userId: string | null;
-  assignmentKind: StaffScheduleAssignmentKind;
-  facilityId: string | null;
-  fieldId: string | null;
-  start: Date | null;
-  end: Date | null;
-  repeating: boolean;
-  daysOfWeek: string[];
-  repeatEnd: Date | null;
-  overrideAmount: string | number;
-  notes: string;
-};
-
-type StaffScheduleCalendarEvent = {
-  id: string;
-  title: string;
-  start: Date;
-  end: Date;
-  resource: StaffScheduleAssignment;
-};
-
-type StaffScheduleOpenOccurrence = StaffScheduleCalendarEvent | null;
 
 type CompensationRate = {
   id: string;
@@ -227,29 +127,6 @@ const WAGE_TYPE_OPTIONS = [
   { value: 'FLAT_PER_EVENT', label: 'Flat per event' },
 ] satisfies Array<{ value: CompensationWageType; label: string }>;
 
-const STAFF_SCHEDULE_KIND_OPTIONS = [
-  { value: 'STAFF_SHIFT', label: 'Staff hours' },
-  { value: 'OFFICIAL_SHIFT', label: 'Official assignment' },
-] satisfies Array<{ value: StaffScheduleAssignmentKind; label: string }>;
-
-const DAY_OF_WEEK_OPTIONS = [
-  { value: '0', label: 'Mon' },
-  { value: '1', label: 'Tue' },
-  { value: '2', label: 'Wed' },
-  { value: '3', label: 'Thu' },
-  { value: '4', label: 'Fri' },
-  { value: '5', label: 'Sat' },
-  { value: '6', label: 'Sun' },
-];
-
-const staffScheduleLocalizer = dateFnsLocalizer({
-  format,
-  parse: parse as any,
-  startOfWeek,
-  getDay,
-  locales: {} as any,
-});
-
 const normalizeRoleKey = (role: Pick<OrganizationRole, 'kind' | 'name' | 'systemKey'> | null | undefined): string => (
   `${role?.systemKey ?? ''} ${role?.kind ?? ''} ${role?.name ?? ''}`.trim().toUpperCase()
 );
@@ -270,13 +147,15 @@ const formatTypeLabel = (type: StaffMemberType): string => (
   STAFF_TYPE_OPTIONS.find((option) => option.value === type)?.label ?? type
 );
 
-const getUserCardData = (entry: RoleRosterEntry): UserData | null => (
-  entry.user
-    ? {
-      ...entry.user,
-      fullName: entry.fullName,
-    }
-    : null
+const rosterRoleId = (entry: RoleRosterEntry, selections: Record<string, string | null>): string | null => (
+  Object.prototype.hasOwnProperty.call(selections, entry.userId)
+    ? selections[entry.userId]
+    : entry.roleId ?? null
+);
+
+const matchesRosterQuery = (entry: RoleRosterEntry, query: string): boolean => (
+  [entry.fullName, entry.userName, entry.email, entry.subtitle]
+    .some((value) => Boolean(value?.toLowerCase().includes(query)))
 );
 
 const normalizePermissionList = (permissions: readonly string[] | undefined): string[] => (
@@ -337,215 +216,6 @@ const formatFinanceDate = (value?: string | null): string => {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
-  });
-};
-
-const nextRoundedHour = (): Date => {
-  const date = new Date();
-  date.setMinutes(0, 0, 0);
-  date.setHours(date.getHours() + 1);
-  return date;
-};
-
-const minutesFromDate = (date: Date): number => date.getHours() * 60 + date.getMinutes();
-
-const mondayDayOf = (date: Date): number => (date.getDay() + 6) % 7;
-
-const addMinutes = (date: Date, minutes: number): Date => new Date(date.getTime() + minutes * 60000);
-
-const parseScheduleDate = (value?: string | Date | null): Date | null => {
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return value;
-  }
-  if (typeof value === 'string' && value.trim()) {
-    const parsed = new Date(value);
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
-  }
-  return null;
-};
-
-const formatScheduleDateTime = (value?: string | Date | null): string => {
-  const parsed = parseScheduleDate(value);
-  if (!parsed) {
-    return 'Not scheduled';
-  }
-  return parsed.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
-};
-
-const formatScheduleTime = (value?: string | Date | null): string => {
-  const parsed = parseScheduleDate(value);
-  if (!parsed) {
-    return '';
-  }
-  return parsed.toLocaleTimeString(undefined, {
-    hour: 'numeric',
-    minute: '2-digit',
-  });
-};
-
-const formatScheduleDuration = (minutes?: number | null): string => {
-  if (!Number.isFinite(minutes ?? NaN) || !minutes) {
-    return 'Duration pending';
-  }
-  const hours = Math.floor(minutes / 60);
-  const remainder = minutes % 60;
-  if (!hours) {
-    return `${remainder} min`;
-  }
-  if (!remainder) {
-    return `${hours} hr`;
-  }
-  return `${hours} hr ${remainder} min`;
-};
-
-const getScheduleEntityId = (value: { id?: string; $id?: string } | null | undefined): string => (
-  String(value?.id ?? value?.$id ?? '').trim()
-);
-
-const scheduleKindLabel = (kind: StaffScheduleAssignmentKind | string | null | undefined): string => (
-  kind === 'OFFICIAL_SHIFT' ? 'Official' : 'Staff'
-);
-
-const defaultStaffScheduleDraft = (): StaffScheduleDraft => {
-  const start = nextRoundedHour();
-  const end = addMinutes(start, 120);
-  return {
-    userId: null,
-    assignmentKind: 'STAFF_SHIFT',
-    facilityId: null,
-    fieldId: null,
-    start,
-    end,
-    repeating: false,
-    daysOfWeek: [String(mondayDayOf(start))],
-    repeatEnd: null,
-    overrideAmount: '',
-    notes: '',
-  };
-};
-
-const calendarRangeForView = (date: Date, view: View): { start: Date; end: Date } => {
-  if (view === 'month') {
-    return {
-      start: startOfWeek(startOfMonth(date)),
-      end: endOfWeek(endOfMonth(date)),
-    };
-  }
-  if (view === 'day') {
-    return {
-      start: startOfDay(date),
-      end: endOfDay(date),
-    };
-  }
-  if (view === 'agenda') {
-    return {
-      start: startOfDay(date),
-      end: endOfDay(addDays(date, 30)),
-    };
-  }
-  return {
-    start: startOfWeek(date),
-    end: endOfWeek(date),
-  };
-};
-
-const dateWithMinutes = (date: Date, minutes: number): Date => {
-  const next = new Date(date);
-  next.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
-  return next;
-};
-
-const buildAssignmentOccurrences = (
-  assignment: StaffScheduleAssignment,
-  range: { start: Date; end: Date },
-): StaffScheduleCalendarEvent[] => {
-  const timeSlot = assignment.timeSlot;
-  const fallbackStart = parseScheduleDate(assignment.plannedStart);
-  const fallbackEnd = parseScheduleDate(assignment.plannedEnd);
-  if (!timeSlot?.repeating) {
-    const start = fallbackStart ?? parseScheduleDate(timeSlot?.startDate);
-    const end = fallbackEnd ?? parseScheduleDate(timeSlot?.endDate);
-    if (!start || !end || end.getTime() <= range.start.getTime() || start.getTime() >= range.end.getTime()) {
-      return [];
-    }
-    return [{
-      id: assignment.id,
-      title: assignment.userName,
-      start,
-      end,
-      resource: assignment,
-    }];
-  }
-
-  const scheduleStart = parseScheduleDate(timeSlot.startDate);
-  if (!scheduleStart) {
-    return [];
-  }
-  const scheduleEnd = parseScheduleDate(timeSlot.endDate);
-  const days = Array.isArray(timeSlot.daysOfWeek) && timeSlot.daysOfWeek.length
-    ? timeSlot.daysOfWeek
-    : [mondayDayOf(scheduleStart)];
-  const startMinutes = typeof timeSlot.startTimeMinutes === 'number'
-    ? timeSlot.startTimeMinutes
-    : minutesFromDate(scheduleStart);
-  const endMinutes = typeof timeSlot.endTimeMinutes === 'number'
-    ? timeSlot.endTimeMinutes
-    : startMinutes + Math.max(30, assignment.plannedMinutes ?? 60);
-  const events: StaffScheduleCalendarEvent[] = [];
-  let cursor = startOfDay(range.start);
-  while (cursor.getTime() <= range.end.getTime()) {
-    const day = mondayDayOf(cursor);
-    if (
-      days.includes(day)
-      && cursor.getTime() >= startOfDay(scheduleStart).getTime()
-      && (!scheduleEnd || cursor.getTime() <= endOfDay(scheduleEnd).getTime())
-    ) {
-      const start = dateWithMinutes(cursor, startMinutes);
-      const end = dateWithMinutes(cursor, endMinutes);
-      if (end.getTime() > range.start.getTime() && start.getTime() < range.end.getTime()) {
-        events.push({
-          id: `${assignment.id}-${start.toISOString()}`,
-          title: assignment.userName,
-          start,
-          end,
-          resource: assignment,
-        });
-      }
-    }
-    cursor = addDays(cursor, 1);
-  }
-  return events;
-};
-
-const scheduleOccurrenceKey = (event: StaffScheduleCalendarEvent): string => (
-  `${event.start.getTime()}-${event.end.getTime()}`
-);
-
-const buildVisibleScheduleEvents = (
-  assignments: StaffScheduleAssignment[],
-  range: { start: Date; end: Date },
-): StaffScheduleCalendarEvent[] => {
-  const events = assignments.flatMap((assignment) => buildAssignmentOccurrences(assignment, range));
-  const childEventsByParentId = new Map<string, Set<string>>();
-  events.forEach((event) => {
-    const parentId = event.resource.parentAssignmentId;
-    if (!parentId) {
-      return;
-    }
-    const keys = childEventsByParentId.get(parentId) ?? new Set<string>();
-    keys.add(scheduleOccurrenceKey(event));
-    childEventsByParentId.set(parentId, keys);
-  });
-  return events.filter((event) => {
-    if (event.resource.parentAssignmentId) {
-      return true;
-    }
-    return !(childEventsByParentId.get(event.resource.id)?.has(scheduleOccurrenceKey(event)));
   });
 };
 
@@ -616,10 +286,13 @@ export default function RoleRosterManager({
   organizationId,
   canManageCompensation = false,
 }: RoleRosterManagerProps) {
+  const [invitePanelOpen, setInvitePanelOpen] = useState(false);
+  const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null);
   const [managerView, setManagerView] = useState<ManagerView>('staff');
   const [inviteMode, setInviteMode] = useState<'existing' | 'email'>('existing');
   const [rosterQuery, setRosterQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
+  const isRosterLoading = useOrganizationDataLoading();
   const [statusFilter, setStatusFilter] = useState<'all' | RoleRosterStatus>('all');
   const [existingInviteRoleId, setExistingInviteRoleId] = useState<string | null>(null);
   const [roleNameDrafts, setRoleNameDrafts] = useState<Record<string, string>>({});
@@ -637,21 +310,7 @@ export default function RoleRosterManager({
   const [compensationDrafts, setCompensationDrafts] = useState<Record<string, CompensationDraft>>({});
   const [compensationTargetErrors, setCompensationTargetErrors] = useState<Record<string, string | null>>({});
   const [savingCompensationKeys, setSavingCompensationKeys] = useState<string[]>([]);
-  const [scheduleAssignments, setScheduleAssignments] = useState<StaffScheduleAssignment[]>([]);
-  const [scheduleFacilities, setScheduleFacilities] = useState<StaffScheduleFacility[]>([]);
-  const [scheduleFields, setScheduleFields] = useState<StaffScheduleField[]>([]);
-  const [scheduleStaffMembers, setScheduleStaffMembers] = useState<StaffScheduleStaffMember[]>([]);
-  const [scheduleLoading, setScheduleLoading] = useState(false);
-  const [scheduleLoaded, setScheduleLoaded] = useState(false);
-  const [scheduleSaving, setScheduleSaving] = useState(false);
-  const [scheduleError, setScheduleError] = useState<string | null>(null);
-  const [scheduleInfo, setScheduleInfo] = useState<string | null>(null);
-  const [scheduleDraft, setScheduleDraft] = useState<StaffScheduleDraft>(() => defaultStaffScheduleDraft());
-  const [scheduleCalendarDate, setScheduleCalendarDate] = useState<Date>(() => new Date());
-  const [scheduleCalendarView, setScheduleCalendarView] = useState<View>('week');
-  const [assigningOpenOccurrence, setAssigningOpenOccurrence] = useState<StaffScheduleOpenOccurrence>(null);
-  const [coverageAssignUserId, setCoverageAssignUserId] = useState<string | null>(null);
-  const [coverageAssignOverrideAmount, setCoverageAssignOverrideAmount] = useState<string | number>('');
+
   const rosterRoleSaveSequenceRef = useRef<Record<string, number>>({});
 
   const roleOptions = useMemo(
@@ -724,31 +383,6 @@ export default function RoleRosterManager({
       setCompensationLoading(false);
     }
   }, [canManageCompensation, organizationId]);
-
-  const loadScheduleAssignments = useCallback(async () => {
-    if (!organizationId) {
-      setScheduleAssignments([]);
-      setScheduleFacilities([]);
-      setScheduleFields([]);
-      setScheduleStaffMembers([]);
-      setScheduleLoaded(false);
-      return;
-    }
-    setScheduleLoading(true);
-    setScheduleError(null);
-    try {
-      const response = await apiRequest<StaffScheduleResponse>(`/api/organizations/${organizationId}/staff/schedule`);
-      setScheduleAssignments(Array.isArray(response.assignments) ? response.assignments : []);
-      setScheduleFacilities(Array.isArray(response.facilities) ? response.facilities : []);
-      setScheduleFields(Array.isArray(response.fields) ? response.fields : []);
-      setScheduleStaffMembers(Array.isArray(response.staffMembers) ? response.staffMembers : []);
-      setScheduleLoaded(true);
-    } catch (error) {
-      setScheduleError(messageForError(error, 'Failed to load staff schedule.'));
-    } finally {
-      setScheduleLoading(false);
-    }
-  }, [organizationId]);
 
   useEffect(() => {
     if (managerView === 'compensation') {
@@ -951,7 +585,7 @@ export default function RoleRosterManager({
   }, [roleNameDrafts, staffRoles, updateRoleDefinition]);
 
   useEffect(() => {
-    if (!draftRole || draftRole.isCreating) {
+    if (!draftRole || draftRole.isCreating || draftRole.error) {
       return undefined;
     }
 
@@ -981,20 +615,11 @@ export default function RoleRosterManager({
     }, ROLE_NAME_DEBOUNCE_MS);
 
     return () => window.clearTimeout(timeoutId);
-  }, [
-    draftRole?.clientId,
-    draftRole?.isCreating,
-    draftRole?.name,
-    draftRole?.permissions,
-    onCreateRole,
-  ]);
-
+  }, [draftRole, onCreateRole]);
   const filteredRosterEntries = useMemo(() => {
     const query = rosterQuery.trim().toLowerCase();
     return rosterEntries.filter((entry) => {
-      const selectedRoleId = Object.prototype.hasOwnProperty.call(rosterRoleSelections, entry.userId)
-        ? rosterRoleSelections[entry.userId]
-        : entry.roleId ?? null;
+      const selectedRoleId = rosterRoleId(entry, rosterRoleSelections);
       if (roleFilter !== 'all' && selectedRoleId !== roleFilter) {
         return false;
       }
@@ -1004,10 +629,7 @@ export default function RoleRosterManager({
       if (!query.length) {
         return true;
       }
-      return entry.fullName.toLowerCase().includes(query)
-        || (entry.userName ?? '').toLowerCase().includes(query)
-        || (entry.email ?? '').toLowerCase().includes(query)
-        || (entry.subtitle ?? '').toLowerCase().includes(query);
+      return matchesRosterQuery(entry, query);
     });
   }, [roleFilter, rosterEntries, rosterQuery, rosterRoleSelections, statusFilter]);
 
@@ -1047,93 +669,6 @@ export default function RoleRosterManager({
     [rosterEntries],
   );
 
-  const scheduleAssignableStaffMembers = useMemo(
-    () => scheduleStaffMembers.filter((entry) => entry.userId && entry.staffMemberId),
-    [scheduleStaffMembers],
-  );
-
-  const scheduleUserOptionsForKind = useCallback(
-    (assignmentKind: StaffScheduleAssignmentKind) => scheduleAssignableStaffMembers
-      .filter((entry) => (
-        assignmentKind === 'OFFICIAL_SHIFT'
-          ? entry.types.includes('OFFICIAL')
-          : true
-      ))
-      .map((entry) => ({
-        value: entry.userId,
-        label: `${entry.fullName}${entry.roleName ? ` - ${entry.roleName}` : ''}`,
-      })),
-    [scheduleAssignableStaffMembers],
-  );
-
-  const scheduleUserOptions = useMemo(
-    () => scheduleUserOptionsForKind(scheduleDraft.assignmentKind),
-    [scheduleDraft.assignmentKind, scheduleUserOptionsForKind],
-  );
-
-  const coverageUserOptions = useMemo(
-    () => scheduleUserOptionsForKind(assigningOpenOccurrence?.resource.assignmentKind ?? 'STAFF_SHIFT'),
-    [assigningOpenOccurrence?.resource.assignmentKind, scheduleUserOptionsForKind],
-  );
-
-  const facilityOptions = useMemo(
-    () => scheduleFacilities.map((facility) => ({
-      value: getScheduleEntityId(facility),
-      label: facility.name?.trim() || facility.location?.trim() || 'Facility',
-    })).filter((option) => option.value),
-    [scheduleFacilities],
-  );
-
-  const filteredScheduleFields = useMemo(
-    () => scheduleFields.filter((field) => (
-      !scheduleDraft.facilityId || field.facilityId === scheduleDraft.facilityId
-    )),
-    [scheduleDraft.facilityId, scheduleFields],
-  );
-
-  const fieldOptions = useMemo(
-    () => filteredScheduleFields.map((field) => ({
-      value: getScheduleEntityId(field),
-      label: field.name?.trim() || 'Resource',
-    })).filter((option) => option.value),
-    [filteredScheduleFields],
-  );
-
-  const scheduleCalendarRange = useMemo(
-    () => calendarRangeForView(scheduleCalendarDate, scheduleCalendarView),
-    [scheduleCalendarDate, scheduleCalendarView],
-  );
-
-  const scheduleCalendarEvents = useMemo(
-    () => buildVisibleScheduleEvents(scheduleAssignments, scheduleCalendarRange),
-    [scheduleAssignments, scheduleCalendarRange],
-  );
-
-  const scheduleColorReferences = useMemo(
-    () => buildUniqueColorReferenceList(scheduleAssignableStaffMembers.map((entry) => entry.userId)),
-    [scheduleAssignableStaffMembers],
-  );
-
-  useEffect(() => {
-    setScheduleDraft((current) => {
-      if (current.userId && scheduleUserOptions.some((option) => option.value === current.userId)) {
-        return current;
-      }
-      return {
-        ...current,
-        userId: null,
-      };
-    });
-  }, [scheduleUserOptions]);
-
-  useEffect(() => {
-    setCoverageAssignUserId((current) => (
-      current && coverageUserOptions.some((option) => option.value === current)
-        ? current
-        : null
-    ));
-  }, [coverageUserOptions]);
-
   const toggleRolePermission = useCallback(
     (role: OrganizationRole, permission: string, checked: boolean) => {
       const currentPermissions = rolePermissionDrafts[role.$id] ?? normalizePermissionList(role.permissions);
@@ -1158,136 +693,6 @@ export default function RoleRosterManager({
       }
     ));
   }, []);
-
-  const createScheduleAssignment = useCallback(async () => {
-    if (!organizationId) {
-      setScheduleError('Missing organization id.');
-      return;
-    }
-    if (!scheduleDraft.start || !scheduleDraft.end) {
-      setScheduleError('Choose a valid start and end time.');
-      return;
-    }
-    if (scheduleDraft.end.getTime() <= scheduleDraft.start.getTime()) {
-      setScheduleError('End time must be after the start time.');
-      return;
-    }
-    const overrideAmountCents = scheduleDraft.overrideAmount === ''
-      ? null
-      : centsFromDollars(scheduleDraft.overrideAmount);
-    if (overrideAmountCents !== null && overrideAmountCents <= 0) {
-      setScheduleError('Override amount must be greater than 0.');
-      return;
-    }
-
-    const daysOfWeek = scheduleDraft.repeating
-      ? scheduleDraft.daysOfWeek.map((day) => Number(day)).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6)
-      : [mondayDayOf(scheduleDraft.start)];
-    if (scheduleDraft.repeating && !daysOfWeek.length) {
-      setScheduleError('Choose at least one repeat day.');
-      return;
-    }
-
-    setScheduleSaving(true);
-    setScheduleError(null);
-    setScheduleInfo(null);
-    try {
-      await apiRequest(`/api/organizations/${organizationId}/staff/schedule`, {
-        method: 'POST',
-        body: {
-          userId: scheduleDraft.userId || null,
-          assignmentKind: scheduleDraft.assignmentKind,
-          facilityId: scheduleDraft.facilityId,
-          fieldId: scheduleDraft.fieldId,
-          rateOverrideType: overrideAmountCents ? 'HOURLY' : null,
-          rateOverrideCents: overrideAmountCents,
-          notes: scheduleDraft.notes,
-          timeSlot: {
-            startDate: scheduleDraft.start.toISOString(),
-            endDate: scheduleDraft.repeating
-              ? scheduleDraft.repeatEnd?.toISOString() ?? null
-              : scheduleDraft.end.toISOString(),
-            repeating: scheduleDraft.repeating,
-            daysOfWeek,
-            startTimeMinutes: minutesFromDate(scheduleDraft.start),
-            endTimeMinutes: minutesFromDate(scheduleDraft.end),
-          },
-        },
-      });
-      setScheduleInfo('Staff assignment added.');
-      setScheduleDraft((current) => ({
-        ...defaultStaffScheduleDraft(),
-        assignmentKind: current.assignmentKind,
-        userId: null,
-      }));
-      await loadScheduleAssignments();
-    } catch (error) {
-      setScheduleError(messageForError(error, 'Failed to add staff assignment.'));
-    } finally {
-      setScheduleSaving(false);
-    }
-  }, [loadScheduleAssignments, organizationId, scheduleDraft]);
-
-  const closeAssignOpenOccurrence = useCallback(() => {
-    setAssigningOpenOccurrence(null);
-    setCoverageAssignUserId(null);
-    setCoverageAssignOverrideAmount('');
-  }, []);
-
-  const assignOpenOccurrence = useCallback(async () => {
-    if (!organizationId || !assigningOpenOccurrence) {
-      setScheduleError('Missing assignment context.');
-      return;
-    }
-    if (!coverageAssignUserId) {
-      setScheduleError('Choose a staff member for this coverage.');
-      return;
-    }
-    const overrideAmountCents = coverageAssignOverrideAmount === ''
-      ? null
-      : centsFromDollars(coverageAssignOverrideAmount);
-    if (overrideAmountCents !== null && overrideAmountCents <= 0) {
-      setScheduleError('Override amount must be greater than 0.');
-      return;
-    }
-
-    setScheduleSaving(true);
-    setScheduleError(null);
-    setScheduleInfo(null);
-    try {
-      await apiRequest(`/api/organizations/${organizationId}/staff/schedule`, {
-        method: 'POST',
-        body: {
-          parentAssignmentId: assigningOpenOccurrence.resource.id,
-          userId: coverageAssignUserId,
-          rateOverrideType: overrideAmountCents ? 'HOURLY' : null,
-          rateOverrideCents: overrideAmountCents,
-          timeSlot: {
-            startDate: assigningOpenOccurrence.start.toISOString(),
-            endDate: assigningOpenOccurrence.end.toISOString(),
-            repeating: false,
-            daysOfWeek: [mondayDayOf(assigningOpenOccurrence.start)],
-            startTimeMinutes: minutesFromDate(assigningOpenOccurrence.start),
-            endTimeMinutes: minutesFromDate(assigningOpenOccurrence.end),
-          },
-        },
-      });
-      setScheduleInfo('Coverage assigned.');
-      closeAssignOpenOccurrence();
-      await loadScheduleAssignments();
-    } catch (error) {
-      setScheduleError(messageForError(error, 'Failed to assign coverage.'));
-    } finally {
-      setScheduleSaving(false);
-    }
-  }, [
-    assigningOpenOccurrence,
-    closeAssignOpenOccurrence,
-    coverageAssignOverrideAmount,
-    coverageAssignUserId,
-    loadScheduleAssignments,
-    organizationId,
-  ]);
 
   const renderInvitePanel = () => (
     <Paper withBorder p="md" radius="md" className="org-tab-item">
@@ -1488,24 +893,17 @@ export default function RoleRosterManager({
   );
 
   const renderFiltersPanel = () => (
-    <Paper withBorder p="md" radius="md" className="org-tab-item">
-      <Stack gap="sm">
-        <Stack gap={2}>
-          <Title order={6}>Filters</Title>
-          <Text size="sm" c="dimmed">
-            Narrow the staff list by role or invite status.
-          </Text>
-        </Stack>
-
+    <Paper withBorder p="md" radius="md" className="org-staff-filters">
+      <Stack gap="sm" className="org-staff-filter-controls">
         <TextInput
-          label="Search"
-          placeholder="Name or username"
+          aria-label="Search staff"
+          placeholder="Search"
           value={rosterQuery}
           onChange={(event) => setRosterQuery(event.currentTarget.value)}
         />
 
         <Select
-          label="Role"
+          aria-label="Filter staff role"
           data={[{ value: 'all', label: 'All roles' }, ...roleOptions]}
           value={roleFilter}
           onChange={(value: string | null) => setRoleFilter(value ?? 'all')}
@@ -1514,7 +912,7 @@ export default function RoleRosterManager({
         />
 
         <Select
-          label="Status"
+          aria-label="Filter staff status"
           data={[
             { value: 'all', label: 'All statuses' },
             { value: 'active', label: 'Active' },
@@ -1681,15 +1079,10 @@ export default function RoleRosterManager({
         ) : null}
 
         {compensationLoading && compensationRates.roleRates.length === 0 && compensationRates.staffRates.length === 0 ? (
-          <Paper withBorder radius="md" p="xl" ta="center" className="org-tab-item">
-            <Group justify="center" gap="sm">
-              <Loader size="sm" />
-              <Text size="sm" c="dimmed">Loading compensation rates...</Text>
-            </Group>
-          </Paper>
+          <OrganizationDataPlaceholder label="compensation rates" />
         ) : (
           <>
-            <Paper withBorder radius="md" className="org-tab-item" style={{ overflow: 'hidden' }}>
+            <Paper withBorder radius="md" className="org-reference-table" style={{ overflow: 'hidden' }}>
               <div style={{ overflowX: 'auto' }}>
                 <Table withColumnBorders highlightOnHover miw={940}>
                   <Table.Thead>
@@ -1737,7 +1130,7 @@ export default function RoleRosterManager({
               </div>
             </Paper>
 
-            <Paper withBorder radius="md" className="org-tab-item" style={{ overflow: 'hidden' }}>
+            <Paper withBorder radius="md" className="org-reference-table" style={{ overflow: 'hidden' }}>
               <div style={{ overflowX: 'auto' }}>
                 <Table withColumnBorders highlightOnHover miw={980}>
                   <Table.Thead>
@@ -1755,7 +1148,7 @@ export default function RoleRosterManager({
                         const currentRate = pickPrimaryCompensationRate(staffRates);
                         const targetKey = compensationTargetKey('STAFF', staffMemberId);
                         return (
-                          <Table.Tr key={entry.id}>
+                          <Table.Tr key={entry.id} data-selected={selectedStaffId === entry.id} onClick={() => setSelectedStaffId(entry.id)}>
                             <Table.Td>
                               <Stack gap={4}>
                                 <Text size="sm" fw={700}>{entry.fullName}</Text>
@@ -1801,403 +1194,52 @@ export default function RoleRosterManager({
     );
   };
 
-  const renderScheduleEvent = ({ event }: EventProps<StaffScheduleCalendarEvent>) => {
-    const assignment = event.resource;
-    const locationParts = [
-      assignment.facilityName,
-      assignment.fieldName,
+  const renderRosterIdentity = (entry: RoleRosterEntry) => {
+    const secondaryParts = [
+      entry.userName ? `@${entry.userName}` : null,
+      entry.email ?? null,
     ].filter((value): value is string => Boolean(value));
-    const isOpenParent = !assignment.userId && !assignment.parentAssignmentId;
     return (
-      <SharedCalendarEvent
-        title={event.title}
-        subtitle={locationParts.join(' - ') || scheduleKindLabel(assignment.assignmentKind)}
-        meta={`${formatScheduleTime(event.start)} - ${formatScheduleTime(event.end)}`}
-        colorReferenceList={scheduleColorReferences}
-        colorMatchKey={assignment.userId ?? assignment.id}
-        colorSeed={assignment.userId ?? assignment.id}
-        variant={isOpenParent ? 'availability' : assignment.assignmentKind === 'OFFICIAL_SHIFT' ? 'reservation' : 'default'}
-        compact={scheduleCalendarView === 'month'}
-        onClick={isOpenParent ? () => {
-          setAssigningOpenOccurrence(event);
-          setCoverageAssignUserId(null);
-          setCoverageAssignOverrideAmount('');
-        } : undefined}
-      />
+      <>      {entry.user ? (
+        <Stack gap={4}>
+          <button type="button" className="org-table-link font-semibold" onClick={() => setSelectedStaffId(entry.id)}>{entry.fullName}</button>
+          {entry.email ? (
+            <Text size="xs" c="dimmed">
+              {entry.email}
+            </Text>
+          ) : null}
+          {entry.subtitle ? (
+            <Text size="xs" c="dimmed">
+              {entry.subtitle}
+            </Text>
+          ) : null}
+        </Stack>
+      ) : (
+        <>
+          <button type="button" onClick={() => setSelectedStaffId(entry.id)} className="font-semibold text-sm">{entry.fullName}</button>
+          {secondaryParts.length > 0 ? (
+            <Text size="xs" c="dimmed">
+              {secondaryParts.join(' - ')}
+            </Text>
+          ) : null}
+        </>
+      )}</>
     );
   };
 
-  const renderScheduleView = () => (
-    <Stack gap="md">
-      <Group justify="space-between" align="flex-end" gap="md">
-        <Stack gap={2}>
-          <Title order={6}>Schedule</Title>
-          <Text size="sm" c="dimmed">
-            Add open or assigned staff coverage with optional facility, resource, and rate overrides.
-          </Text>
-        </Stack>
-        <Button variant="light" onClick={() => void loadScheduleAssignments()} loading={scheduleLoading}>
-          Refresh
-        </Button>
-      </Group>
-
-      {scheduleError ? (
-        <Alert color="red" radius="md" onClose={() => setScheduleError(null)} withCloseButton>
-          {scheduleError}
-        </Alert>
-      ) : null}
-      {scheduleInfo ? (
-        <Alert color="green" radius="md" onClose={() => setScheduleInfo(null)} withCloseButton>
-          {scheduleInfo}
-        </Alert>
-      ) : null}
-
-      <Modal
-        opened={Boolean(assigningOpenOccurrence)}
-        onClose={closeAssignOpenOccurrence}
-        title="Assign coverage"
-        centered
-      >
-        <Stack gap="sm">
-          <Stack gap={2}>
-            <Text size="sm" fw={700}>
-              {assigningOpenOccurrence?.resource.facilityName ?? 'Any facility'}
-              {assigningOpenOccurrence?.resource.fieldName ? ` - ${assigningOpenOccurrence.resource.fieldName}` : ''}
-            </Text>
-            <Text size="sm" c="dimmed">
-              {formatScheduleDateTime(assigningOpenOccurrence?.start)} - {formatScheduleTime(assigningOpenOccurrence?.end)}
-            </Text>
-          </Stack>
-
-          <Select
-            label={assigningOpenOccurrence?.resource.assignmentKind === 'OFFICIAL_SHIFT' ? 'Official' : 'Staff member'}
-            data={coverageUserOptions}
-            value={coverageAssignUserId}
-            onChange={setCoverageAssignUserId}
-            placeholder={assigningOpenOccurrence?.resource.assignmentKind === 'OFFICIAL_SHIFT' ? 'Select an official' : 'Select staff'}
-            searchable={coverageUserOptions.length > 8}
-            disabled={!coverageUserOptions.length}
-            allowDeselect={false}
-          />
-
-          <NumberInput
-            label="Override rate"
-            description="Optional hourly override for this staffed occurrence."
-            prefix="$"
-            decimalScale={2}
-            min={0}
-            value={coverageAssignOverrideAmount}
-            onChange={setCoverageAssignOverrideAmount}
-          />
-
-          <Group justify="flex-end">
-            <Button variant="subtle" onClick={closeAssignOpenOccurrence} disabled={scheduleSaving}>
-              Cancel
-            </Button>
-            <Button
-              onClick={() => void assignOpenOccurrence()}
-              loading={scheduleSaving}
-              disabled={!coverageAssignUserId || scheduleSaving}
-            >
-              Assign
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
-
-      <div className="staff-schedule-layout">
-        <Paper withBorder radius="md" p="md" className="org-tab-item" h="fit-content">
-          <Stack gap="sm">
-            <Stack gap={2}>
-              <Title order={6}>Add Coverage</Title>
-              <Text size="sm" c="dimmed">
-                Create an open shift, or assign staff for the full timeslot. Costs fall back to the staff member rate.
-              </Text>
-            </Stack>
-
-            <Select
-              label="Assignment"
-              data={STAFF_SCHEDULE_KIND_OPTIONS}
-              value={scheduleDraft.assignmentKind}
-              onChange={(value) => {
-                setScheduleDraft((current) => ({
-                  ...current,
-                  assignmentKind: (value as StaffScheduleAssignmentKind | null) ?? 'STAFF_SHIFT',
-                  userId: null,
-                }));
-              }}
-              allowDeselect={false}
-            />
-
-            <Select
-              label="Assigned staff"
-              description="Leave blank to create open coverage that can be assigned from the calendar."
-              data={scheduleUserOptions}
-              value={scheduleDraft.userId}
-              onChange={(value) => setScheduleDraft((current) => ({ ...current, userId: value }))}
-              placeholder={scheduleDraft.assignmentKind === 'OFFICIAL_SHIFT' ? 'Open official shift' : 'Open staff shift'}
-              searchable={scheduleUserOptions.length > 8}
-              disabled={!scheduleUserOptions.length}
-              clearable
-            />
-
-            <Select
-              label="Facility"
-              data={facilityOptions}
-              value={scheduleDraft.facilityId}
-              onChange={(value) => {
-                setScheduleDraft((current) => {
-                  const nextField = current.fieldId
-                    && scheduleFields.some((field) => getScheduleEntityId(field) === current.fieldId && field.facilityId === value)
-                    ? current.fieldId
-                    : null;
-                  return {
-                    ...current,
-                    facilityId: value,
-                    fieldId: nextField,
-                  };
-                });
-              }}
-              placeholder="Any facility"
-              clearable
-              searchable={facilityOptions.length > 8}
-            />
-
-            <Select
-              label="Resource"
-              data={fieldOptions}
-              value={scheduleDraft.fieldId}
-              onChange={(value) => {
-                const selectedField = scheduleFields.find((field) => getScheduleEntityId(field) === value);
-                setScheduleDraft((current) => ({
-                  ...current,
-                  fieldId: value,
-                  facilityId: selectedField?.facilityId ?? current.facilityId,
-                }));
-              }}
-              placeholder={scheduleDraft.facilityId ? 'Any resource in facility' : 'Any resource'}
-              clearable
-              searchable={fieldOptions.length > 8}
-            />
-
-            <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
-              <DateTimePicker
-                label="Start"
-                valueFormat="MM/DD/YYYY hh:mm A"
-                value={scheduleDraft.start}
-                onChange={(value) => {
-                  const nextStart = parseScheduleDate(value as Date | string | null);
-                  if (!nextStart) return;
-                  setScheduleDraft((current) => ({
-                    ...current,
-                    start: nextStart,
-                    end: current.end && current.end.getTime() > nextStart.getTime()
-                      ? current.end
-                      : addMinutes(nextStart, 120),
-                    daysOfWeek: current.repeating ? current.daysOfWeek : [String(mondayDayOf(nextStart))],
-                  }));
-                }}
-                timePickerProps={{ withDropdown: true, format: '12h' }}
-              />
-              <DateTimePicker
-                label={scheduleDraft.repeating ? 'End time' : 'End'}
-                valueFormat="MM/DD/YYYY hh:mm A"
-                value={scheduleDraft.end}
-                onChange={(value) => {
-                  const nextEnd = parseScheduleDate(value as Date | string | null);
-                  if (!nextEnd) return;
-                  setScheduleDraft((current) => ({ ...current, end: nextEnd }));
-                }}
-                timePickerProps={{ withDropdown: true, format: '12h' }}
-              />
-            </SimpleGrid>
-
-            <Switch
-              label="Repeats weekly"
-              checked={scheduleDraft.repeating}
-              onChange={(event) => {
-                const repeating = event.currentTarget.checked;
-                setScheduleDraft((current) => ({
-                  ...current,
-                  repeating,
-                  daysOfWeek: current.start ? [String(mondayDayOf(current.start))] : current.daysOfWeek,
-                  repeatEnd: repeating ? current.repeatEnd : null,
-                }));
-              }}
-            />
-
-            {scheduleDraft.repeating ? (
-              <Stack gap="sm">
-                <MultiSelect
-                  label="Repeat days"
-                  data={DAY_OF_WEEK_OPTIONS}
-                  value={scheduleDraft.daysOfWeek}
-                  onChange={(value) => setScheduleDraft((current) => ({ ...current, daysOfWeek: value }))}
-                  placeholder="Choose days"
-                />
-                <DateTimePicker
-                  label="Repeat until"
-                  valueFormat="MM/DD/YYYY"
-                  value={scheduleDraft.repeatEnd}
-                  onChange={(value) => {
-                    const repeatEnd = parseScheduleDate(value as Date | string | null);
-                    setScheduleDraft((current) => ({ ...current, repeatEnd }));
-                  }}
-                  clearable
-                />
-              </Stack>
-            ) : null}
-
-            <NumberInput
-              label="Override rate"
-              description="Optional hourly override for this assignment."
-              prefix="$"
-              decimalScale={2}
-              min={0}
-              value={scheduleDraft.overrideAmount}
-              onChange={(value) => setScheduleDraft((current) => ({ ...current, overrideAmount: value }))}
-            />
-
-            <Textarea
-              label="Notes"
-              minRows={2}
-              autosize
-              value={scheduleDraft.notes}
-              onChange={(event) => setScheduleDraft((current) => ({ ...current, notes: event.currentTarget.value }))}
-            />
-
-            <Button
-              onClick={() => void createScheduleAssignment()}
-              loading={scheduleSaving}
-              disabled={scheduleSaving}
-            >
-              Add coverage
-            </Button>
-          </Stack>
-        </Paper>
-
-        <Stack gap="md" miw={0}>
-          <Paper withBorder radius="md" p="sm" className="org-tab-item shared-calendar-shell staff-schedule-calendar-shell">
-            {scheduleLoading && !scheduleLoaded ? (
-              <Group justify="center" gap="sm" py="xl">
-                <Loader size="sm" />
-                <Text size="sm" c="dimmed">Loading staff schedule...</Text>
-              </Group>
-            ) : (
-              <BigCalendar<StaffScheduleCalendarEvent>
-                localizer={staffScheduleLocalizer}
-                events={scheduleCalendarEvents}
-                startAccessor="start"
-                endAccessor="end"
-                date={scheduleCalendarDate}
-                view={scheduleCalendarView}
-                views={['month', 'week', 'day', 'agenda']}
-                onNavigate={setScheduleCalendarDate}
-                onView={(view) => setScheduleCalendarView(view)}
-                onSelectEvent={(event) => {
-                  if (!event.resource.userId && !event.resource.parentAssignmentId) {
-                    setAssigningOpenOccurrence(event);
-                    setCoverageAssignUserId(null);
-                    setCoverageAssignOverrideAmount('');
-                  }
-                }}
-                components={{
-                  event: renderScheduleEvent,
-                }}
-                style={{ minHeight: 620 }}
-                popup
-              />
-            )}
-          </Paper>
-
-          <Paper withBorder radius="md" className="org-tab-item" style={{ overflow: 'hidden' }}>
-            <div style={{ overflowX: 'auto' }}>
-              <Table highlightOnHover miw={760}>
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th>Assignment</Table.Th>
-                    <Table.Th>Scope</Table.Th>
-                    <Table.Th>Timeslot</Table.Th>
-                    <Table.Th>Cost</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {scheduleAssignments.length > 0 ? (
-                    scheduleAssignments.slice(0, 12).map((assignment) => (
-                      <Table.Tr key={assignment.id}>
-                        <Table.Td>
-                          <Stack gap={4}>
-                            <Group gap={6}>
-                              <Text size="sm" fw={700}>{assignment.userName}</Text>
-                              <Badge size="xs" variant="light" color={assignment.assignmentKind === 'OFFICIAL_SHIFT' ? 'orange' : 'blue'}>
-                                {scheduleKindLabel(assignment.assignmentKind)}
-                              </Badge>
-                            </Group>
-                            <Text size="xs" c="dimmed">
-                              {formatScheduleDuration(assignment.plannedMinutes)}
-                            </Text>
-                          </Stack>
-                        </Table.Td>
-                        <Table.Td>
-                          <Stack gap={2}>
-                            <Text size="sm">{assignment.facilityName ?? 'Any facility'}</Text>
-                            <Text size="xs" c="dimmed">{assignment.fieldName ?? 'Any resource'}</Text>
-                          </Stack>
-                        </Table.Td>
-                        <Table.Td>
-                          <Stack gap={2}>
-                            <Text size="sm">
-                              {assignment.timeSlot?.repeating ? 'Repeats weekly' : 'One time'}
-                            </Text>
-                            <Text size="xs" c="dimmed">
-                              {formatScheduleDateTime(assignment.plannedStart)} - {formatScheduleTime(assignment.plannedEnd)}
-                            </Text>
-                          </Stack>
-                        </Table.Td>
-                        <Table.Td>
-                          <Text size="sm" c={assignment.rateOverrideCents ? undefined : 'dimmed'}>
-                            {assignment.rateOverrideCents
-                              ? `${formatBillAmount(assignment.rateOverrideCents)}/hr override`
-                              : 'Staff rate'}
-                          </Text>
-                        </Table.Td>
-                      </Table.Tr>
-                    ))
-                  ) : (
-                    <Table.Tr>
-                      <Table.Td colSpan={4}>
-                        <Text size="sm" c="dimmed" ta="center" py="md">
-                          No staff assignments have been added yet.
-                        </Text>
-                      </Table.Td>
-                    </Table.Tr>
-                  )}
-                </Table.Tbody>
-              </Table>
-            </div>
-          </Paper>
-        </Stack>
-      </div>
-    </Stack>
-  );
-
   const renderStaffView = () => (
-    <div className="staff-roster-layout">
-      <Stack gap="md" h="fit-content">
-        {renderInvitePanel()}
+    <div className="org-staff-workspace">
+      <Stack gap="md" className="min-w-0">
         {renderFiltersPanel()}
-      </Stack>
-
-      <Stack gap="md">
         <Stack gap={2}>
           <Title order={6}>Roster</Title>
           <Text size="sm" c="dimmed">
-            {`${filteredRosterEntries.length} shown - ${rosterCounts.active} active - ${rosterCounts.pending} pending - ${rosterCounts.declined} declined`}
+            <OrganizationLoadingValue>{`${filteredRosterEntries.length} shown - ${rosterCounts.active} active - ${rosterCounts.pending} pending - ${rosterCounts.declined} declined`}</OrganizationLoadingValue>
           </Text>
         </Stack>
 
-        {filteredRosterEntries.length > 0 ? (
-          <Paper withBorder radius="md" className="org-tab-item" style={{ overflow: 'hidden' }}>
+        {isRosterLoading || filteredRosterEntries.length > 0 ? (
+          <Paper withBorder radius="md" className="org-reference-table" style={{ overflow: 'hidden' }}>
             <div style={{ overflowX: 'auto' }}>
               <Table withColumnBorders highlightOnHover miw={760}>
                 <Table.Thead>
@@ -2208,48 +1250,15 @@ export default function RoleRosterManager({
                     <Table.Th style={{ width: 140 }}>Actions</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
-                <Table.Tbody>
+                <OrganizationTableBody columns={4} label="staff">
                   {filteredRosterEntries.map((entry) => {
-                    const userCardData = getUserCardData(entry);
-                    const selectedRoleId = Object.prototype.hasOwnProperty.call(rosterRoleSelections, entry.userId)
-                      ? rosterRoleSelections[entry.userId]
-                      : entry.roleId ?? null;
+                    const selectedRoleId = rosterRoleId(entry, rosterRoleSelections);
                     const isSavingRosterRole = savingRosterRoleUserIds.includes(entry.userId);
-                    const secondaryParts = [
-                      entry.userName ? `@${entry.userName}` : null,
-                      entry.email ?? null,
-                    ].filter((value): value is string => Boolean(value));
 
                     return (
                       <Table.Tr key={entry.id}>
                         <Table.Td>
-                          {userCardData ? (
-                            <Stack gap={4}>
-                              <UserCard
-                                user={userCardData}
-                                className="!p-0 !shadow-none !bg-transparent"
-                              />
-                              {entry.email ? (
-                                <Text size="xs" c="dimmed">
-                                  {entry.email}
-                                </Text>
-                              ) : null}
-                              {entry.subtitle ? (
-                                <Text size="xs" c="dimmed">
-                                  {entry.subtitle}
-                                </Text>
-                              ) : null}
-                            </Stack>
-                          ) : (
-                            <>
-                              <Text fw={600}>{entry.fullName}</Text>
-                              {secondaryParts.length > 0 ? (
-                                <Text size="xs" c="dimmed">
-                                  {secondaryParts.join(' - ')}
-                                </Text>
-                              ) : null}
-                            </>
-                          )}
+                          {renderRosterIdentity(entry)}
                         </Table.Td>
                         <Table.Td>
                           {!entry.locked ? (
@@ -2302,7 +1311,7 @@ export default function RoleRosterManager({
                       </Table.Tr>
                     );
                   })}
-                </Table.Tbody>
+                </OrganizationTableBody>
               </Table>
             </div>
           </Paper>
@@ -2317,6 +1326,7 @@ export default function RoleRosterManager({
           </Paper>
         )}
       </Stack>
+      <OrganizationStaffDetails entry={rosterEntries.find((entry) => entry.id === selectedStaffId) ?? null} roles={staffRoles} />
     </div>
   );
 
@@ -2361,7 +1371,7 @@ export default function RoleRosterManager({
         </Stack>
       </Group>
 
-      <Paper withBorder radius="md" className="org-tab-item" style={{ overflow: 'hidden' }}>
+      <Paper withBorder radius="md" className="org-reference-table" style={{ overflow: 'hidden' }}>
         <div style={{ overflowX: 'auto' }}>
           <Table withColumnBorders highlightOnHover miw={rolesTableMinWidth}>
             <Table.Thead>
@@ -2376,7 +1386,7 @@ export default function RoleRosterManager({
                 ))}
               </Table.Tr>
             </Table.Thead>
-            <Table.Tbody>
+            <OrganizationTableBody columns={permissionColumns.length + 1} label="staff roles">
               {staffRoles.map((role) => {
                 const permissions = rolePermissionDrafts[role.$id] ?? normalizePermissionList(role.permissions);
                 const isUpdating = updatingRoleIds.includes(role.$id);
@@ -2396,6 +1406,8 @@ export default function RoleRosterManager({
                   </Table.Tr>
                 );
               })}
+            </OrganizationTableBody>
+            <Table.Tbody>
               {draftRole ? (
                 <Table.Tr>
                   <Table.Td>
@@ -2421,6 +1433,13 @@ export default function RoleRosterManager({
                       aria-label="New role name"
                       autoFocus
                     />
+                    {draftRole.error && !roleNameValidationMessage(draftRole.name) && !draftRole.isCreating && (
+                      <Button size="xs" variant="outline" onClick={() => {
+                        setDraftRole((current) => current ? { ...current, error: null } : current);
+                      }}>
+                        Retry role creation
+                      </Button>
+                    )}
                     {draftRole.isCreating ? (
                       <Text size="xs" c="dimmed" mt={4}>
                         Creating...
@@ -2467,21 +1486,22 @@ export default function RoleRosterManager({
   );
 
   return (
-    <Paper withBorder p="md" radius="md" className="org-tab-surface">
+    <section className="org-section org-staff">
+      <OrganizationTabHeading title="Staff" description="Manage access, assignments, and compensation">
+        <Button onClick={() => setInvitePanelOpen(true)} leftSection={<Plus />}>Invite Staff</Button>
+      </OrganizationTabHeading>
+      <OrganizationStatStrip items={[
+        { label: 'staff members', value: rosterEntries.length, icon: <Users /> },
+        { label: 'roles', value: staffRoles.length, icon: <ShieldCheck /> },
+        { label: 'pending invites', value: rosterCounts.pending, icon: <Mail /> },
+        { label: 'active members', value: rosterCounts.active, icon: <UserCheck /> },
+      ]} />
       <Stack gap="md">
-        <Group justify="space-between" align="flex-start" gap="md">
-          <Stack gap={2}>
-            <Title order={5}>Staff List</Title>
-            <Text size="sm" c="dimmed">
-              Manage organization hosts, officials, and staff access in one roster.
-            </Text>
-          </Stack>
           <SegmentedControl
             value={managerView}
             onChange={(value) => setManagerView(value as ManagerView)}
             data={managerViewOptions}
           />
-        </Group>
 
         {managerView === 'staff'
           ? renderStaffView()
@@ -2489,6 +1509,7 @@ export default function RoleRosterManager({
             ? renderRolesView()
             : renderCompensationView()}
       </Stack>
-    </Paper>
+      <Modal opened={invitePanelOpen} onClose={() => setInvitePanelOpen(false)} title="Invite Staff" size="lg">{renderInvitePanel()}</Modal>
+    </section>
   );
 }

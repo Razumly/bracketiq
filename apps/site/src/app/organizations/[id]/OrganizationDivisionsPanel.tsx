@@ -1,37 +1,29 @@
-'use client';
+"use client";
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActionIcon,
   Alert,
-  Badge,
-  Button,
-  Group,
-  Modal,
-  NumberInput,
   Paper,
-  Select,
-  Stack,
-  Table,
-  Text,
-  Textarea,
-  TextInput,
-  Title,
-  Tooltip,
-} from '@/components/organization/organization-operation-ui';
-import { notifications } from '@/lib/organizationNotifications';
-import { Archive, ExternalLink, Pencil, Plus } from 'lucide-react';
-import type { Division, Organization } from '@/types';
-import { organizationService } from '@/lib/organizationService';
-import { useSports } from '@/app/hooks/useSports';
-import { normalizeExternalHttpUrl } from '@/lib/externalUrl';
+} from "@/components/organization/organization-operation-ui";
+import { notifications } from "@/lib/organizationNotifications";
+import type { Division, Organization } from "@/types";
+import { organizationService } from "@/lib/organizationService";
+import { useSports } from "@/app/hooks/useSports";
+import { useOrganizationDataLoading } from "@/components/organization/OrganizationDataLoading";
 
-type DivisionTypeOption = { id: string; name: string };
-type DivisionTypePayload = {
-  genders?: DivisionTypeOption[];
-  ages?: DivisionTypeOption[];
-  sportSkills?: Array<{ sportId: string; skills: DivisionTypeOption[] }>;
-};
+import {
+  DivisionEditor,
+  DivisionHeading,
+  DivisionTable,
+} from "./OrganizationDivisionViews";
+import {
+  emptyDivisionDraft,
+  newDivisionDraft,
+  editDivisionDraft,
+  divisionOptions,
+  divisionPayload,
+  type DivisionTypePayload,
+} from "./organizationDivisionModel";
 
 type Props = {
   organization: Organization;
@@ -40,40 +32,26 @@ type Props = {
   onChanged?: (divisions: Division[]) => void;
 };
 
-const emptyDraft = {
-  name: '',
-  sportId: '',
-  gender: 'C',
-  skillDivisionTypeId: '',
-  ageDivisionTypeId: '',
-  priceDollars: 0,
-  maxParticipants: null as number | null,
-  description: '',
-  registrationUrl: '',
-  status: 'ACTIVE' as 'ACTIVE' | 'INACTIVE',
-};
-
-const formatPrice = (price?: number): string => {
-  if (typeof price !== 'number') return 'Not specified';
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(price / 100);
-};
-
 export default function OrganizationDivisionsPanel({
   organization,
   canManage = false,
   summary = false,
   onChanged,
 }: Props) {
-  const { sports } = useSports();
-  const [divisions, setDivisions] = useState<Division[]>(organization.divisions ?? []);
+  const { sports, loading: sportsLoading, error: sportsError } = useSports();
+  const [divisions, setDivisions] = useState<Division[]>(
+    organization.divisions ?? [],
+  );
   const [types, setTypes] = useState<DivisionTypePayload>({});
   const [loading, setLoading] = useState(false);
+  const [isFetching, setIsFetching] = useState(true);
+  const isDataLoading = useOrganizationDataLoading(isFetching || sportsLoading);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [opened, setOpened] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [draft, setDraft] = useState(emptyDraft);
+  const [draft, setDraft] = useState(emptyDivisionDraft);
   const onChangedRef = useRef(onChanged);
   onChangedRef.current = onChanged;
 
@@ -83,10 +61,15 @@ export default function OrganizationDivisionsPanel({
 
   useEffect(() => {
     let active = true;
+    setIsFetching(true);
+    setError(null);
     Promise.all([
-      organizationService.listOrganizationDivisions(organization.$id, canManage),
-      fetch('/api/division-types').then((response) => {
-        if (!response.ok) throw new Error('Failed to load division options');
+      organizationService.listOrganizationDivisions(
+        organization.$id,
+        canManage,
+      ),
+      fetch("/api/division-types").then((response) => {
+        if (!response.ok) throw new Error("Failed to load division options");
         return response.json() as Promise<DivisionTypePayload>;
       }),
     ])
@@ -97,50 +80,42 @@ export default function OrganizationDivisionsPanel({
         onChangedRef.current?.(nextDivisions);
       })
       .catch((loadError) => {
-        if (active) setError(loadError instanceof Error ? loadError.message : 'Unable to load divisions.');
+        if (active)
+          setError(
+            loadError instanceof Error
+              ? loadError.message
+              : "Unable to load divisions.",
+          );
+      })
+      .finally(() => {
+        if (active) setIsFetching(false);
       });
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, [canManage, organization.$id]);
 
   const visibleDivisions = useMemo(
-    () => divisions.filter((division) => canManage || division.status === 'ACTIVE'),
+    () =>
+      divisions.filter((division) => canManage || division.status === "ACTIVE"),
     [canManage, divisions],
   );
-  const rows = summary && !expanded ? visibleDivisions.slice(0, 2) : visibleDivisions;
-  const sportOptions = sports.map((sport) => ({ value: sport.$id, label: sport.name }));
-  const genderOptions = (types.genders ?? []).map((option) => ({ value: option.id, label: option.name }));
-  const ageOptions = (types.ages ?? []).map((option) => ({ value: option.id, label: option.name }));
-  const skillOptions = (types.sportSkills ?? [])
-    .find((entry) => entry.sportId === draft.sportId)
-    ?.skills.map((option) => ({ value: option.id, label: option.name })) ?? [];
+  const rows = useMemo(
+    () =>
+      summary && !expanded ? visibleDivisions.slice(0, 2) : visibleDivisions,
+    [summary, expanded, visibleDivisions],
+  );
+  const options = divisionOptions(sports, types, draft.sportId);
+  const displayError = error ?? sportsError?.message ?? null;
 
   const openCreate = () => {
-    const firstSport = sportOptions[0]?.value ?? '';
-    const firstSkills = (types.sportSkills ?? []).find((entry) => entry.sportId === firstSport)?.skills ?? [];
     setEditingId(null);
-    setDraft({
-      ...emptyDraft,
-      sportId: firstSport,
-      skillDivisionTypeId: firstSkills[0]?.id ?? '',
-      ageDivisionTypeId: types.ages?.[0]?.id ?? '',
-    });
+    setDraft(newDivisionDraft(sports, types));
     setOpened(true);
   };
-
   const openEdit = (division: Division) => {
     setEditingId(division.id);
-    setDraft({
-      name: division.name,
-      sportId: division.sportId ?? '',
-      gender: division.gender ?? 'C',
-      skillDivisionTypeId: division.skillDivisionTypeId ?? '',
-      ageDivisionTypeId: division.ageDivisionTypeId ?? '',
-      priceDollars: (division.price ?? 0) / 100,
-      maxParticipants: division.maxParticipants ?? null,
-      description: division.description ?? '',
-      registrationUrl: division.registrationUrl ?? '',
-      status: division.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE',
-    });
+    setDraft(editDivisionDraft(division));
     setOpened(true);
   };
 
@@ -148,30 +123,36 @@ export default function OrganizationDivisionsPanel({
     setSaving(true);
     setError(null);
     try {
-      const payload = {
-        name: draft.name,
-        sportId: draft.sportId,
-        gender: draft.gender as 'M' | 'F' | 'C',
-        skillDivisionTypeId: draft.skillDivisionTypeId,
-        ageDivisionTypeId: draft.ageDivisionTypeId,
-        price: Math.round(draft.priceDollars * 100),
-        maxParticipants: draft.maxParticipants,
-        description: draft.description,
-        registrationUrl: draft.registrationUrl,
-        status: draft.status,
-      };
+      const payload = divisionPayload(draft);
       if (editingId) {
-        await organizationService.updateOrganizationDivision(organization.$id, editingId, payload);
+        await organizationService.updateOrganizationDivision(
+          organization.$id,
+          editingId,
+          payload,
+        );
       } else {
-        await organizationService.createOrganizationDivision(organization.$id, payload);
+        await organizationService.createOrganizationDivision(
+          organization.$id,
+          payload,
+        );
       }
-      const nextDivisions = await organizationService.listOrganizationDivisions(organization.$id, canManage);
+      const nextDivisions = await organizationService.listOrganizationDivisions(
+        organization.$id,
+        canManage,
+      );
       setDivisions(nextDivisions);
       onChanged?.(nextDivisions);
       setOpened(false);
-      notifications.show({ color: 'teal', message: editingId ? 'Division updated.' : 'Division added.' });
+      notifications.show({
+        color: "teal",
+        message: editingId ? "Division updated." : "Division added.",
+      });
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Unable to save division.');
+      setError(
+        saveError instanceof Error
+          ? saveError.message
+          : "Unable to save division.",
+      );
     } finally {
       setSaving(false);
     }
@@ -180,13 +161,23 @@ export default function OrganizationDivisionsPanel({
   const archive = async (division: Division) => {
     setLoading(true);
     try {
-      await organizationService.archiveOrganizationDivision(organization.$id, division.id);
-      const nextDivisions = await organizationService.listOrganizationDivisions(organization.$id, canManage);
+      await organizationService.archiveOrganizationDivision(
+        organization.$id,
+        division.id,
+      );
+      const nextDivisions = await organizationService.listOrganizationDivisions(
+        organization.$id,
+        canManage,
+      );
       setDivisions(nextDivisions);
       onChanged?.(nextDivisions);
-      notifications.show({ color: 'teal', message: 'Division archived.' });
+      notifications.show({ color: "teal", message: "Division archived." });
     } catch (archiveError) {
-      setError(archiveError instanceof Error ? archiveError.message : 'Unable to archive division.');
+      setError(
+        archiveError instanceof Error
+          ? archiveError.message
+          : "Unable to archive division.",
+      );
     } finally {
       setLoading(false);
     }
@@ -194,129 +185,46 @@ export default function OrganizationDivisionsPanel({
 
   return (
     <Paper withBorder p="md" radius="md" className="org-tab-surface">
-      <Group justify="space-between" mb="md">
-        <div>
-          <Title order={5}>{summary ? 'Divisions Offered' : 'Club Divisions'}</Title>
-          {!summary && <Text size="sm" c="dimmed">Current club offerings and total per-player season prices.</Text>}
-        </div>
-        <Group gap="xs">
-          {summary && visibleDivisions.length > 2 && (
-            <Button variant="subtle" size="xs" onClick={() => setExpanded((current) => !current)}>
-              {expanded ? 'Show less' : `More (${visibleDivisions.length - 2})`}
-            </Button>
-          )}
-          {canManage && !summary && (
-            <Button leftSection={<Plus size={16} />} size="sm" onClick={openCreate}>Add division</Button>
-          )}
-        </Group>
-      </Group>
-      {error && <Alert color="red" mb="md">{error}</Alert>}
-      {rows.length === 0 ? (
-        <Text size="sm" c="dimmed">No club divisions have been added.</Text>
-      ) : (
-        <Table.ScrollContainer minWidth={720}>
-          <Table verticalSpacing="sm" highlightOnHover>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Division</Table.Th>
-                <Table.Th>Sport</Table.Th>
-                <Table.Th>Gender</Table.Th>
-                <Table.Th>Age</Table.Th>
-                <Table.Th>Skill</Table.Th>
-                <Table.Th>Season price</Table.Th>
-                {canManage && !summary && <Table.Th aria-label="Actions" />}
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {rows.map((division) => {
-                const registrationUrl = canManage
-                  ? null
-                  : normalizeExternalHttpUrl(division.registrationUrl);
-                const openRegistration = () => {
-                  if (registrationUrl) {
-                    window.open(registrationUrl, '_blank', 'noopener,noreferrer');
-                  }
-                };
-                return (
-                <Table.Tr
-                  key={division.id}
-                  onClick={registrationUrl ? openRegistration : undefined}
-                  onKeyDown={registrationUrl ? (event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault();
-                      openRegistration();
-                    }
-                  } : undefined}
-                  role={registrationUrl ? 'link' : undefined}
-                  tabIndex={registrationUrl ? 0 : undefined}
-                  aria-label={registrationUrl ? `Register for ${division.name}` : undefined}
-                  style={registrationUrl ? { cursor: 'pointer' } : undefined}
-                >
-                  <Table.Td>
-                    <Text fw={600} size="sm">{division.name}</Text>
-                    {division.status !== 'ACTIVE' && <Badge size="xs" color="gray">{division.status}</Badge>}
-                    {registrationUrl && (
-                      <Group gap={4} mt={2} c="blue">
-                        <Text size="xs" c="blue">Register</Text>
-                        <ExternalLink size={12} aria-hidden="true" />
-                      </Group>
-                    )}
-                  </Table.Td>
-                  <Table.Td>{division.sportId ?? 'Not specified'}</Table.Td>
-                  <Table.Td>{genderOptions.find((option) => option.value === division.gender)?.label ?? division.gender}</Table.Td>
-                  <Table.Td>{ageOptions.find((option) => option.value === division.ageDivisionTypeId)?.label ?? division.ageDivisionTypeId}</Table.Td>
-                  <Table.Td>{(types.sportSkills ?? []).find((entry) => entry.sportId === division.sportId)?.skills.find((option) => option.id === division.skillDivisionTypeId)?.name ?? division.skillDivisionTypeId}</Table.Td>
-                  <Table.Td>{formatPrice(division.price)}</Table.Td>
-                  {canManage && !summary && (
-                    <Table.Td>
-                      <Group gap="xs" justify="flex-end" wrap="nowrap">
-                        <Tooltip label="Edit division">
-                          <ActionIcon variant="subtle" onClick={() => openEdit(division)} aria-label={`Edit ${division.name}`}>
-                            <Pencil size={16} />
-                          </ActionIcon>
-                        </Tooltip>
-                        <Tooltip label="Archive division">
-                          <ActionIcon color="red" variant="subtle" loading={loading} onClick={() => void archive(division)} aria-label={`Archive ${division.name}`}>
-                            <Archive size={16} />
-                          </ActionIcon>
-                        </Tooltip>
-                      </Group>
-                    </Table.Td>
-                  )}
-                </Table.Tr>
-                );
-              })}
-            </Table.Tbody>
-          </Table>
-        </Table.ScrollContainer>
+      <DivisionHeading
+        summary={summary}
+        visibleCount={visibleDivisions.length}
+        expanded={expanded}
+        onToggle={() => setExpanded((current) => !current)}
+        canManage={canManage}
+        openCreate={openCreate}
+        unavailable={isDataLoading || Boolean(displayError)}
+      />
+      {displayError && (
+        <Alert color="red" mb="md">
+          {displayError}
+        </Alert>
       )}
-
-      <Modal opened={opened} onClose={() => setOpened(false)} title={editingId ? 'Edit club division' : 'Add club division'} centered>
-        <Stack gap="sm">
-          <Select label="Sport" data={sportOptions} value={draft.sportId} onChange={(value) => {
-            const sportId = value ?? '';
-            const firstSkill = (types.sportSkills ?? []).find((entry) => entry.sportId === sportId)?.skills[0]?.id ?? '';
-            setDraft((current) => ({ ...current, sportId, skillDivisionTypeId: firstSkill }));
-          }} required searchable />
-          <Group grow align="flex-start">
-            <Select label="Gender" data={genderOptions} value={draft.gender} onChange={(value) => setDraft((current) => ({ ...current, gender: value ?? 'C' }))} required />
-            <Select label="Age" data={ageOptions} value={draft.ageDivisionTypeId} onChange={(value) => setDraft((current) => ({ ...current, ageDivisionTypeId: value ?? '' }))} required searchable />
-          </Group>
-          <Select label="Filter skill level" description="Choose a standard skill level used by Discover filters." data={skillOptions} value={draft.skillDivisionTypeId} onChange={(value) => setDraft((current) => ({ ...current, skillDivisionTypeId: value ?? '' }))} required searchable />
-          <TextInput label="Division name" description="Use the club's custom division or team name, or leave blank to generate one." value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.currentTarget.value }))} />
-          <Group grow align="flex-start">
-            <NumberInput label="Division season price" description="Total per-player price for the club season." prefix="$" decimalScale={2} min={0} value={draft.priceDollars} onChange={(value) => setDraft((current) => ({ ...current, priceDollars: Number(value) || 0 }))} />
-            <NumberInput label="Capacity" description="Optional" min={1} value={draft.maxParticipants ?? ''} onChange={(value) => setDraft((current) => ({ ...current, maxParticipants: value === '' ? null : Number(value) }))} />
-          </Group>
-          <Textarea label="Description" autosize minRows={3} value={draft.description} onChange={(event) => setDraft((current) => ({ ...current, description: event.currentTarget.value }))} />
-          <TextInput label="Registration URL" type="url" value={draft.registrationUrl} onChange={(event) => setDraft((current) => ({ ...current, registrationUrl: event.currentTarget.value }))} />
-          {editingId && <Select label="Status" data={[{ value: 'ACTIVE', label: 'Active' }, { value: 'INACTIVE', label: 'Inactive' }]} value={draft.status} onChange={(value) => setDraft((current) => ({ ...current, status: value === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE' }))} />}
-          <Group justify="flex-end">
-            <Button variant="default" onClick={() => setOpened(false)}>Cancel</Button>
-            <Button loading={saving} onClick={() => void save()}>Save</Button>
-          </Group>
-        </Stack>
-      </Modal>
+      <DivisionTable
+        rows={rows}
+        canManage={canManage}
+        summary={summary}
+        isDataLoading={isDataLoading}
+        error={displayError}
+        sports={sports}
+        types={types}
+        openEdit={openEdit}
+        archive={archive}
+        loading={loading}
+      />
+      <DivisionEditor
+        error={displayError}
+        opened={opened}
+        editingId={editingId}
+        saving={saving}
+        draft={draft}
+        types={types}
+        options={options}
+        onChange={setDraft}
+        onClose={() => {
+          if (!saving) setOpened(false);
+        }}
+        onSave={save}
+      />
     </Paper>
   );
 }

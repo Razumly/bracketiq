@@ -63,8 +63,48 @@ const jsonRequest = (url: string, body: unknown, method: 'POST' | 'PATCH' = 'POS
   });
 
 describe('time-slots routes', () => {
+  it.each(['2020-01-01T10:00:00Z', '2035-01-01T10:00:00Z'])('rejects a non-repeating POST ending at or before now: %s', async (endDate) => {
+    jest.useFakeTimers({ now: new Date('2035-01-01T10:00:00Z') });
+    try {
+      const response = await POST(jsonRequest('http://localhost/api/time-slots', {
+        id: 'expired', repeating: false, timeZone: 'UTC', scheduledFieldIds: ['field_1'],
+        startDate: endDate.replace('10:00', '09:00'), endDate,
+      }));
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: expect.stringMatching(/in the future/) });
+      expect(prismaMock.timeSlots.create).not.toHaveBeenCalled();
+    } finally { jest.useRealTimers(); }
+  });
+
+  it('rejects an expired non-repeating PATCH before writing', async () => {
+    prismaMock.timeSlots.findUnique.mockResolvedValueOnce({
+      id: 'expired', repeating: false, startDate: new Date('2020-01-01T09:00:00Z'),
+      endDate: new Date('2020-01-01T10:00:00Z'), timeZone: 'UTC', scheduledFieldIds: ['field_1'], divisions: [],
+    });
+    const response = await PATCH(jsonRequest('http://localhost/api/time-slots/expired', { slot: { price: 100 } }, 'PATCH'), { params: Promise.resolve({ id: 'expired' }) });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: expect.stringMatching(/in the future/) });
+    expect(prismaMock.timeSlots.update).not.toHaveBeenCalled();
+  });
+
+  it('persists an ongoing overnight slot whose end is future', async () => {
+    jest.useFakeTimers({ now: new Date('2035-01-02T00:00:00Z') });
+    prismaMock.timeSlots.create.mockImplementationOnce(async ({ data }) => data);
+    try {
+      const response = await POST(jsonRequest('http://localhost/api/time-slots', {
+        id: 'overnight', repeating: false, timeZone: 'UTC', scheduledFieldIds: ['field_1'],
+        startDate: '2035-01-01T22:00:00Z', endDate: '2035-01-02T02:00:00Z',
+      }));
+      expect(response.status).toBe(201);
+      expect(prismaMock.timeSlots.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+        startDate: new Date('2035-01-01T22:00:00Z'), endDate: new Date('2035-01-02T02:00:00Z'),
+      }) }));
+    } finally { jest.useRealTimers(); }
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.useFakeTimers({ now: new Date('2026-01-01T00:00:00Z') });
     requireSessionMock.mockResolvedValue({ userId: 'user_1', isAdmin: false });
     canManageScheduledFieldsMock.mockResolvedValue(true);
     canManageTimeSlotMock.mockResolvedValue(true);
@@ -95,6 +135,7 @@ describe('time-slots routes', () => {
     prismaMock.timeSlots.delete.mockResolvedValue({});
     prismaMock.timeSlots.update.mockResolvedValue({});
   });
+  afterEach(() => jest.useRealTimers());
 
   it('GET applies array-aware field/day filters and returns canonical arrays', async () => {
     prismaMock.timeSlots.findMany.mockResolvedValueOnce([

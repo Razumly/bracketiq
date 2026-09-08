@@ -1,14 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useState } from 'react';
-import { Alert, Badge, Button, Group, Loader, Paper, Stack, Table, Text, Title } from '@/components/organization/organization-operation-ui';
-import { refundRequestService } from '@/lib/refundRequestService';
-import type { RefundRequest } from '@/types';
-import { eventService } from '@/lib/eventService';
-import { userService } from '@/lib/userService';
-import { organizationService } from '@/lib/organizationService';
-import { teamService } from '@/lib/teamService';
-import { formatDisplayDateTime } from '@/lib/dateUtils';
+import { useEffect, useMemo, useState } from "react";
+import { Alert } from "@/components/organization/organization-operation-ui";
+import { refundRequestService } from "@/lib/refundRequestService";
+import type { RefundRequest } from "@/types";
+import RefundRequestListView from "./RefundRequestListView";
+import {
+  filterRefundRequests,
+  loadRefundReferences,
+  type RefundReferences,
+} from "./refundRequestReferences";
+import OrganizationRefundsView from "@/components/organization/OrganizationRefundsView";
 
 type RefundRequestsListProps = {
   organizationId?: string;
@@ -16,26 +18,6 @@ type RefundRequestsListProps = {
   hostId?: string;
   showHeader?: boolean;
   withContainer?: boolean;
-};
-
-const displayUserName = (user: { firstName?: string; lastName?: string; userName?: string; $id?: string }) => {
-  const name = `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim();
-  if (name) return name;
-  if (user.userName) return user.userName;
-  return user.$id ?? 'User';
-};
-
-const formatRefundMoney = (amountCents: number, currency: string) => {
-  const normalizedCurrency = currency.trim().toUpperCase() || 'USD';
-  const amount = Math.max(0, amountCents) / 100;
-  try {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: normalizedCurrency,
-    }).format(amount);
-  } catch {
-    return `${amount.toFixed(2)} ${normalizedCurrency}`;
-  }
 };
 
 export default function RefundRequestsList({
@@ -50,12 +32,17 @@ export default function RefundRequestsList({
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
-  const [eventsById, setEventsById] = useState<Record<string, string>>({});
-  const [usersById, setUsersById] = useState<Record<string, string>>({});
-  const [organizationsById, setOrganizationsById] = useState<Record<string, string>>({});
-  const [teamsById, setTeamsById] = useState<Record<string, string>>({});
+  const [references, setReferences] = useState<RefundReferences>({
+    events: {},
+    users: {},
+    organizations: {},
+    teams: {},
+  });
 
-  const hasFilter = useMemo(() => Boolean(organizationId || userId || hostId), [organizationId, userId, hostId]);
+  const hasFilter = useMemo(
+    () => Boolean(organizationId || userId || hostId),
+    [organizationId, userId, hostId],
+  );
   const isRequesterView = useMemo(
     () => Boolean(userId && !hostId && !organizationId),
     [userId, hostId, organizationId],
@@ -66,76 +53,33 @@ export default function RefundRequestsList({
 
     const loadRefunds = async () => {
       if (!hasFilter) {
-        setError('No filter provided to load refund requests.');
+        setError("No filter provided to load refund requests.");
         setLoading(false);
         return;
       }
 
       setLoading(true);
       setError(null);
+      setRefunds([]);
       try {
-        const results = await refundRequestService.listRefundRequests({ organizationId, userId, hostId });
-        if (isMounted) {
-          setRefunds(results);
-        }
-
-        const eventIds = Array.from(new Set(results.map((refund) => refund.eventId).filter(Boolean)));
-        const userIds = Array.from(
-          new Set(
-            results
-              .flatMap((refund) => [refund.userId, refund.hostId])
-              .filter((id): id is string => typeof id === 'string' && Boolean(id)),
-          ),
-        );
-        const organizationIds = Array.from(
-          new Set(
-            results
-              .map((refund) => refund.organizationId)
-              .filter((id): id is string => typeof id === 'string' && Boolean(id)),
-          ),
-        );
-        const teamIds = Array.from(
-          new Set(
-            results
-              .map((refund) => refund.teamId)
-              .filter((id): id is string => typeof id === 'string' && Boolean(id)),
-          ),
-        );
-
-        try {
-          const [events, users, organizations, teams] = await Promise.all([
-            Promise.all(eventIds.map((id) => eventService.getEventById(id))),
-            userIds.length ? userService.getUsersByIds(userIds) : Promise.resolve([]),
-            organizationIds.length ? organizationService.getOrganizationsByIds(organizationIds) : Promise.resolve([]),
-            teamIds.length ? teamService.getTeamsByIds(teamIds, true) : Promise.resolve([]),
-          ]);
-
-          if (isMounted) {
-            const eventEntries = events
-              .filter((event): event is NonNullable<typeof event> => Boolean(event))
-              .map((event) => [event.$id, event.name] as const);
-            const userEntries = users.map((user) => [user.$id, displayUserName(user)] as const);
-            const orgEntries = organizations.map((org) => [org.$id, org.name] as const);
-            const teamEntries = teams.map((team) => [team.$id, team.name || team.$id] as const);
-
-            if (eventEntries.length) {
-              setEventsById((prev) => ({ ...prev, ...Object.fromEntries(eventEntries) }));
-            }
-            if (userEntries.length) {
-              setUsersById((prev) => ({ ...prev, ...Object.fromEntries(userEntries) }));
-            }
-            if (orgEntries.length) {
-              setOrganizationsById((prev) => ({ ...prev, ...Object.fromEntries(orgEntries) }));
-            }
-            if (teamEntries.length) {
-              setTeamsById((prev) => ({ ...prev, ...Object.fromEntries(teamEntries) }));
-            }
-          }
-        } catch (lookupError) {
-          console.error('Failed to hydrate refund request references', lookupError);
-        }
+        const results = await refundRequestService.listRefundRequests({
+          organizationId,
+          userId,
+          hostId,
+        });
+        if (!isMounted) return;
+        const scopedRefunds = filterRefundRequests(results, {
+          organizationId,
+          userId,
+          hostId,
+        });
+        const names = await loadRefundReferences(scopedRefunds);
+        if (!isMounted) return;
+        setReferences(names);
+        setRefunds(scopedRefunds);
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to load refund requests';
+        const message =
+          err instanceof Error ? err.message : "Failed to load refund requests";
         if (isMounted) {
           setError(message);
         }
@@ -154,42 +98,36 @@ export default function RefundRequestsList({
   }, [organizationId, userId, hostId, hasFilter]);
 
   const title = useMemo(() => {
-    if (organizationId) return 'Organization Refund Requests';
-    if (hostId) return 'Hosted Event Refund Requests';
-    return 'Your Refund Requests';
+    if (organizationId) return "Organization Refund Requests";
+    if (hostId) return "Hosted Event Refund Requests";
+    return "Your Refund Requests";
   }, [organizationId, hostId]);
 
   const description = useMemo(() => {
     if (organizationId) {
-      return 'Review refund requests across events in this organization.';
+      return "Review refund requests across events in this organization.";
     }
     if (hostId) {
-      return 'Review refund requests submitted by participants for events you host.';
+      return "Review refund requests submitted by participants for events you host.";
     }
-    return 'Track the refund requests you submitted and their current status.';
+    return "Track the refund requests you submitted and their current status.";
   }, [organizationId, hostId]);
 
-  const visibleRefunds = useMemo(() => {
-    if (!refunds.length) return refunds;
-    if (hostId) {
-      return refunds.filter(
-        (refund) => refund.hostId === hostId && refund.userId !== hostId,
-      );
-    }
-    if (organizationId) {
-      return refunds.filter((refund) => refund.organizationId === organizationId);
-    }
-    if (userId) {
-      return refunds.filter((refund) => refund.userId === userId);
-    }
-    return refunds;
-  }, [refunds, hostId, organizationId, userId]);
+  const visibleRefunds = useMemo(
+    () => filterRefundRequests(refunds, { organizationId, userId, hostId }),
+    [refunds, organizationId, userId, hostId],
+  );
 
-  const handleStatusChange = async (refund: RefundRequest, status: 'APPROVED' | 'REJECTED') => {
+  const handleStatusChange = async (
+    refund: RefundRequest,
+    status: "APPROVED" | "REJECTED",
+  ) => {
     const refundId = refund.$id;
     setActionError(null);
-    if (status === 'APPROVED' && !refund.approvalPreview?.isValid) {
-      setActionError('This refund request does not have a current immutable approval preview. Reload it or ask the customer to submit a new request.');
+    if (status === "APPROVED" && !refund.approvalPreview?.isValid) {
+      setActionError(
+        "This refund request does not have a current immutable approval preview. Reload it or ask the customer to submit a new request.",
+      );
       return;
     }
 
@@ -198,255 +136,66 @@ export default function RefundRequestsList({
       const updated = await refundRequestService.updateRefundStatus(
         refundId,
         status,
-        status === 'APPROVED' ? refund.approvalPreview : undefined,
+        status === "APPROVED" ? refund.approvalPreview : undefined,
       );
-      setRefunds((prev) => prev.map((refund) => (refund.$id === refundId ? { ...refund, status: updated.status } : refund)));
+      setRefunds((prev) =>
+        prev.map((refund) =>
+          refund.$id === refundId
+            ? { ...refund, status: updated.status }
+            : refund,
+        ),
+      );
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to update refund request';
+      const message =
+        err instanceof Error ? err.message : "Failed to update refund request";
       setActionError(message);
     } finally {
       setProcessingId(null);
     }
   };
 
-  const statusColor = (status?: string) => {
-    switch (status) {
-      case 'APPROVED':
-        return 'green';
-      case 'REJECTED':
-        return 'red';
-      default:
-        return 'yellow';
-    }
-  };
-
-  const canTakeAction = (refund: RefundRequest) => {
-    if (organizationId) return true;
-    if (hostId && refund.hostId && refund.hostId === hostId) return true;
-    return false;
-  };
-
-  const content = (
-    <Stack gap="md">
-      {showHeader ? (
-        <Group justify="space-between">
-          <div>
-            <Title order={4}>{title}</Title>
-            <Text size="sm" c="dimmed">
-              {description}
-            </Text>
-          </div>
-          {loading && <Loader size="sm" />}
-        </Group>
-      ) : loading ? (
-        <Group justify="flex-end">
-          <Loader size="sm" />
-        </Group>
-      ) : null}
-
-      {error && (
-        <Alert color="red" data-testid="refund-error">
-          {error}
-        </Alert>
-      )}
-
-      {actionError && (
-        <Alert color="red" data-testid="refund-action-error">
-          {actionError}
-        </Alert>
-      )}
-
-      {!loading && !error && visibleRefunds.length === 0 && (
-        <Text size="sm" c="dimmed">
-          No refund requests found.
-        </Text>
-      )}
-
-      {!loading && !error && visibleRefunds.length > 0 && (
-        <div className="org-tab-table-surface">
-          <Table.ScrollContainer minWidth={isRequesterView ? 1060 : 1240}>
-            <Table highlightOnHover withTableBorder withColumnBorders>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Event</Table.Th>
-                <Table.Th>Reason</Table.Th>
-                <Table.Th>Team</Table.Th>
-                <Table.Th>Requested By</Table.Th>
-                <Table.Th>Host</Table.Th>
-                <Table.Th>Organization</Table.Th>
-                <Table.Th>Refund scope</Table.Th>
-                <Table.Th>Requested At</Table.Th>
-                <Table.Th>Status</Table.Th>
-                {!isRequesterView && <Table.Th>Actions</Table.Th>}
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {visibleRefunds.map((refund) => {
-                const eventName = eventsById[refund.eventId] ?? refund.eventId ?? 'Unknown event';
-                const requesterName = usersById[refund.userId] ?? refund.userId ?? 'Unknown user';
-                const hostName = refund.hostId
-                  ? usersById[refund.hostId] ?? refund.hostId
-                  : null;
-                const teamName = refund.teamId
-                  ? teamsById[refund.teamId] ?? refund.teamId
-                  : null;
-                const organizationName = refund.organizationId
-                  ? organizationsById[refund.organizationId] ?? refund.organizationId
-                  : null;
-                const approvalPreview = refund.approvalPreview;
-
-                return (
-                  <Table.Tr key={refund.$id}>
-                    <Table.Td>
-                      <Stack gap={2}>
-                        <Text fw={500}>{eventName}</Text>
-                      </Stack>
-                    </Table.Td>
-                    <Table.Td>
-                      <Text size="sm">{refund.reason || 'No reason provided'}</Text>
-                    </Table.Td>
-                    <Table.Td>
-                      {teamName ? (
-                        <Badge variant="light" color="cyan">
-                          {teamName}
-                        </Badge>
-                      ) : (
-                        <Text size="sm" c="dimmed">
-                          —
-                        </Text>
-                      )}
-                    </Table.Td>
-                    <Table.Td>
-                      <Badge variant="light" color="blue">
-                        {requesterName}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      {hostName ? (
-                        <Badge variant="light" color="violet">
-                          {hostName}
-                        </Badge>
-                      ) : (
-                        <Text size="sm" c="dimmed">
-                          —
-                        </Text>
-                      )}
-                    </Table.Td>
-                    <Table.Td>
-                      {organizationName ? (
-                        <Badge variant="light" color="green">
-                          {organizationName}
-                        </Badge>
-                      ) : (
-                        <Text size="sm" c="dimmed">
-                          —
-                        </Text>
-                      )}
-                    </Table.Td>
-                    <Table.Td>
-                      {approvalPreview?.isValid ? (
-                        <Stack gap={2} miw={220}>
-                          <Text size="sm" fw={500}>
-                            {formatRefundMoney(
-                              approvalPreview.refundableAmountCents,
-                              approvalPreview.currency,
-                            )}{' '}
-                            · {approvalPreview.paymentCount}{' '}
-                            {approvalPreview.paymentCount === 1 ? 'payment' : 'payments'}
-                          </Text>
-                          {approvalPreview.paymentScope.map((payment) => (
-                            <Text key={payment.paymentId} size="xs" c="dimmed">
-                              {payment.paymentId} · {payment.billId} · {formatRefundMoney(
-                                payment.refundableAmountCents,
-                                payment.currency,
-                              )}
-                            </Text>
-                          ))}
-                          <Text size="xs" c="dimmed">
-                            {approvalPreview.occurrence.occurrenceDate
-                              ? `Occurrence ${approvalPreview.occurrence.occurrenceDate}${
-                                approvalPreview.occurrence.slotId
-                                  ? ` · slot ${approvalPreview.occurrence.slotId}`
-                                  : ''
-                              }`
-                              : 'All payments in the immutable request scope'}
-                          </Text>
-                          {approvalPreview.policyDecision ? (
-                            <Text size="xs" c="dimmed">
-                              {approvalPreview.policyDecision}
-                            </Text>
-                          ) : null}
-                        </Stack>
-                      ) : (
-                        <Text size="sm" c="red">
-                          Approval preview unavailable
-                        </Text>
-                      )}
-                    </Table.Td>
-                    <Table.Td>
-                      <Text size="sm">
-                        {refund.$createdAt ? formatDisplayDateTime(refund.$createdAt) : 'Unknown'}
-                      </Text>
-                    </Table.Td>
-                    <Table.Td>
-                      <Badge variant="light" color={statusColor(refund.status)}>
-                        {refund.status ?? 'WAITING'}
-                      </Badge>
-                    </Table.Td>
-                    {!isRequesterView && (
-                      <Table.Td>
-                        {canTakeAction(refund) ? (
-                          <Group gap="xs">
-                            <Button
-                              size="xs"
-                              color="green"
-                              variant="light"
-                              disabled={
-                                (refund.status && refund.status !== 'WAITING')
-                                || processingId === refund.$id
-                                || !refund.approvalPreview?.isValid
-                              }
-                              loading={processingId === refund.$id}
-                              onClick={() => handleStatusChange(refund, 'APPROVED')}
-                            >
-                              Approve
-                            </Button>
-                            <Button
-                              size="xs"
-                              color="red"
-                              variant="light"
-                              disabled={(refund.status && refund.status !== 'WAITING') || processingId === refund.$id}
-                              loading={processingId === refund.$id}
-                              onClick={() => handleStatusChange(refund, 'REJECTED')}
-                            >
-                              Deny
-                            </Button>
-                          </Group>
-                        ) : (
-                          <Text size="sm" c="dimmed">
-                            —
-                          </Text>
-                        )}
-                      </Table.Td>
-                    )}
-                  </Table.Tr>
-                );
-              })}
-            </Table.Tbody>
-            </Table>
-          </Table.ScrollContainer>
-        </div>
-      )}
-    </Stack>
-  );
-
-  if (!withContainer) {
-    return content;
+  if (organizationId) {
+    return (
+      <>
+        {error && (
+          <Alert color="red" data-testid="refund-error">
+            {error}
+          </Alert>
+        )}
+        {actionError && (
+          <Alert color="red" data-testid="refund-action-error">
+            {actionError}
+          </Alert>
+        )}
+        <OrganizationRefundsView
+          loading={loading}
+          error={error}
+          refunds={visibleRefunds}
+          events={references.events}
+          users={references.users}
+          teams={references.teams}
+          processingId={processingId}
+          onDecision={handleStatusChange}
+        />
+      </>
+    );
   }
 
   return (
-    <Paper withBorder radius="md" p="md" className="org-tab-surface">
-      {content}
-    </Paper>
+    <RefundRequestListView
+      title={title}
+      description={description}
+      loading={loading}
+      error={error}
+      actionError={actionError}
+      visibleRefunds={visibleRefunds}
+      references={references}
+      isRequesterView={isRequesterView}
+      processingId={processingId}
+      hostId={hostId}
+      handleStatusChange={handleStatusChange}
+      showHeader={showHeader}
+      withContainer={withContainer}
+    />
   );
 }

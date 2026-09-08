@@ -22,23 +22,23 @@ jest.mock('next/navigation', () => ({
   useRouter: () => ({ push: pushMock }),
 }));
 
-jest.mock('react-big-calendar', () => {
+jest.mock('../fieldsTab/FacilityResourceCalendarGrid', () => {
   const React = require('react');
   const MS_IN_WEEK = 7 * 24 * 60 * 60 * 1000;
 
-  const Calendar = ({
-    date,
+  const FacilityResourceCalendarGrid = ({
+    calendarDate,
     events = [],
     resources,
-    onNavigate,
+    onNavigateDate,
     onEventDrop,
     onEventResize,
     onSelectEvent,
-    draggableAccessor,
+    canMoveEvent,
     onSelectSlot,
-    resizableAccessor,
+    canResizeEvent,
   }: any) => {
-    const resolvedDate = date instanceof Date ? date : new Date(date);
+    const resolvedDate = calendarDate instanceof Date ? calendarDate : new Date(calendarDate);
     const contentRef = React.useRef(null);
     const daySlotRefs = React.useRef([]);
     React.useEffect(() => {
@@ -74,7 +74,7 @@ jest.mock('react-big-calendar', () => {
       <div>
         <button
           type="button"
-          onClick={() => onNavigate?.(new Date(resolvedDate.getTime() + MS_IN_WEEK))}
+          onClick={() => onNavigateDate?.(new Date(resolvedDate.getTime() + MS_IN_WEEK))}
         >
           Next Week
         </button>
@@ -89,21 +89,27 @@ jest.mock('react-big-calendar', () => {
           Select Empty Rental Slot
         </button>
         <div data-testid="calendar-resource-count">{Array.isArray(resources) ? resources.length : 'none'}</div>
-        <div ref={contentRef} className="rbc-time-content" data-testid="calendar-drop-zone">
-          {Array.from({ length: 7 }, (_, index) => (
-            <div
-              key={index}
-              ref={(node) => {
-                daySlotRefs.current[index] = node;
-              }}
-              className="rbc-day-slot"
-              data-testid={`calendar-day-slot-${index}`}
-            />
-          ))}
+        <div
+          data-resource-row
+          data-resource-id={resources?.[0]?.id ?? 'field_main'}
+          style={{ minHeight: 700 }}
+        >
+          <div ref={contentRef} className="rbc-time-content" data-calendar-timeline data-testid="calendar-drop-zone">
+            {Array.from({ length: 7 }, (_, index) => (
+              <div
+                key={index}
+                ref={(node) => {
+                  daySlotRefs.current[index] = node;
+                }}
+                className="rbc-day-slot"
+                data-testid={`calendar-day-slot-${index}`}
+              />
+            ))}
+          </div>
         </div>
         {events.map((event: any) => {
-          const canDrag = typeof draggableAccessor === 'function' ? Boolean(draggableAccessor(event)) : false;
-          const canResize = typeof resizableAccessor === 'function' ? Boolean(resizableAccessor(event)) : false;
+          const canDrag = typeof canMoveEvent === 'function' ? Boolean(canMoveEvent(event)) : false;
+          const canResize = typeof canResizeEvent === 'function' ? Boolean(canResizeEvent(event)) : false;
           const resourceId = event.resource?.$id ?? event.id;
           const shouldSelectAfterMutation = event.metaType === 'facility-feed'
             && (event.feedType === 'staff_assignment' || event.feedType === 'official_assignment');
@@ -167,8 +173,8 @@ jest.mock('react-big-calendar', () => {
   };
 
   return {
-    Calendar,
-    dateFnsLocalizer: () => ({}),
+    __esModule: true,
+    default: FacilityResourceCalendarGrid,
   };
 });
 
@@ -879,6 +885,53 @@ describe('FieldsTabContent calendar navigation', () => {
     expect(await screen.findByText('Selection 2')).toBeInTheDocument();
   });
 
+  it('rejects a booked rental drag without changing the selection or calendar date', async () => {
+    const organization = buildOrganizationWithFutureFacilityRentals();
+    const slot = organization.fields[0].rentalSlots[0];
+    const bookingStart = new Date(slot.endDate);
+    const bookingEnd = new Date(bookingStart.getTime() + 30 * 60 * 1000);
+    slot.endDate = new Date(bookingEnd.getTime() + 30 * 60 * 1000).toISOString();
+    getNextRentalOccurrenceMock.mockImplementation((item: any) => new Date(item.startDate));
+    getFieldEventsMatchesMock.mockImplementation(async (field: any) => ({
+      ...field,
+      events: [{
+        $id: 'booking_after_selection',
+        eventType: 'EVENT',
+        start: bookingStart.toISOString(),
+        end: bookingEnd.toISOString(),
+      }],
+      matches: [],
+    }));
+    const user = userEvent.setup();
+    render(
+      <MantineProvider>
+        <FieldsTabContent
+          organization={organization}
+          organizationId="org_test"
+          currentUser={{ $id: 'user_2' } as any}
+        />
+      </MantineProvider>,
+    );
+
+    await screen.findByRole('button', { name: 'Drag Unavailable' });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Reserve resources' })).toBeEnabled());
+    const dragButton = await screen.findByRole('button', { name: 'Drag Selection 1' });
+    const card = dragButton.parentElement!;
+    const originalRange = within(card).getByTestId(/^event-range-/).textContent;
+    const originalDate = screen.getByTestId('calendar-date').textContent;
+    mockShowNotification.mockClear();
+
+    await user.click(dragButton);
+
+    expect(mockShowNotification).toHaveBeenCalledTimes(1);
+    expect(mockShowNotification).toHaveBeenCalledWith({
+      color: 'red',
+      message: 'That time range is already booked on at least one selected resource.',
+    });
+    expect(within(card).getByTestId(/^event-range-/).textContent).toBe(originalRange);
+    expect(screen.getByTestId('calendar-date').textContent).toBe(originalDate);
+  });
+
   it('uses the field filter to show and hide readonly rental slots on one calendar', async () => {
     getNextRentalOccurrenceMock.mockImplementation((slot: any) => new Date(slot.startDate));
     getFieldEventsMatchesMock.mockImplementation(async (field: any) => ({
@@ -901,7 +954,7 @@ describe('FieldsTabContent calendar navigation', () => {
 
     expect(await screen.findByTestId('event-range-slot_1')).toBeInTheDocument();
     expect(screen.queryByTestId('event-range-slot_2')).not.toBeInTheDocument();
-    expect(screen.getByTestId('calendar-resource-count')).toHaveTextContent('none');
+    expect(screen.getByTestId('calendar-resource-count')).toHaveTextContent('1');
 
     await user.click(screen.getByRole('button', { name: /Field 2/i }));
 
@@ -1075,6 +1128,7 @@ describe('FieldsTabContent calendar navigation', () => {
       </MantineProvider>,
     );
 
+    await userEvent.setup().click(await screen.findByRole('button', { name: /^Resources \(/ }));
     await waitFor(() => {
       expect(within(screen.getByLabelText('Facility resources')).getByText('2 of 2 selected')).toBeInTheDocument();
     });
@@ -1105,6 +1159,7 @@ describe('FieldsTabContent calendar navigation', () => {
       </MantineProvider>,
     );
 
+    await userEvent.setup().click(await screen.findByRole('button', { name: /^Resources \(/ }));
     await waitFor(() => {
       expect(within(screen.getByLabelText('Facility resources')).getByText('1 of 2 selected')).toBeInTheDocument();
     });
@@ -1234,6 +1289,10 @@ describe('FieldsTabContent calendar navigation', () => {
     expect(screen.queryByRole('button', { name: 'Show assignments' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Facility details' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Edit schedule' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'View facilities' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'All facilities' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Today' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Calendar legend')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '+ Facility' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '+ Resource' })).not.toBeInTheDocument();
     expect(screen.queryByText('Facility operations summary')).not.toBeInTheDocument();
@@ -1245,8 +1304,11 @@ describe('FieldsTabContent calendar navigation', () => {
 
     expect(await screen.findByRole('button', { name: '+ Facility' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '+ Resource' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Schedule' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Back to schedule' })).toBeInTheDocument();
     expect(screen.getByText('Facility details')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Back to schedule' }));
+    expect(await screen.findByRole('button', { name: 'Edit schedule' })).toBeInTheDocument();
   });
 
   it('shows facility operation layers on the main manager calendar', async () => {
@@ -1270,6 +1332,7 @@ describe('FieldsTabContent calendar navigation', () => {
     expect(screen.queryByText('Create')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Edit schedule' }));
     expect(screen.getByText('Create')).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'Create schedule entries' })).toBeInTheDocument();
     expect(screen.getByText('Rental slot')).toBeInTheDocument();
     expect(screen.getByText('Staff shift')).toBeInTheDocument();
     expect(screen.getByText('Official shift')).toBeInTheDocument();
@@ -1284,9 +1347,10 @@ describe('FieldsTabContent calendar navigation', () => {
     });
     expect(screen.getByRole('button', { name: 'Drag Court lead' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Drag Match official assignment' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Drag Conflict: League night' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Drag Conflict: League night' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Maintenance 1/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Conflicts 1/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Conflicts/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('1 conflict');
 
     await user.click(screen.getByRole('button', { name: /Maintenance 1/ }));
 
@@ -1294,7 +1358,9 @@ describe('FieldsTabContent calendar navigation', () => {
       expect(screen.queryByRole('button', { name: 'Drag Net repair' })).not.toBeInTheDocument();
     });
     expect(screen.getByRole('button', { name: 'Drag Court lead' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Drag Conflict: League night' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Drag Conflict: League night' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Next Week' }));
+    await waitFor(() => expect(screen.queryByText('1 conflict')).not.toBeInTheDocument());
   });
 
   it('opens child staff assignment cards with unassign instead of delete', async () => {
@@ -1377,7 +1443,7 @@ describe('FieldsTabContent calendar navigation', () => {
     await user.click(screen.getByRole('button', { name: 'Unassign staff member' }));
 
     expect(apiRequestMock).toHaveBeenCalledTimes(1);
-    await user.click(await screen.findByRole('button', { name: /Save changes \(1\)/ }));
+    await user.click(await screen.findByRole('button', { name: /Save changes/ }));
 
     await waitFor(() => {
       expect(apiRequestMock).toHaveBeenCalledWith(
@@ -1473,7 +1539,7 @@ describe('FieldsTabContent calendar navigation', () => {
     await user.click(await screen.findByRole('button', { name: 'Select Sam Staff' }));
     expect(await screen.findByRole('heading', { name: 'Edit Staff Assignment' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Unassign staff member' }));
-    expect(await screen.findByRole('button', { name: /Save changes \(1\)/ })).toBeEnabled();
+    expect(await screen.findByRole('button', { name: /Save changes/ })).toBeEnabled();
 
     await user.click(await screen.findByRole('button', { name: 'Select Open staff shift' }));
     expect(await screen.findByRole('heading', { name: 'Assign Staff Coverage' })).toBeInTheDocument();
@@ -1569,9 +1635,9 @@ describe('FieldsTabContent calendar navigation', () => {
       expect(screen.getAllByRole('button', { name: 'Select Sam Staff' }).length).toBeGreaterThanOrEqual(2);
     });
     expect(apiRequestMock.mock.calls.filter(([, options]) => options?.method === 'PATCH')).toHaveLength(0);
-    expect(await screen.findByRole('button', { name: /Save changes \(1\)/ })).toBeEnabled();
+    expect(await screen.findByRole('button', { name: /Save changes/ })).toBeEnabled();
 
-    await user.click(screen.getByRole('button', { name: /Save changes \(1\)/ }));
+    await user.click(screen.getByRole('button', { name: /Save changes/ }));
     await waitFor(() => {
       expect(apiRequestMock).toHaveBeenCalledWith(
         '/api/organizations/org_test/staff/schedule/staff_parent_open_series_1',
@@ -1612,7 +1678,8 @@ describe('FieldsTabContent calendar navigation', () => {
       plannedEnd: '2026-07-21T15:00:00.000Z',
     };
     apiRequestMock.mockImplementation(async (path: string, options?: any) => {
-      if (path.endsWith('/staff/schedule') && !options?.method) {
+      const method = options?.method;
+      if (path.endsWith('/staff/schedule') && !method) {
         return {
           assignments: [parentAssignment],
           staffMembers: [{
@@ -1623,7 +1690,7 @@ describe('FieldsTabContent calendar navigation', () => {
           }],
         };
       }
-      if (path.endsWith('/staff/schedule') && options?.method === 'POST') {
+      if (path.endsWith('/staff/schedule') && method === 'POST') {
         return {
           assignment: {
             id: 'created_child_assignment',
@@ -1636,7 +1703,7 @@ describe('FieldsTabContent calendar navigation', () => {
           },
         };
       }
-      if (options?.method === 'PATCH') {
+      if (method === 'PATCH') {
         throw new Error('Unexpected parent update for occurrence assignment');
       }
       return {};
@@ -1664,9 +1731,9 @@ describe('FieldsTabContent calendar navigation', () => {
       expect(screen.getByRole('button', { name: 'Select Sam Staff' })).toBeInTheDocument();
     });
     expect(apiRequestMock.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(0);
-    expect(await screen.findByRole('button', { name: /Save changes \(1\)/ })).toBeEnabled();
+    expect(await screen.findByRole('button', { name: /Save changes/ })).toBeEnabled();
 
-    await user.click(screen.getByRole('button', { name: /Save changes \(1\)/ }));
+    await user.click(screen.getByRole('button', { name: /Save changes/ }));
     await waitFor(() => {
       const createCall = apiRequestMock.mock.calls.find(([path, options]) => (
         String(path).endsWith('/staff/schedule') && options?.method === 'POST'
@@ -1846,7 +1913,7 @@ describe('FieldsTabContent calendar navigation', () => {
     await user.click(screen.getByRole('button', { name: 'Delete assignment' }));
 
     expect(apiRequestMock).toHaveBeenCalledTimes(1);
-    await user.click(await screen.findByRole('button', { name: /Save changes \(1\)/ }));
+    await user.click(await screen.findByRole('button', { name: /Save changes/ }));
 
     await waitFor(() => {
       expect(apiRequestMock).toHaveBeenCalledWith(
@@ -1948,7 +2015,8 @@ describe('FieldsTabContent calendar navigation', () => {
     }));
     const futureChildAssignments = [futureChildAssignment, ...additionalFutureChildAssignments];
     apiRequestMock.mockImplementation(async (path: string, options?: any) => {
-      if (path.endsWith('/staff/schedule') && !options?.method) {
+      const method = options?.method;
+      if (path.endsWith('/staff/schedule') && !method) {
         return {
           assignments: [parentAssignment, pastChildAssignment, ...futureChildAssignments],
           staffMembers: [{
@@ -1962,7 +2030,7 @@ describe('FieldsTabContent calendar navigation', () => {
       const matchedFutureChildAssignment = futureChildAssignments.find((assignment) => (
         path.endsWith(`/staff/schedule/${assignment.id}`)
       ));
-      if (matchedFutureChildAssignment && options?.method === 'PATCH') {
+      if (matchedFutureChildAssignment && method === 'PATCH') {
         return {
           assignment: {
             ...matchedFutureChildAssignment,
@@ -1970,7 +2038,7 @@ describe('FieldsTabContent calendar navigation', () => {
           },
         };
       }
-      if (path.endsWith('/staff/schedule/staff_parent_open_1') && options?.method === 'PATCH') {
+      if (path.endsWith('/staff/schedule/staff_parent_open_1') && method === 'PATCH') {
         return {
           assignment: {
             ...parentAssignment,
@@ -2015,14 +2083,14 @@ describe('FieldsTabContent calendar navigation', () => {
     await user.click(screen.getByRole('button', { name: 'Stage delete' }));
 
     expect(apiRequestMock).toHaveBeenCalledTimes(1);
-    expect(await screen.findByRole('button', { name: /Save changes \(1\)/ })).toBeEnabled();
+    expect(await screen.findByRole('button', { name: /Save changes/ })).toBeEnabled();
     await user.click(screen.getByRole('button', { name: 'Undo' }));
     expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
 
     await user.click(screen.getAllByRole('button', { name: 'Select Open staff shift' })[0]);
     await user.click(await screen.findByRole('button', { name: 'Delete open staff shift' }));
     await user.click(await screen.findByRole('button', { name: 'Stage delete' }));
-    await user.click(await screen.findByRole('button', { name: /Save changes \(1\)/ }));
+    await user.click(await screen.findByRole('button', { name: /Save changes/ }));
 
     await waitFor(() => {
       const staffWriteCalls = apiRequestMock.mock.calls.filter(([path, options]) => (
@@ -2135,7 +2203,7 @@ describe('FieldsTabContent calendar navigation', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Save assignment' }));
 
     expect(apiRequestMock).toHaveBeenCalledTimes(1);
-    await user.click(await screen.findByRole('button', { name: /Save changes \(1\)/ }));
+    await user.click(await screen.findByRole('button', { name: /Save changes/ }));
 
     await waitFor(() => {
       expect(apiRequestMock).toHaveBeenCalledWith(
@@ -2224,7 +2292,7 @@ describe('FieldsTabContent calendar navigation', () => {
     expect(apiRequestMock.mock.calls.filter(([, options]) => options?.method === 'PATCH')).toHaveLength(0);
     expect(screen.queryByRole('heading', { name: 'Edit Staff Assignment' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Assign Staff Coverage' })).not.toBeInTheDocument();
-    await user.click(await screen.findByRole('button', { name: /Save changes \(1\)/ }));
+    await user.click(await screen.findByRole('button', { name: /Save changes/ }));
 
     const expectedStart = new Date('2026-03-11T12:00:00.000Z');
     const expectedEnd = new Date('2026-03-11T14:00:00.000Z');
@@ -2319,7 +2387,7 @@ describe('FieldsTabContent calendar navigation', () => {
     });
     await user.click(screen.getByRole('button', { name: 'Edit schedule' }));
     await user.click(screen.getAllByRole('button', { name: 'Resize Sam Staff' })[0]);
-    await user.click(await screen.findByRole('button', { name: /Save changes \(1\)/ }));
+    await user.click(await screen.findByRole('button', { name: /Save changes/ }));
 
     const resizedStart = new Date('2026-03-11T12:00:00.000Z');
     const resizedEnd = new Date('2026-03-11T14:00:00.000Z');
@@ -2414,7 +2482,7 @@ describe('FieldsTabContent calendar navigation', () => {
     });
     await user.click(screen.getByRole('button', { name: 'Edit schedule' }));
     await user.click(screen.getAllByRole('button', { name: 'Drag Sam Staff' })[0]);
-    await user.click(await screen.findByRole('button', { name: /Save changes \(1\)/ }));
+    await user.click(await screen.findByRole('button', { name: /Save changes/ }));
 
     const movedStart = new Date('2026-03-11T12:00:00.000Z');
     const movedEnd = new Date('2026-03-11T13:00:00.000Z');
@@ -2558,7 +2626,7 @@ describe('FieldsTabContent calendar navigation', () => {
     await user.click(screen.getAllByRole('button', { name: 'Resize Open staff shift' })[0]);
 
     expect(apiRequestMock.mock.calls.filter(([, options]) => options?.method === 'PATCH')).toHaveLength(0);
-    await user.click(await screen.findByRole('button', { name: /Save changes \(1\)/ }));
+    await user.click(await screen.findByRole('button', { name: /Save changes/ }));
 
     await waitFor(() => {
       expect(apiRequestMock.mock.calls.filter(([, options]) => options?.method === 'PATCH')).toHaveLength(3);
@@ -2721,7 +2789,7 @@ describe('FieldsTabContent calendar navigation', () => {
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(await screen.findByRole('heading', { name: 'Facility details' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Schedule' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Back to schedule' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '+ Facility' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '+ Resource' })).toBeInTheDocument();
     expect(screen.getAllByText('Facilities').length).toBeGreaterThanOrEqual(1);
@@ -2827,7 +2895,7 @@ describe('FieldsTabContent calendar navigation', () => {
       </MantineProvider>,
     );
 
-    await user.click(await screen.findByRole('button', { name: 'Manage facilities' }));
+    await user.click(await screen.findByRole('button', { name: 'Facility details' }));
     expect(screen.getByRole('button', { name: '+ Resource' })).toBeDisabled();
 
     await user.click(screen.getByRole('button', { name: '+ Facility' }));
@@ -2926,7 +2994,7 @@ describe('FieldsTabContent calendar navigation', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Facility details' }));
     await user.click(screen.getByRole('button', { name: /Main/ }));
-    await user.click(screen.getByRole('textbox', { name: 'Facility' }));
+    await user.click(screen.getByRole('combobox', { name: 'Facility' }));
     fireEvent.click(screen.getByRole('option', { name: 'North Annex', hidden: true }));
     await user.click(screen.getByRole('button', { name: /Save changes/ }));
 
@@ -2983,6 +3051,7 @@ describe('FieldsTabContent calendar navigation', () => {
     );
 
     await user.click(screen.getByRole('button', { name: 'Edit schedule' }));
+    await user.click(screen.getByRole('button', { name: /^Resources \(/ }));
     await user.click(within(screen.getByLabelText('Facility resources')).getByRole('button', { name: 'All' }));
     const staffCreateCard = screen.getByText('Staff shift').closest('.facility-calendar-create-card');
     expect(staffCreateCard).not.toBeNull();
@@ -3011,12 +3080,20 @@ describe('FieldsTabContent calendar navigation', () => {
     await user.click(screen.getAllByRole('button', { name: 'Select Open staff shift' })[0]);
 
     expect(await screen.findByRole('heading', { name: 'Edit Staff Draft' })).toBeInTheDocument();
-    await user.type(screen.getByLabelText('Notes'), 'Gate coverage');
+    const notes = screen.getByLabelText('Notes');
+    await user.type(notes, 'Gate coverage');
+    expect(screen.getByLabelText('Notes')).toBe(notes);
+    expect(notes).toHaveFocus();
     await user.click(screen.getByRole('button', { name: 'Save draft' }));
 
-    expect(await screen.findByRole('button', { name: /Save changes \(2\)/ })).toBeEnabled();
+    expect(await screen.findByRole('button', { name: /Save changes/ })).toBeEnabled();
+    await user.click(screen.getAllByRole('button', { name: 'Select Open staff shift' })[0]);
+    expect(screen.getByLabelText('Notes')).toHaveValue('Gate coverage');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
     await user.click(screen.getByRole('button', { name: 'Undo' }));
-    expect(await screen.findByRole('button', { name: /Save changes \(1\)/ })).toBeEnabled();
+    expect(await screen.findByRole('button', { name: /Save changes/ })).toBeEnabled();
+    await user.click(screen.getAllByRole('button', { name: 'Select Open staff shift' })[0]);
+    expect(screen.getByLabelText('Notes')).toHaveValue('');
   });
 
 	  it('renders queued repeating staff drafts as repeated calendar occurrences', async () => {
@@ -3096,7 +3173,7 @@ describe('FieldsTabContent calendar navigation', () => {
     });
     expect(apiRequestMock.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(0);
 
-    await user.click(screen.getByRole('button', { name: /Save changes \(2\)/ }));
+    await user.click(screen.getByRole('button', { name: /Save changes/ }));
     await waitFor(() => {
       expect(apiRequestMock.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(1);
     });
@@ -3200,7 +3277,7 @@ describe('FieldsTabContent calendar navigation', () => {
 	    expect(screen.queryByRole('button', { name: 'Select Open official shift' })).not.toBeInTheDocument();
 	    expect(apiRequestMock.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(0);
 
-	    await user.click(screen.getByRole('button', { name: /Save changes \(2\)/ }));
+	    await user.click(screen.getByRole('button', { name: /Save changes/ }));
 	    await waitFor(() => {
 	      expect(apiRequestMock.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(1);
 	    });
@@ -3310,7 +3387,7 @@ describe('FieldsTabContent calendar navigation', () => {
 	    expect(screen.getAllByRole('button', { name: 'Select Open staff shift' }).length).toBeGreaterThanOrEqual(2);
 	    expect(apiRequestMock.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(0);
 
-	    await user.click(screen.getByRole('button', { name: /Save changes \(2\)/ }));
+	    await user.click(screen.getByRole('button', { name: /Save changes/ }));
 	    await waitFor(() => {
 	      expect(apiRequestMock.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(2);
 	    });
@@ -3321,19 +3398,19 @@ describe('FieldsTabContent calendar navigation', () => {
 	      parentAssignmentId: null,
 	      userId: null,
 	      assignmentKind: 'STAFF_SHIFT',
-	    }));
-	    expect(staffCreateCalls[0]?.[1]?.body?.timeSlot).toEqual(expect.objectContaining({
-	      repeating: true,
-	      daysOfWeek: expect.arrayContaining([1, 2, 3]),
+	      timeSlot: expect.objectContaining({
+	        repeating: true,
+	        daysOfWeek: expect.arrayContaining([1, 2, 3]),
+	      }),
 	    }));
 	    expect(staffCreateCalls[1]?.[1]?.body).toEqual(expect.objectContaining({
 	      parentAssignmentId: 'created_parent_assignment',
 	      userId: 'staff_user_1',
 	      assignmentKind: 'STAFF_SHIFT',
-	    }));
-	    expect(staffCreateCalls[1]?.[1]?.body?.timeSlot).toEqual(expect.objectContaining({
-	      repeating: false,
-	      daysOfWeek: [0],
+	      timeSlot: expect.objectContaining({
+	        repeating: false,
+	        daysOfWeek: [0],
+	      }),
 	    }));
 	  });
 
@@ -3359,6 +3436,7 @@ describe('FieldsTabContent calendar navigation', () => {
     );
 
     await user.click(screen.getByRole('button', { name: 'Edit schedule' }));
+    await user.click(screen.getByRole('button', { name: /^Resources \(/ }));
     await user.click(within(screen.getByLabelText('Facility resources')).getByRole('button', { name: 'All' }));
     const rentalCreateCard = screen.getByText('Rental slot').closest('.facility-calendar-create-card');
     expect(rentalCreateCard).not.toBeNull();
@@ -3674,7 +3752,7 @@ describe('FieldsTabContent calendar navigation', () => {
     });
 
     expect(updateRentalSlotMock).not.toHaveBeenCalled();
-    await user.click(await screen.findByRole('button', { name: /Save changes \(1\)/ }));
+    await user.click(await screen.findByRole('button', { name: /Save changes/ }));
 
     await waitFor(() => {
       expect(updateRentalSlotMock).toHaveBeenCalledTimes(1);
@@ -3750,7 +3828,7 @@ describe('FieldsTabContent calendar navigation', () => {
     });
     expect(updateRentalSlotMock).not.toHaveBeenCalled();
 
-    await user.click(await screen.findByRole('button', { name: /Save changes \(1\)/ }));
+    await user.click(await screen.findByRole('button', { name: /Save changes/ }));
 
     await waitFor(() => {
       expect(updateRentalSlotMock).toHaveBeenCalledTimes(1);
@@ -3804,7 +3882,75 @@ describe('FieldsTabContent calendar navigation', () => {
       expect(screen.getByTestId('event-range-slot_1')).toHaveTextContent(draggedRentalRangeText);
     });
     expect(updateRentalSlotMock).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: /Save changes \(1\)/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Save changes/ })).toBeEnabled();
+  });
+
+  it('retains the draft and undo history after a failed save and permits an explicit retry', async () => {
+    getNextRentalOccurrenceMock.mockReturnValue(new Date('2026-03-10T10:00:00.000Z'));
+    getFieldEventsMatchesMock.mockImplementation(async (field: any) => ({
+      ...field, events: [], matches: [],
+    }));
+    let rejectSave!: (error: Error) => void;
+    updateRentalSlotMock.mockImplementationOnce(() => new Promise((_resolve, reject) => {
+      rejectSave = reject;
+    }));
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const user = userEvent.setup();
+    try {
+      render(
+        <MantineProvider>
+          <FieldsTabContent
+            organization={buildOrganizationWithRentalSlot()}
+            organizationId="org_test"
+            currentUser={{ $id: 'owner_1' } as any}
+          />
+        </MantineProvider>,
+      );
+      await user.click(screen.getByRole('button', { name: 'Edit schedule' }));
+      await user.click(await screen.findByRole('button', { name: 'Drag Rental Slot' }));
+      const saveButton = screen.getByRole('button', { name: /Save changes/ });
+      await user.click(saveButton);
+      await waitFor(() => expect(updateRentalSlotMock).toHaveBeenCalledTimes(1));
+      expect(saveButton).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Discard changes' })).toBeDisabled();
+      await user.click(saveButton);
+      expect(updateRentalSlotMock).toHaveBeenCalledTimes(1);
+
+      await act(async () => rejectSave(new Error('Calendar save failed')));
+      await waitFor(() => expect(saveButton).toBeEnabled());
+      expect(mockShowNotification).toHaveBeenCalledWith(expect.objectContaining({
+        color: 'red', message: 'Calendar save failed',
+      }));
+      expect(screen.getByTestId('event-range-slot_1')).toHaveTextContent(draggedRentalRangeText);
+      expect(screen.getByRole('button', { name: 'Discard changes' })).toBeEnabled();
+      expect(updateRentalSlotMock).toHaveBeenCalledTimes(1);
+
+      await user.click(screen.getByRole('button', { name: 'Undo' }));
+      expect(screen.getByTestId('event-range-slot_1')).toHaveTextContent(originalRentalRangeText);
+      expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+      await user.click(screen.getByRole('button', { name: 'Drag Rental Slot' }));
+      await user.click(screen.getByRole('button', { name: /Save changes/ }));
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Edit schedule' })).toBeEnabled());
+      expect(updateRentalSlotMock).toHaveBeenCalledTimes(2);
+      expect(screen.getByTestId('event-range-slot_1')).toHaveTextContent(draggedRentalRangeText);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it.each(['rental slot', 'staff shift', 'official shift'])('creates and undoes a %s through the keyboard action', async (kind) => {
+    const user = userEvent.setup();
+    render(<FieldsTabContent organization={buildOrganizationWithRentalSlot()} organizationId="org_test" currentUser={{ $id: 'owner_1' } as any} />);
+    await user.click(await screen.findByRole('button', { name: 'Edit schedule' }));
+    const add = screen.getByRole('button', { name: `Add ${kind}` });
+    add.focus();
+    await user.keyboard('{Enter}');
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    expect(updateRentalSlotMock).not.toHaveBeenCalled();
   });
 
   it('undoes a staged rental slot move before saving', async () => {

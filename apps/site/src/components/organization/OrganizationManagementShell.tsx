@@ -10,6 +10,7 @@ import {
   ChevronDown,
   ChevronRight,
   CircleDollarSign,
+  CircleDot,
   ClipboardList,
   FileText,
   Globe2,
@@ -40,7 +41,8 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { OrganizationOperationLoadingState, OrganizationOperationPermissionState } from '@/components/organization/OrganizationOperationStates';
+import { OrganizationOperationPermissionState } from '@/components/organization/OrganizationOperationStates';
+import { OrganizationDataLoadingProvider } from './OrganizationDataLoading';
 import type { Organization } from '@/types';
 import type { OrganizationTab, OrganizationTabOption } from '@/app/organizations/[id]/organizationTabs';
 
@@ -120,10 +122,14 @@ function OrganizationShellLoadingState() {
   return (
     <div className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8" data-testid="organization-shell-loading" role="status" aria-live="polite">
       <span className="sr-only">Loading Organization overview</span>
-      <div className="h-36 animate-pulse rounded-lg bg-muted motion-reduce:animate-none sm:h-52" />
-      <div className="-mt-10 space-y-4 px-2 sm:-mt-14 sm:px-6">
-        <div className="h-24 w-24 animate-pulse rounded-full border-4 border-background bg-muted motion-reduce:animate-none sm:h-28 sm:w-28" />
-        <div className="h-8 w-64 animate-pulse rounded-lg bg-muted motion-reduce:animate-none" />
+      <div className="space-y-5">
+        <div className="flex items-center gap-4">
+          <div className="size-24 shrink-0 animate-pulse rounded-full border border-border bg-muted motion-reduce:animate-none sm:size-28" />
+          <div className="min-w-0 flex-1 space-y-3">
+            <div className="h-8 w-64 max-w-full animate-pulse rounded-lg bg-muted motion-reduce:animate-none" />
+            <div className="h-5 w-80 max-w-full animate-pulse rounded-lg bg-muted motion-reduce:animate-none" />
+          </div>
+        </div>
         <div className="h-11 w-full animate-pulse rounded-lg bg-muted motion-reduce:animate-none" />
         <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
           <div className="h-72 animate-pulse rounded-lg bg-muted motion-reduce:animate-none" />
@@ -132,10 +138,6 @@ function OrganizationShellLoadingState() {
       </div>
     </div>
   );
-}
-
-function OrganizationTabLoadingState({ tabLabel }: { tabLabel: string }) {
-  return <OrganizationOperationLoadingState label={tabLabel} />;
 }
 
 function OrganizationShellErrorState({
@@ -351,6 +353,118 @@ function OrganizationSectionDrawer({
   );
 }
 
+type OrganizationIdentityHeaderProps = Pick<OrganizationManagementShellProps,
+  'headerBadges' | 'headerActions' | 'canEditOrganization' | 'onEditOrganization' | 'canToggleHomePagePreference' | 'isCurrentOrganizationHomePage' | 'isUpdatingHomePagePreference' | 'onSetHomePage' | 'onShareOrganization'
+> & { organization: OrganizationShellOrganization };
+
+function organizationLogoUrl(organization: OrganizationShellOrganization): string {
+  if (organization.logoUrl) return organization.logoUrl;
+  if (organization.logoId) return `/api/files/${organization.logoId}/preview?w=160&h=160&fit=contain`;
+  return `/api/avatars/initials?name=${encodeURIComponent(organization.name)}&size=160`;
+}
+
+function OrganizationIdentityHeader({ organization, headerBadges, headerActions, canEditOrganization, onEditOrganization, canToggleHomePagePreference, isCurrentOrganizationHomePage, isUpdatingHomePagePreference, onSetHomePage, onShareOrganization }: OrganizationIdentityHeaderProps) {
+  const homePageCheckboxId = useId();
+  const logoUrl = organizationLogoUrl(organization);
+  return (
+      <section className="bg-background">
+        <div className="mx-auto max-w-[1440px] px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-col gap-4 py-5 sm:py-6">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex w-full min-w-0 flex-1 items-center gap-4 sm:w-auto">
+                <div className="grid size-24 shrink-0 place-content-center overflow-hidden rounded-full border border-border bg-card shadow-sm sm:size-28">
+                  <Image src={logoUrl} alt={`${organization.name} logo`} width={128} height={128} unoptimized className="size-full object-contain" />
+                </div>
+                <div className="min-w-0 text-foreground">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h1 className="break-words text-2xl font-semibold tracking-tight sm:text-3xl">{organization.name}</h1>
+                    {headerBadges}
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-base text-muted-foreground sm:text-sm">
+                    {organization.location && (
+                      <span className="inline-flex min-w-0 items-center gap-1.5">
+                        <MapPin aria-hidden="true" className="size-4 shrink-0" />
+                        <span className="break-words">{organization.location}</span>
+                      </span>
+                    )}
+                    {organization.sports?.map((sport, index) => (
+                      <span key={sport} className="org-shell-sport">
+                        <CircleDot aria-hidden="true" className={`size-5 ${index % 2 === 0 ? 'text-accent' : 'text-violet-500'}`} />
+                        <span>{sport}</span>
+                      </span>
+                    ))}
+                    {canToggleHomePagePreference && onSetHomePage && (
+                      <label htmlFor={homePageCheckboxId} className="inline-flex min-h-11 items-center gap-2 px-2 text-xs text-muted-foreground hover:bg-muted">
+                        <Checkbox
+                          id={homePageCheckboxId}
+                          checked={Boolean(isCurrentOrganizationHomePage)}
+                          disabled={isUpdatingHomePagePreference}
+                          onCheckedChange={(checked) => onSetHomePage(Boolean(checked))}
+                          className="text-white before:border-white/50 before:bg-transparent data-checked:before:border-accent data-checked:before:bg-accent"
+                        />
+                        Set as home page
+                      </label>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="flex w-full flex-wrap items-center justify-start gap-2 sm:w-auto sm:justify-end">
+                {onShareOrganization && (
+                  <Button variant="outline" onClick={onShareOrganization} className="border-border bg-background text-foreground hover:bg-muted">
+                    <Share2 data-icon="inline-start" aria-hidden="true" />
+                    <span>Share</span>
+                  </Button>
+                )}
+                {canEditOrganization && onEditOrganization && (
+                  <Button variant="default" onClick={onEditOrganization} className="bg-accent text-accent-foreground hover:bg-accent/90">
+                    <Pencil data-icon="inline-start" aria-hidden="true" />
+                    <span>Edit organization</span>
+                  </Button>
+                )}
+                {headerActions}
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+  );
+}
+
+function OrganizationOverviewHeading({ canCreateEvent, isCreateEventDisabled, createEventHelperText, onCreateEvent }: Pick<OrganizationManagementShellProps, 'canCreateEvent' | 'isCreateEventDisabled' | 'createEventHelperText' | 'onCreateEvent'>) {
+  return (
+          <div className="mt-6 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-2xl font-semibold tracking-tight">Organization overview</h2>
+              <p className="mt-1 text-sm text-muted-foreground">Manage the profile, activity, and people connected to this Organization.</p>
+            </div>
+            {canCreateEvent && onCreateEvent && (
+              <div className="flex flex-col items-end gap-1">
+                <Button disabled={isCreateEventDisabled} onClick={onCreateEvent}>
+                  <CalendarDays data-icon="inline-start" aria-hidden="true" />
+                  Create event
+                </Button>
+                {createEventHelperText && <p className="max-w-64 text-right text-xs text-muted-foreground">{createEventHelperText}</p>}
+              </div>
+            )}
+          </div>
+  );
+}
+
+function OrganizationRefreshError({ message, onRetry }: { message?: string | null; onRetry?: () => void }) {
+  if (!message) return null;
+  return (
+    <div role="alert" className="mt-6 rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+      <h2 className="font-semibold">Organization data could not refresh</h2>
+      <p className="mt-2 text-sm">{message}</p>
+      {onRetry && <Button variant="outline" className="mt-3" onClick={onRetry}>Try again</Button>}
+    </div>
+  );
+}
+
+function isEmptyOverview({ activeTab, isOverviewEmpty, isTabLoading }: Pick<OrganizationManagementShellProps, 'activeTab' | 'isOverviewEmpty' | 'isTabLoading'>) {
+  return activeTab === 'overview' && isOverviewEmpty && !isTabLoading;
+}
+
 export function OrganizationManagementShell({
   organization,
   status,
@@ -362,23 +476,22 @@ export function OrganizationManagementShell({
   onBackToOrganizations,
   headerBadges,
   headerActions,
-  canEditOrganization = false,
+  canEditOrganization,
   onEditOrganization,
-  canToggleHomePagePreference = false,
-  isCurrentOrganizationHomePage = false,
-  isUpdatingHomePagePreference = false,
+  canToggleHomePagePreference,
+  isCurrentOrganizationHomePage,
+  isUpdatingHomePagePreference,
   onSetHomePage,
-  canCreateEvent = false,
-  isCreateEventDisabled = false,
+  canCreateEvent,
+  isCreateEventDisabled,
   createEventHelperText,
   onCreateEvent,
-  isOverviewEmpty = false,
-  isTabLoading = false,
+  isOverviewEmpty,
+  isTabLoading,
   onShareOrganization,
   children,
 }: OrganizationManagementShellProps) {
   const [isSectionsOpen, setIsSectionsOpen] = useState(false);
-  const homePageCheckboxId = useId();
 
   if (status === 'loading') {
     return <OrganizationShellLoadingState />;
@@ -408,90 +521,9 @@ export function OrganizationManagementShell({
     );
   }
 
-  const logoUrl = organization.logoUrl
-    ?? (organization.logoId
-      ? `/api/files/${organization.logoId}/preview?w=160&h=160&fit=contain`
-      : `/api/avatars/initials?name=${encodeURIComponent(organization.name)}&size=160`);
-
   return (
     <div className="org-page-shell organization-management-shell min-w-0 bg-background text-foreground" data-testid="organization-management-shell">
-      <section className="relative overflow-hidden bg-background">
-        <div
-          aria-hidden="true"
-          className="h-36 bg-[radial-gradient(circle_at_78%_18%,rgba(20,184,166,0.36),transparent_28%),linear-gradient(120deg,#0f172a_0%,#172554_55%,#0f766e_140%)] bg-cover bg-center sm:h-52"
-          style={{
-            ...(organization.brandPrimaryColor ? { backgroundColor: organization.brandPrimaryColor } : {}),
-            ...(organization.imageUrl ? { backgroundImage: `linear-gradient(rgba(15,23,42,0.18),rgba(15,23,42,0.18)), url(${organization.imageUrl})` } : {}),
-          }}
-        >
-          <div className="mx-auto h-full max-w-[1440px] px-4 sm:px-6 lg:px-8">
-            <div className="h-full w-1/2 border-r border-white/10 opacity-60" />
-          </div>
-        </div>
-        <div className="mx-auto max-w-[1440px] px-4 sm:px-6 lg:px-8">
-          <div className="relative -mt-12 flex flex-col gap-4 pb-5 sm:-mt-16 sm:pb-7">
-            <div className="flex flex-wrap items-end justify-between gap-4">
-              <div className="flex min-w-0 flex-1 items-end gap-4">
-                <div className="grid size-24 shrink-0 place-content-center overflow-hidden rounded-full border-4 border-background bg-card shadow-lg sm:size-32">
-                  <Image src={logoUrl} alt={`${organization.name} logo`} width={128} height={128} unoptimized className="size-full object-contain" />
-                </div>
-                <div className="min-w-0 pb-1 text-foreground">
-                  <h1 className="break-words text-2xl font-semibold tracking-tight sm:text-3xl">{organization.name}</h1>
-                  <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
-                    {organization.location && (
-                      <span className="inline-flex min-w-0 items-center gap-1.5">
-                        <MapPin aria-hidden="true" className="size-4 shrink-0" />
-                        <span className="break-words">{organization.location}</span>
-                      </span>
-                    )}
-                    {organization.website && (
-                      <a href={organization.website} target="_blank" rel="noreferrer" className="inline-flex min-w-0 items-center gap-1.5 underline-offset-4 hover:underline">
-                        <Globe2 aria-hidden="true" className="size-4 shrink-0" />
-                        <span className="max-w-64 truncate">Website</span>
-                      </a>
-                    )}
-                  </div>
-                </div>
-              </div>
-              <div className="flex w-full flex-wrap items-center justify-start gap-2 sm:w-auto sm:justify-end">
-                {onShareOrganization && (
-                  <Button variant="outline" onClick={onShareOrganization} className="border-border bg-background text-foreground hover:bg-muted">
-                    <Share2 data-icon="inline-start" aria-hidden="true" />
-                    <span>Share</span>
-                  </Button>
-                )}
-                {canEditOrganization && onEditOrganization && (
-                  <Button variant="default" onClick={onEditOrganization} className="bg-accent text-accent-foreground hover:bg-accent/90">
-                    <Pencil data-icon="inline-start" aria-hidden="true" />
-                    <span>Edit organization</span>
-                  </Button>
-                )}
-                {headerActions}
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 pl-0 sm:pl-36">
-              {organization.sports?.map((sport) => (
-                <span key={sport} className="rounded-full border border-border bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
-                  {sport}
-                </span>
-              ))}
-              {headerBadges}
-              {canToggleHomePagePreference && onSetHomePage && (
-                <label htmlFor={homePageCheckboxId} className="inline-flex min-h-11 items-center gap-2 rounded-lg px-2 text-xs text-muted-foreground hover:bg-muted">
-                  <Checkbox
-                    id={homePageCheckboxId}
-                    checked={isCurrentOrganizationHomePage}
-                    disabled={isUpdatingHomePagePreference}
-                    onCheckedChange={(checked) => onSetHomePage(Boolean(checked))}
-                    className="text-white before:border-white/50 before:bg-transparent data-checked:before:border-accent data-checked:before:bg-accent"
-                  />
-                  Set as home page
-                </label>
-              )}
-            </div>
-          </div>
-        </div>
-      </section>
+      <OrganizationIdentityHeader organization={organization} headerBadges={headerBadges} headerActions={headerActions} canEditOrganization={canEditOrganization} onEditOrganization={onEditOrganization} canToggleHomePagePreference={canToggleHomePagePreference} isCurrentOrganizationHomePage={isCurrentOrganizationHomePage} isUpdatingHomePagePreference={isUpdatingHomePagePreference} onSetHomePage={onSetHomePage} onShareOrganization={onShareOrganization} />
 
       <div className="mx-auto w-full max-w-[1440px] px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
         <div className="md:hidden">
@@ -499,13 +531,15 @@ export function OrganizationManagementShell({
             variant="outline"
             aria-haspopup="dialog"
             aria-expanded={isSectionsOpen}
+            aria-label={getOrganizationTabLabel(availableTabs, activeTab)}
             onClick={() => setIsSectionsOpen(true)}
             className="w-full justify-between bg-card text-left"
           >
-            <span className="min-w-0 truncate">
-              <span>{getOrganizationTabLabel(availableTabs, activeTab)}</span>
+            <span className="flex min-w-0 flex-col items-start gap-0.5 text-left">
+              <span className="truncate font-semibold">{getOrganizationTabLabel(availableTabs, activeTab)}</span>
+              <span className="text-xs font-normal text-muted-foreground">Organization sections</span>
             </span>
-            <ChevronDown aria-hidden="true" className="size-4 shrink-0" />
+            <ChevronDown aria-hidden="true" className="size-5 shrink-0" />
           </Button>
             <OrganizationSectionDrawer
             organization={organization}
@@ -545,29 +579,10 @@ export function OrganizationManagementShell({
           </Tabs>
         </div>
 
-        {activeTab === 'overview' && (
-          <div className="mt-6 flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h2 className="text-2xl font-semibold tracking-tight">Organization overview</h2>
-              <p className="mt-1 text-sm text-muted-foreground">Manage the profile, activity, and people connected to this Organization.</p>
-            </div>
-            {canCreateEvent && onCreateEvent && (
-              <div className="flex flex-col items-end gap-1">
-                <Button disabled={isCreateEventDisabled} onClick={onCreateEvent}>
-                  <CalendarDays data-icon="inline-start" aria-hidden="true" />
-                  Create event
-                </Button>
-                {createEventHelperText && <p className="max-w-64 text-right text-xs text-muted-foreground">{createEventHelperText}</p>}
-              </div>
-            )}
-          </div>
-        )}
+        {activeTab === 'overview' && <OrganizationOverviewHeading canCreateEvent={canCreateEvent} isCreateEventDisabled={isCreateEventDisabled} createEventHelperText={createEventHelperText} onCreateEvent={onCreateEvent} />}
 
-        {isTabLoading ? (
-          <div className="mt-6 min-w-0" data-slot="organization-tab-content">
-            <OrganizationTabLoadingState tabLabel={getOrganizationTabLabel(availableTabs, activeTab)} />
-          </div>
-        ) : activeTab === 'overview' && isOverviewEmpty ? (
+        <OrganizationRefreshError message={errorMessage} onRetry={onRetry} />
+        {isEmptyOverview({ activeTab, isOverviewEmpty, isTabLoading }) ? (
           <div className="mt-6">
             <OrganizationShellEmptyOverview
               organization={organization}
@@ -579,7 +594,9 @@ export function OrganizationManagementShell({
             />
           </div>
         ) : (
-          <div className="mt-6 min-w-0" data-slot="organization-tab-content">{children}</div>
+          <div className="mt-6 min-w-0" data-slot="organization-tab-content">
+            <OrganizationDataLoadingProvider loading={Boolean(isTabLoading)}>{children}</OrganizationDataLoadingProvider>
+          </div>
         )}
       </div>
     </div>

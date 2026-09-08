@@ -1,5 +1,8 @@
 package com.razumly.mvp.eventDetail
 
+import com.razumly.mvp.core.data.dataTypes.canonicalizedOneTime
+import com.razumly.mvp.core.data.dataTypes.assertFutureOneTimeEnd
+
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfig
@@ -155,11 +158,13 @@ internal object EventEditPayloadBuilder {
             )
 
             if (!slot.repeating) {
-                val slotStartDate = slot.startDate.takeUnless { it == Instant.DISTANT_PAST } ?: event.start
-                val slotEndDate = slot.endDate ?: return@mapNotNull null
-                if (slotEndDate <= slotStartDate) {
-                    return@mapNotNull null
-                }
+                val canonical = slot.copy(
+                    startDate = slot.startDate.takeUnless { it == Instant.DISTANT_PAST } ?: event.start,
+                    startTimeMinutes = null,
+                    endTimeMinutes = null,
+                ).canonicalizedOneTime()
+                val slotStartDate = canonical.startDate
+                val slotEndDate = requireNotNull(canonical.endDate)
                 val slotDayOfWeek = slotStartDate.toMondayFirstDay(slotTimeZone)
                 return@mapNotNull slot.copy(
                     id = slot.id.ifBlank { idFactory() },
@@ -249,14 +254,18 @@ internal object EventEditPayloadBuilder {
             hasRentalBackedSlots
     }
 }
-internal fun EventEditPayloadResult.omitUnchangedManagedCollections(
+internal fun EventEditPayloadResult.validateAndKeepChangedManagedCollections(
     currentFields: List<Field>,
     baselineFields: List<Field>?,
     currentTimeSlots: List<TimeSlot>,
     baselineTimeSlots: List<TimeSlot>?,
+    now: Instant = Clock.System.now(),
 ): EventEditPayloadResult {
     val fieldsChanged = baselineFields == null || !editableFieldsMatch(currentFields, baselineFields)
     val timeSlotsChanged = baselineTimeSlots == null || currentTimeSlots != baselineTimeSlots
+    if (timeSlotsChanged) {
+        prepared.timeSlots?.forEach { it.assertFutureOneTimeEnd(now) }
+    }
     return copy(
         prepared = prepared.copy(
             fields = prepared.fields?.takeIf { fieldsChanged },

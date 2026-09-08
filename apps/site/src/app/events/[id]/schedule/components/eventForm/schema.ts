@@ -1,107 +1,130 @@
-import { z } from 'zod';
+import { z } from "zod";
 
-import type { LeagueSlotForm } from '@/app/discover/components/LeagueFields';
-import { resolveOneTimeTimeSlot } from '@/lib/timeSlotAvailability';
-import { parseDateTimeInTimeZone, parseLocalDateTime } from '@/lib/dateUtils';
-import { evaluatePlayoffPlacementCapacities } from '@/lib/divisionCapacity';
+import type { LeagueSlotForm } from "@/app/discover/components/LeagueFields";
+import { resolveOneTimeTimeSlot } from "@/lib/timeSlotAvailability";
+import { parseDateTimeInTimeZone, parseLocalDateTime } from "@/lib/dateUtils";
+import { evaluatePlayoffPlacementCapacities } from "@/lib/divisionCapacity";
 import {
-    hasWeeklyRepeatingTimeSlot,
-    WEEKLY_REPEATING_TIME_SLOT_REQUIRED_MESSAGE,
-} from '@/lib/eventScheduling';
-import { getManualPaymentLinkError } from '@/lib/manualRegistrationPayments';
+  hasWeeklyRepeatingTimeSlot,
+  WEEKLY_REPEATING_TIME_SLOT_REQUIRED_MESSAGE,
+} from "@/lib/eventScheduling";
+import { getManualPaymentLinkError } from "@/lib/manualRegistrationPayments";
 import {
-    GENERIC_RESOURCE_LABELS,
-    getSportResourceLabels,
-} from '@/lib/sportResourceLabels';
-import type { Field, RegistrationQuestionDraft } from '@/types';
-import { STAFFING_PRIORITIES } from '@/server/officials/config';
+  GENERIC_RESOURCE_LABELS,
+  getSportResourceLabels,
+} from "@/lib/sportResourceLabels";
+import type { Field, RegistrationQuestionDraft } from "@/types";
+import { STAFFING_PRIORITIES } from "@/server/officials/config";
 import {
-    registrationQuestionInputSchema,
-    type RegistrationQuestionInput,
-} from '@/contracts/eventEditor';
-import { requiresOrganizationEventFieldSelection } from '../eventFieldSelection';
+  registrationQuestionInputSchema,
+  type RegistrationQuestionInput,
+} from "@/contracts/eventEditor";
+import { requiresOrganizationEventFieldSelection } from "../eventFieldSelection";
 import {
-    buildSlotDivisionLookup,
-    normalizeDivisionKeys,
-    normalizePlayoffDivisionParticipantCount,
-    normalizeSlotDivisionKeysWithLookup,
-} from './divisionForm';
-import { hasAffiliateUrl, isTournamentPoolPlayFormEnabled, supportsScheduleSlotsForEvent } from './eventRules';
+  buildSlotDivisionLookup,
+  normalizeDivisionKeys,
+  normalizePlayoffDivisionParticipantCount,
+  normalizeSlotDivisionKeysWithLookup,
+} from "./divisionForm";
 import {
-    findDuplicateDivisionNames,
-    isGeneratedPhaseDivisionNameCandidate,
-    MIN_BRACKET_TEAM_COUNT,
-    normalizeDivisionNameKey,
-} from '@/lib/divisionTypes';
-import { BRACKET_TEAM_COUNT_ERROR } from './divisionMessages';
-import { coordinatesAreSet } from './locationHelpers';
-import { getFieldOrganizationId } from '../externalRentalField';
-import { isEventLocalField } from './resourceGroups';
-import { stringSetsEqual } from './shared';
-import { normalizeSlotFieldIds, normalizeWeekdays } from './slotForm';
-import { computeOneTimeSlotBoundsError, computeRepeatingSlotTemporalError, computeSlotError } from './slotValidation';
+  hasAffiliateUrl,
+  isTournamentPoolPlayFormEnabled,
+  supportsScheduleSlotsForEvent,
+} from "./eventRules";
+import {
+  findDuplicateDivisionNames,
+  isGeneratedPhaseDivisionNameCandidate,
+  MIN_BRACKET_TEAM_COUNT,
+  normalizeDivisionNameKey,
+} from "@/lib/divisionTypes";
+import { BRACKET_TEAM_COUNT_ERROR } from "./divisionMessages";
+import { coordinatesAreSet } from "./locationHelpers";
+import { getFieldOrganizationId } from "../externalRentalField";
+import { isEventLocalField } from "./resourceGroups";
+import { stringSetsEqual } from "./shared";
+import { normalizeSlotFieldIds, normalizeWeekdays } from "./slotForm";
+import {
+  computeOneTimeSlotBoundsError,
+  computeRepeatingSlotTemporalError,
+  computeSlotError,
+} from "./slotValidation";
 
 const normalizeRegistrationQuestionDraft = (
-    question: RegistrationQuestionDraft,
-    index: number,
+  question: RegistrationQuestionDraft,
+  index: number,
 ): RegistrationQuestionInput => {
-    const id = typeof question.id === 'string' ? question.id.trim() : '';
-    const clientId = typeof question.clientId === 'string' ? question.clientId.trim() : '';
-    return {
-        ...(id ? { id } : { clientId: clientId || `question-client-${index + 1}` }),
-        prompt: question.prompt,
-        answerType: question.answerType ?? 'TEXT',
-        required: Boolean(question.required),
-        sortOrder: Number.isFinite(Number(question.sortOrder))
-            ? Number(question.sortOrder)
-            : index,
-    };
+  const id = typeof question.id === "string" ? question.id.trim() : "";
+  const clientId =
+    typeof question.clientId === "string" ? question.clientId.trim() : "";
+  return {
+    ...(id ? { id } : { clientId: clientId || `question-client-${index + 1}` }),
+    prompt: question.prompt,
+    answerType: question.answerType ?? "TEXT",
+    required: Boolean(question.required),
+    sortOrder: Number.isFinite(Number(question.sortOrder))
+      ? Number(question.sortOrder)
+      : index,
+  };
 };
 
 export const buildRegistrationQuestionValidationIssues = (
-    questions: RegistrationQuestionDraft[],
-): z.ZodIssue[] => questions.flatMap((question, index) => {
-    if (String(question.prompt ?? '').trim().length === 0) return [];
+  questions: RegistrationQuestionDraft[],
+): z.ZodIssue[] =>
+  questions.flatMap((question, index) => {
+    if (String(question.prompt ?? "").trim().length === 0) return [];
     const result = registrationQuestionInputSchema.safeParse(
-        normalizeRegistrationQuestionDraft(question, index),
+      normalizeRegistrationQuestionDraft(question, index),
     );
     if (result.success) return [];
     return result.error.issues.map((issue) => ({
-        ...issue,
-        path: ['registrationQuestions', index, ...issue.path],
+      ...issue,
+      path: ["registrationQuestions", index, ...issue.path],
     }));
-});
+  });
 
 const leagueSlotSchema: z.ZodType<LeagueSlotForm> = z.object({
-    key: z.string(),
-    $id: z.string().optional(),
-    scheduledFieldId: z.string().optional(),
-    scheduledFieldIds: z.array(z.string()).default([]),
-    dayOfWeek: z.number().int().min(0).max(6).optional(),
-    daysOfWeek: z.array(z.number().int().min(0).max(6)).optional(),
-    divisions: z.array(z.string()).default([]),
-    startDate: z.string().optional(),
-    endDate: z.string().optional(),
-    timeZone: z.string().optional(),
-    startTimeMinutes: z.number().int().nonnegative().max(24 * 60 - 1).optional(),
-    endTimeMinutes: z.number().int().nonnegative().max(24 * 60).optional(),
-    price: z.number().int().nonnegative().optional(),
-    sourceType: z.string().nullable().optional(),
-    rentalBookingId: z.string().nullable().optional(),
-    rentalBookingItemId: z.string().nullable().optional(),
-    rentalLocked: z.boolean().optional(),
-    requiredTemplateIds: z.array(z.string()).optional(),
-    hostRequiredTemplateIds: z.array(z.string()).optional(),
-    repeating: z.boolean().optional(),
-    conflicts: z.array(z.any()).default([]),
-    checking: z.boolean().default(false),
-    error: z.string().optional(),
+  key: z.string(),
+  $id: z.string().optional(),
+  scheduledFieldId: z.string().optional(),
+  scheduledFieldIds: z.array(z.string()).default([]),
+  dayOfWeek: z.number().int().min(0).max(6).optional(),
+  daysOfWeek: z.array(z.number().int().min(0).max(6)).optional(),
+  divisions: z.array(z.string()).default([]),
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+  timeZone: z.string().optional(),
+  startTimeMinutes: z
+    .number()
+    .int()
+    .nonnegative()
+    .max(24 * 60 - 1)
+    .optional(),
+  endTimeMinutes: z
+    .number()
+    .int()
+    .nonnegative()
+    .max(24 * 60)
+    .optional(),
+  price: z.number().int().nonnegative().optional(),
+  sourceType: z.string().nullable().optional(),
+  rentalBookingId: z.string().nullable().optional(),
+  rentalBookingItemId: z.string().nullable().optional(),
+  rentalLocked: z.boolean().optional(),
+  requiredTemplateIds: z.array(z.string()).optional(),
+  hostRequiredTemplateIds: z.array(z.string()).optional(),
+  repeating: z.boolean().optional(),
+  conflicts: z.array(z.any()).default([]),
+  checking: z.boolean().default(false),
+  error: z.string().optional(),
 });
 
-const RENTAL_SLOT_MISMATCH_ERROR_MARKER = ' is only available for ';
+const RENTAL_SLOT_MISMATCH_ERROR_MARKER = " is only available for ";
 
-const matchRulesConfigSchema = z.object({
-    scoringModel: z.enum(['SETS', 'PERIODS', 'INNINGS', 'POINTS_ONLY']).optional(),
+const matchRulesConfigSchema = z
+  .object({
+    scoringModel: z
+      .enum(["SETS", "PERIODS", "INNINGS", "POINTS_ONLY"])
+      .optional(),
     segmentCount: z.number().int().positive().optional(),
     segmentLabel: z.string().trim().optional(),
     supportsDraw: z.boolean().optional(),
@@ -111,961 +134,1285 @@ const matchRulesConfigSchema = z.object({
     canUseShootout: z.boolean().optional(),
     officialRoles: z.array(z.string()).optional(),
     supportedIncidentTypes: z.array(z.string()).optional(),
-    incidentTypeDefinitions: z.array(z.object({
-        code: z.string().trim(),
-        label: z.string().trim(),
-        kind: z.enum(['SCORING', 'DISCIPLINE', 'NOTE', 'ADMIN']),
-        cardColor: z.enum(['yellow', 'red', 'blue']).nullable().optional(),
-        requiresTeam: z.boolean().optional(),
-        requiresParticipant: z.boolean().optional(),
-        defaultEnabled: z.boolean().optional(),
-        linkedPointDelta: z.number().int().nullable().optional(),
-        metadata: z.record(z.string(), z.unknown()).nullable().optional(),
-    })).optional(),
+    incidentTypeDefinitions: z
+      .array(
+        z.object({
+          code: z.string().trim(),
+          label: z.string().trim(),
+          kind: z.enum(["SCORING", "DISCIPLINE", "NOTE", "ADMIN"]),
+          cardColor: z.enum(["yellow", "red", "blue"]).nullable().optional(),
+          requiresTeam: z.boolean().optional(),
+          requiresParticipant: z.boolean().optional(),
+          defaultEnabled: z.boolean().optional(),
+          linkedPointDelta: z.number().int().nullable().optional(),
+          metadata: z.record(z.string(), z.unknown()).nullable().optional(),
+        }),
+      )
+      .optional(),
     autoCreatePointIncidentType: z.string().trim().optional(),
-    timekeeping: z.object({
-        timerMode: z.enum(['NONE', 'COUNT_UP']).optional(),
-        segmentDurationMinutes: z.number().int().positive().nullable().optional(),
-        segmentDurationMinutesBySequence: z.array(z.number().int().positive()).optional(),
+    timekeeping: z
+      .object({
+        timerMode: z.enum(["NONE", "COUNT_UP"]).optional(),
+        segmentDurationMinutes: z
+          .number()
+          .int()
+          .positive()
+          .nullable()
+          .optional(),
+        segmentDurationMinutesBySequence: z
+          .array(z.number().int().positive())
+          .optional(),
         canUseAddedTime: z.boolean().optional(),
         addedTimeEnabled: z.boolean().optional(),
         stopAtRegulationEnd: z.boolean().optional(),
-    }).optional(),
-}).nullable().optional();
+      })
+      .optional(),
+  })
+  .nullable()
+  .optional();
 
 const divisionPhaseSchema = z.object({
-        matchRulesOverride: matchRulesConfigSchema,
-        autoCreatePointMatchIncidents: z.boolean().optional(),
-        segmentLengthMinutes: z.number()
-            .int()
-            .min(1, 'Enter at least 1 minute.')
-            .nullable()
-            .optional()
-            .refine((value) => value !== null, 'Enter at least 1 minute.'),
-        segmentBreakMinutes: z.number().int().nonnegative().nullable().optional(),
-    });
+  matchRulesOverride: matchRulesConfigSchema,
+  autoCreatePointMatchIncidents: z.boolean().optional(),
+  segmentLengthMinutes: z
+    .number()
+    .int()
+    .min(1, "Enter at least 1 minute.")
+    .nullable()
+    .optional()
+    .refine((value) => value !== null, "Enter at least 1 minute."),
+  segmentBreakMinutes: z.number().int().nonnegative().nullable().optional(),
+});
 
-const divisionPhaseSettingsSchema = z.object({
+const divisionPhaseSettingsSchema = z
+  .object({
     LEAGUE: divisionPhaseSchema.optional(),
     POOL: divisionPhaseSchema.optional(),
     BRACKET: divisionPhaseSchema.optional(),
     PLAYOFF: divisionPhaseSchema.optional(),
-}).default({});
+  })
+  .default({});
 
 const tournamentConfigSchema = z.object({
-    doubleElimination: z.boolean(),
-    winnerSetCount: z.number().min(1),
-    loserSetCount: z.number().min(1),
-    winnerBracketPointsToVictory: z.array(z.number()),
-    loserBracketPointsToVictory: z.array(z.number()),
-    prize: z.string(),
-    fieldCount: z.number().min(0),
-    restTimeMinutes: z.number().min(0),
-    usesSets: z.boolean().optional(),
-    matchDurationMinutes: z.number().optional(),
-    setDurationMinutes: z.number().optional(),
+  doubleElimination: z.boolean(),
+  winnerSetCount: z.number().min(1),
+  loserSetCount: z.number().min(1),
+  winnerBracketPointsToVictory: z.array(z.number()),
+  loserBracketPointsToVictory: z.array(z.number()),
+  prize: z.string(),
+  fieldCount: z.number().min(0),
+  restTimeMinutes: z.number().min(0),
+  usesSets: z.boolean().optional(),
+  matchDurationMinutes: z.number().optional(),
+  setDurationMinutes: z.number().optional(),
 });
 
 export type EventFormSchemaOptions = {
-    allowMissingEventImage?: boolean;
-    allowMissingEventDivisions?: boolean;
+  allowMissingEventImage?: boolean;
+  allowMissingEventDivisions?: boolean;
 };
 
-export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
+export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) =>
+  z
     .object({
-        $id: z.string(),
-        name: z.string().trim().min(1, 'Event name is required'),
-        description: z.string().default(''),
-        isAffiliateEvent: z.boolean().default(false),
-        affiliateUrl: z.string().trim().default(''),
-        registrationPaymentMode: z.enum(['ONLINE', 'MANUAL']).default('ONLINE'),
-        manualPaymentLinks: z.array(z.object({
+      $id: z.string(),
+      name: z.string().trim().min(1, "Event name is required"),
+      description: z.string().default(""),
+      isAffiliateEvent: z.boolean().default(false),
+      affiliateUrl: z.string().trim().default(""),
+      registrationPaymentMode: z.enum(["ONLINE", "MANUAL"]).default("ONLINE"),
+      manualPaymentLinks: z
+        .array(
+          z.object({
             id: z.string().optional(),
-            provider: z.enum(['CASH_APP', 'VENMO', 'PAYPAL', 'STRIPE', 'ZELLE', 'OTHER']),
+            provider: z.enum([
+              "CASH_APP",
+              "VENMO",
+              "PAYPAL",
+              "STRIPE",
+              "ZELLE",
+              "OTHER",
+            ]),
             label: z.string().trim().optional(),
             url: z.string().trim(),
-        })).default([]),
-        manualPaymentInstructions: z.string().trim().default(''),
-        tags: z.array(z.object({
+          }),
+        )
+        .default([]),
+      manualPaymentInstructions: z.string().trim().default(""),
+      tags: z
+        .array(
+          z.object({
             id: z.string().optional(),
             $id: z.string().optional(),
             name: z.string().trim().min(1),
             slug: z.string().optional(),
-        })).default([]),
-        location: z.string().trim(),
-        address: z.string().trim().default(''),
-        coordinates: z.tuple([z.number(), z.number()]),
-        start: z.string(),
-        end: z
-            .string()
-            .nullable()
-            .optional()
-            .transform((value) => value ?? ''),
-        timeZone: z.string().trim().default('UTC'),
-        state: z.string().default('DRAFT'),
-        eventType: z.enum(['EVENT', 'TOURNAMENT', 'LEAGUE', 'WEEKLY_EVENT', 'TRYOUT']),
-        parentEvent: z.string().optional().nullable(),
-        sportIds: z.array(z.string().trim().min(1)).default([]).refine(
-            (sportIds) => sportIds.length > 0,
-            { message: 'Sport is required' },
-        ),
-        sportConfig: z.any().nullable(),
-        price: z.number().int().min(0, 'Price must be at least 0'),
-        minAge: z.number().int().min(0).optional(),
-        maxAge: z.number().int().min(0).optional(),
-        allowPaymentPlans: z.boolean().default(false),
-        installmentCount: z.number().int().min(0).default(0),
-        installmentDueDates: z.array(z.string()).default([]),
-        installmentDueRelativeDays: z.array(z.number().int()).default([]),
-        installmentAmounts: z.array(z.number().int().min(0)).default([]),
-        allowTeamSplitDefault: z.boolean().default(false),
-        maxParticipants: z.number().min(2, 'Enter at least 2').nullable(),
-        teamSizeLimit: z.number().min(1, 'Enter at least 1').nullable(),
-        teamSignup: z.boolean(),
-        singleDivision: z.boolean(),
-        splitLeaguePlayoffDivisions: z.boolean().default(false),
-        registrationByDivisionType: z.boolean().default(false),
-        divisions: z.array(z.string()),
-        divisionDetails: z.array(
-            z.object({
-                id: z.string().trim().min(1),
-                sourceDivisionId: z.string().trim().min(1).optional(),
-                key: z.string().trim().min(1),
-                kind: z.enum(['LEAGUE', 'PLAYOFF']).optional(),
-                isSystemGenerated: z.boolean().optional(),
-                name: z.string().trim().min(1),
-                divisionTypeId: z.string().trim().min(1),
-                divisionTypeName: z.string().trim().min(1),
-                ratingType: z.enum(['AGE', 'SKILL']),
-                gender: z.enum(['M', 'F', 'C']),
-                skillDivisionTypeId: z.string().trim().min(1),
-                skillDivisionTypeName: z.string().trim().min(1),
-                ageDivisionTypeId: z.string().trim().min(1),
-                ageDivisionTypeName: z.string().trim().min(1),
-                price: z.number().int().min(0),
-                maxParticipants: z.number().int().min(2),
-                playoffTeamCount: z.number().optional(),
-                poolCount: z.number().int().min(1).optional(),
-                poolTeamCount: z.number().int().min(1).optional(),
-                phaseSettings: divisionPhaseSettingsSchema,
-                playoffPlacementDivisionIds: z.array(z.string()).optional(),
-                gamesPerOpponent: z.number().min(1).optional(),
-                restTimeMinutes: z.number().min(0).optional(),
-                usesSets: z.boolean().optional(),
-                matchDurationMinutes: z.number().optional(),
-                setDurationMinutes: z.number().optional(),
-                setsPerMatch: z.number().optional(),
-                pointsToVictory: z.array(z.number()).optional(),
-                playoffConfig: z.any().optional(),
-                allowPaymentPlans: z.boolean().default(false),
-                installmentCount: z.number().int().min(0).default(0),
-                installmentDueDates: z.array(z.string()).default([]),
-                installmentDueRelativeDays: z.array(z.number().int()).default([]),
-                installmentAmounts: z.array(z.number().int().min(0)).default([]),
-                sportId: z.string().optional(),
-                fieldIds: z.array(z.string()).optional(),
-                ageCutoffDate: z.string().optional(),
-                ageCutoffLabel: z.string().optional(),
-                ageCutoffSource: z.string().optional(),
-            }),
-        ).default([]),
-        playoffDivisionDetails: z.array(
-            z.object({
-                id: z.string().trim().min(1),
-                sourceDivisionId: z.string().trim().min(1).optional(),
-                key: z.string().trim().min(1),
-                kind: z.literal('PLAYOFF').default('PLAYOFF'),
-                isSystemGenerated: z.boolean().optional(),
-                name: z.string().trim().min(1),
-                maxParticipants: z.number().int().nullable(),
-                playoffConfig: z.any(),
-                phaseSettings: divisionPhaseSettingsSchema,
-            }),
-        ).default([]),
-        divisionFieldIds: z.record(z.string(), z.array(z.string())).default({}),
-        selectedFieldIds: z.array(z.string()).default([]),
-        cancellationRefundHours: z.number().min(0).nullable(),
-        registrationCutoffHours: z.number().min(0),
-        organizationId: z.string().optional(),
-        taxHandling: z.enum([
-            'INHERIT_ORG',
-            'STRIPE_TAX',
-            'EXEMPT_PARTICIPANT_SPORTS',
-            'ORGANIZER_MANUAL_TAX',
-            'ORGANIZER_STRIPE_TAX',
-        ]).default('INHERIT_ORG'),
-        organizerManualTaxRateBps: z.number().int().min(0).max(2500).default(0),
-        requiredTemplateIds: z.array(z.string()).default([]),
-        hostId: z.string().optional(),
-        noFixedEndDateTime: z.boolean().default(false),
-        isAutomatedScheduling: z.boolean().default(true),
-        imageId: options.allowMissingEventImage
-            ? z.string().trim().default('')
-            : z.string().trim().min(1, 'Event image is required'),
-        seedColor: z.number(),
-        waitList: z.array(z.string()),
-        freeAgents: z.array(z.string()),
-        players: z.array(z.any()),
-        teams: z.array(z.any()),
-        officials: z.array(z.any()),
-        officialIds: z.array(z.string()),
-        staffingPriority: z.enum(STAFFING_PRIORITIES).default('BEST_AVAILABLE_COVERAGE'),
-        officialPositions: z.array(
-            z.object({
-                id: z.string().trim().min(1),
-                name: z.string().trim().min(1),
-                count: z.number().int().min(1),
-                order: z.number().int().min(0),
-            }),
-        ).default([]),
-        eventOfficials: z.array(
-            z.object({
-                id: z.string().trim().min(1),
-                userId: z.string().trim().min(1),
-                positionIds: z.array(z.string()).default([]),
-                fieldIds: z.array(z.string()).default([]),
-                isActive: z.boolean().optional(),
-            }),
-        ).default([]),
-        pendingStaffInvites: z.array(
-            z.object({
-                firstName: z.string().default(''),
-                lastName: z.string().default(''),
-                email: z.string().default(''),
-                roles: z.array(z.enum(['OFFICIAL', 'ASSISTANT_HOST'])).default([]),
-            }),
-        ).default([]),
-        assistantHostIds: z.array(z.string()).default([]),
-        doTeamsOfficiate: z.boolean(),
-        teamOfficialsMaySwap: z.boolean().default(false),
-        teamCheckInMode: z.enum(['OFF', 'EVENT', 'MATCH']).default('OFF'),
-        teamCheckInOpenMinutesBefore: z.number().min(0).default(60),
-        allowMatchRosterEdits: z.boolean().default(false),
-        allowTemporaryMatchPlayers: z.boolean().default(false),
-        matchRulesOverride: matchRulesConfigSchema.default(null),
-        autoCreatePointMatchIncidents: z.boolean().default(false),
-        leagueScoringConfig: z.any(),
-        leagueSlots: z.array(leagueSlotSchema),
-        leagueData: z.object({
-            gamesPerOpponent: z.number().min(1),
-            includePlayoffs: z.boolean(),
+          }),
+        )
+        .default([]),
+      location: z.string().trim(),
+      address: z.string().trim().default(""),
+      coordinates: z.tuple([z.number(), z.number()]),
+      start: z.string(),
+      end: z
+        .string()
+        .nullable()
+        .optional()
+        .transform((value) => value ?? ""),
+      timeZone: z.string().trim().default("UTC"),
+      state: z.string().default("DRAFT"),
+      eventType: z.enum([
+        "EVENT",
+        "TOURNAMENT",
+        "LEAGUE",
+        "WEEKLY_EVENT",
+        "TRYOUT",
+      ]),
+      parentEvent: z.string().optional().nullable(),
+      sportIds: z
+        .array(z.string().trim().min(1))
+        .default([])
+        .refine((sportIds) => sportIds.length > 0, {
+          message: "Sport is required",
+        }),
+      sportConfig: z.any().nullable(),
+      price: z.number().int().min(0, "Price must be at least 0"),
+      minAge: z.number().int().min(0).optional(),
+      maxAge: z.number().int().min(0).optional(),
+      allowPaymentPlans: z.boolean().default(false),
+      installmentCount: z.number().int().min(0).default(0),
+      installmentDueDates: z.array(z.string()).default([]),
+      installmentDueRelativeDays: z.array(z.number().int()).default([]),
+      installmentAmounts: z.array(z.number().int().min(0)).default([]),
+      allowTeamSplitDefault: z.boolean().default(false),
+      maxParticipants: z.number().min(2, "Enter at least 2").nullable(),
+      teamSizeLimit: z.number().min(1, "Enter at least 1").nullable(),
+      teamSignup: z.boolean(),
+      singleDivision: z.boolean(),
+      splitLeaguePlayoffDivisions: z.boolean().default(false),
+      registrationByDivisionType: z.boolean().default(false),
+      divisions: z.array(z.string()),
+      divisionDetails: z
+        .array(
+          z.object({
+            id: z.string().trim().min(1),
+            sourceDivisionId: z.string().trim().min(1).optional(),
+            key: z.string().trim().min(1),
+            kind: z.enum(["LEAGUE", "PLAYOFF"]).optional(),
+            isSystemGenerated: z.boolean().optional(),
+            name: z.string().trim().min(1),
+            divisionTypeId: z.string().trim().min(1),
+            divisionTypeName: z.string().trim().min(1),
+            ratingType: z.enum(["AGE", "SKILL"]),
+            gender: z.enum(["M", "F", "C"]),
+            skillDivisionTypeId: z.string().trim().min(1),
+            skillDivisionTypeName: z.string().trim().min(1),
+            ageDivisionTypeId: z.string().trim().min(1),
+            ageDivisionTypeName: z.string().trim().min(1),
+            price: z.number().int().min(0),
+            maxParticipants: z.number().int().min(2),
             playoffTeamCount: z.number().optional(),
+            poolCount: z.number().int().min(1).optional(),
+            poolTeamCount: z.number().int().min(1).optional(),
+            phaseSettings: divisionPhaseSettingsSchema,
+            playoffPlacementDivisionIds: z.array(z.string()).optional(),
+            gamesPerOpponent: z.number().min(1).optional(),
+            restTimeMinutes: z.number().min(0).optional(),
             usesSets: z.boolean().optional(),
             matchDurationMinutes: z.number().optional(),
-            restTimeMinutes: z.number().min(0).optional(),
             setDurationMinutes: z.number().optional(),
             setsPerMatch: z.number().optional(),
             pointsToVictory: z.array(z.number()).optional(),
-        }),
-        playoffData: tournamentConfigSchema,
-        tournamentData: tournamentConfigSchema,
-        fields: z.array(z.any()),
-        fieldCount: z.number().min(0),
-        joinAsParticipant: z.boolean(),
+            playoffConfig: z.any().optional(),
+            allowPaymentPlans: z.boolean().default(false),
+            installmentCount: z.number().int().min(0).default(0),
+            installmentDueDates: z.array(z.string()).default([]),
+            installmentDueRelativeDays: z.array(z.number().int()).default([]),
+            installmentAmounts: z.array(z.number().int().min(0)).default([]),
+            sportId: z.string().optional(),
+            fieldIds: z.array(z.string()).optional(),
+            ageCutoffDate: z.string().optional(),
+            ageCutoffLabel: z.string().optional(),
+            ageCutoffSource: z.string().optional(),
+          }),
+        )
+        .default([]),
+      playoffDivisionDetails: z
+        .array(
+          z.object({
+            id: z.string().trim().min(1),
+            sourceDivisionId: z.string().trim().min(1).optional(),
+            key: z.string().trim().min(1),
+            kind: z.literal("PLAYOFF").default("PLAYOFF"),
+            isSystemGenerated: z.boolean().optional(),
+            name: z.string().trim().min(1),
+            maxParticipants: z.number().int().nullable(),
+            playoffConfig: z.any(),
+            phaseSettings: divisionPhaseSettingsSchema,
+          }),
+        )
+        .default([]),
+      divisionFieldIds: z.record(z.string(), z.array(z.string())).default({}),
+      selectedFieldIds: z.array(z.string()).default([]),
+      cancellationRefundHours: z.number().min(0).nullable(),
+      registrationCutoffHours: z.number().min(0),
+      organizationId: z.string().optional(),
+      taxHandling: z
+        .enum([
+          "INHERIT_ORG",
+          "STRIPE_TAX",
+          "EXEMPT_PARTICIPANT_SPORTS",
+          "ORGANIZER_MANUAL_TAX",
+          "ORGANIZER_STRIPE_TAX",
+        ])
+        .default("INHERIT_ORG"),
+      organizerManualTaxRateBps: z.number().int().min(0).max(2500).default(0),
+      requiredTemplateIds: z.array(z.string()).default([]),
+      hostId: z.string().optional(),
+      noFixedEndDateTime: z.boolean().default(false),
+      isAutomatedScheduling: z.boolean().default(true),
+      imageId: options.allowMissingEventImage
+        ? z.string().trim().default("")
+        : z.string().trim().min(1, "Event image is required"),
+      seedColor: z.number(),
+      waitList: z.array(z.string()),
+      freeAgents: z.array(z.string()),
+      players: z.array(z.any()),
+      teams: z.array(z.any()),
+      officials: z.array(z.any()),
+      officialIds: z.array(z.string()),
+      staffingPriority: z
+        .enum(STAFFING_PRIORITIES)
+        .default("BEST_AVAILABLE_COVERAGE"),
+      officialPositions: z
+        .array(
+          z.object({
+            id: z.string().trim().min(1),
+            name: z.string().trim().min(1),
+            count: z.number().int().min(1),
+            order: z.number().int().min(0),
+          }),
+        )
+        .default([]),
+      eventOfficials: z
+        .array(
+          z.object({
+            id: z.string().trim().min(1),
+            userId: z.string().trim().min(1),
+            positionIds: z.array(z.string()).default([]),
+            fieldIds: z.array(z.string()).default([]),
+            isActive: z.boolean().optional(),
+          }),
+        )
+        .default([]),
+      pendingStaffInvites: z
+        .array(
+          z.object({
+            firstName: z.string().default(""),
+            lastName: z.string().default(""),
+            email: z.string().default(""),
+            roles: z.array(z.enum(["OFFICIAL", "ASSISTANT_HOST"])).default([]),
+          }),
+        )
+        .default([]),
+      assistantHostIds: z.array(z.string()).default([]),
+      doTeamsOfficiate: z.boolean(),
+      teamOfficialsMaySwap: z.boolean().default(false),
+      teamCheckInMode: z.enum(["OFF", "EVENT", "MATCH"]).default("OFF"),
+      teamCheckInOpenMinutesBefore: z.number().min(0).default(60),
+      allowMatchRosterEdits: z.boolean().default(false),
+      allowTemporaryMatchPlayers: z.boolean().default(false),
+      matchRulesOverride: matchRulesConfigSchema.default(null),
+      autoCreatePointMatchIncidents: z.boolean().default(false),
+      leagueScoringConfig: z.any(),
+      leagueSlots: z.array(leagueSlotSchema),
+      leagueData: z.object({
+        gamesPerOpponent: z.number().min(1),
+        includePlayoffs: z.boolean(),
+        playoffTeamCount: z.number().optional(),
+        usesSets: z.boolean().optional(),
+        matchDurationMinutes: z.number().optional(),
+        restTimeMinutes: z.number().min(0).optional(),
+        setDurationMinutes: z.number().optional(),
+        setsPerMatch: z.number().optional(),
+        pointsToVictory: z.array(z.number()).optional(),
+      }),
+      playoffData: tournamentConfigSchema,
+      tournamentData: tournamentConfigSchema,
+      fields: z.array(z.any()),
+      fieldCount: z.number().min(0),
+      joinAsParticipant: z.boolean(),
     })
     .superRefine((values, ctx) => {
+      function validateUniqueDivisionNames() {
         const namedDivisionCandidates = [
-            ...values.divisionDetails.map((detail, index) => ({
-                detail,
-                path: ['divisionDetails', index, 'name'] as const,
-            })),
-            ...values.playoffDivisionDetails.map((detail, index) => ({
-                detail,
-                path: ['playoffDivisionDetails', index, 'name'] as const,
-            })),
+          ...values.divisionDetails.map((detail, index) => ({
+            detail,
+            path: ["divisionDetails", index, "name"] as const,
+          })),
+          ...values.playoffDivisionDetails.map((detail, index) => ({
+            detail,
+            path: ["playoffDivisionDetails", index, "name"] as const,
+          })),
         ].filter(
-            ({ detail }) => !isGeneratedPhaseDivisionNameCandidate(detail),
+          ({ detail }) => !isGeneratedPhaseDivisionNameCandidate(detail),
         );
         const duplicateNameKeys = new Set(
-            findDuplicateDivisionNames(namedDivisionCandidates.map(({ detail }) => detail))
-                .map(normalizeDivisionNameKey),
+          findDuplicateDivisionNames(
+            namedDivisionCandidates.map(({ detail }) => detail),
+          ).map(normalizeDivisionNameKey),
         );
         const seenDivisionIds = new Set<string>();
         const seenDivisionNameKeys = new Set<string>();
         namedDivisionCandidates.forEach(({ detail, path }) => {
-            const id = detail.id.trim().toLowerCase();
-            if (id && seenDivisionIds.has(id)) {
-                return;
-            }
-            if (id) {
-                seenDivisionIds.add(id);
-            }
-            const nameKey = normalizeDivisionNameKey(detail.name);
-            if (duplicateNameKeys.has(nameKey) && seenDivisionNameKeys.has(nameKey)) {
-                ctx.addIssue({
-                    code: 'custom',
-                    message: 'Division name must be unique within this event. Choose a different name.',
-                    path: [...path],
-                });
-            }
-            seenDivisionNameKeys.add(nameKey);
+          const id = detail.id.trim().toLowerCase();
+          if (id && seenDivisionIds.has(id)) {
+            return;
+          }
+          if (id) {
+            seenDivisionIds.add(id);
+          }
+          const nameKey = normalizeDivisionNameKey(detail.name);
+          if (
+            duplicateNameKeys.has(nameKey) &&
+            seenDivisionNameKeys.has(nameKey)
+          ) {
+            ctx.addIssue({
+              code: "custom",
+              message:
+                "Division name must be unique within this event. Choose a different name.",
+              path: [...path],
+            });
+          }
+          seenDivisionNameKeys.add(nameKey);
         });
+      }
+      validateUniqueDivisionNames();
 
-        const sportConfig = values.sportConfig && typeof values.sportConfig === 'object'
-            ? values.sportConfig as Record<string, unknown>
+      function resolveFormResourceLabels() {
+        const sportConfig =
+          values.sportConfig && typeof values.sportConfig === "object"
+            ? (values.sportConfig as Record<string, unknown>)
             : null;
-        const hasResourceLabels = typeof sportConfig?.resourceLabelSingular === 'string'
-            && typeof sportConfig.resourceLabelPlural === 'string';
-        const resourceLabels = values.sportIds.length === 1 && hasResourceLabels
+        const hasResourceLabels =
+          typeof sportConfig?.resourceLabelSingular === "string" &&
+          typeof sportConfig.resourceLabelPlural === "string";
+        const resourceLabels =
+          values.sportIds.length === 1 && hasResourceLabels
             ? getSportResourceLabels(sportConfig)
             : GENERIC_RESOURCE_LABELS;
-        if (!values.isAffiliateEvent && values.registrationPaymentMode === 'MANUAL') {
-            values.manualPaymentLinks.forEach((link, index) => {
-                const message = getManualPaymentLinkError(link.provider, link.url);
-                if (message) {
-                    ctx.addIssue({
-                        code: 'custom',
-                        message,
-                        path: ['manualPaymentLinks', index, 'url'],
-                    });
-                }
-            });
+        return resourceLabels;
+      }
+      const resourceLabels = resolveFormResourceLabels();
+      function validateManualPaymentLinks() {
+        if (
+          !values.isAffiliateEvent &&
+          values.registrationPaymentMode === "MANUAL"
+        ) {
+          values.manualPaymentLinks.forEach((link, index) => {
+            const message = getManualPaymentLinkError(link.provider, link.url);
+            if (message) {
+              ctx.addIssue({
+                code: "custom",
+                message,
+                path: ["manualPaymentLinks", index, "url"],
+              });
+            }
+          });
         }
+      }
+      validateManualPaymentLinks();
 
-        const isAffiliateEvent = Boolean(values.isAffiliateEvent || hasAffiliateUrl(values.affiliateUrl));
+      const isAffiliateEvent = Boolean(
+        values.isAffiliateEvent || hasAffiliateUrl(values.affiliateUrl),
+      );
 
+      function validateParticipationAndLocation() {
         if (values.singleDivision && values.maxParticipants == null) {
-            ctx.addIssue({
-                code: 'custom',
-                message: values.teamSignup ? 'Max teams is required' : 'Max participants is required',
-                path: ['maxParticipants'],
-            });
+          ctx.addIssue({
+            code: "custom",
+            message: values.teamSignup
+              ? "Max teams is required"
+              : "Max participants is required",
+            path: ["maxParticipants"],
+          });
         }
 
-        if (values.eventType !== 'TRYOUT' && values.teamSizeLimit == null) {
-            ctx.addIssue({
-                code: 'custom',
-                message: 'Team size is required',
-                path: ['teamSizeLimit'],
-            });
+        if (values.eventType !== "TRYOUT" && values.teamSizeLimit == null) {
+          ctx.addIssue({
+            code: "custom",
+            message: "Team size is required",
+            path: ["teamSizeLimit"],
+          });
         }
 
         if (!coordinatesAreSet(values.coordinates)) {
-            ctx.addIssue({
-                code: "custom",
-                message: 'Select an event address from suggestions or the map',
-                path: ['location'],
-            });
+          ctx.addIssue({
+            code: "custom",
+            message: "Select an event address from suggestions or the map",
+            path: ["location"],
+          });
         }
+      }
+      validateParticipationAndLocation();
 
-        const requiresDivisionSelection = !(options.allowMissingEventDivisions && values.eventType === 'EVENT');
+      const requiresDivisionSelection = !(
+        options.allowMissingEventDivisions && values.eventType === "EVENT"
+      );
+      function validateRequiredDivisions() {
         if (requiresDivisionSelection && values.divisions.length === 0) {
-            ctx.addIssue({
-                code: "custom",
-                message: 'Select at least one division',
-                path: ['divisions'],
-            });
+          ctx.addIssue({
+            code: "custom",
+            message: "Select at least one division",
+            path: ["divisions"],
+          });
         }
         if (requiresDivisionSelection && values.divisionDetails.length === 0) {
+          ctx.addIssue({
+            code: "custom",
+            message: "Add at least one division",
+            path: ["divisionDetails"],
+          });
+        }
+      }
+      validateRequiredDivisions();
+      function validateTryoutResources() {
+        if (values.eventType === "TRYOUT") {
+          if (!values.organizationId) {
             ctx.addIssue({
+              code: "custom",
+              message: "Tryout events must belong to an organization.",
+              path: ["organizationId"],
+            });
+          }
+          if (values.singleDivision) {
+            ctx.addIssue({
+              code: "custom",
+              message: "Tryout events use the selected club divisions.",
+              path: ["singleDivision"],
+            });
+          }
+          if (values.noFixedEndDateTime) {
+            ctx.addIssue({
+              code: "custom",
+              message: "Tryout events require a Planned End.",
+              path: ["noFixedEndDateTime"],
+            });
+          }
+          values.divisionDetails.forEach((division, index) => {
+            if (!division.sourceDivisionId) {
+              ctx.addIssue({
                 code: "custom",
-                message: 'Add at least one division',
-                path: ['divisionDetails'],
+                message:
+                  "Choose this division from the organization club divisions.",
+                path: ["divisionDetails", index, "sourceDivisionId"],
+              });
+            }
+          });
+          const organizationId = values.organizationId?.trim() ?? "";
+          const organizationFieldIds = new Set(
+            values.fields
+              .filter((field) => !isEventLocalField(field as Field))
+              .filter(
+                (field) =>
+                  getFieldOrganizationId(field as Field)?.trim() ===
+                  organizationId,
+              )
+              .map((field) =>
+                String(
+                  (field as Field & { $id?: string }).$id ??
+                    (field as Field & { id?: string }).id ??
+                    "",
+                ).trim(),
+              )
+              .filter(Boolean),
+          );
+          const selectedOrganizationFieldIds = new Set(
+            values.selectedFieldIds
+              .map((fieldId) => fieldId.trim())
+              .filter(Boolean),
+          );
+          const hasValidOrganizationField = Array.from(
+            selectedOrganizationFieldIds,
+          ).some((fieldId) => organizationFieldIds.has(fieldId));
+          if (!hasValidOrganizationField) {
+            ctx.addIssue({
+              code: "custom",
+              message:
+                "Select at least one field owned by the tryout organization.",
+              path: ["selectedFieldIds"],
             });
+          }
+          const hasValidFiniteTimeSlot = values.leagueSlots.some((slot) => {
+            if (slot.repeating !== false) {
+              return false;
+            }
+            const slotFieldIds = normalizeSlotFieldIds(slot);
+            if (
+              !slotFieldIds.some((fieldId) => organizationFieldIds.has(fieldId))
+            ) {
+              return false;
+            }
+            try {
+              const resolved = resolveOneTimeTimeSlot(slot, slot.timeZone);
+              return resolved.end.getTime() > resolved.start.getTime();
+            } catch {
+              return false;
+            }
+          });
+          if (!hasValidFiniteTimeSlot) {
+            ctx.addIssue({
+              code: "custom",
+              message:
+                "Add at least one finite time slot assigned to a tryout organization field.",
+              path: ["leagueSlots"],
+            });
+          }
         }
-        if (values.eventType === 'TRYOUT') {
-            if (!values.organizationId) {
-                ctx.addIssue({
-                    code: 'custom',
-                    message: 'Tryout events must belong to an organization.',
-                    path: ['organizationId'],
-                });
-            }
-            if (values.singleDivision) {
-                ctx.addIssue({
-                    code: 'custom',
-                    message: 'Tryout events use the selected club divisions.',
-                    path: ['singleDivision'],
-                });
-            }
-            if (values.noFixedEndDateTime) {
-                ctx.addIssue({
-                    code: 'custom',
-                    message: 'Tryout events require a Planned End.',
-                    path: ['noFixedEndDateTime'],
-                });
-            }
-            values.divisionDetails.forEach((division, index) => {
-                if (!division.sourceDivisionId) {
-                    ctx.addIssue({
-                        code: 'custom',
-                        message: 'Choose this division from the organization club divisions.',
-                        path: ['divisionDetails', index, 'sourceDivisionId'],
-                    });
-                }
-            });
-            const organizationId = values.organizationId?.trim() ?? '';
-            const organizationFieldIds = new Set(
-                values.fields
-                    .filter((field) => !isEventLocalField(field as Field))
-                    .filter((field) => getFieldOrganizationId(field as Field)?.trim() === organizationId)
-                    .map((field) => String(
-                        (field as Field & { $id?: string }).$id
-                            ?? (field as Field & { id?: string }).id
-                            ?? '',
-                    ).trim())
-                    .filter(Boolean),
-            );
-            const selectedOrganizationFieldIds = new Set(
-                values.selectedFieldIds.map((fieldId) => fieldId.trim()).filter(Boolean),
-            );
-            const hasValidOrganizationField = Array.from(selectedOrganizationFieldIds)
-                .some((fieldId) => organizationFieldIds.has(fieldId));
-            if (!hasValidOrganizationField) {
-                ctx.addIssue({
-                    code: 'custom',
-                    message: 'Select at least one field owned by the tryout organization.',
-                    path: ['selectedFieldIds'],
-                });
-            }
-            const hasValidFiniteTimeSlot = values.leagueSlots.some((slot) => {
-                if (slot.repeating !== false) {
-                    return false;
-                }
-                const slotFieldIds = normalizeSlotFieldIds(slot);
-                if (!slotFieldIds.some((fieldId) => organizationFieldIds.has(fieldId))) {
-                    return false;
-                }
-                try {
-                    const resolved = resolveOneTimeTimeSlot(slot, slot.timeZone);
-                    return resolved.end.getTime() > resolved.start.getTime();
-                } catch {
-                    return false;
-                }
-            });
-            if (!hasValidFiniteTimeSlot) {
-                ctx.addIssue({
-                    code: 'custom',
-                    message: 'Add at least one finite time slot assigned to a tryout organization field.',
-                    path: ['leagueSlots'],
-                });
-            }
-        }
+      }
+      validateTryoutResources();
 
-        if (supportsScheduleSlotsForEvent(values.eventType, values.parentEvent) && !values.noFixedEndDateTime) {
-            const parsedStart = parseLocalDateTime(values.start);
-            const parsedEnd = parseLocalDateTime(values.end);
-            if (!parsedStart || !parsedEnd || parsedEnd.getTime() <= parsedStart.getTime()) {
-                ctx.addIssue({
-                    code: "custom",
-                    message: 'End date/time must be after start date/time when no fixed end datetime scheduling is disabled.',
-                    path: ['end'],
-                });
-            }
+      function validateFixedEventBounds() {
+        if (
+          supportsScheduleSlotsForEvent(values.eventType, values.parentEvent) &&
+          !values.noFixedEndDateTime
+        ) {
+          const parsedStart = parseLocalDateTime(values.start);
+          const parsedEnd = parseLocalDateTime(values.end);
+          if (
+            !parsedStart ||
+            !parsedEnd ||
+            parsedEnd.getTime() <= parsedStart.getTime()
+          ) {
+            ctx.addIssue({
+              code: "custom",
+              message:
+                "End date/time must be after start date/time when no fixed end datetime scheduling is disabled.",
+              path: ["end"],
+            });
+          }
         }
+      }
+      validateFixedEventBounds();
 
+      function validateDivisionAlignment() {
         const divisionIds = normalizeDivisionKeys(values.divisions);
         const detailIds = normalizeDivisionKeys(
-            values.divisionDetails
-                .map((detail) => detail?.id)
-                .filter((value): value is string => typeof value === 'string'),
+          values.divisionDetails
+            .map((detail) => detail?.id)
+            .filter((value): value is string => typeof value === "string"),
         );
-        if (requiresDivisionSelection && !stringSetsEqual(divisionIds, detailIds)) {
-            ctx.addIssue({
-                code: "custom",
-                message: 'Division details are out of sync. Re-add the affected division.',
-                path: ['divisionDetails'],
-            });
+        if (
+          requiresDivisionSelection &&
+          !stringSetsEqual(divisionIds, detailIds)
+        ) {
+          ctx.addIssue({
+            code: "custom",
+            message:
+              "Division details are out of sync. Re-add the affected division.",
+            path: ["divisionDetails"],
+          });
         }
-        if (requiresOrganizationEventFieldSelection(values.eventType, values.organizationId, values.selectedFieldIds)) {
-            ctx.addIssue({
-                code: "custom",
-                message: `Select at least one organization ${resourceLabels.singular.toLocaleLowerCase()} for this event.`,
-                path: ['selectedFieldIds'],
-            });
+      }
+      validateDivisionAlignment();
+      function validateEventResources() {
+        if (
+          requiresOrganizationEventFieldSelection(
+            values.eventType,
+            values.organizationId,
+            values.selectedFieldIds,
+          )
+        ) {
+          ctx.addIssue({
+            code: "custom",
+            message: `Select at least one organization ${resourceLabels.singular.toLocaleLowerCase()} for this event.`,
+            path: ["selectedFieldIds"],
+          });
         }
-        const localFieldCount = values.fields.filter((field) => isEventLocalField(field as Field)).length;
+        const localFieldCount = values.fields.filter((field) =>
+          isEventLocalField(field as Field),
+        ).length;
         const selectedOrganizationFieldCount = values.selectedFieldIds.length;
         const scheduledFieldCount = Array.from(
-            new Set(values.leagueSlots.flatMap((slot) => normalizeSlotFieldIds(slot))),
+          new Set(
+            values.leagueSlots.flatMap((slot) => normalizeSlotFieldIds(slot)),
+          ),
         ).length;
-        const hasAtLeastOneField = selectedOrganizationFieldCount > 0
-            || localFieldCount > 0
-            || scheduledFieldCount > 0
-            || values.fieldCount > 0;
-        if ((values.eventType === 'EVENT' || values.eventType === 'WEEKLY_EVENT') && !hasAtLeastOneField) {
-            ctx.addIssue({
-                code: "custom",
-                message: `Select or create at least one ${resourceLabels.singular.toLocaleLowerCase()} for this event.`,
-                path: ['fieldCount'],
-            });
+        const hasAtLeastOneField =
+          selectedOrganizationFieldCount > 0 ||
+          localFieldCount > 0 ||
+          scheduledFieldCount > 0 ||
+          values.fieldCount > 0;
+        if (
+          (values.eventType === "EVENT" ||
+            values.eventType === "WEEKLY_EVENT") &&
+          !hasAtLeastOneField
+        ) {
+          ctx.addIssue({
+            code: "custom",
+            message: `Select or create at least one ${resourceLabels.singular.toLocaleLowerCase()} for this event.`,
+            path: ["fieldCount"],
+          });
         }
+      }
+      validateEventResources();
+      function validateAffiliateUrl() {
         if (isAffiliateEvent) {
-            try {
-                const url = new URL(values.affiliateUrl);
-                if (!['http:', 'https:'].includes(url.protocol)) {
-                    throw new Error('Invalid protocol');
-                }
-            } catch {
-                ctx.addIssue({
-                    code: "custom",
-                    message: 'Enter a valid affiliate link.',
-                    path: ['affiliateUrl'],
-                });
+          try {
+            const url = new URL(values.affiliateUrl);
+            if (!["http:", "https:"].includes(url.protocol)) {
+              throw new Error("Invalid protocol");
             }
+          } catch {
+            ctx.addIssue({
+              code: "custom",
+              message: "Enter a valid affiliate link.",
+              path: ["affiliateUrl"],
+            });
+          }
         }
+      }
+      validateAffiliateUrl();
 
-        const usesRelativePaymentPlanDueDates = values.eventType === 'WEEKLY_EVENT' && !values.parentEvent;
+      const usesRelativePaymentPlanDueDates =
+        values.eventType === "WEEKLY_EVENT" && !values.parentEvent;
+      function validateEventInstallments() {
         if (!isAffiliateEvent && values.allowPaymentPlans) {
-            const amounts = values.installmentAmounts || [];
-            const dueDates = values.installmentDueDates || [];
-            const relativeDueDays = values.installmentDueRelativeDays || [];
-            if (values.installmentCount && amounts.length !== values.installmentCount) {
-                ctx.addIssue({
-                    code: "custom",
-                    message: 'Installment count must match number of installments',
-                    path: ['installmentCount'],
-                });
+          const amounts = values.installmentAmounts;
+          const dueDates = values.installmentDueDates;
+          const relativeDueDays = values.installmentDueRelativeDays;
+          if (
+            values.installmentCount &&
+            amounts.length !== values.installmentCount
+          ) {
+            ctx.addIssue({
+              code: "custom",
+              message: "Installment count must match number of installments",
+              path: ["installmentCount"],
+            });
+          }
+          if (!amounts.length) {
+            ctx.addIssue({
+              code: "custom",
+              message: "Add at least one installment amount",
+              path: ["installmentAmounts"],
+            });
+          }
+          if (usesRelativePaymentPlanDueDates) {
+            if (relativeDueDays.length !== amounts.length) {
+              ctx.addIssue({
+                code: "custom",
+                message: "Each installment needs a due date offset",
+                path: ["installmentDueRelativeDays"],
+              });
+            }
+          } else if (dueDates.length && dueDates.length !== amounts.length) {
+            ctx.addIssue({
+              code: "custom",
+              message: "Each installment needs a due date",
+              path: ["installmentDueDates"],
+            });
+          }
+        }
+      }
+      validateEventInstallments();
+
+      function validateDivisionInstallments() {
+        if (!isAffiliateEvent && !values.singleDivision) {
+          values.divisionDetails.forEach((detail, index) => {
+            if (!detail.allowPaymentPlans) {
+              return;
+            }
+            function readInstallmentValues() {
+              const amounts = Array.isArray(detail.installmentAmounts)
+                ? detail.installmentAmounts
+                : [];
+              const dueDates = Array.isArray(detail.installmentDueDates)
+                ? detail.installmentDueDates
+                : [];
+              const relativeDueDays = Array.isArray(
+                detail.installmentDueRelativeDays,
+              )
+                ? detail.installmentDueRelativeDays
+                : [];
+              const expectedCount = Number.isFinite(detail.installmentCount)
+                ? detail.installmentCount
+                : amounts.length;
+              return {
+                amounts,
+                dueDates,
+                relativeDueDays,
+                expectedCount,
+              };
+            }
+            const { amounts, dueDates, relativeDueDays, expectedCount } =
+              readInstallmentValues();
+            if (expectedCount > 0 && amounts.length !== expectedCount) {
+              ctx.addIssue({
+                code: "custom",
+                message:
+                  "Division installment count must match number of installments",
+                path: ["divisionDetails", index, "installmentCount"],
+              });
             }
             if (!amounts.length) {
-                ctx.addIssue({
-                    code: "custom",
-                    message: 'Add at least one installment amount',
-                    path: ['installmentAmounts'],
-                });
+              ctx.addIssue({
+                code: "custom",
+                message: "Add at least one division installment amount",
+                path: ["divisionDetails", index, "installmentAmounts"],
+              });
             }
             if (usesRelativePaymentPlanDueDates) {
-                if (relativeDueDays.length !== amounts.length) {
-                    ctx.addIssue({
-                        code: "custom",
-                        message: 'Each installment needs a due date offset',
-                        path: ['installmentDueRelativeDays'],
-                    });
-                }
-            } else if (dueDates.length && dueDates.length !== amounts.length) {
+              if (relativeDueDays.length !== amounts.length) {
                 ctx.addIssue({
-                    code: "custom",
-                    message: 'Each installment needs a due date',
-                    path: ['installmentDueDates'],
-                });
-            }
-        }
-
-        if (!isAffiliateEvent && !values.singleDivision) {
-            values.divisionDetails.forEach((detail, index) => {
-                if (!detail.allowPaymentPlans) {
-                    return;
-                }
-                const amounts = Array.isArray(detail.installmentAmounts) ? detail.installmentAmounts : [];
-                const dueDates = Array.isArray(detail.installmentDueDates) ? detail.installmentDueDates : [];
-                const relativeDueDays = Array.isArray(detail.installmentDueRelativeDays)
-                    ? detail.installmentDueRelativeDays
-                    : [];
-                const expectedCount = Number.isFinite(detail.installmentCount) ? detail.installmentCount : amounts.length;
-                if (expectedCount > 0 && amounts.length !== expectedCount) {
-                    ctx.addIssue({
-                        code: 'custom',
-                        message: 'Division installment count must match number of installments',
-                        path: ['divisionDetails', index, 'installmentCount'],
-                    });
-                }
-                if (!amounts.length) {
-                    ctx.addIssue({
-                        code: 'custom',
-                        message: 'Add at least one division installment amount',
-                        path: ['divisionDetails', index, 'installmentAmounts'],
-                    });
-                }
-                if (usesRelativePaymentPlanDueDates) {
-                    if (relativeDueDays.length !== amounts.length) {
-                        ctx.addIssue({
-                            code: 'custom',
-                            message: 'Each division installment needs a due date offset',
-                            path: ['divisionDetails', index, 'installmentDueRelativeDays'],
-                        });
-                    }
-                } else if (dueDates.length && dueDates.length !== amounts.length) {
-                    ctx.addIssue({
-                        code: 'custom',
-                        message: 'Each division installment needs a due date',
-                        path: ['divisionDetails', index, 'installmentDueDates'],
-                    });
-                }
-            });
-        }
-
-        if (typeof values.minAge === 'number' && typeof values.maxAge === 'number') {
-            if (values.minAge > values.maxAge) {
-                ctx.addIssue({
-                    code: "custom",
-                    message: 'Minimum age must be less than or equal to maximum age',
-                    path: ['minAge'],
-                });
-            }
-        }
-
-        if (values.eventType === 'TOURNAMENT') {
-            if (!(typeof values.maxParticipants === 'number' && values.maxParticipants >= MIN_BRACKET_TEAM_COUNT)) {
-                ctx.addIssue({
-                    code: "custom",
-                    message: BRACKET_TEAM_COUNT_ERROR,
-                    path: ['maxParticipants'],
-                });
-            }
-            if (!values.singleDivision) {
-                values.divisionDetails.forEach((detail, index) => {
-                    if (!(typeof detail.maxParticipants === 'number' && detail.maxParticipants >= MIN_BRACKET_TEAM_COUNT)) {
-                        ctx.addIssue({
-                            code: "custom",
-                            message: BRACKET_TEAM_COUNT_ERROR,
-                            path: ['divisionDetails', index, 'maxParticipants'],
-                        });
-                    }
-                });
-            }
-        }
-        if ((values.eventType === 'LEAGUE' || values.eventType === 'TOURNAMENT') && values.isAutomatedScheduling === false) {
-            const plannedEnd = parseDateTimeInTimeZone(values.end, values.timeZone);
-            const plannedStart = parseDateTimeInTimeZone(values.start, values.timeZone);
-            if (!plannedEnd) {
-                ctx.addIssue({
-                    code: 'custom',
-                    message: 'Planned End is required when Automated Scheduling is off.',
-                    path: ['end'],
-                });
-            } else if (plannedStart && plannedEnd <= plannedStart) {
-                ctx.addIssue({
-                    code: 'custom',
-                    message: 'Planned End must be after Start Date & Time.',
-                    path: ['end'],
-                });
-            }
-        }
-
-        if (supportsScheduleSlotsForEvent(values.eventType, values.parentEvent) && values.isAutomatedScheduling !== false) {
-            const slotDivisionLookup = buildSlotDivisionLookup(
-                values.divisionDetails,
-                values.eventType === 'LEAGUE' && values.leagueData.includePlayoffs && values.splitLeaguePlayoffDivisions
-                    ? values.playoffDivisionDetails
-                    : [],
-            );
-            const selectedDivisionKeys = slotDivisionLookup.keys;
-            if (
-                (values.eventType === 'LEAGUE' || values.eventType === 'TOURNAMENT') &&
-                values.leagueData.includePlayoffs &&
-                !(typeof values.leagueData.playoffTeamCount === 'number' &&
-                    values.leagueData.playoffTeamCount >= MIN_BRACKET_TEAM_COUNT)
-            ) {
-                ctx.addIssue({
-                    code: "custom",
-                    message: BRACKET_TEAM_COUNT_ERROR,
-                    path: ['leagueData', 'playoffTeamCount'],
-                });
-            }
-            if (values.eventType === 'LEAGUE' && values.leagueData.includePlayoffs) {
-                if (values.splitLeaguePlayoffDivisions) {
-                    if (!values.playoffDivisionDetails.length) {
-                        ctx.addIssue({
-                            code: "custom",
-                            message: 'Add at least one playoff division when split playoffs are enabled.',
-                            path: ['playoffDivisionDetails'],
-                        });
-                    }
-
-                    const playoffDivisionById = new Map(
-                        values.playoffDivisionDetails.map((division) => [
-                            normalizeDivisionKeys([division.id])[0],
-                            division,
-                        ]),
-                    );
-
-                    values.divisionDetails.forEach((detail, index) => {
-                        if (!(typeof detail.playoffTeamCount === 'number' && detail.playoffTeamCount >= MIN_BRACKET_TEAM_COUNT)) {
-                            ctx.addIssue({
-                                code: "custom",
-                                message: BRACKET_TEAM_COUNT_ERROR,
-                                path: ['divisionDetails', index, 'playoffTeamCount'],
-                            });
-                            return;
-                        }
-
-                        const mapping = Array.isArray(detail.playoffPlacementDivisionIds)
-                            ? detail.playoffPlacementDivisionIds
-                            : [];
-                        for (let placementIndex = 0; placementIndex < detail.playoffTeamCount; placementIndex += 1) {
-                            const mappedDivisionId = normalizeDivisionKeys([mapping[placementIndex]])[0];
-                            if (!mappedDivisionId) {
-                                ctx.addIssue({
-                                    code: "custom",
-                                    message: `Map placement ${placementIndex + 1} to a playoff division.`,
-                                    path: ['divisionDetails', index, 'playoffPlacementDivisionIds', placementIndex],
-                                });
-                                continue;
-                            }
-                            if (!playoffDivisionById.has(mappedDivisionId)) {
-                                ctx.addIssue({
-                                    code: "custom",
-                                    message: `Placement ${placementIndex + 1} references an invalid playoff division.`,
-                                    path: ['divisionDetails', index, 'playoffPlacementDivisionIds', placementIndex],
-                                });
-                                continue;
-                            }
-                        }
-                    });
-
-                    const capacityByDivisionId = new Map(
-                        evaluatePlayoffPlacementCapacities(
-                            values.divisionDetails.map((detail) => ({
-                                placementCount: detail.playoffTeamCount,
-                                playoffDivisionIds: Array.isArray(detail.playoffPlacementDivisionIds)
-                                    ? detail.playoffPlacementDivisionIds
-                                    : [],
-                            })),
-                            values.playoffDivisionDetails.map((division) => ({
-                                playoffDivisionId: normalizeDivisionKeys([division.id])[0] ?? '',
-                                capacity: normalizePlayoffDivisionParticipantCount(division.maxParticipants),
-                                name: division.name,
-                            })),
-                            (value) => normalizeDivisionKeys([value])[0] ?? null,
-                        ).map((result) => [result.playoffDivisionId, result]),
-                    );
-
-                    values.playoffDivisionDetails.forEach((division, index) => {
-                        const normalizedId = normalizeDivisionKeys([division.id])[0];
-                        if (!normalizedId) {
-                            return;
-                        }
-                        const capacityResult = capacityByDivisionId.get(normalizedId);
-                        const assignedCount = capacityResult?.mappedPositionCount ?? 0;
-                        const capacity = normalizePlayoffDivisionParticipantCount(division.maxParticipants);
-                        if (typeof capacity !== 'number' || capacity < MIN_BRACKET_TEAM_COUNT) {
-                            ctx.addIssue({
-                                code: "custom",
-                                message: values.teamSignup
-                                    ? `Playoff division teams count must be at least ${MIN_BRACKET_TEAM_COUNT}.`
-                                    : `Playoff division participants count must be at least ${MIN_BRACKET_TEAM_COUNT}.`,
-                                path: ['playoffDivisionDetails', index, 'maxParticipants'],
-                            });
-                            return;
-                        }
-                        if (!capacityResult?.matchesCapacity) {
-                            ctx.addIssue({
-                                code: "custom",
-                                message: `Playoff division "${division.name}" has ${assignedCount} mapped positions but ${capacity} team slots.`,
-                                path: ['playoffDivisionDetails', index, 'maxParticipants'],
-                            });
-                        }
-                    });
-                } else if (!values.singleDivision) {
-                    values.divisionDetails.forEach((detail, index) => {
-                        if (!(typeof detail.playoffTeamCount === 'number' && detail.playoffTeamCount >= MIN_BRACKET_TEAM_COUNT)) {
-                            ctx.addIssue({
-                                code: "custom",
-                                message: BRACKET_TEAM_COUNT_ERROR,
-                                path: ['divisionDetails', index, 'playoffTeamCount'],
-                            });
-                        }
-                    });
-                }
-            }
-
-            if (isTournamentPoolPlayFormEnabled(values.eventType, values.leagueData.includePlayoffs)) {
-                values.divisionDetails.forEach((detail, index) => {
-                    const maxTeams = values.singleDivision
-                        ? Math.max(MIN_BRACKET_TEAM_COUNT, Math.trunc(values.maxParticipants || detail.maxParticipants || 0))
-                        : Math.max(MIN_BRACKET_TEAM_COUNT, Math.trunc(detail.maxParticipants || 0));
-                    const poolCount = Number.isFinite(detail.poolCount)
-                        ? Math.max(1, Math.trunc(detail.poolCount as number))
-                        : null;
-                    const bracketTeams = Number.isFinite(detail.playoffTeamCount)
-                        ? Math.trunc(detail.playoffTeamCount as number)
-                        : null;
-                    if (!poolCount) {
-                        ctx.addIssue({
-                            code: "custom",
-                            message: 'Pool count is required when pool play is enabled.',
-                            path: ['divisionDetails', index, 'poolCount'],
-                        });
-                        return;
-                    }
-                    if (bracketTeams === null || bracketTeams < MIN_BRACKET_TEAM_COUNT) {
-                        ctx.addIssue({
-                            code: "custom",
-                            message: BRACKET_TEAM_COUNT_ERROR,
-                            path: ['divisionDetails', index, 'playoffTeamCount'],
-                        });
-                    }
-                    if (maxTeams % poolCount !== 0) {
-                        ctx.addIssue({
-                            code: "custom",
-                            message: 'Division max teams must divide evenly by pool count.',
-                            path: ['divisionDetails', index, 'poolCount'],
-                        });
-                    }
-                    if (bracketTeams && bracketTeams % poolCount !== 0) {
-                        ctx.addIssue({
-                            code: "custom",
-                            message: 'Bracket team count must divide evenly by pool count.',
-                            path: ['divisionDetails', index, 'playoffTeamCount'],
-                        });
-                    }
-                });
-            }
-
-            const requiresWeeklyRepeatingSlot = values.eventType === 'WEEKLY_EVENT';
-            if (requiresWeeklyRepeatingSlot && !hasWeeklyRepeatingTimeSlot(values.leagueSlots)) {
-                ctx.addIssue({
-                    code: "custom",
-                    message: WEEKLY_REPEATING_TIME_SLOT_REQUIRED_MESSAGE,
-                    path: ['leagueSlots'],
-                });
-            } else if (!values.leagueSlots.length) {
-                ctx.addIssue({
-                    code: "custom",
-                    message: 'Add at least one timeslot',
-                    path: ['leagueSlots'],
-                });
-            }
-            const coveredDivisionKeys = new Set<string>();
-            const resolvedEventStart = parseDateTimeInTimeZone(values.start, values.timeZone);
-            const resolvedEventEnd = values.noFixedEndDateTime
-                ? null
-                : parseDateTimeInTimeZone(values.end, values.timeZone);
-            values.leagueSlots.forEach((slot, index) => {
-                if (!normalizeSlotFieldIds(slot).length) {
-                    ctx.addIssue({
-                        code: "custom",
-                        message: `Select at least one ${resourceLabels.singular.toLocaleLowerCase()}`,
-                        path: ['leagueSlots', index, 'scheduledFieldIds'],
-                    });
-                }
-                if (slot.repeating === false) {
-                    const slotStart = parseLocalDateTime(slot.startDate ?? null);
-                    const slotEnd = parseLocalDateTime(slot.endDate ?? null);
-                    if (!slotStart) {
-                        ctx.addIssue({
-                            code: "custom",
-                            message: 'Select a start date/time',
-                            path: ['leagueSlots', index, 'startDate'],
-                        });
-                    }
-                    if (!slotEnd) {
-                        ctx.addIssue({
-                            code: "custom",
-                            message: 'Select an end date/time',
-                            path: ['leagueSlots', index, 'endDate'],
-                        });
-                    }
-                    if (slotStart && slotEnd && slotEnd.getTime() <= slotStart.getTime()) {
-                        ctx.addIssue({
-                            code: "custom",
-                            message: 'End date/time must be after start date/time',
-                            path: ['leagueSlots', index, 'endDate'],
-                        });
-                    }
-                    const boundsError = computeOneTimeSlotBoundsError({
-                        slot,
-                        eventStart: resolvedEventStart,
-                        eventEnd: resolvedEventEnd,
-                    });
-                    if (boundsError) {
-                        ctx.addIssue({
-                            code: "custom",
-                            message: boundsError,
-                            path: ['leagueSlots', index, 'endDate'],
-                        });
-                    }
-                } else {
-                    if (!normalizeWeekdays(slot).length) {
-                        ctx.addIssue({
-                            code: "custom",
-                            message: 'Select at least one day',
-                            path: ['leagueSlots', index, 'daysOfWeek'],
-                        });
-                    }
-                    if (!Number.isFinite(slot.startTimeMinutes)) {
-                        ctx.addIssue({
-                            code: "custom",
-                            message: 'Select a start time',
-                            path: ['leagueSlots', index, 'startTimeMinutes'],
-                        });
-                    }
-                    if (!Number.isFinite(slot.endTimeMinutes)) {
-                        ctx.addIssue({
-                            code: "custom",
-                            message: 'Select an end time',
-                            path: ['leagueSlots', index, 'endTimeMinutes'],
-                        });
-                    }
-                    const temporalError = computeRepeatingSlotTemporalError({
-                        slot: {
-                            ...slot,
-                            startDate: slot.startDate ?? values.start,
-                        },
-                        eventStart: resolvedEventStart,
-                        eventEnd: resolvedEventEnd,
-                    });
-                    if (temporalError) {
-                        ctx.addIssue({
-                            code: "custom",
-                            message: temporalError,
-                            path: ['leagueSlots', index, 'endTimeMinutes'],
-                        });
-                    }
-                }
-                const normalizedSlotDivisionKeys = normalizeSlotDivisionKeysWithLookup(slot.divisions, slotDivisionLookup);
-                if (!values.singleDivision && selectedDivisionKeys.length && !normalizedSlotDivisionKeys.length) {
-                    ctx.addIssue({
-                        code: "custom",
-                        message: 'Select at least one division for this timeslot.',
-                        path: ['leagueSlots', index, 'divisions'],
-                    });
-                }
-                normalizedSlotDivisionKeys.forEach((divisionKey) => coveredDivisionKeys.add(divisionKey));
-                if (
-                    values.singleDivision &&
-                    selectedDivisionKeys.length &&
-                    !stringSetsEqual(
-                        normalizedSlotDivisionKeys,
-                        selectedDivisionKeys,
-                    )
-                ) {
-                    ctx.addIssue({
-                        code: "custom",
-                        message: 'Single division requires every timeslot to include all selected divisions.',
-                        path: ['leagueSlots', index, 'divisions'],
-                    });
-                }
-                const error = computeSlotError(
-                    values.leagueSlots,
+                  code: "custom",
+                  message: "Each division installment needs a due date offset",
+                  path: [
+                    "divisionDetails",
                     index,
-                    values.eventType,
-                    values.parentEvent,
-                    {
-                        eventStart: resolvedEventStart,
-                        eventEnd: resolvedEventEnd,
-                    },
-                );
-                if (error) {
-                    ctx.addIssue({
-                        code: "custom",
-                        message: error,
-                        path: ['leagueSlots', index, 'error'],
-                    });
-                }
-                if (
-                    typeof slot.error === 'string' &&
-                    slot.error.includes(RENTAL_SLOT_MISMATCH_ERROR_MARKER)
-                ) {
-                    ctx.addIssue({
-                        code: "custom",
-                        message: slot.error,
-                        path: ['leagueSlots', index, 'error'],
-                    });
-                }
-            });
-            selectedDivisionKeys.forEach((divisionKey) => {
-                if (coveredDivisionKeys.has(divisionKey)) {
-                    return;
-                }
-                const division = values.divisionDetails.find((detail) => (
-                    normalizeDivisionKeys([detail.id, detail.key]).includes(divisionKey)
-                ));
-                ctx.addIssue({
-                    code: "custom",
-                    message: `${division?.name || 'Each division'} needs at least one timeslot.`,
-                    path: ['leagueSlots'],
+                    "installmentDueRelativeDays",
+                  ],
                 });
-            });
+              }
+            } else if (dueDates.length && dueDates.length !== amounts.length) {
+              ctx.addIssue({
+                code: "custom",
+                message: "Each division installment needs a due date",
+                path: ["divisionDetails", index, "installmentDueDates"],
+              });
+            }
+          });
         }
+      }
+      validateDivisionInstallments();
+
+      function validateAgeRange() {
+        if (
+          typeof values.minAge === "number" &&
+          typeof values.maxAge === "number"
+        ) {
+          if (values.minAge > values.maxAge) {
+            ctx.addIssue({
+              code: "custom",
+              message: "Minimum age must be less than or equal to maximum age",
+              path: ["minAge"],
+            });
+          }
+        }
+      }
+      validateAgeRange();
+
+      function validateTournamentCapacity() {
+        if (values.eventType === "TOURNAMENT") {
+          if (
+            !(
+              typeof values.maxParticipants === "number" &&
+              values.maxParticipants >= MIN_BRACKET_TEAM_COUNT
+            )
+          ) {
+            ctx.addIssue({
+              code: "custom",
+              message: BRACKET_TEAM_COUNT_ERROR,
+              path: ["maxParticipants"],
+            });
+          }
+          if (!values.singleDivision) {
+            values.divisionDetails.forEach((detail, index) => {
+              if (
+                !(
+                  typeof detail.maxParticipants === "number" &&
+                  detail.maxParticipants >= MIN_BRACKET_TEAM_COUNT
+                )
+              ) {
+                ctx.addIssue({
+                  code: "custom",
+                  message: BRACKET_TEAM_COUNT_ERROR,
+                  path: ["divisionDetails", index, "maxParticipants"],
+                });
+              }
+            });
+          }
+        }
+      }
+      validateTournamentCapacity();
+      function validateUnscheduledPlannedEnd() {
+        if (
+          (values.eventType === "LEAGUE" ||
+            values.eventType === "TOURNAMENT") &&
+          values.isAutomatedScheduling === false
+        ) {
+          const plannedEnd = parseDateTimeInTimeZone(
+            values.end,
+            values.timeZone,
+          );
+          const plannedStart = parseDateTimeInTimeZone(
+            values.start,
+            values.timeZone,
+          );
+          if (!plannedEnd) {
+            ctx.addIssue({
+              code: "custom",
+              message:
+                "Planned End is required when Automated Scheduling is off.",
+              path: ["end"],
+            });
+          } else if (plannedStart && plannedEnd <= plannedStart) {
+            ctx.addIssue({
+              code: "custom",
+              message: "Planned End must be after Start Date & Time.",
+              path: ["end"],
+            });
+          }
+        }
+      }
+      validateUnscheduledPlannedEnd();
+
+      function validateScheduleConstruction() {
+        if (
+          supportsScheduleSlotsForEvent(values.eventType, values.parentEvent) &&
+          values.isAutomatedScheduling !== false
+        ) {
+          function resolveSlotDivisions() {
+            const slotDivisionLookup = buildSlotDivisionLookup(
+              values.divisionDetails,
+              values.eventType === "LEAGUE" &&
+                values.leagueData.includePlayoffs &&
+                values.splitLeaguePlayoffDivisions
+                ? values.playoffDivisionDetails
+                : [],
+            );
+            return slotDivisionLookup;
+          }
+          const slotDivisionLookup = resolveSlotDivisions();
+          const selectedDivisionKeys = slotDivisionLookup.keys;
+          function validatePlayoffTeamCount() {
+            if (
+              (values.eventType === "LEAGUE" ||
+                values.eventType === "TOURNAMENT") &&
+              values.leagueData.includePlayoffs &&
+              !(
+                typeof values.leagueData.playoffTeamCount === "number" &&
+                values.leagueData.playoffTeamCount >= MIN_BRACKET_TEAM_COUNT
+              )
+            ) {
+              ctx.addIssue({
+                code: "custom",
+                message: BRACKET_TEAM_COUNT_ERROR,
+                path: ["leagueData", "playoffTeamCount"],
+              });
+            }
+          }
+          validatePlayoffTeamCount();
+          function validatePlayoffDivisions() {
+            if (
+              values.eventType === "LEAGUE" &&
+              values.leagueData.includePlayoffs
+            ) {
+              if (values.splitLeaguePlayoffDivisions) {
+                if (!values.playoffDivisionDetails.length) {
+                  ctx.addIssue({
+                    code: "custom",
+                    message:
+                      "Add at least one playoff division when split playoffs are enabled.",
+                    path: ["playoffDivisionDetails"],
+                  });
+                }
+
+                const playoffDivisionById = new Map(
+                  values.playoffDivisionDetails.map((division) => [
+                    normalizeDivisionKeys([division.id])[0],
+                    division,
+                  ]),
+                );
+
+                values.divisionDetails.forEach((detail, index) => {
+                  if (
+                    !(
+                      typeof detail.playoffTeamCount === "number" &&
+                      detail.playoffTeamCount >= MIN_BRACKET_TEAM_COUNT
+                    )
+                  ) {
+                    ctx.addIssue({
+                      code: "custom",
+                      message: BRACKET_TEAM_COUNT_ERROR,
+                      path: ["divisionDetails", index, "playoffTeamCount"],
+                    });
+                    return;
+                  }
+
+                  const mapping = Array.isArray(
+                    detail.playoffPlacementDivisionIds,
+                  )
+                    ? detail.playoffPlacementDivisionIds
+                    : [];
+                  for (
+                    let placementIndex = 0;
+                    placementIndex < detail.playoffTeamCount;
+                    placementIndex += 1
+                  ) {
+                    const mappedDivisionId = normalizeDivisionKeys([
+                      mapping[placementIndex],
+                    ])[0];
+                    if (!mappedDivisionId) {
+                      ctx.addIssue({
+                        code: "custom",
+                        message: `Map placement ${placementIndex + 1} to a playoff division.`,
+                        path: [
+                          "divisionDetails",
+                          index,
+                          "playoffPlacementDivisionIds",
+                          placementIndex,
+                        ],
+                      });
+                      continue;
+                    }
+                    if (!playoffDivisionById.has(mappedDivisionId)) {
+                      ctx.addIssue({
+                        code: "custom",
+                        message: `Placement ${placementIndex + 1} references an invalid playoff division.`,
+                        path: [
+                          "divisionDetails",
+                          index,
+                          "playoffPlacementDivisionIds",
+                          placementIndex,
+                        ],
+                      });
+                      continue;
+                    }
+                  }
+                });
+
+                const capacityByDivisionId = new Map(
+                  evaluatePlayoffPlacementCapacities(
+                    values.divisionDetails.map((detail) => ({
+                      placementCount: detail.playoffTeamCount,
+                      playoffDivisionIds: Array.isArray(
+                        detail.playoffPlacementDivisionIds,
+                      )
+                        ? detail.playoffPlacementDivisionIds
+                        : [],
+                    })),
+                    values.playoffDivisionDetails.map((division) => ({
+                      playoffDivisionId:
+                        normalizeDivisionKeys([division.id])[0] ?? "",
+                      capacity: normalizePlayoffDivisionParticipantCount(
+                        division.maxParticipants,
+                      ),
+                      name: division.name,
+                    })),
+                    (value) => normalizeDivisionKeys([value])[0] ?? null,
+                  ).map((result) => [result.playoffDivisionId, result]),
+                );
+
+                values.playoffDivisionDetails.forEach((division, index) => {
+                  const normalizedId = normalizeDivisionKeys([division.id])[0];
+                  if (!normalizedId) {
+                    return;
+                  }
+                  const capacityResult = capacityByDivisionId.get(normalizedId);
+                  const assignedCount =
+                    capacityResult?.mappedPositionCount ?? 0;
+                  const capacity = normalizePlayoffDivisionParticipantCount(
+                    division.maxParticipants,
+                  );
+                  if (
+                    typeof capacity !== "number" ||
+                    capacity < MIN_BRACKET_TEAM_COUNT
+                  ) {
+                    ctx.addIssue({
+                      code: "custom",
+                      message: values.teamSignup
+                        ? `Playoff division teams count must be at least ${MIN_BRACKET_TEAM_COUNT}.`
+                        : `Playoff division participants count must be at least ${MIN_BRACKET_TEAM_COUNT}.`,
+                      path: [
+                        "playoffDivisionDetails",
+                        index,
+                        "maxParticipants",
+                      ],
+                    });
+                    return;
+                  }
+                  if (!capacityResult?.matchesCapacity) {
+                    ctx.addIssue({
+                      code: "custom",
+                      message: `Playoff division "${division.name}" has ${assignedCount} mapped positions but ${capacity} team slots.`,
+                      path: [
+                        "playoffDivisionDetails",
+                        index,
+                        "maxParticipants",
+                      ],
+                    });
+                  }
+                });
+              } else if (!values.singleDivision) {
+                values.divisionDetails.forEach((detail, index) => {
+                  if (
+                    !(
+                      typeof detail.playoffTeamCount === "number" &&
+                      detail.playoffTeamCount >= MIN_BRACKET_TEAM_COUNT
+                    )
+                  ) {
+                    ctx.addIssue({
+                      code: "custom",
+                      message: BRACKET_TEAM_COUNT_ERROR,
+                      path: ["divisionDetails", index, "playoffTeamCount"],
+                    });
+                  }
+                });
+              }
+            }
+          }
+          validatePlayoffDivisions();
+
+          if (
+            isTournamentPoolPlayFormEnabled(
+              values.eventType,
+              values.leagueData.includePlayoffs,
+            )
+          ) {
+            values.divisionDetails.forEach((detail, index) => {
+              function resolvePoolTeamCount() {
+                const maxTeams = values.singleDivision
+                  ? Math.max(
+                      MIN_BRACKET_TEAM_COUNT,
+                      Math.trunc(
+                        values.maxParticipants || detail.maxParticipants || 0,
+                      ),
+                    )
+                  : Math.max(
+                      MIN_BRACKET_TEAM_COUNT,
+                      Math.trunc(detail.maxParticipants || 0),
+                    );
+                return maxTeams;
+              }
+              const maxTeams = resolvePoolTeamCount();
+              const poolCount = Number.isFinite(detail.poolCount)
+                ? Math.max(1, Math.trunc(detail.poolCount as number))
+                : null;
+              const bracketTeams = Number.isFinite(detail.playoffTeamCount)
+                ? Math.trunc(detail.playoffTeamCount as number)
+                : null;
+              if (!poolCount) {
+                ctx.addIssue({
+                  code: "custom",
+                  message: "Pool count is required when pool play is enabled.",
+                  path: ["divisionDetails", index, "poolCount"],
+                });
+                return;
+              }
+              if (
+                bracketTeams === null ||
+                bracketTeams < MIN_BRACKET_TEAM_COUNT
+              ) {
+                ctx.addIssue({
+                  code: "custom",
+                  message: BRACKET_TEAM_COUNT_ERROR,
+                  path: ["divisionDetails", index, "playoffTeamCount"],
+                });
+              }
+              if (maxTeams % poolCount !== 0) {
+                ctx.addIssue({
+                  code: "custom",
+                  message:
+                    "Division max teams must divide evenly by pool count.",
+                  path: ["divisionDetails", index, "poolCount"],
+                });
+              }
+              if (bracketTeams && bracketTeams % poolCount !== 0) {
+                ctx.addIssue({
+                  code: "custom",
+                  message:
+                    "Bracket team count must divide evenly by pool count.",
+                  path: ["divisionDetails", index, "playoffTeamCount"],
+                });
+              }
+            });
+          }
+
+          const requiresWeeklyRepeatingSlot =
+            values.eventType === "WEEKLY_EVENT";
+          if (
+            requiresWeeklyRepeatingSlot &&
+            !hasWeeklyRepeatingTimeSlot(values.leagueSlots)
+          ) {
+            ctx.addIssue({
+              code: "custom",
+              message: WEEKLY_REPEATING_TIME_SLOT_REQUIRED_MESSAGE,
+              path: ["leagueSlots"],
+            });
+          } else if (!values.leagueSlots.length) {
+            ctx.addIssue({
+              code: "custom",
+              message: "Add at least one timeslot",
+              path: ["leagueSlots"],
+            });
+          }
+          const coveredDivisionKeys = new Set<string>();
+          const resolvedEventStart = parseDateTimeInTimeZone(
+            values.start,
+            values.timeZone,
+          );
+          const resolvedEventEnd = values.noFixedEndDateTime
+            ? null
+            : parseDateTimeInTimeZone(values.end, values.timeZone);
+          values.leagueSlots.forEach((slot, index) => {
+            if (!normalizeSlotFieldIds(slot).length) {
+              ctx.addIssue({
+                code: "custom",
+                message: `Select at least one ${resourceLabels.singular.toLocaleLowerCase()}`,
+                path: ["leagueSlots", index, "scheduledFieldIds"],
+              });
+            }
+            function validateOneTimeSlot() {
+              const slotStart = parseLocalDateTime(slot.startDate ?? null);
+              const slotEnd = parseLocalDateTime(slot.endDate ?? null);
+              if (!slotStart) {
+                ctx.addIssue({
+                  code: "custom",
+                  message: "Select a start date/time",
+                  path: ["leagueSlots", index, "startDate"],
+                });
+              }
+              if (!slotEnd) {
+                ctx.addIssue({
+                  code: "custom",
+                  message: "Select an end date/time",
+                  path: ["leagueSlots", index, "endDate"],
+                });
+              }
+              const boundsError = computeOneTimeSlotBoundsError({
+                slot,
+                eventStart: resolvedEventStart,
+                eventEnd: resolvedEventEnd,
+              });
+              if (boundsError) {
+                ctx.addIssue({
+                  code: "custom",
+                  message: boundsError,
+                  path: ["leagueSlots", index, "endDate"],
+                });
+              }
+            }
+            function validateRepeatingSlot() {
+              if (!normalizeWeekdays(slot).length) {
+                ctx.addIssue({
+                  code: "custom",
+                  message: "Select at least one day",
+                  path: ["leagueSlots", index, "daysOfWeek"],
+                });
+              }
+              if (!Number.isFinite(slot.startTimeMinutes)) {
+                ctx.addIssue({
+                  code: "custom",
+                  message: "Select a start time",
+                  path: ["leagueSlots", index, "startTimeMinutes"],
+                });
+              }
+              if (!Number.isFinite(slot.endTimeMinutes)) {
+                ctx.addIssue({
+                  code: "custom",
+                  message: "Select an end time",
+                  path: ["leagueSlots", index, "endTimeMinutes"],
+                });
+              }
+              const temporalError = computeRepeatingSlotTemporalError({
+                slot: {
+                  ...slot,
+                  startDate: slot.startDate ?? values.start,
+                },
+                eventStart: resolvedEventStart,
+                eventEnd: resolvedEventEnd,
+              });
+              if (temporalError) {
+                ctx.addIssue({
+                  code: "custom",
+                  message: temporalError,
+                  path: ["leagueSlots", index, "endTimeMinutes"],
+                });
+              }
+            }
+            if (slot.repeating === false) validateOneTimeSlot();
+            else validateRepeatingSlot();
+            function validateSlotDivisions() {
+              const normalizedSlotDivisionKeys =
+                normalizeSlotDivisionKeysWithLookup(
+                  slot.divisions,
+                  slotDivisionLookup,
+                );
+              if (
+                !values.singleDivision &&
+                selectedDivisionKeys.length &&
+                !normalizedSlotDivisionKeys.length
+              ) {
+                ctx.addIssue({
+                  code: "custom",
+                  message: "Select at least one division for this timeslot.",
+                  path: ["leagueSlots", index, "divisions"],
+                });
+              }
+              normalizedSlotDivisionKeys.forEach((divisionKey) =>
+                coveredDivisionKeys.add(divisionKey),
+              );
+              if (
+                values.singleDivision &&
+                selectedDivisionKeys.length &&
+                !stringSetsEqual(
+                  normalizedSlotDivisionKeys,
+                  selectedDivisionKeys,
+                )
+              ) {
+                ctx.addIssue({
+                  code: "custom",
+                  message:
+                    "Single division requires every timeslot to include all selected divisions.",
+                  path: ["leagueSlots", index, "divisions"],
+                });
+              }
+            }
+            validateSlotDivisions();
+            const error = computeSlotError(
+              values.leagueSlots,
+              index,
+              values.eventType,
+              values.parentEvent,
+              {
+                eventStart: resolvedEventStart,
+                eventEnd: resolvedEventEnd,
+              },
+            );
+            if (error) {
+              ctx.addIssue({
+                code: "custom",
+                message: error,
+                path: ["leagueSlots", index, "error"],
+              });
+            }
+            if (
+              typeof slot.error === "string" &&
+              slot.error.includes(RENTAL_SLOT_MISMATCH_ERROR_MARKER)
+            ) {
+              ctx.addIssue({
+                code: "custom",
+                message: slot.error,
+                path: ["leagueSlots", index, "error"],
+              });
+            }
+          });
+          selectedDivisionKeys.forEach((divisionKey) => {
+            if (coveredDivisionKeys.has(divisionKey)) {
+              return;
+            }
+            const division = values.divisionDetails.find((detail) =>
+              normalizeDivisionKeys([detail.id, detail.key]).includes(
+                divisionKey,
+              ),
+            );
+            ctx.addIssue({
+              code: "custom",
+              message: `${division?.name || "Each division"} needs at least one timeslot.`,
+              path: ["leagueSlots"],
+            });
+          });
+        }
+      }
+      validateScheduleConstruction();
     });

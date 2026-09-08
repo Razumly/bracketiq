@@ -104,6 +104,8 @@ type EventsTabContentProps<TEventType extends string = Event['eventType']> = {
   isLoadingInitial: boolean;
   isLoadingMore: boolean;
   hasMoreEvents: boolean;
+  hasScopedEventCache?: boolean;
+  cacheStartDate?: string;
   sentinelRef: RefObject<HTMLDivElement | null>;
   eventsError: string | null;
   onFilterChange?: () => Promise<void> | void;
@@ -119,33 +121,72 @@ type EventsTabContentProps<TEventType extends string = Event['eventType']> = {
   onEventSortChange?: (value: EventSortValue) => void;
 };
 
+function eventTagOptions<T extends string>(props: EventsTabContentProps<T>) {
+  return {
+    selectedTags: props.selectedTags ?? [],
+    setSelectedTags: props.setSelectedTags ?? (() => {}),
+    eventTags: props.eventTags ?? [],
+    eventTagsLoading: props.eventTagsLoading ?? false,
+    eventTagsError: props.eventTagsError ?? null,
+  };
+}
+
+function eventViewOptions<T extends string>(props: EventsTabContentProps<T>) {
+  return {
+    ...props,
+    ...eventTagOptions(props),
+    onSearchSubmit: props.onSearchSubmit ?? (() => {}),
+    divisionFilters: props.divisionFilters ?? EMPTY_DIVISION_FILTERS,
+    setDivisionFilters: props.setDivisionFilters ?? (() => {}),
+    showCreateEventButton: props.showCreateEventButton ?? true,
+    createEventDisabled: props.createEventDisabled ?? false,
+    createEventHelperText: props.createEventHelperText ?? null,
+    hideWeeklyChildren: props.hideWeeklyChildren ?? false,
+    defaultSort: props.defaultSort ?? 'recommended',
+  };
+}
+
+type ActiveEventFilter = { key: string; label: string; onRemove: () => void };
+
+function hasDivisionFilters(value: DivisionDiscoveryFilterValue) {
+  return value.genders.length > 0 || value.skillDivisionTypeIds.length > 0
+    || value.ageDivisionTypeIds.length > 0 || value.priceMinDollars !== null
+    || value.priceMaxDollars !== null;
+}
+
 export default function EventsTabContent<TEventType extends string = Event['eventType']>(
   props: EventsTabContentProps<TEventType>,
+) {
+  return <EventsTabView {...eventViewOptions(props)} />;
+}
+
+function EventsTabView<TEventType extends string>(
+  props: ReturnType<typeof eventViewOptions<TEventType>>,
 ) {
   const {
     location,
     searchTerm,
     setSearchTerm,
-    onSearchSubmit = () => {},
+    onSearchSubmit,
     onOpenMap,
     selectedEventTypes,
     setSelectedEventTypes,
     eventTypeOptions,
     selectedSports,
     setSelectedSports,
-    selectedTags = [],
-    setSelectedTags = () => {},
-    eventTags = [],
-    eventTagsLoading = false,
-    eventTagsError = null,
+    selectedTags,
+    setSelectedTags,
+    eventTags,
+    eventTagsLoading,
+    eventTagsError,
     maxDistance,
     setMaxDistance,
     selectedStartDate,
     setSelectedStartDate,
     selectedEndDate,
     setSelectedEndDate,
-    divisionFilters = EMPTY_DIVISION_FILTERS,
-    setDivisionFilters = () => {},
+    divisionFilters,
+    setDivisionFilters,
     sports,
     sportsLoading,
     sportsError,
@@ -156,17 +197,19 @@ export default function EventsTabContent<TEventType extends string = Event['even
     isLoadingInitial,
     isLoadingMore,
     hasMoreEvents,
+    hasScopedEventCache,
+    cacheStartDate,
     sentinelRef,
     eventsError,
     onFilterChange,
     onEventClick,
     onCreateEvent,
-    showCreateEventButton = true,
-    createEventDisabled = false,
-    createEventHelperText = null,
-    hideWeeklyChildren = false,
+    showCreateEventButton,
+    createEventDisabled,
+    createEventHelperText,
+    hideWeeklyChildren,
     setHideWeeklyChildren,
-    defaultSort = 'recommended',
+    defaultSort,
     eventSort: controlledEventSort,
     onEventSortChange,
   } = props;
@@ -278,11 +321,13 @@ export default function EventsTabContent<TEventType extends string = Event['even
     selectedStartDate,
     selectedTags,
   ]);
-  const { visibleEvents, isRefreshing } = useEventListFiltering({
+  const { visibleEvents, isRefreshing, refreshError } = useEventListFiltering({
     events,
     filters: eventFilters,
     filterKey: eventListFilterKey(eventFilters),
     hasMoreEvents,
+    hasScopedEventCache,
+    cacheStartDate,
     onFilterChange,
   });
 
@@ -335,92 +380,99 @@ export default function EventsTabContent<TEventType extends string = Event['even
     return sorted;
   }, [eventSort, getEventDistanceKm, hideWeeklyChildren, visibleEvents]);
 
-  const activeFilters: Array<{ key: string; label: string; onRemove: () => void }> = [];
-
-  if (activeQuery) {
-    activeFilters.push({
-      key: 'query',
-      label: `Search: ${activeQuery}`,
-      onRemove: () => setSearchTerm(''),
-    });
-  }
-
-  if (!allEventTypesSelected) {
-    selectedEventTypes.forEach((type) => {
+  const categoryFilterChips = (): ActiveEventFilter[] => {
+    const activeFilters: ActiveEventFilter[] = [];
+    if (activeQuery) {
       activeFilters.push({
-        key: `event-type-${type}`,
-        label: formatEnumDisplayLabel(type, 'Event'),
-        onRemove: () => setSelectedEventTypes(selectedEventTypes.filter((value) => value !== type)),
+        key: 'query',
+        label: `Search: ${activeQuery}`,
+        onRemove: () => setSearchTerm(''),
+      });
+    }
+
+    if (!allEventTypesSelected) {
+      selectedEventTypes.forEach((type) => {
+        activeFilters.push({
+          key: `event-type-${type}`,
+          label: formatEnumDisplayLabel(type, 'Event'),
+          onRemove: () => setSelectedEventTypes(selectedEventTypes.filter((value) => value !== type)),
+        });
+      });
+    }
+
+    selectedSports.forEach((sport) => {
+      activeFilters.push({
+        key: `sport-${sport}`,
+        label: sport,
+        onRemove: () => setSelectedSports((current) => current.filter((value) => value !== sport)),
       });
     });
-  }
 
-  selectedSports.forEach((sport) => {
-    activeFilters.push({
-      key: `sport-${sport}`,
-      label: sport,
-      onRemove: () => setSelectedSports((current) => current.filter((value) => value !== sport)),
+    selectedTags.forEach((tag) => {
+      activeFilters.push({
+        key: `tag-${tag}`,
+        label: tag,
+        onRemove: () => setSelectedTags((current) => current.filter((value) => value !== tag)),
+      });
     });
-  });
+    return activeFilters;
+  };
 
-  selectedTags.forEach((tag) => {
-    activeFilters.push({
-      key: `tag-${tag}`,
-      label: tag,
-      onRemove: () => setSelectedTags((current) => current.filter((value) => value !== tag)),
-    });
-  });
+  const rangeFilterChips = (): ActiveEventFilter[] => {
+    const activeFilters: ActiveEventFilter[] = [];
+    if (selectedStartDate) {
+      activeFilters.push({
+        key: 'date-from',
+        label: `From ${selectedStartDate.toLocaleDateString()}`,
+        onRemove: () => setSelectedStartDate(null),
+      });
+    }
 
-  if (selectedStartDate) {
-    activeFilters.push({
-      key: 'date-from',
-      label: `From ${selectedStartDate.toLocaleDateString()}`,
-      onRemove: () => setSelectedStartDate(null),
-    });
-  }
+    if (selectedEndDate) {
+      activeFilters.push({
+        key: 'date-to',
+        label: `Until ${selectedEndDate.toLocaleDateString()}`,
+        onRemove: () => setSelectedEndDate(null),
+      });
+    }
 
-  if (selectedEndDate) {
-    activeFilters.push({
-      key: 'date-to',
-      label: `Until ${selectedEndDate.toLocaleDateString()}`,
-      onRemove: () => setSelectedEndDate(null),
-    });
-  }
+    if (hasDivisionFilters(divisionFilters)) {
+      activeFilters.push({
+        key: 'division-filters',
+        label: 'Division filters',
+        onRemove: () => setDivisionFilters({
+          genders: [],
+          skillDivisionTypeIds: [],
+          ageDivisionTypeIds: [],
+          priceMinDollars: null,
+          priceMaxDollars: null,
+        }),
+      });
+    }
 
-  const hasDivisionFilters = divisionFilters.genders.length > 0
-    || divisionFilters.skillDivisionTypeIds.length > 0
-    || divisionFilters.ageDivisionTypeIds.length > 0
-    || divisionFilters.priceMinDollars !== null
-    || divisionFilters.priceMaxDollars !== null;
-  if (hasDivisionFilters) {
-    activeFilters.push({
-      key: 'division-filters',
-      label: 'Division filters',
-      onRemove: () => setDivisionFilters({
-        genders: [],
-        skillDivisionTypeIds: [],
-        ageDivisionTypeIds: [],
-        priceMinDollars: null,
-        priceMaxDollars: null,
-      }),
-    });
-  }
+    if (location && typeof maxDistance === 'number') {
+      activeFilters.push({
+        key: 'distance',
+        label: `Within ${Math.round(kmToMiles(maxDistance))} mi`,
+        onRemove: () => setMaxDistance(null),
+      });
+    }
+    return activeFilters;
+  };
 
-  if (location && typeof maxDistance === 'number') {
-    activeFilters.push({
-      key: 'distance',
-      label: `Within ${Math.round(kmToMiles(maxDistance))} mi`,
-      onRemove: () => setMaxDistance(null),
-    });
-  }
+  const visibilityFilterChips = (): ActiveEventFilter[] => {
+    const activeFilters: ActiveEventFilter[] = [];
+    if (hideWeeklyChildren && setHideWeeklyChildren) {
+      activeFilters.push({
+        key: 'hide-weekly-children',
+        label: 'Hide weekly sessions',
+        onRemove: () => setHideWeeklyChildren(false),
+      });
+    }
+    return activeFilters;
+  };
 
-  if (hideWeeklyChildren && setHideWeeklyChildren) {
-    activeFilters.push({
-      key: 'hide-weekly-children',
-      label: 'Hide weekly sessions',
-      onRemove: () => setHideWeeklyChildren(false),
-    });
-  }
+  const activeFilters = [...categoryFilterChips(), ...rangeFilterChips(), ...visibilityFilterChips()];
 
   const activeFilterCount = activeFilters.length;
   const eventReadoutCount = activeFilterCount > 0
@@ -430,8 +482,7 @@ export default function EventsTabContent<TEventType extends string = Event['even
       : sortedEvents.length;
   const hasActiveDistanceFilter = Boolean(location && typeof maxDistance === 'number');
 
-  const filterPanel = (
-    <div className="space-y-6">
+  const renderTagFilters = () => (
       <div>
         <Text size="xs" fw={700} c="dimmed" tt="uppercase" mb={8}>
           Tags
@@ -491,7 +542,9 @@ export default function EventsTabContent<TEventType extends string = Event['even
           </Alert>
         )}
       </div>
+  );
 
+  const renderSportFilters = () => (
       <div>
         <Text size="xs" fw={700} c="dimmed" tt="uppercase" mb={8}>
           Sports
@@ -549,7 +602,9 @@ export default function EventsTabContent<TEventType extends string = Event['even
           </Alert>
         )}
       </div>
+  );
 
+  const renderDateFilters = () => (
       <div>
         <Text size="xs" fw={700} c="dimmed" tt="uppercase" mb={8}>
           Date Range
@@ -590,6 +645,15 @@ export default function EventsTabContent<TEventType extends string = Event['even
           />
         </div>
       </div>
+  );
+
+  const filterPanel = (
+    <div className="space-y-6">
+      {renderTagFilters()}
+
+      {renderSportFilters()}
+
+      {renderDateFilters()}
 
       <DivisionDiscoveryFilters
         value={divisionFilters}
@@ -629,8 +693,7 @@ export default function EventsTabContent<TEventType extends string = Event['even
     </div>
   );
 
-  return (
-    <>
+  const renderSearchActions = () => (
       <div className="space-y-6 mb-8">
         <Group justify="space-between" align="center" gap="md" wrap="wrap" className="w-full">
           <DiscoverSearchControls
@@ -655,83 +718,10 @@ export default function EventsTabContent<TEventType extends string = Event['even
           )}
         </Group>
       </div>
+  );
 
-      <div className="grid gap-6 lg:grid-cols-[18rem_minmax(0,1fr)]">
-        <aside className="hidden lg:block lg:sticky lg:top-24 lg:h-[calc(100dvh-6.5rem)]">
-          <Paper
-            withBorder
-            p={0}
-            radius="lg"
-            className="h-full overflow-hidden"
-          >
-            <div className="discover-filter-panel h-full overflow-y-auto p-4">
-              <Group justify="space-between" align="center" mb="md">
-                <Text fw={700} size="sm">
-                  Filters
-                </Text>
-                <Button variant="subtle" size="compact-sm" onClick={resetFilters} disabled={!activeFilterCount}>
-                  Reset
-                </Button>
-              </Group>
-              {filterPanel}
-            </div>
-          </Paper>
-        </aside>
-
-        <div className="space-y-4">
-          <Group justify="space-between" align="center" gap="sm" wrap="wrap">
-            <Text size="sm" c="dimmed">
-              {eventReadoutCount} event{eventReadoutCount === 1 ? '' : 's'} {hasActiveDistanceFilter ? 'near you' : 'available'}.
-            </Text>
-            <Select
-              aria-label="Sort events"
-              data={EVENT_SORT_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
-              value={eventSort}
-              onChange={(value) => setEventSort((value as (typeof EVENT_SORT_OPTIONS)[number]['value']) ?? 'recommended')}
-              leftSection={<ArrowUpDown size={14} />}
-              style={{ minWidth: 220 }}
-            />
-          </Group>
-
-          {activeFilters.length > 0 && (
-            <Paper withBorder p="sm" radius="lg" className="discover-active-filters">
-              <Group justify="space-between" align="flex-start" gap="xs" wrap="wrap">
-                <Group gap="xs" align="center">
-                  <Text fw={600} size="sm" c="dimmed">
-                    Active filters
-                  </Text>
-                  {activeFilters.map((filter) => (
-                    <button
-                      key={filter.key}
-                      type="button"
-                      className="discover-active-filter-chip"
-                      onClick={filter.onRemove}
-                    >
-                      <span>{filter.label}</span>
-                      <X size={12} />
-                    </button>
-                  ))}
-                </Group>
-                <Button variant="subtle" size="compact-sm" onClick={resetFilters}>
-                  Clear all
-                </Button>
-              </Group>
-            </Paper>
-          )}
-
-          {eventsError && (
-            <Alert color="red">
-              {eventsError}
-            </Alert>
-          )}
-
-          {isRefreshing && !isLoadingInitial && (
-            <Text role="status" aria-live="polite" size="sm" c="dimmed">
-              Updating events…
-            </Text>
-          )}
-
-          {isLoadingInitial ? (
+  const renderEventCards = () => (
+    isLoadingInitial ? (
             <Loading text="Loading events..." />
           ) : sortedEvents.length === 0 ? (
             <Paper withBorder p="xl" radius="lg">
@@ -773,8 +763,98 @@ export default function EventsTabContent<TEventType extends string = Event['even
                 </Text>
               )}
             </>
+          )
+  );
+
+  const renderActiveFilters = () => (
+    activeFilters.length > 0 && (
+            <Paper withBorder p="sm" radius="lg" className="discover-active-filters">
+              <Group justify="space-between" align="flex-start" gap="xs" wrap="wrap">
+                <Group gap="xs" align="center">
+                  <Text fw={600} size="sm" c="dimmed">
+                    Active filters
+                  </Text>
+                  {activeFilters.map((filter) => (
+                    <button
+                      key={filter.key}
+                      type="button"
+                      className="discover-active-filter-chip"
+                      onClick={filter.onRemove}
+                    >
+                      <span>{filter.label}</span>
+                      <X size={12} />
+                    </button>
+                  ))}
+                </Group>
+                <Button variant="subtle" size="compact-sm" onClick={resetFilters}>
+                  Clear all
+                </Button>
+              </Group>
+            </Paper>
+          )
+  );
+
+  const renderResults = () => (
+        <div className="space-y-4">
+          <Group justify="space-between" align="center" gap="sm" wrap="wrap">
+            <Text size="sm" c="dimmed">
+              {eventReadoutCount} event{eventReadoutCount === 1 ? '' : 's'} {hasActiveDistanceFilter ? 'near you' : 'available'}.
+            </Text>
+            <Select
+              aria-label="Sort events"
+              data={EVENT_SORT_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+              value={eventSort}
+              onChange={(value) => setEventSort((value as (typeof EVENT_SORT_OPTIONS)[number]['value']) ?? 'recommended')}
+              leftSection={<ArrowUpDown size={14} />}
+              style={{ minWidth: 220 }}
+            />
+          </Group>
+
+          {renderActiveFilters()}
+
+          {(eventsError || refreshError) && (
+            <Alert color="red">
+              {eventsError ?? refreshError}
+            </Alert>
           )}
+
+          {isRefreshing && !isLoadingInitial && (
+            <Text role="status" aria-live="polite" size="sm" c="dimmed">
+              Updating events…
+            </Text>
+          )}
+
+          {renderEventCards()}
         </div>
+  );
+
+  return (
+    <>
+      {renderSearchActions()}
+
+      <div className="grid gap-6 lg:grid-cols-[18rem_minmax(0,1fr)]">
+        <aside className="hidden lg:block lg:sticky lg:top-24 lg:h-[calc(100dvh-6.5rem)]">
+          <Paper
+            withBorder
+            p={0}
+            radius="lg"
+            className="h-full overflow-hidden"
+          >
+            <div className="discover-filter-panel h-full overflow-y-auto p-4">
+              <Group justify="space-between" align="center" mb="md">
+                <Text fw={700} size="sm">
+                  Filters
+                </Text>
+                <Button variant="subtle" size="compact-sm" onClick={resetFilters} disabled={!activeFilterCount}>
+                  Reset
+                </Button>
+              </Group>
+              {filterPanel}
+            </div>
+          </Paper>
+        </aside>
+
+        {renderResults()}
       </div>
     </>
   );

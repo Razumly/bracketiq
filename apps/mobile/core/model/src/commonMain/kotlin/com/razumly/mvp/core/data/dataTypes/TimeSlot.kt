@@ -13,6 +13,7 @@ import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.Contextual
 import kotlinx.serialization.Serializable
 import kotlin.time.ExperimentalTime
+import kotlin.time.Clock
 import kotlin.time.Instant
 
 private val dateOnlyPattern = Regex("""^\d{4}-\d{2}-\d{2}$""")
@@ -458,9 +459,14 @@ fun TimeSlot.resolveOneTimeInterval(): ResolvedOneTimeTimeSlotInterval {
             "One-Time Time Slot \"$id\" is invalid: select an end time.",
         )
     }
-    if (resolvedEndMinutes <= resolvedStartMinutes) {
+    val endLocalDate = if (resolvedEndMinutes <= resolvedStartMinutes) {
+        startLocal.date.plus(DatePeriod(days = 1))
+    } else {
+        startLocal.date
+    }
+    if (endLocal != null && endLocal.date != startLocal.date && endLocal.date != endLocalDate) {
         throw OneTimeTimeSlotValidationException(
-            "One-Time Time Slot \"$id\" is invalid: the end time must be after the start time on the same local date.",
+            "One-Time Time Slot \"$id\" is invalid: the interval must not exceed one local day or end before its start date.",
         )
     }
 
@@ -469,7 +475,7 @@ fun TimeSlot.resolveOneTimeInterval(): ResolvedOneTimeTimeSlotInterval {
         .parse("${localDate}T${resolvedStartMinutes.asLocalTime()}:00")
         .toInstant(zone)
     val minuteAlignedEnd = LocalDateTime
-        .parse("${localDate}T${resolvedEndMinutes.asLocalTime()}:00")
+        .parse("${endLocalDate}T${resolvedEndMinutes.asLocalTime()}:00")
         .toInstant(zone)
     val resolvedStart = if (startLocal.hour * 60 + startLocal.minute == resolvedStartMinutes) {
         startDate
@@ -479,7 +485,7 @@ fun TimeSlot.resolveOneTimeInterval(): ResolvedOneTimeTimeSlotInterval {
     val resolvedEnd = if (
         endDate != null &&
         endLocal != null &&
-        endLocal.date.toString() == localDate &&
+        endLocal.date == endLocalDate &&
         endLocal.hour * 60 + endLocal.minute == resolvedEndMinutes
     ) {
         endDate
@@ -490,6 +496,11 @@ fun TimeSlot.resolveOneTimeInterval(): ResolvedOneTimeTimeSlotInterval {
         throw OneTimeTimeSlotValidationException(
             "One-Time Time Slot \"$id\" is invalid: the exact interval cannot be resolved.",
         )
+    }
+    val localDurationMillis = resolvedEnd.toLocalDateTime(zone).toInstant(TimeZone.UTC).toEpochMilliseconds() -
+        resolvedStart.toLocalDateTime(zone).toInstant(TimeZone.UTC).toEpochMilliseconds()
+    if (localDurationMillis > 24 * 60 * 60 * 1000L) {
+        throw OneTimeTimeSlotValidationException("The interval must not exceed one local day.")
     }
     return ResolvedOneTimeTimeSlotInterval(
         slotId = id,
@@ -502,6 +513,14 @@ fun TimeSlot.resolveOneTimeInterval(): ResolvedOneTimeTimeSlotInterval {
         resourceIds = normalizedScheduledFieldIds(),
         divisionIds = normalizedDivisionIds(),
     )
+}
+
+@OptIn(ExperimentalTime::class)
+fun TimeSlot.assertFutureOneTimeEnd(now: Instant = Clock.System.now()) {
+    if (repeating) return
+    if (resolveOneTimeInterval().end <= now) {
+        throw OneTimeTimeSlotValidationException("The end date and time must be in the future.")
+    }
 }
 
 @OptIn(ExperimentalTime::class)

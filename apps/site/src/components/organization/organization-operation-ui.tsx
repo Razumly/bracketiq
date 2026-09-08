@@ -14,12 +14,38 @@ import { cn } from '@/lib/utils';
 
 type Spacing = number | string;
 
+type RadiusValue = string | number | undefined;
+
+const numericRadiusClass = (value: number): string => {
+  if (value <= 0) return 'org-radius-none';
+  if (value <= 4) return 'org-radius-small';
+  if (value <= 8) return 'org-radius-control';
+  return 'org-radius-surface';
+};
+
+const radiusClasses: Record<string, string> = {
+  none: 'org-radius-none', xs: 'org-radius-small', sm: 'org-radius-small',
+  xl: 'org-radius-pill', full: 'org-radius-pill',
+};
+
+const radiusClass = (value: RadiusValue, fallback: 'surface' | 'control'): string => {
+  if (typeof value === 'number') return numericRadiusClass(value);
+  return radiusClasses[value ?? ''] ?? `org-radius-${fallback}`;
+};
+
+const spacingClasses: Record<string, Record<string, string>> = {
+  gap: { '0': 'gap-0', '1': 'gap-px', '2': 'gap-0.5', '4': 'gap-1', '6': 'gap-1.5', '8': 'gap-2', '10': 'gap-2.5', '12': 'gap-3', '16': 'gap-4', '20': 'gap-5', '24': 'gap-6', '32': 'gap-8', 'xs': 'gap-2', 'sm': 'gap-3', 'md': 'gap-4', 'lg': 'gap-6', 'xl': 'gap-8' },
+  p: { '0': 'p-0', '1': 'p-px', '2': 'p-0.5', '4': 'p-1', '6': 'p-1.5', '8': 'p-2', '10': 'p-2.5', '12': 'p-3', '16': 'p-4', '20': 'p-5', '24': 'p-6', '32': 'p-8', 'xs': 'p-2', 'sm': 'p-3', 'md': 'p-4', 'lg': 'p-6', 'xl': 'p-8' },
+  m: { '0': 'm-0', '1': 'm-px', '2': 'm-0.5', '4': 'm-1', '6': 'm-1.5', '8': 'm-2', '10': 'm-2.5', '12': 'm-3', '16': 'm-4', '20': 'm-5', '24': 'm-6', '32': 'm-8', 'xs': 'm-2', 'sm': 'm-3', 'md': 'm-4', 'lg': 'm-6', 'xl': 'm-8' },
+  px: { '0': 'px-0', '1': 'px-px', '2': 'px-0.5', '4': 'px-1', '6': 'px-1.5', '8': 'px-2', '10': 'px-2.5', '12': 'px-3', '16': 'px-4', '20': 'px-5', '24': 'px-6', '32': 'px-8', 'xs': 'px-2', 'sm': 'px-3', 'md': 'px-4', 'lg': 'px-6', 'xl': 'px-8' },
+  py: { '0': 'py-0', '1': 'py-px', '2': 'py-0.5', '4': 'py-1', '6': 'py-1.5', '8': 'py-2', '10': 'py-2.5', '12': 'py-3', '16': 'py-4', '20': 'py-5', '24': 'py-6', '32': 'py-8', 'xs': 'py-2', 'sm': 'py-3', 'md': 'py-4', 'lg': 'py-6', 'xl': 'py-8' },
+  mt: { '0': 'mt-0', '1': 'mt-px', '2': 'mt-0.5', '4': 'mt-1', '6': 'mt-1.5', '8': 'mt-2', '10': 'mt-2.5', '12': 'mt-3', '16': 'mt-4', '20': 'mt-5', '24': 'mt-6', '32': 'mt-8', 'xs': 'mt-2', 'sm': 'mt-3', 'md': 'mt-4', 'lg': 'mt-6', 'xl': 'mt-8' },
+  mb: { '0': 'mb-0', '1': 'mb-px', '2': 'mb-0.5', '4': 'mb-1', '6': 'mb-1.5', '8': 'mb-2', '10': 'mb-2.5', '12': 'mb-3', '16': 'mb-4', '20': 'mb-5', '24': 'mb-6', '32': 'mb-8', 'xs': 'mb-2', 'sm': 'mb-3', 'md': 'mb-4', 'lg': 'mb-6', 'xl': 'mb-8' },
+};
+
 const spacingClass = (value: Spacing | undefined, prefix: 'gap' | 'p' | 'm' | 'px' | 'py' | 'mt' | 'mb'): string => {
   if (value === undefined) return '';
-  const key = String(value);
-  const scale: Record<string, string> = { '0': '0', xs: '2', sm: '3', md: '4', lg: '6', xl: '8', '1': '1', '2': '2', '4': '4', '6': '6', '8': '8' };
-  const resolved = scale[key];
-  return resolved ? `${prefix}-${resolved}` : '';
+  return spacingClasses[prefix][String(value)] ?? '';
 };
 
 const textColorClass = (color?: string): string => {
@@ -50,41 +76,93 @@ type LayoutProps = React.HTMLAttributes<HTMLDivElement> & {
   w?: number | string;
 };
 
+const justifyClasses: Record<string, string> = {
+  center: 'justify-center', 'flex-end': 'justify-end', 'space-between': 'justify-between',
+  'space-around': 'justify-around', 'flex-start': 'justify-start',
+};
+const alignClasses: Record<string, string> = {
+  center: 'items-center', 'flex-start': 'items-start', 'flex-end': 'items-end',
+  end: 'items-end', stretch: 'items-stretch', baseline: 'items-baseline',
+};
+const wrapClasses: Record<string, string> = {
+  wrap: 'flex-wrap', nowrap: 'flex-nowrap', 'wrap-reverse': 'flex-wrap-reverse',
+};
+
 const layoutClasses = (props: LayoutProps): string => cn(
   spacingClass(props.gap, 'gap'), spacingClass(props.p, 'p'), spacingClass(props.px, 'px'), spacingClass(props.py, 'py'),
   spacingClass(props.mt, 'mt'), spacingClass(props.mb, 'mb'),
-  props.justify === 'center' && 'justify-center', props.justify === 'flex-end' && 'justify-end', props.justify === 'space-between' && 'justify-between', props.justify === 'space-around' && 'justify-around', props.justify === 'flex-start' && 'justify-start',
-  props.align === 'center' && 'items-center', props.align === 'flex-start' && 'items-start', props.align === 'flex-end' && 'items-end', props.align === 'end' && 'items-end', props.align === 'stretch' && 'items-stretch', props.align === 'baseline' && 'items-baseline',
-  props.wrap === 'wrap' && 'flex-wrap', props.wrap === 'nowrap' && 'flex-nowrap', props.wrap === 'wrap-reverse' && 'flex-wrap-reverse', props.grow && '[&>*]:flex-1', textColorClass(props.c),
+  justifyClasses[props.justify ?? ''], alignClasses[props.align ?? ''],
+  wrapClasses[props.wrap ?? ''], props.grow && '[&>*]:flex-1', textColorClass(props.c),
 );
 
 const layoutStyle = (props: LayoutProps): React.CSSProperties => ({ height: props.h, minWidth: props.miw, maxWidth: props.maw, width: props.w, ...props.style });
 
 export const Group = React.forwardRef<HTMLDivElement, LayoutProps>(function Group(props, ref) {
-  const { className, children, gap, justify, align, wrap, grow, p, px, py, mt, mb, c, h, miw, maw, w, style, ...rest } = props;
+  const { className, children, gap = 'md', justify, align = 'center', wrap = 'wrap', grow, p, px, py, mt, mb, c, h, miw, maw, w, style, ...rest } = props;
   const layoutProps = { gap, justify, align, wrap, grow, p, px, py, mt, mb, c, h, miw, maw, w, style };
   return <div ref={ref} className={cn('flex min-w-0', layoutClasses(layoutProps), className)} style={layoutStyle(layoutProps)} {...rest}>{children}</div>;
 });
 
 export const Stack = React.forwardRef<HTMLDivElement, LayoutProps>(function Stack(props, ref) {
-  const { className, children, gap, justify, align, wrap, grow, p, px, py, mt, mb, c, h, miw, maw, w, style, ...rest } = props;
+  const { className, children, gap = 'md', justify, align, wrap, grow, p, px, py, mt, mb, c, h, miw, maw, w, style, ...rest } = props;
   const layoutProps = { gap, justify, align, wrap, grow, p, px, py, mt, mb, c, h, miw, maw, w, style };
   return <div ref={ref} className={cn('flex min-w-0 flex-col', layoutClasses(layoutProps), className)} style={layoutStyle(layoutProps)} {...rest}>{children}</div>;
 });
 
 type SimpleGridProps = React.HTMLAttributes<HTMLDivElement> & { cols?: number | { base?: number; sm?: number; md?: number; lg?: number; xl?: number }; spacing?: Spacing; mb?: Spacing; mt?: Spacing; p?: Spacing; py?: Spacing };
-const gridColumnClass = (value: number | undefined): string => value ? `grid-cols-${value}` : '';
+const gridColumns: Record<string, Record<number, string>> = {
+  "base": {
+    "1": "grid-cols-1",
+    "2": "grid-cols-2",
+    "3": "grid-cols-3",
+    "4": "grid-cols-4",
+    "5": "grid-cols-5",
+    "6": "grid-cols-6"
+  },
+  "sm": {
+    "1": "sm:grid-cols-1",
+    "2": "sm:grid-cols-2",
+    "3": "sm:grid-cols-3",
+    "4": "sm:grid-cols-4",
+    "5": "sm:grid-cols-5",
+    "6": "sm:grid-cols-6"
+  },
+  "md": {
+    "1": "md:grid-cols-1",
+    "2": "md:grid-cols-2",
+    "3": "md:grid-cols-3",
+    "4": "md:grid-cols-4",
+    "5": "md:grid-cols-5",
+    "6": "md:grid-cols-6"
+  },
+  "lg": {
+    "1": "lg:grid-cols-1",
+    "2": "lg:grid-cols-2",
+    "3": "lg:grid-cols-3",
+    "4": "lg:grid-cols-4",
+    "5": "lg:grid-cols-5",
+    "6": "lg:grid-cols-6"
+  },
+  "xl": {
+    "1": "xl:grid-cols-1",
+    "2": "xl:grid-cols-2",
+    "3": "xl:grid-cols-3",
+    "4": "xl:grid-cols-4",
+    "5": "xl:grid-cols-5",
+    "6": "xl:grid-cols-6"
+  }
+};
 export function SimpleGrid({ className, cols = 1, spacing = 'md', mb, mt, p, py, ...props }: SimpleGridProps) {
-  const classes = typeof cols === 'number'
-    ? gridColumnClass(cols)
-    : cn(gridColumnClass(cols.base ?? 1), cols.sm && `sm:${gridColumnClass(cols.sm)}`, cols.md && `md:${gridColumnClass(cols.md)}`, cols.lg && `lg:${gridColumnClass(cols.lg)}`, cols.xl && `xl:${gridColumnClass(cols.xl)}`);
+  const values = typeof cols === 'number' ? { base: cols } : { base: 1, ...cols };
+  const classes = Object.entries(values).map(([breakpoint, count]) => gridColumns[breakpoint]?.[count]);
   return <div className={cn('grid min-w-0', classes, spacingClass(spacing, 'gap'), spacingClass(mb, 'mb'), spacingClass(mt, 'mt'), spacingClass(p, 'p'), spacingClass(py, 'py'), className)} {...props} />;
 }
 
 type TextProps = React.HTMLAttributes<HTMLElement> & { component?: React.ElementType; size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl'; c?: string; fw?: number | string; tt?: string; truncate?: boolean | string; lineClamp?: number; mb?: Spacing; mt?: Spacing; p?: Spacing; py?: Spacing; fz?: string | number; lh?: string | number; ta?: string; w?: string | number; span?: boolean };
+const textSizeClasses = { xs: 'text-xs', sm: 'text-sm', md: 'text-base', lg: 'text-lg', xl: 'text-xl' };
 export function Text({ component: Component = 'p', size = 'md', c, fw, tt, truncate, lineClamp, mb, mt, p, py, fz, lh, ta, w, span, className, style, ...props }: TextProps) {
   const Tag = span ? 'span' : Component;
-  return <Tag className={cn(size === 'xs' ? 'text-xs' : size === 'sm' ? 'text-sm' : size === 'lg' ? 'text-lg' : size === 'xl' ? 'text-xl' : 'text-base', textColorClass(c), fw && `font-${fw}`, tt === 'uppercase' && 'uppercase', truncate && 'truncate', lineClamp && `line-clamp-${lineClamp}`, spacingClass(mb, 'mb'), spacingClass(mt, 'mt'), spacingClass(p, 'p'), spacingClass(py, 'py'), ta && `text-${ta}`, className)} style={{ fontSize: fz, lineHeight: lh, width: w, ...style }} {...props} />;
+  return <Tag className={cn(textSizeClasses[size], textColorClass(c), tt === 'uppercase' && 'uppercase', truncate && 'truncate', lineClamp && `line-clamp-${lineClamp}`, spacingClass(mb, 'mb'), spacingClass(mt, 'mt'), spacingClass(p, 'p'), spacingClass(py, 'py'), className)} style={{ fontSize: fz, fontWeight: fw, textAlign: ta as React.CSSProperties['textAlign'], lineHeight: lh, width: w, ...style }} {...props} />;
 }
 
 type TitleProps = TextProps & { order?: 1 | 2 | 3 | 4 | 5 | 6 };
@@ -94,16 +172,36 @@ export function Title({ order = 2, size, className, ...props }: TitleProps) {
 }
 
 type PaperProps = React.HTMLAttributes<HTMLDivElement> & { withBorder?: boolean; radius?: string | number; p?: Spacing; mb?: Spacing; mt?: Spacing; shadow?: string; component?: React.ElementType; ta?: string; h?: number | string };
-export function Paper({ withBorder, radius: _radius, p, mb, mt, shadow, component: Component = 'div', ta, h, className, style, ...props }: PaperProps) {
-  return <Component className={cn('min-w-0 max-w-full bg-card text-card-foreground', withBorder && 'border border-border', spacingClass(p, 'p'), spacingClass(mb, 'mb'), spacingClass(mt, 'mt'), shadow === 'xs' && 'shadow-sm', shadow === 'sm' && 'shadow-md', ta && `text-${ta}`, className)} style={{ height: h, ...style }} {...props} />;
+export function Paper({ withBorder, radius, p, mb, mt, shadow, component: Component = 'div', ta, h, className, style, ...props }: PaperProps) {
+  return <Component className={cn('org-paper min-w-0 max-w-full bg-card text-card-foreground', radiusClass(radius, 'surface'), withBorder && 'border border-border', spacingClass(p, 'p'), spacingClass(mb, 'mb'), spacingClass(mt, 'mt'), shadow === 'xs' && 'shadow-sm', shadow === 'sm' && 'shadow-md', ta && `text-${ta}`, className)} style={{ height: h, ...style }} {...props} />;
 }
 
 type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; size?: string; color?: string; loading?: boolean; fullWidth?: boolean; leftSection?: React.ReactNode; rightSection?: React.ReactNode; justify?: string; compact?: string; radius?: string | number; component?: React.ElementType; href?: string; target?: string; rel?: string; nativeButton?: boolean; mt?: Spacing | { base?: Spacing; md?: Spacing }; mb?: Spacing | { base?: Spacing; md?: Spacing }; px?: Spacing; w?: number | string };
-export function Button({ className, variant = 'filled', size = 'md', color, loading, fullWidth, leftSection, rightSection, justify, compact, radius: _radius, component, href, target, rel, nativeButton: _nativeButton, mt, mb, px, w, children, disabled, style, ...props }: ButtonProps) {
-  const mappedVariant = color === 'red' || variant === 'danger' ? 'destructive' : variant === 'light' ? 'secondary' : variant === 'subtle' ? 'ghost' : variant === 'outline' ? 'outline' : variant === 'link' ? 'link' : 'default';
-  const mappedSize = compact === 'xs' || size === 'xs' || size === 'compact-xs' ? 'xs' : compact === 'sm' || size === 'sm' || size === 'compact-sm' ? 'sm' : size === 'lg' ? 'lg' : size === 'icon' ? 'icon' : 'default';
+const buttonVariant = (variant: string, color?: string) => {
+  if (color === 'red' || variant === 'danger') return 'destructive';
+  const variants: Record<string, 'secondary' | 'ghost' | 'outline' | 'link'> = {
+    light: 'secondary', secondary: 'secondary', subtle: 'ghost', ghost: 'ghost',
+    outline: 'outline', default: 'outline', link: 'link',
+  };
+  return variants[variant] ?? 'default';
+};
+
+const buttonSize = (size: string, compact?: string) => {
+  if (compact === 'xs' || ['xs', 'compact-xs'].includes(size)) return 'xs';
+  if (compact === 'sm' || ['sm', 'compact-sm'].includes(size)) return 'sm';
+  if (size === 'lg') return 'lg';
+  if (size === 'icon') return 'icon';
+  return 'default';
+};
+const buttonMarginClass = (margin: ButtonProps['mt'], direction: 'mt' | 'mb') => {
+  return typeof margin === 'object' ? '' : spacingClass(margin, direction);
+};
+
+export function Button({ className, variant = 'filled', size = 'md', color, loading, fullWidth, leftSection, rightSection, justify, compact, radius, component, href, target, rel, nativeButton: _nativeButton, mt, mb, px, w, children, disabled, style, ...props }: ButtonProps) {
+  const mappedVariant = buttonVariant(variant, color);
+  const mappedSize = buttonSize(size, compact);
   const content = <>{loading && <Loader2 aria-hidden="true" className="size-4 animate-spin motion-reduce:animate-none" />}{leftSection}{children}{rightSection}</>;
-  const buttonProps = { ...props, target, rel, disabled: disabled || loading, 'aria-busy': loading || undefined, className: cn(fullWidth && 'w-full', justify === 'flex-start' && 'justify-start', spacingClass(px, 'px'), typeof mt !== 'object' && spacingClass(mt, 'mt'), typeof mb !== 'object' && spacingClass(mb, 'mb'), className), style: { width: w, ...style } } as any;
+  const buttonProps = { ...props, target, rel, disabled: disabled || loading, 'aria-busy': loading || undefined, className: cn(radiusClass(radius, 'control'), fullWidth && 'w-full', justify === 'flex-start' && 'justify-start', spacingClass(px, 'px'), buttonMarginClass(mt, 'mt'), buttonMarginClass(mb, 'mb'), className), style: { width: w, ...style } } as any;
   if (component === 'a') {
     return <BaseButton nativeButton={false} render={<a href={href} />} variant={mappedVariant as any} size={mappedSize as any} {...buttonProps}>{content}</BaseButton>;
   }
@@ -117,8 +215,8 @@ const useFieldId = (id: string | undefined, label: React.ReactNode): string => {
   const labelPart = typeof label === 'string' ? label.toLowerCase().replace(/[^a-z0-9]+/g, '-') : 'field';
   return `organization-field-${labelPart}-${generatedId.replace(/[^a-z0-9]+/gi, '')}`;
 };
-function FieldFrame({ id, label, description, error, required, mb, mt, p, className, children }: FieldProps & { className?: string; children: React.ReactNode }) {
-  return <div className={cn('min-w-0 space-y-1.5', spacingClass(mb, 'mb'), spacingClass(mt, 'mt'), spacingClass(p, 'p'), className)}>{label && <label htmlFor={id} className="block text-sm font-medium text-foreground">{label}{required && <span aria-hidden="true"> *</span>}</label>}{children}{description && <p className="text-xs text-muted-foreground">{description}</p>}{error && <p role="alert" className="text-xs text-destructive">{error}</p>}</div>;
+function FieldFrame({ id, label, description, error, required, mb, mt, p, className, style, children }: FieldProps & { className?: string; style?: React.CSSProperties; children: React.ReactNode }) {
+  return <div className={cn('min-w-0 space-y-1.5', spacingClass(mb, 'mb'), spacingClass(mt, 'mt'), spacingClass(p, 'p'), className)} style={style}>{label && <label htmlFor={id} className="block text-sm font-medium text-foreground">{label}{required && <span aria-hidden="true"> *</span>}</label>}{children}{description && <p className="text-xs text-muted-foreground">{description}</p>}{error && <p role="alert" className="text-xs text-destructive">{error}</p>}</div>;
 }
 
 const stableChangeEvent = <T extends HTMLInputElement | HTMLTextAreaElement>(event: React.ChangeEvent<T>): React.ChangeEvent<T> => {
@@ -127,17 +225,17 @@ const stableChangeEvent = <T extends HTMLInputElement | HTMLTextAreaElement>(eve
 };
 
 type TextInputProps = Omit<React.InputHTMLAttributes<HTMLInputElement>, 'size'> & FieldProps & { size?: string; variant?: string; radius?: string | number; leftSection?: React.ReactNode; rightSection?: React.ReactNode; leftSectionWidth?: number; rightSectionWidth?: number };
-export const TextInput = React.forwardRef<HTMLInputElement, TextInputProps>(function TextInput({ id, label, description, error, required, mb, mt, p, size: _size, variant: _variant, radius: _radius, leftSection, rightSection, leftSectionWidth, rightSectionWidth, className, onChange, ...props }, ref) {
+export const TextInput = React.forwardRef<HTMLInputElement, TextInputProps>(function TextInput({ id, label, description, error, required, mb, mt, p, size: _size, variant: _variant, radius, leftSection, rightSection, leftSectionWidth, rightSectionWidth, className, style, onChange, ...props }, ref) {
   const resolvedId = useFieldId(id, label);
-  return <FieldFrame id={resolvedId} label={label} description={description} error={error} required={required} mb={mb} mt={mt} p={p}><div className="relative"><input ref={ref} id={resolvedId} required={required} aria-invalid={Boolean(error) || undefined} className={cn('h-11 min-h-11 w-full min-w-0 rounded-lg border border-input bg-background px-3 py-2 text-base text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:opacity-70 md:text-sm', leftSection && 'pl-9', rightSection && 'pr-9', className)} {...props} onChange={(event) => onChange?.(stableChangeEvent(event))} />{leftSection && <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2" style={{ width: leftSectionWidth }}>{leftSection}</span>}{rightSection && <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={{ width: rightSectionWidth }}>{rightSection}</span>}</div></FieldFrame>;
+  return <FieldFrame id={resolvedId} label={label} description={description} error={error} required={required} mb={mb} mt={mt} p={p} style={style}><div className="relative"><input ref={ref} id={resolvedId} required={required} aria-invalid={Boolean(error) || undefined} className={cn('h-11 min-h-11 w-full min-w-0 border border-input bg-background px-3 py-2 text-base text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:opacity-70 md:text-sm', radiusClass(radius, 'control'), leftSection && 'pl-9', rightSection && 'pr-9', className)} {...props} onChange={(event) => onChange?.(stableChangeEvent(event))} />{leftSection && <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2" style={{ width: leftSectionWidth }}>{leftSection}</span>}{rightSection && <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={{ width: rightSectionWidth }}>{rightSection}</span>}</div></FieldFrame>;
 });
 
 export function PasswordInput(props: TextInputProps) { return <TextInput {...props} type="password" />; }
 
-type TextareaProps = React.TextareaHTMLAttributes<HTMLTextAreaElement> & FieldProps & { minRows?: number; maxRows?: number; autosize?: boolean; size?: string };
-export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(function Textarea({ id, label, description, error, required, mb, mt, p, minRows = 3, maxRows: _maxRows, autosize: _autosize, size: _size, className, onChange, ...props }, ref) {
+type TextareaProps = React.TextareaHTMLAttributes<HTMLTextAreaElement> & FieldProps & { minRows?: number; maxRows?: number; autosize?: boolean; size?: string; radius?: string | number };
+export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(function Textarea({ id, label, description, error, required, mb, mt, p, minRows = 3, maxRows: _maxRows, autosize: _autosize, size: _size, radius, className, style, onChange, ...props }, ref) {
   const resolvedId = useFieldId(id, label);
-  return <FieldFrame id={resolvedId} label={label} description={description} error={error} required={required} mb={mb} mt={mt} p={p}><textarea ref={ref} id={resolvedId} required={required} rows={minRows} aria-invalid={Boolean(error) || undefined} className={cn('min-h-24 w-full min-w-0 resize-y rounded-lg border border-input bg-background px-3 py-2.5 text-base text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:opacity-70 md:text-sm', className)} {...props} onChange={(event) => onChange?.(stableChangeEvent(event))} /></FieldFrame>;
+  return <FieldFrame id={resolvedId} label={label} description={description} error={error} required={required} mb={mb} mt={mt} p={p} style={style}><textarea ref={ref} id={resolvedId} required={required} rows={minRows} aria-invalid={Boolean(error) || undefined} className={cn('min-h-24 w-full min-w-0 resize-y border border-input bg-background px-3 py-2.5 text-base text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:opacity-70 md:text-sm', radiusClass(radius, 'control'), className)} {...props} onChange={(event) => onChange?.(stableChangeEvent(event))} /></FieldFrame>;
 });
 
 type NumberInputProps = Omit<TextInputProps, 'type' | 'onChange'> & { value?: number | string; onChange?: (value: number | string) => void; decimalScale?: number; fixedDecimalScale?: boolean; prefix?: string; suffix?: string; min?: number; max?: number; step?: number; w?: number | string };
@@ -165,21 +263,27 @@ const useDismissibleLayer = (open: boolean, onClose: () => void) => {
   }, [onClose, open]);
   return containerRef;
 };
-type SelectProps = Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'size'> & FieldProps & { data?: ReadonlyArray<SelectOption>; value?: string | null; onChange?: (value: string | null) => void; placeholder?: string; allowDeselect?: boolean; clearable?: boolean; searchable?: boolean; nothingFoundMessage?: string; size?: string; rightSection?: React.ReactNode; rightSectionWidth?: number; rightSectionPointerEvents?: string; searchValue?: string; onSearchChange?: (value: string) => void };
-export function Select({ data = [], value, onChange, id, label, description, error, required, mb, mt, p, placeholder, allowDeselect, clearable: _clearable, searchable: _searchable, nothingFoundMessage: _nothingFoundMessage, size: _size, rightSection, rightSectionWidth, rightSectionPointerEvents, searchValue: _searchValue, onSearchChange, className, ...props }: SelectProps) {
+type SelectProps = Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'size'> & FieldProps & { data?: ReadonlyArray<SelectOption>; value?: string | null; onChange?: (value: string | null) => void; placeholder?: string; allowDeselect?: boolean; clearable?: boolean; searchable?: boolean; nothingFoundMessage?: string; size?: string; radius?: string | number; rightSection?: React.ReactNode; rightSectionWidth?: number; rightSectionPointerEvents?: string; searchValue?: string; onSearchChange?: (value: string) => void };
+const hasClearableSelection = (value: SelectProps['value'], allowDeselect?: boolean, clearable?: boolean) => Boolean(value && (allowDeselect || clearable));
+export function Select({ data = [], value, onChange, id, label, description, error, required, mb, mt, p, placeholder, allowDeselect, clearable, searchable: _searchable, nothingFoundMessage: _nothingFoundMessage, size: _size, radius, rightSection, rightSectionWidth, rightSectionPointerEvents, searchValue: _searchValue, onSearchChange, className, style, ...props }: SelectProps) {
   const resolvedId = useFieldId(id, label);
   const listboxId = React.useId();
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState('');
-  const containerRef = useDismissibleLayer(open, () => setOpen(false));
+  const containerRef = useDismissibleLayer(open, () => {
+    setSearch('');
+    onSearchChange?.('');
+    setOpen(false);
+  });
   const selectedOption = data.find((option) => normalizeSelectOption(option).value === value);
   const selectedLabel = selectedOption ? selectOptionLabel(selectedOption) : '';
   const visibleOptions = data.filter((option) => !search || selectOptionLabel(option).toLowerCase().includes(search.toLowerCase()));
-  return <FieldFrame id={resolvedId} label={label} description={description} error={error} required={required} mb={mb} mt={mt} p={p}><div ref={containerRef} className="relative"><input {...props} id={resolvedId} role="combobox" aria-expanded={open} aria-controls={listboxId} value={search || selectedLabel} placeholder={placeholder} required={required} aria-invalid={Boolean(error) || undefined} onFocus={() => setOpen(true)} onClick={() => setOpen(true)} onChange={(event) => { setSearch(event.currentTarget.value); onSearchChange?.(event.currentTarget.value); }} className={cn('h-11 min-h-11 w-full min-w-0 rounded-lg border border-input bg-background px-3 py-2 pr-10 text-base text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:opacity-70 md:text-sm', className)} /><span aria-hidden={rightSection ? undefined : true} className={cn('absolute top-1/2 right-3 flex -translate-y-1/2 items-center justify-center text-muted-foreground', rightSectionPointerEvents === 'none' ? 'pointer-events-none' : 'pointer-events-auto')} style={{ width: rightSectionWidth }}>{rightSection ?? <ChevronDown aria-hidden="true" className="size-4" />}</span><div id={listboxId} role="listbox" hidden={!open} className="absolute top-full z-30 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg">{allowDeselect && value && <button type="button" role="option" aria-selected={false} className="block min-h-10 w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted" onClick={() => { onChange?.(null); setSearch(''); setOpen(false); }}>Clear selection</button>}{visibleOptions.length ? visibleOptions.map((option) => { const normalized = normalizeSelectOption(option); return <button key={normalized.value} type="button" role="option" aria-selected={normalized.value === value} disabled={normalized.disabled} className="block min-h-10 w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50" onClick={() => { onChange?.(normalized.value); setSearch(''); setOpen(false); }}>{normalized.label}</button>; }) : <p className="px-3 py-2 text-sm text-muted-foreground">No options found.</p>}</div></div></FieldFrame>;
+  const controlRadius = radiusClass(radius, 'control');
+  return <FieldFrame id={resolvedId} label={label} description={description} error={error} required={required} mb={mb} mt={mt} p={p} style={style}><div ref={containerRef} className={cn('relative', controlRadius)}><input {...props} id={resolvedId} role="combobox" aria-expanded={open} aria-controls={listboxId} value={search || selectedLabel} placeholder={placeholder} required={required} aria-invalid={Boolean(error) || undefined} onFocus={() => setOpen(true)} onClick={() => setOpen(true)} onChange={(event) => { setSearch(event.currentTarget.value); onSearchChange?.(event.currentTarget.value); }} className={cn('h-11 min-h-11 w-full min-w-0 rounded-lg border border-input bg-background px-3 py-2 pr-10 text-base text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:opacity-70 md:text-sm', className)} /><span aria-hidden={rightSection ? undefined : true} className={cn('absolute top-1/2 right-3 flex -translate-y-1/2 items-center justify-center text-muted-foreground', rightSectionPointerEvents === 'none' ? 'pointer-events-none' : 'pointer-events-auto')} style={{ width: rightSectionWidth }}>{rightSection ?? <ChevronDown aria-hidden="true" className="size-4" />}</span><div id={listboxId} role="listbox" hidden={!open} className="absolute top-full z-30 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg">{hasClearableSelection(value, allowDeselect, clearable) && <button type="button" role="option" aria-selected={false} className="block min-h-10 w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted" onClick={() => { onChange?.(null); setSearch(''); setOpen(false); }}>Clear selection</button>}{visibleOptions.length ? visibleOptions.map((option) => { const normalized = normalizeSelectOption(option); return <button key={normalized.value} type="button" role="option" aria-selected={normalized.value === value} disabled={normalized.disabled} className="block min-h-10 w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50" onClick={() => { onChange?.(normalized.value); setSearch(''); setOpen(false); }}>{normalized.label}</button>; }) : <p className="px-3 py-2 text-sm text-muted-foreground">No options found.</p>}</div></div></FieldFrame>;
 }
 
-type MultiSelectProps = Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'size'> & FieldProps & { data?: ReadonlyArray<SelectOption>; value?: string[]; onChange?: (value: string[]) => void; placeholder?: string; searchable?: boolean; clearable?: boolean; size?: string };
-export function MultiSelect({ data = [], value = [], onChange, id, label, description, error, required, mb, mt, p, className, placeholder, searchable: _searchable, clearable: _clearable, size: _size, ...props }: MultiSelectProps) {
+type MultiSelectProps = Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'size'> & FieldProps & { data?: ReadonlyArray<SelectOption>; value?: string[]; onChange?: (value: string[]) => void; placeholder?: string; searchable?: boolean; clearable?: boolean; size?: string; radius?: string | number };
+export function MultiSelect({ data = [], value = [], onChange, id, label, description, error, required, mb, mt, p, className, placeholder, searchable: _searchable, clearable: _clearable, size: _size, radius, style, ...props }: MultiSelectProps) {
   const resolvedId = useFieldId(id, label);
   const listboxId = React.useId();
   const [open, setOpen] = React.useState(false);
@@ -187,7 +291,8 @@ export function MultiSelect({ data = [], value = [], onChange, id, label, descri
   const containerRef = useDismissibleLayer(open, () => setOpen(false));
   const selectedLabels = data.filter((option) => value.includes(normalizeSelectOption(option).value)).map(selectOptionLabel).join(', ');
   const visibleOptions = data.filter((option) => !search || selectOptionLabel(option).toLowerCase().includes(search.toLowerCase()));
-  return <FieldFrame id={resolvedId} label={label} description={description} error={error} required={required} mb={mb} mt={mt} p={p}><div ref={containerRef} className="relative"><input {...props} id={resolvedId} role="combobox" aria-expanded={open} aria-controls={listboxId} value={search || selectedLabels} placeholder={placeholder} required={required} aria-invalid={Boolean(error) || undefined} onFocus={() => setOpen(true)} onClick={() => setOpen(true)} onChange={(event) => setSearch(event.currentTarget.value)} className={cn('h-11 min-h-11 w-full min-w-0 rounded-lg border border-input bg-background px-3 py-2 pr-10 text-base text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:opacity-70 md:text-sm', className)} /><ChevronDown aria-hidden="true" className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-muted-foreground" /><div id={listboxId} role="listbox" aria-multiselectable="true" hidden={!open} className="absolute top-full z-30 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg">{visibleOptions.length ? visibleOptions.map((option) => { const normalized = normalizeSelectOption(option); const selected = value.includes(normalized.value); return <button key={normalized.value} type="button" role="option" aria-selected={selected} disabled={normalized.disabled} className="flex min-h-10 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50" onClick={() => { onChange?.(selected ? value.filter((entry) => entry !== normalized.value) : [...value, normalized.value]); setSearch(''); }}>{selected && <Check aria-hidden="true" className="size-4" />}{normalized.label}</button>; }) : <p className="px-3 py-2 text-sm text-muted-foreground">No options found.</p>}</div></div></FieldFrame>;
+  const controlRadius = radiusClass(radius, 'control');
+  return <FieldFrame id={resolvedId} label={label} description={description} error={error} required={required} mb={mb} mt={mt} p={p} style={style}><div ref={containerRef} className={cn('relative', controlRadius)}><input {...props} id={resolvedId} role="combobox" aria-expanded={open} aria-controls={listboxId} value={search || selectedLabels} placeholder={placeholder} required={required} aria-invalid={Boolean(error) || undefined} onFocus={() => setOpen(true)} onClick={() => setOpen(true)} onChange={(event) => setSearch(event.currentTarget.value)} className={cn('h-11 min-h-11 w-full min-w-0 rounded-lg border border-input bg-background px-3 py-2 pr-10 text-base text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:opacity-70 md:text-sm', className)} /><ChevronDown aria-hidden="true" className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-muted-foreground" /><div id={listboxId} role="listbox" aria-multiselectable="true" hidden={!open} className="absolute top-full z-30 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg">{visibleOptions.length ? visibleOptions.map((option) => { const normalized = normalizeSelectOption(option); const selected = value.includes(normalized.value); return <button key={normalized.value} type="button" role="option" aria-selected={selected} disabled={normalized.disabled} className="flex min-h-10 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50" onClick={() => { onChange?.(selected ? value.filter((entry) => entry !== normalized.value) : [...value, normalized.value]); setSearch(''); }}>{selected && <Check aria-hidden="true" className="size-4" />}{normalized.label}</button>; }) : <p className="px-3 py-2 text-sm text-muted-foreground">No options found.</p>}</div></div></FieldFrame>;
 }
 
 type AutocompleteProps = Omit<TextInputProps, 'value' | 'onChange'> & { data?: ReadonlyArray<string>; value?: string; onChange?: (value: string) => void; comboboxProps?: unknown };
@@ -196,7 +301,7 @@ export function Autocomplete({ data = [], value, onChange, comboboxProps: _combo
 type ColorInputProps = Omit<TextInputProps, 'value' | 'onChange' | 'type'> & { value?: string; onChange?: (value: string) => void; format?: string; swatches?: string[] };
 export function ColorInput({ value, onChange, ...props }: ColorInputProps) { return <TextInput {...props} value={value ?? ''} onChange={(event) => onChange?.(event.currentTarget.value)} />; }
 
-type DateControlProps = FieldProps & React.AriaAttributes & { value?: Date | string | null; onChange?: (value: Date | null) => void; minDate?: Date; placeholder?: string; size?: string; clearable?: boolean; valueFormat?: string; highlightToday?: boolean; leftSection?: React.ReactNode; timePickerProps?: unknown; clearButtonProps?: React.ButtonHTMLAttributes<HTMLButtonElement>; popoverProps?: unknown; style?: React.CSSProperties };
+type DateControlProps = FieldProps & React.AriaAttributes & { value?: Date | string | null; onChange?: (value: Date | null) => void; disabled?: boolean; minDate?: Date; placeholder?: string; size?: string; radius?: string | number; clearable?: boolean; valueFormat?: string; highlightToday?: boolean; leftSection?: React.ReactNode; timePickerProps?: unknown; clearButtonProps?: React.ButtonHTMLAttributes<HTMLButtonElement>; popoverProps?: unknown; style?: React.CSSProperties };
 const dateInputValue = (value: Date | string | null | undefined, includeTime: boolean): string => { if (!value) return ''; if (typeof value === 'string') return value.slice(0, includeTime ? 16 : 10); const pad = (n: number) => String(n).padStart(2, '0'); const date = `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`; return includeTime ? `${date}T${pad(value.getHours())}:${pad(value.getMinutes())}` : date; };
 const parseDateValue = (value: Date | string | null | undefined): Date | null => {
   if (!value) return null;
@@ -220,26 +325,33 @@ const monthDays = (value: Date): Array<Date | null> => {
     ...Array.from({ length: daysInMonth }, (_, index) => new Date(value.getFullYear(), value.getMonth(), index + 1)),
   ];
 };
-function DateControl({ value, onChange, id, label, description, error, required, mb, mt, p, minDate, placeholder = 'mm/dd/yyyy', clearable = false, valueFormat, highlightToday = false, leftSection, timePickerProps: _timePickerProps, clearButtonProps, popoverProps: _popoverProps, style, size: _size, includeTime, ...ariaProps }: DateControlProps & { includeTime?: boolean }) {
+const dateAccessibleName = (label: React.ReactNode, ariaLabel?: string) => ariaLabel ?? (typeof label === 'string' ? label : 'Choose date');
+const minimumDateTime = (minimum?: Date) => minimum ? startOfDay(minimum) : null;
+function DateTimeControl({ value, onChange, id, label, description, error, required, mb, mt, p, minDate, placeholder = 'mm/dd/yyyy', clearable: _clearable, valueFormat: _valueFormat, highlightToday: _highlightToday, leftSection: _leftSection, timePickerProps: _timePickerProps, clearButtonProps: _clearButtonProps, popoverProps: _popoverProps, style, size: _size, radius: _radius, ...ariaProps }: DateControlProps) {
+  const resolvedId = useFieldId(id, label);
+  return <FieldFrame id={resolvedId} label={label} description={description} error={error} required={required} mb={mb} mt={mt} p={p} style={style}><input {...ariaProps} id={resolvedId} type="datetime-local" value={dateInputValue(value, true)} min={minDate ? dateInputValue(minDate, true) : undefined} placeholder={placeholder} required={required} aria-invalid={Boolean(error) || undefined} onChange={(event) => onChange?.(event.currentTarget.value ? new Date(event.currentTarget.value) : null)} className="h-11 min-h-11 w-full min-w-0 rounded-lg border border-input bg-background px-3 py-2 text-base text-foreground outline-none transition-colors focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:opacity-70 md:text-sm" style={style} /></FieldFrame>;
+}
+function CalendarDateControl({ value, onChange, id, label, description, error, required, mb, mt, p, minDate, placeholder = 'mm/dd/yyyy', clearable = false, valueFormat, highlightToday = false, leftSection, timePickerProps: _timePickerProps, clearButtonProps, popoverProps: _popoverProps, style, size: _size, radius, ...ariaProps }: DateControlProps) {
   const resolvedId = useFieldId(id, label);
   const selectedDate = parseDateValue(value);
   const [open, setOpen] = React.useState(false);
   const [viewDate, setViewDate] = React.useState(() => selectedDate ?? new Date());
   const containerRef = useDismissibleLayer(open, () => setOpen(false));
-  const accessibleName = ariaProps['aria-label'] ?? (typeof label === 'string' ? label : 'Choose date');
-  if (includeTime) {
-    return <FieldFrame id={resolvedId} label={label} description={description} error={error} required={required} mb={mb} mt={mt} p={p}><input {...ariaProps} id={resolvedId} type="datetime-local" value={dateInputValue(value, true)} min={minDate ? dateInputValue(minDate, true) : undefined} placeholder={placeholder} required={required} aria-invalid={Boolean(error) || undefined} onChange={(event) => onChange?.(event.currentTarget.value ? new Date(event.currentTarget.value) : null)} className="h-11 min-h-11 w-full min-w-0 rounded-lg border border-input bg-background px-3 py-2 text-base text-foreground outline-none transition-colors focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:opacity-70 md:text-sm" style={style} /></FieldFrame>;
-  }
+  const accessibleName = dateAccessibleName(label, ariaProps['aria-label']);
+  const controlRadius = radiusClass(radius, 'control');
   const days = monthDays(viewDate);
   const today = new Date();
-  const minimumTime = minDate ? startOfDay(minDate) : null;
-  return <FieldFrame id={resolvedId} label={label} description={description} error={error} required={required} mb={mb} mt={mt} p={p}><div ref={containerRef} className="relative"><button {...ariaProps} id={resolvedId} type="button" aria-haspopup="dialog" aria-expanded={open} aria-label={accessibleName} onClick={() => setOpen((current) => !current)} className="flex h-11 min-h-11 w-full min-w-0 items-center justify-between gap-2 rounded-lg border border-input bg-background px-3 py-2 text-left text-base text-foreground outline-none transition-colors focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:opacity-70 md:text-sm" style={style}><span className={selectedDate ? '' : 'text-muted-foreground'}>{formatDateLabel(selectedDate, valueFormat) || placeholder}</span><span className="flex items-center gap-1 text-muted-foreground">{leftSection ?? <CalendarDays aria-hidden="true" className="size-4" />}</span></button>{clearable && selectedDate && <button {...clearButtonProps} type="button" aria-label="Clear date" onClick={() => { onChange?.(null); setOpen(false); }} className="absolute top-1/2 right-9 -translate-y-1/2 rounded-md p-1 text-muted-foreground hover:bg-muted"><X aria-hidden="true" className="size-4" /></button>}{open && <div role="dialog" aria-label={accessibleName} className="absolute top-full left-0 z-40 mt-2 w-72 rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-xl"><div className="flex items-center justify-between gap-2"><button type="button" aria-label="Previous month" onClick={() => setViewDate((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1))} className="flex size-10 items-center justify-center rounded-md hover:bg-muted"><ChevronLeft aria-hidden="true" className="size-4" /></button><Text component="span" fw={600} className="text-sm">{viewDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</Text><button type="button" aria-label="Next month" onClick={() => setViewDate((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1))} className="flex size-10 items-center justify-center rounded-md hover:bg-muted"><ChevronRight aria-hidden="true" className="size-4" /></button></div><div className="mt-3 grid grid-cols-7 text-center text-xs font-semibold text-muted-foreground">{['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((day) => <span key={day} className="py-1">{day}</span>)}</div><div className="grid grid-cols-7 gap-1">{days.map((day, index) => { if (!day) return <span key={`blank-${index}`} aria-hidden="true" />; const disabled = minimumTime !== null && startOfDay(day) < minimumTime; const selected = selectedDate !== null && dateKey(day) === dateKey(selectedDate); const isToday = dateKey(day) === dateKey(today); const dateLabel = day.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }); return <button key={day.toISOString()} type="button" aria-pressed={selected} aria-current={isToday ? 'date' : undefined} aria-label={dateLabel} disabled={disabled} onClick={() => { onChange?.(day); setOpen(false); }} className={cn('flex min-h-10 items-center justify-center rounded-md text-sm transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-35', selected && 'bg-primary text-primary-foreground hover:bg-primary', highlightToday && isToday && !selected && 'ring-1 ring-primary')}>{day.getDate()}</button>; })}</div><div className="mt-2 flex items-center justify-between border-t border-border pt-2"><button type="button" className="min-h-10 rounded-md px-2 text-sm text-primary hover:bg-muted" onClick={() => { onChange?.(null); setOpen(false); }}>Clear</button><button type="button" className="min-h-10 rounded-md px-2 text-sm text-primary hover:bg-muted" onClick={() => { onChange?.(new Date()); setOpen(false); }}>Today</button></div></div>}</div></FieldFrame>;
+  const minimumTime = minimumDateTime(minDate);
+  return <FieldFrame id={resolvedId} label={label} description={description} error={error} required={required} mb={mb} mt={mt} p={p} style={style}><div ref={containerRef} className={cn('relative', controlRadius)}><button {...ariaProps} id={resolvedId} type="button" aria-haspopup="dialog" aria-expanded={open} aria-label={accessibleName} onClick={() => setOpen((current) => !current)} className="flex h-11 min-h-11 w-full min-w-0 items-center justify-between gap-2 rounded-lg border border-input bg-background px-3 py-2 text-left text-base text-foreground outline-none transition-colors focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:opacity-70 md:text-sm" style={style}><span className={selectedDate ? '' : 'text-muted-foreground'}>{formatDateLabel(selectedDate, valueFormat) || placeholder}</span><span className="flex items-center gap-1 text-muted-foreground">{leftSection ?? <CalendarDays aria-hidden="true" className="size-4" />}</span></button>{clearable && selectedDate && !ariaProps.disabled && <button {...clearButtonProps} type="button" aria-label="Clear date" onClick={() => { onChange?.(null); setOpen(false); }} className="absolute top-1/2 right-9 -translate-y-1/2 rounded-md p-1 text-muted-foreground hover:bg-muted"><X aria-hidden="true" className="size-4" /></button>}{open && !ariaProps.disabled && <div role="dialog" aria-label={accessibleName} className="absolute top-full left-0 z-40 mt-2 w-72 rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-xl"><div className="flex items-center justify-between gap-2"><button type="button" aria-label="Previous month" onClick={() => setViewDate((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1))} className="flex size-10 items-center justify-center rounded-md hover:bg-muted"><ChevronLeft aria-hidden="true" className="size-4" /></button><Text component="span" fw={600} className="text-sm">{viewDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</Text><button type="button" aria-label="Next month" onClick={() => setViewDate((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1))} className="flex size-10 items-center justify-center rounded-md hover:bg-muted"><ChevronRight aria-hidden="true" className="size-4" /></button></div><div className="mt-3 grid grid-cols-7 text-center text-xs font-semibold text-muted-foreground">{['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((day) => <span key={day} className="py-1">{day}</span>)}</div><div className="grid grid-cols-7 gap-1">{days.map((day, index) => { if (!day) return <span key={`blank-${index}`} aria-hidden="true" />; const disabled = minimumTime !== null && startOfDay(day) < minimumTime; const selected = selectedDate !== null && dateKey(day) === dateKey(selectedDate); const isToday = dateKey(day) === dateKey(today); const dateLabel = day.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }); return <button key={day.toISOString()} type="button" aria-pressed={selected} aria-current={isToday ? 'date' : undefined} aria-label={dateLabel} disabled={disabled} onClick={() => { onChange?.(day); setOpen(false); }} className={cn('flex min-h-10 items-center justify-center rounded-md text-sm transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-35', selected && 'bg-primary text-primary-foreground hover:bg-primary', highlightToday && isToday && !selected && 'ring-1 ring-primary')}>{day.getDate()}</button>; })}</div><div className="mt-2 flex items-center justify-between border-t border-border pt-2"><button type="button" className="min-h-10 rounded-md px-2 text-sm text-primary hover:bg-muted" onClick={() => { onChange?.(null); setOpen(false); }}>Clear</button><button type="button" disabled={minimumTime !== null && startOfDay(today) < minimumTime} className="min-h-10 rounded-md px-2 text-sm text-primary hover:bg-muted disabled:cursor-not-allowed disabled:opacity-35" onClick={() => { onChange?.(today); setOpen(false); }}>Today</button></div></div>}</div></FieldFrame>;
+}
+function DateControl({ includeTime, ...props }: DateControlProps & { includeTime?: boolean }) {
+  return includeTime ? <DateTimeControl {...props} /> : <CalendarDateControl {...props} />;
 }
 export function DatePickerInput(props: DateControlProps) { return <DateControl {...props} includeTime={false} />; }
 export function DateTimePicker(props: DateControlProps) { return <DateControl {...props} includeTime />; }
 
-type FileInputProps = FieldProps & { value?: File | null; onChange?: (value: File | null) => void; placeholder?: string; accept?: string; clearable?: boolean; className?: string };
-export function FileInput({ value: _value, onChange, id, label, description, error, required, mb, mt, p, placeholder, accept, className }: FileInputProps) { const resolvedId = useFieldId(id, label); return <FieldFrame id={resolvedId} label={label} description={description} error={error} required={required} mb={mb} mt={mt} p={p}><input id={resolvedId} type="file" accept={accept} required={required} aria-label={typeof label === 'string' ? label : placeholder} onChange={(event) => onChange?.(event.currentTarget.files?.[0] ?? null)} className={cn('block min-h-11 w-full min-w-0 rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5', className)} /></FieldFrame>; }
+type FileInputProps = FieldProps & { value?: File | null; onChange?: (value: File | null) => void; placeholder?: string; accept?: string; clearable?: boolean; radius?: string | number; className?: string };
+export function FileInput({ value: _value, onChange, id, label, description, error, required, mb, mt, p, placeholder, accept, radius, className }: FileInputProps) { const resolvedId = useFieldId(id, label); return <FieldFrame id={resolvedId} label={label} description={description} error={error} required={required} mb={mb} mt={mt} p={p}><input id={resolvedId} type="file" accept={accept} required={required} aria-label={typeof label === 'string' ? label : placeholder} onChange={(event) => onChange?.(event.currentTarget.files?.[0] ?? null)} className={cn('block min-h-11 w-full min-w-0 border border-input bg-background px-3 py-2 text-sm text-foreground file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5', radiusClass(radius, 'control'), className)} /></FieldFrame>; }
 
 type SwitchProps = Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'> & FieldProps & { checked?: boolean; onChange?: React.ChangeEventHandler<HTMLInputElement> };
 export function Switch({ id, label, description, mb, mt, p, checked, onChange, disabled, className, ...props }: SwitchProps) { const resolvedId = useFieldId(id, label); return <label htmlFor={resolvedId} className={cn('flex min-h-11 items-start gap-3 rounded-lg border border-transparent py-2 text-sm', spacingClass(mb, 'mb'), spacingClass(mt, 'mt'), spacingClass(p, 'p'), disabled && 'cursor-not-allowed opacity-60', className)}><input {...props} id={resolvedId} type="checkbox" aria-label={typeof label === 'string' ? label : undefined} checked={checked} onChange={onChange} disabled={disabled} className="mt-1 size-4 accent-primary" /><span className="min-w-0"><span className="block font-medium text-foreground">{label}</span>{description && <span className="mt-1 block text-xs text-muted-foreground">{description}</span>}</span></label>; }
@@ -251,7 +363,7 @@ type ChipProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'onChange'>
 export function Chip({ checked = false, onChange, className, children, radius: _radius, ...props }: ChipProps) { return <button {...props} type="button" aria-pressed={checked} onClick={() => onChange?.(!checked)} className={cn('min-h-11 rounded-full border px-3 py-2 text-sm font-medium', checked ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-background text-foreground hover:bg-muted', className)}>{children}</button>; }
 
 type SegmentedControlProps = { value: string; onChange: (value: string) => void; data: Array<{ label: React.ReactNode; value: string }>; className?: string; fullWidth?: boolean };
-export function SegmentedControl({ value, onChange, data, className, fullWidth }: SegmentedControlProps) { return <div className={cn('inline-flex max-w-full flex-wrap gap-1 rounded-lg bg-muted p-1', fullWidth && 'w-full', className)} role="group">{data.map((item) => <button type="button" key={item.value} aria-pressed={item.value === value} onClick={() => onChange(item.value)} className={cn('min-h-11 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground', fullWidth && 'flex-1', item.value === value && 'bg-background text-foreground shadow-sm')}>{item.label}</button>)}</div>; }
+export function SegmentedControl({ value, onChange, data, className, fullWidth }: SegmentedControlProps) { return <div className={cn('inline-flex max-w-full flex-wrap gap-1 bg-muted p-1 org-radius-surface', fullWidth && 'w-full', className)} role="group">{data.map((item) => <button type="button" key={item.value} aria-pressed={item.value === value} onClick={() => onChange(item.value)} className={cn('min-h-11 px-3 py-2 text-sm font-medium text-muted-foreground org-radius-control', fullWidth && 'flex-1', item.value === value && 'bg-background text-foreground shadow-sm')}>{item.label}</button>)}</div>; }
 
 type ModalProps = { opened: boolean; onClose: () => void; title?: React.ReactNode; children?: React.ReactNode; centered?: boolean; size?: string; styles?: { content?: React.CSSProperties; body?: React.CSSProperties }; withCloseButton?: boolean };
 export function Modal({ opened, onClose, title, children, size, styles, withCloseButton = true }: ModalProps) { return <Dialog open={opened} onOpenChange={(next) => { if (!next) onClose(); }}><DialogContent showCloseButton={withCloseButton} style={styles?.content} className={cn(size === 'xl' && 'max-w-4xl', size === 'lg' && 'max-w-2xl', size === 'sm' && 'max-w-sm')}><DialogHeader>{title && <DialogTitle>{title}</DialogTitle>}</DialogHeader><div style={styles?.body}>{children}</div></DialogContent></Dialog>; }
@@ -267,13 +379,32 @@ type LoaderProps = React.SVGAttributes<SVGSVGElement> & { size?: 'xs' | 'sm' | '
 export function Loader({ size = 'md', className, ...props }: LoaderProps) { const sizeClass = size === 'xs' ? 'size-3' : size === 'sm' ? 'size-4' : size === 'lg' ? 'size-7' : 'size-5'; return <Loader2 role="status" aria-label="Loading" className={cn(sizeClass, 'animate-spin motion-reduce:animate-none', className)} {...props} />; }
 
 type BadgeProps = React.HTMLAttributes<HTMLSpanElement> & { size?: string; variant?: string; color?: string; radius?: string };
-export function Badge({ size = 'md', variant: _variant, color, radius: _radius, className, ...props }: BadgeProps) { const colorClass = color === 'red' ? 'border-destructive/30 bg-destructive/10 text-destructive' : color === 'blue' ? 'border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200' : color === 'cyan' ? 'border-cyan-200 bg-cyan-50 text-cyan-800 dark:border-cyan-800 dark:bg-cyan-950 dark:text-cyan-200' : color === 'violet' ? 'border-violet-200 bg-violet-50 text-violet-800 dark:border-violet-800 dark:bg-violet-950 dark:text-violet-200' : color === 'green' || color === 'teal' ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200' : color === 'orange' || color === 'yellow' ? 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200' : 'border-border bg-muted text-muted-foreground'; return <span className={cn('inline-flex w-fit items-center rounded-full border font-medium', size === 'xs' ? 'px-1.5 py-0.5 text-[0.68rem]' : size === 'sm' ? 'px-2 py-0.5 text-xs' : 'px-2.5 py-1 text-sm', colorClass, className)} {...props} />; }
+const badgeToneClasses: Record<string, string> = {
+  red: 'border-destructive/30 bg-destructive/10 text-destructive',
+  blue: 'border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200',
+  cyan: 'border-cyan-200 bg-cyan-50 text-cyan-800 dark:border-cyan-800 dark:bg-cyan-950 dark:text-cyan-200',
+  violet: 'border-violet-200 bg-violet-50 text-violet-800 dark:border-violet-800 dark:bg-violet-950 dark:text-violet-200',
+  green: 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200',
+  yellow: 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200',
+};
+const operationColorAliases: Record<string, string> = { teal: 'green', orange: 'yellow' };
+const operationTone = (color: string | undefined, tones: Record<string, string>, fallback: string) => {
+  const name = color ?? '';
+  return tones[operationColorAliases[name] ?? name] ?? fallback;
+};
+export function Badge({ size = 'md', variant: _variant, color, radius: _radius, className, ...props }: BadgeProps) { const colorClass = operationTone(color, badgeToneClasses, 'border-border bg-muted text-muted-foreground'); return <span className={cn('inline-flex w-fit items-center rounded-full border font-medium', size === 'xs' ? 'px-1.5 py-0.5 text-[0.68rem]' : size === 'sm' ? 'px-2 py-0.5 text-xs' : 'px-2.5 py-1 text-sm', colorClass, className)} {...props} />; }
 
 type AvatarProps = React.HTMLAttributes<HTMLDivElement> & { src?: string | null; alt?: string; name?: string; size?: string | number; radius?: string };
 export function Avatar({ src, alt, name, size = 'md', className, ...props }: AvatarProps) { const initials = name?.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase(); return <div className={cn('inline-flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted text-sm font-semibold text-muted-foreground', size === 'sm' && 'size-8 text-xs', size === 'lg' && 'size-14', className)} {...props}>{src ? <img src={src} alt={alt ?? name ?? ''} className="size-full object-cover" /> : initials}</div>; }
 
 type AlertProps = React.HTMLAttributes<HTMLDivElement> & { title?: React.ReactNode; color?: string; icon?: React.ReactNode; withCloseButton?: boolean; onClose?: () => void; radius?: string; variant?: string; mb?: Spacing; mt?: Spacing; p?: Spacing };
-export function Alert({ title, color, icon, withCloseButton, onClose, radius: _radius, variant: _variant, mb, mt, p, className, children, ...props }: AlertProps) { const tone = color === 'red' ? 'border-destructive/30 bg-destructive/10 text-destructive' : color === 'yellow' || color === 'orange' ? 'border-amber-300 bg-amber-50 text-amber-900 dark:bg-amber-950 dark:text-amber-100' : color === 'blue' ? 'border-blue-300 bg-blue-50 text-blue-900 dark:bg-blue-950 dark:text-blue-100' : color === 'green' || color === 'teal' ? 'border-emerald-300 bg-emerald-50 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-100' : 'border-border bg-muted text-foreground'; return <div role="alert" className={cn('relative flex gap-3 rounded-lg border text-sm', spacingClass(p, 'p') || 'p-3', spacingClass(mb, 'mb'), spacingClass(mt, 'mt'), tone, className)} {...props}>{icon && <span className="mt-0.5 shrink-0">{icon}</span>}<div className="min-w-0 flex-1">{title && <p className="mb-1 font-semibold">{title}</p>}<div>{children}</div></div>{withCloseButton && onClose && <button type="button" aria-label="Dismiss" onClick={onClose} className="min-h-8 min-w-8 rounded-md p-1 hover:bg-black/10"><X aria-hidden="true" className="size-4" /></button>}</div>; }
+const alertToneClasses: Record<string, string> = {
+  red: 'border-destructive/30 bg-destructive/10 text-destructive',
+  yellow: 'border-amber-300 bg-amber-50 text-amber-900 dark:bg-amber-950 dark:text-amber-100',
+  blue: 'border-blue-300 bg-blue-50 text-blue-900 dark:bg-blue-950 dark:text-blue-100',
+  green: 'border-emerald-300 bg-emerald-50 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-100',
+};
+export function Alert({ title, color, icon, withCloseButton, onClose, radius, variant: _variant, mb, mt, p, className, children, ...props }: AlertProps) { const tone = operationTone(color, alertToneClasses, 'border-border bg-muted text-foreground'); return <div role="alert" className={cn('relative flex gap-3 border text-sm', radiusClass(radius, 'surface'), spacingClass(p, 'p') || 'p-3', spacingClass(mb, 'mb'), spacingClass(mt, 'mt'), tone, className)} {...props}>{icon && <span className="mt-0.5 shrink-0">{icon}</span>}<div className="min-w-0 flex-1">{title && <p className="mb-1 font-semibold">{title}</p>}<div>{children}</div></div>{withCloseButton && onClose && <button type="button" aria-label="Dismiss" onClick={onClose} className="min-h-8 min-w-8 rounded-md p-1 hover:bg-black/10"><X aria-hidden="true" className="size-4" /></button>}</div>; }
 
 type ActionIconProps = Omit<ButtonProps, 'children' | 'fullWidth'> & { children?: React.ReactNode };
 export function ActionIcon({ className, children, ...props }: ActionIconProps) { return <Button {...props} size={props.size ?? 'icon-sm'} className={cn('shrink-0', className)}>{children}</Button>; }
@@ -285,15 +416,15 @@ export function Rating({ value = 0, onChange, readOnly = false, size = 'md', cla
 type PopoverState = { open: boolean; setOpen: React.Dispatch<React.SetStateAction<boolean>> };
 const PopoverContext = React.createContext<PopoverState | null>(null);
 type PopoverProps = { children: React.ReactNode; width?: number | string; position?: string; shadow?: string; withArrow?: boolean; withinPortal?: boolean };
-function PopoverRoot({ children, width: _width, position: _position, shadow: _shadow, withArrow: _withArrow, withinPortal: _withinPortal }: PopoverProps) { const [open, setOpen] = React.useState(false); return <PopoverContext.Provider value={{ open, setOpen }}><div className="relative inline-block">{children}</div></PopoverContext.Provider>; }
+function PopoverRoot({ children, width: _width, position: _position, shadow: _shadow, withArrow: _withArrow, withinPortal: _withinPortal }: PopoverProps) { const [open, setOpen] = React.useState(false); const containerRef = useDismissibleLayer(open, () => setOpen(false)); return <PopoverContext.Provider value={{ open, setOpen }}><div ref={containerRef} className="relative inline-block">{children}</div></PopoverContext.Provider>; }
 function PopoverTarget({ children }: { children: React.ReactElement }) { const context = React.useContext(PopoverContext); const childProps = children.props as { onClick?: (event: React.MouseEvent) => void }; return React.cloneElement(children, { onClick: (event: React.MouseEvent) => { childProps.onClick?.(event); context?.setOpen((current) => !current); } } as Partial<typeof children.props>); }
-function PopoverDropdown({ children }: { children: React.ReactNode }) { const context = React.useContext(PopoverContext); return context?.open ? <div className="absolute top-full left-0 z-40 mt-1 min-w-60 rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-lg">{children}</div> : null; }
+function PopoverDropdown({ children }: { children: React.ReactNode }) { const context = React.useContext(PopoverContext); return context?.open ? <div className="absolute top-full left-0 z-40 mt-1 min-w-60 border border-border bg-popover p-3 text-popover-foreground shadow-lg org-radius-surface">{children}</div> : null; }
 export const Popover = Object.assign(PopoverRoot, { Target: PopoverTarget, Dropdown: PopoverDropdown });
 
 export function Collapse({ in: visible, children }: { in: boolean; children?: React.ReactNode }) { return visible ? <div>{children}</div> : null; }
 
 type TableCellProps = React.TdHTMLAttributes<HTMLTableCellElement> & { ta?: string; fw?: number | string; c?: string };
-function TableCell({ ta, fw, c, className, ...props }: TableCellProps) { return <td className={cn('px-3 py-2 align-top text-sm', ta && `text-${ta}`, fw && `font-${fw}`, textColorClass(c), className)} {...props} />; }
-function TableHeaderCell({ ta, fw, c, className, ...props }: TableCellProps) { return <th className={cn('px-3 py-2 text-left align-top text-sm font-semibold', ta && `text-${ta}`, fw && `font-${fw}`, textColorClass(c), className)} {...props} />; }
+function TableCell({ ta, fw, c, className, style, ...props }: TableCellProps) { return <td className={cn('px-3 py-2 align-top text-sm', textColorClass(c), className)} style={{ textAlign: ta as React.CSSProperties['textAlign'], fontWeight: fw, ...style }} {...props} />; }
+function TableHeaderCell({ ta, fw, c, className, style, ...props }: TableCellProps) { return <th className={cn('px-3 py-2 text-left align-top text-sm font-semibold', textColorClass(c), className)} style={{ textAlign: ta as React.CSSProperties['textAlign'], fontWeight: fw, ...style }} {...props} />; }
 function TableBase({ className, striped, highlightOnHover, withTableBorder: _withTableBorder, withColumnBorders: _withColumnBorders, verticalSpacing: _verticalSpacing, horizontalSpacing: _horizontalSpacing, miw, layout, ...props }: React.TableHTMLAttributes<HTMLTableElement> & { striped?: boolean; highlightOnHover?: boolean; withTableBorder?: boolean; withColumnBorders?: boolean; verticalSpacing?: string; horizontalSpacing?: string; miw?: number | string; layout?: string }) { return <table className={cn('w-full border-collapse', striped && '[&_tbody_tr:nth-child(even)]:bg-muted/40', highlightOnHover && '[&_tbody_tr:hover]:bg-muted/60', className)} style={{ minWidth: miw, tableLayout: layout as React.CSSProperties['tableLayout'] }} {...props} />; }
 export const Table = Object.assign(TableBase, { Thead: (props: React.HTMLAttributes<HTMLTableSectionElement>) => <thead {...props} />, Tbody: (props: React.HTMLAttributes<HTMLTableSectionElement>) => <tbody {...props} />, Tr: (props: React.HTMLAttributes<HTMLTableRowElement>) => <tr {...props} />, Td: TableCell, Th: TableHeaderCell, ScrollContainer: ({ children, minWidth, className, style, ...props }: React.HTMLAttributes<HTMLDivElement> & { minWidth?: number | string }) => <div className={cn('overflow-x-auto', className)} {...props}><div style={{ minWidth, ...style }}>{children}</div></div> });

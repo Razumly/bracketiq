@@ -76,6 +76,7 @@ describe("OrganizationDiscountsTabContent", () => {
       ),
     );
 
+    await user.click(screen.getByRole("button", { name: "Add discount" }));
     await user.type(
       screen.getByRole("textbox", { name: "Discount name" }),
       "Early bird",

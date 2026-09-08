@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Group, Modal, MultiSelect, Stack, Switch, Text } from '@mantine/core';
-import { DatePickerInput, TimeInput } from '@mantine/dates';
+import { Button, DatePickerInput, Group, Modal, MultiSelect, Stack, Switch, Text } from '@/components/organization/organization-operation-ui';
+import { RentalSlotClockInput } from './RentalSlotClockInput';
+import { assertOneTimeTimeSlotFutureEnd, resolveOneTimeTimeSlot } from '@/lib/timeSlotAvailability';
 import type { Field, TimeSlot } from '@/types';
 import { fieldService, type ManageRentalSlotResult } from '@/lib/fieldService';
 import { apiRequest, isApiRequestError } from '@/lib/apiClient';
@@ -192,6 +193,7 @@ export default function CreateRentalSlotModal({
   const [startTime, setStartTime] = useState<string>(toTimeValue(now));
   const [endTime, setEndTime] = useState<string>(toTimeValue(defaultEnd));
   const [repeating, setRepeating] = useState<boolean>(false);
+  const [daysOfWeek, setDaysOfWeek] = useState<NonNullable<TimeSlot['dayOfWeek']>[]>([]);
   const [price, setPrice] = useState<number>(0);
   const [requiredTemplateIds, setRequiredTemplateIds] = useState<string[]>([]);
   const [hostRequiredTemplateIds, setHostRequiredTemplateIds] = useState<string[]>([]);
@@ -218,11 +220,8 @@ export default function CreateRentalSlotModal({
       return null;
     }
 
-    const startDateValue = coerceDateValue(startDate);
-    return formatOvernightWeekdayWarning(
-      startDateValue ? [toMondayBasedDay(startDateValue)] : [],
-    );
-  }, [hasOvernightWindow, repeating, startDate]);
+    return formatOvernightWeekdayWarning(daysOfWeek);
+  }, [hasOvernightWindow, repeating, daysOfWeek]);
   const effectiveFieldColorReferenceList = useMemo(
     () => (
       fieldColorReferenceList?.length
@@ -246,7 +245,6 @@ export default function CreateRentalSlotModal({
         slot.startDate ?? null,
         editorTimeZone.timeZone,
       ) ?? new Date();
-      parsedStartRaw.setHours(0, 0, 0, 0);
       const parsedStart = new Date(parsedStartRaw.getTime());
       setStartDate(parsedStart);
 
@@ -271,6 +269,7 @@ export default function CreateRentalSlotModal({
       }
 
       setRepeating(Boolean(slot.repeating));
+      setDaysOfWeek(slot.daysOfWeek?.length ? slot.daysOfWeek : [slot.dayOfWeek ?? toMondayBasedDay(parsedStart)]);
       setPrice(
         organizationHasStripeAccount && typeof slot.price === 'number'
           ? slot.price
@@ -305,6 +304,7 @@ export default function CreateRentalSlotModal({
       setStartTime(toTimeValue(rangeStart));
       setEndTime(toTimeValue(rangeEnd));
       setRepeating(true);
+      setDaysOfWeek([toMondayBasedDay(rangeStart)]);
       setPrice(0);
       setRequiredTemplateIds([]);
       setHostRequiredTemplateIds([]);
@@ -320,6 +320,7 @@ export default function CreateRentalSlotModal({
     setStartTime(toTimeValue(baseDate));
     setEndTime(toTimeValue(baseEnd));
     setRepeating(false);
+    setDaysOfWeek([toMondayBasedDay(baseDate)]);
     setPrice(0);
     setRequiredTemplateIds([]);
     setHostRequiredTemplateIds([]);
@@ -448,38 +449,23 @@ export default function CreateRentalSlotModal({
 
     const endDateValue = coerceDateValue(endDate);
 
-    if (!repeating && !endDateValue) {
-      setError('End date is required when the slot does not repeat weekly.');
-      return;
-    }
-
     const startMinutes = parseTimeValue(startTime);
     const endMinutes = parseTimeValue(endTime);
 
-    if (repeating && startMinutes === null) {
+    if (startMinutes === null) {
       setError('Enter a valid start time.');
       return;
     }
 
-    if (repeating && endMinutes === null) {
+    if (endMinutes === null) {
       setError('Enter a valid end time.');
       return;
     }
 
-    const startDateTime = repeating && startMinutes !== null
-      ? cloneWithMinutes(startDateValue, startMinutes)
-      : new Date(startDateValue.getTime());
-    if (!repeating) {
-      startDateTime.setHours(0, 0, 0, 0);
-    }
+    const startDateTime = cloneWithMinutes(startDateValue, startMinutes);
 
-    const effectiveEndDate = endDateValue ?? startDateValue;
-    const endDateTime = repeating && endMinutes !== null
-      ? cloneWithMinutes(effectiveEndDate, endMinutes)
-      : new Date(effectiveEndDate.getTime());
-    if (!repeating) {
-      endDateTime.setHours(0, 0, 0, 0);
-    }
+    const effectiveEndDate = repeating ? (endDateValue ?? startDateValue) : startDateValue;
+    let endDateTime = cloneWithMinutes(effectiveEndDate, endMinutes);
 
     if (repeating && endDateValue) {
       const startDay = new Date(startDateValue.getTime());
@@ -492,25 +478,40 @@ export default function CreateRentalSlotModal({
       }
     }
 
-    const compare = endDateTime.getTime() - startDateTime.getTime();
-    if (!repeating && compare < 0) {
-      setError('End date/time must be after the start date/time.');
+    if (repeating && !daysOfWeek.length) {
+      setError('Select at least one weekday.');
       return;
     }
+    if (!repeating) {
+      try {
+        const resolved = resolveOneTimeTimeSlot({ repeating: false,
+          startDate: formatLocalDateTime(startDateTime), endDate: formatLocalDateTime(endDateTime),
+          startTimeMinutes: startMinutes, endTimeMinutes: endMinutes, timeZone: editorTimeZone.timeZone,
+        });
+        assertOneTimeTimeSlotFutureEnd(resolved);
+        const resolvedCalendarEnd = instantToCalendarDateInTimeZone(resolved.end, editorTimeZone.timeZone);
+        if (!resolvedCalendarEnd) throw new Error('The end time cannot be resolved.');
+        endDateTime = resolvedCalendarEnd;
+      } catch (error) {
+        setError(error instanceof Error ? error.message : 'Invalid rental time range.');
+        return;
+      }
+    }
 
-    const dayOfWeek = toMondayBasedDay(startDateTime);
+    const dayOfWeek = (repeating ? daysOfWeek[0] : toMondayBasedDay(startDateTime)) as NonNullable<TimeSlot['dayOfWeek']>;
 
     setSubmitting(true);
     setError(null);
     try {
       const payload: RentalSlotUpsertInput = {
         dayOfWeek,
+        daysOfWeek: repeating ? daysOfWeek : [dayOfWeek],
         repeating,
         startDate: formatLocalDateTime(startDateTime),
-        endDate: endDateValue ? formatLocalDateTime(endDateTime) : null,
-        timeZone: editorTimeZone.hasSlotTimeZone ? editorTimeZone.timeZone : undefined,
-        startTimeMinutes: repeating && startMinutes !== null ? startMinutes : undefined,
-        endTimeMinutes: repeating && endMinutes !== null ? endMinutes : undefined,
+        endDate: !repeating || endDateValue ? formatLocalDateTime(endDateTime) : null,
+        timeZone: editorTimeZone.timeZone,
+        startTimeMinutes: startMinutes,
+        endTimeMinutes: endMinutes,
         requiredTemplateIds,
         hostRequiredTemplateIds,
         price: organizationHasStripeAccount ? price : (slot?.price ?? 0),
@@ -524,6 +525,7 @@ export default function CreateRentalSlotModal({
         const updatePayload: RentalSlotUpdateInput = {
           $id: slot.$id,
           dayOfWeek: payload.dayOfWeek,
+          daysOfWeek: payload.daysOfWeek,
           repeating: payload.repeating ?? false,
           startDate: payload.startDate,
           endDate: payload.endDate ?? null,
@@ -649,7 +651,7 @@ export default function CreateRentalSlotModal({
             popoverProps={{ withinPortal: true }}
           />
 
-          <DatePickerInput
+          {repeating && <DatePickerInput
             label={repeating ? 'End date (optional)' : 'End date'}
             placeholder="Pick an end date"
             valueFormat="MM/DD/YYYY"
@@ -661,26 +663,22 @@ export default function CreateRentalSlotModal({
             required={!repeating}
             popoverProps={{ withinPortal: true }}
             minDate={startDate ?? undefined}
-          />
+          />}
 
-          {repeating && (
+          {(
             <>
             <Group grow>
-              <TimeInput
+              <RentalSlotClockInput
                 label="Start time"
-                withSeconds={false}
                 value={startTime}
-                onChange={(value) => setStartTime(value.currentTarget.value)}
+                onChange={setStartTime}
                 disabled={!hasTargetFields}
-                required
               />
-              <TimeInput
+              <RentalSlotClockInput
                 label="End time"
-                withSeconds={false}
                 value={endTime}
-                onChange={(value) => setEndTime(value.currentTarget.value)}
+                onChange={setEndTime}
                 disabled={!hasTargetFields}
-                required
               />
             </Group>
             {overnightWeekdayWarning && (
@@ -690,6 +688,10 @@ export default function CreateRentalSlotModal({
             )}
             </>
           )}
+          {!repeating && hasOvernightWindow && <Text size="sm">Ends on the next local day. Equal times mean one full local day.</Text>}
+          {repeating && <MultiSelect label="Repeat on" value={daysOfWeek.map(String)}
+            data={['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((label, value) => ({ label, value: String(value) }))}
+            onChange={(values) => setDaysOfWeek(values.map(Number).filter((day): day is NonNullable<TimeSlot['dayOfWeek']> => Number.isInteger(day) && day >= 0 && day <= 6).sort((a, b) => a - b))} disabled={!hasTargetFields} />}
 
           <div>
             <HostPriceInput
@@ -722,7 +724,6 @@ export default function CreateRentalSlotModal({
               searchable
               clearable
               disabled={!hasTargetFields || !organizationId || templatesLoading}
-              nothingFoundMessage="No templates found"
             />
             {!templatesLoading && organizationId && templateOptions.length === 0 && (
               <Text size="xs" c="dimmed" mt={4}>
@@ -741,7 +742,6 @@ export default function CreateRentalSlotModal({
               searchable
               clearable
               disabled={!hasTargetFields || !organizationId || templatesLoading}
-              nothingFoundMessage="No templates found"
             />
           </div>
 

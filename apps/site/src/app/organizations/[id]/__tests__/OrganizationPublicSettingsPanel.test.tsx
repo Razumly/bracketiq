@@ -1,9 +1,9 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { MantineProvider } from "@mantine/core";
 
-import type { Event } from "@/types";
+import type { Event, Organization } from "@/types";
 import { eventService } from "@/lib/eventService";
-import { WidgetEventSearchPicker } from "../OrganizationPublicSettingsPanel";
+import OrganizationPublicSettingsPanel, { WidgetEventSearchPicker } from "../OrganizationPublicSettingsPanel";
 
 jest.mock("@/lib/eventService", () => ({
   eventService: {
@@ -12,6 +12,20 @@ jest.mock("@/lib/eventService", () => ({
 }));
 
 const getEventsPaginatedMock = eventService.getEventsPaginated as jest.Mock;
+
+it("keeps edited public page content when organization data refreshes", () => {
+  const organization = { $id: 'org_1', name: 'River City', publicSlug: 'river-city', publicHeadline: 'Welcome to River City' } as Organization;
+  const onUpdated = jest.fn();
+  const { rerender } = render(<OrganizationPublicSettingsPanel organization={organization} onUpdated={onUpdated} />);
+  const headline = screen.getByRole('textbox', { name: 'Public headline' });
+  headline.focus();
+  fireEvent.change(headline, { target: { value: 'A new season' } });
+  rerender(<OrganizationPublicSettingsPanel organization={{ ...organization, publicHeadline: 'Server headline' }} onUpdated={onUpdated} />);
+  expect(headline).toHaveFocus();
+  expect(headline).toHaveValue('A new season');
+  rerender(<OrganizationPublicSettingsPanel organization={{ ...organization, $id: 'org_2', publicHeadline: 'Second club' }} onUpdated={onUpdated} />);
+  expect(headline).toHaveValue('Second club');
+});
 
 type Deferred<T> = {
   promise: Promise<T>;

@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import type { TimeSlots } from '@/generated/prisma/client';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
 import { findDollarPrefixedFields } from '@/server/requestParsing';
 import { findPresentKeys, findUnknownKeys, parseStrictEnvelope } from '@/server/http/strictPatch';
 import { normalizeRentalTaxHandling } from '@/lib/taxPolicy';
 import {
+  assertOneTimeTimeSlotFutureEnd,
   assertValidOneTimeTimeSlots,
   resolveOneTimeTimeSlot,
   TimeSlotValidationError,
@@ -136,6 +138,224 @@ const normalizeTemplateIds = (value: unknown): string[] => {
 };
 
 
+type SlotPatchRow = Pick<TimeSlots, 'id' | 'startDate' | 'endDate' | 'timeZone' | 'repeating' | 'dayOfWeek' | 'daysOfWeek' | 'scheduledFieldId' | 'scheduledFieldIds' | 'startTimeMinutes' | 'endTimeMinutes' | 'divisions'>;
+
+function normalizePatchMetadata(payload: Record<string, unknown>): void {
+  delete payload.id;
+  delete payload.createdAt;
+  delete payload.updatedAt;
+  if (payload.requiredTemplateIds !== undefined) {
+    payload.requiredTemplateIds = normalizeTemplateIds(payload.requiredTemplateIds);
+  }
+  if (payload.hostRequiredTemplateIds !== undefined) {
+    payload.hostRequiredTemplateIds = normalizeTemplateIds(payload.hostRequiredTemplateIds);
+  }
+  if (payload.taxHandling !== undefined) {
+    payload.taxHandling = normalizeRentalTaxHandling(payload.taxHandling);
+  }
+
+}
+
+function normalizePatchFields(payload: Record<string, unknown>, existingSlot: SlotPatchRow): string[] {
+  if (payload.scheduledFieldIds !== undefined || payload.scheduledFieldId !== undefined) {
+    const normalized = normalizeFieldIds([
+      ...(Array.isArray(payload.scheduledFieldIds) ? payload.scheduledFieldIds : []),
+      ...(typeof payload.scheduledFieldId === 'string' ? [payload.scheduledFieldId] : []),
+    ]);
+    payload.scheduledFieldIds = normalized;
+    payload.scheduledFieldId = normalized[0] ?? null;
+  }
+  const effectiveScheduledFieldIds = normalizeFieldIds(
+    payload.scheduledFieldIds !== undefined
+      ? payload.scheduledFieldIds
+      : ((existingSlot as any).scheduledFieldIds ?? ((existingSlot as any).scheduledFieldId ? [(existingSlot as any).scheduledFieldId] : [])),
+  );
+  return effectiveScheduledFieldIds;
+}
+
+function normalizePatchDates(payload: Record<string, unknown>, effectiveTimeZone: string): void {
+  if (payload.timeZone !== undefined || payload.scheduledFieldIds !== undefined || payload.scheduledFieldId !== undefined) {
+    payload.timeZone = effectiveTimeZone;
+  }
+  if (payload.startDate) {
+    const parsedDate = parseDateInputInTimeZone(payload.startDate, effectiveTimeZone);
+    if (parsedDate) payload.startDate = parsedDate;
+  }
+  if (payload.endDate !== undefined) {
+    if (payload.endDate === null) {
+      payload.endDate = null;
+    } else {
+      const parsedDate = parseDateInputInTimeZone(payload.endDate, effectiveTimeZone);
+      if (parsedDate) payload.endDate = parsedDate;
+    }
+  }
+
+}
+
+function normalizePatchScope(payload: Record<string, unknown>): string[] | null {
+  let payloadDivisions: string[] | null = null;
+  if (payload.divisions !== undefined) {
+    payloadDivisions = normalizeDivisionKeys(payload.divisions);
+    delete payload.divisions;
+  }
+  if (payload.dayOfWeek !== undefined || payload.daysOfWeek !== undefined) {
+    const normalizedDays = normalizeDaysOfWeek({
+      dayOfWeek: typeof payload.dayOfWeek === 'number' ? payload.dayOfWeek : undefined,
+      daysOfWeek: Array.isArray(payload.daysOfWeek) ? payload.daysOfWeek : undefined,
+    });
+    payload.daysOfWeek = normalizedDays;
+    payload.dayOfWeek = normalizedDays[0] ?? null;
+  }
+  return payloadDivisions;
+}
+
+function effectivePatchDates(payload: Record<string, unknown>, existingSlot: SlotPatchRow) {
+  const effectiveRepeating = typeof payload.repeating === 'boolean'
+    ? payload.repeating
+    : existingSlot.repeating;
+  const effectiveStartDate = payload.startDate instanceof Date && !Number.isNaN(payload.startDate.getTime())
+    ? payload.startDate
+    : existingSlot.startDate;
+  const currentEndDate = existingSlot.endDate instanceof Date && !Number.isNaN(existingSlot.endDate.getTime())
+    ? existingSlot.endDate
+    : null;
+  const requestedEndDate = payload.endDate instanceof Date && !Number.isNaN(payload.endDate.getTime())
+    ? payload.endDate
+    : null;
+  const endDateCandidate = Object.prototype.hasOwnProperty.call(payload, 'endDate')
+    ? requestedEndDate
+    : currentEndDate;
+  return { effectiveRepeating, effectiveStartDate, endDateCandidate };
+}
+
+function validatePatchInterval(payload: Record<string, unknown>, existingSlot: SlotPatchRow, effectiveTimeZone: string, effectiveScheduledFieldIds: string[], payloadDivisions: string[] | null): NextResponse | null {
+  const id = existingSlot.id;
+  const { effectiveRepeating, effectiveStartDate, endDateCandidate } = effectivePatchDates(payload, existingSlot);
+  if (effectiveRepeating) {
+    payload.endDate = endDateCandidate;
+    try {
+      assertRepeatingTimeSlotsResolvable({
+        slots: [{
+          ...existingSlot,
+          ...payload,
+          id,
+          repeating: true,
+          startDate: effectiveStartDate,
+          endDate: payload.endDate,
+          timeZone: effectiveTimeZone,
+          scheduledFieldId: effectiveScheduledFieldIds[0] ?? null,
+          scheduledFieldIds: effectiveScheduledFieldIds,
+          divisions: payloadDivisions ?? existingSlot.divisions,
+        }],
+        eventStart: effectiveStartDate,
+        eventEnd: null,
+      });
+    } catch (error) {
+      const repeatingTimeSlotResponse = repeatingTimeSlotValidationResponse(error);
+      if (repeatingTimeSlotResponse) {
+        return repeatingTimeSlotResponse;
+      }
+      throw error;
+    }
+  } else {
+    try {
+      const resolved = resolveOneTimeTimeSlot({
+        ...existingSlot,
+        ...payload,
+        id,
+        repeating: false,
+        startDate: effectiveStartDate,
+        endDate: endDateCandidate,
+        timeZone: effectiveTimeZone,
+        scheduledFieldIds: effectiveScheduledFieldIds,
+        divisions: payloadDivisions ?? existingSlot.divisions,
+      }, effectiveTimeZone);
+      assertOneTimeTimeSlotFutureEnd(resolved);
+      payload.startDate = resolved.start;
+      payload.endDate = resolved.end;
+      payload.startTimeMinutes = resolved.startTimeMinutes;
+      payload.endTimeMinutes = resolved.endTimeMinutes;
+      payload.timeZone = resolved.timeZone;
+    } catch (error) {
+      if (error instanceof TimeSlotValidationError) {
+        return NextResponse.json(
+          { error: error.message, code: 'INVALID_TIME_SLOT', slotIds: error.slotIds },
+          { status: 400 },
+        );
+      }
+      throw error;
+    }
+  }
+  return null;
+}
+
+function buildPatchUpdateData(payload: Record<string, unknown>, payloadDivisions: string[] | null) {
+  const updatedAt = new Date();
+  const updateData: Record<string, unknown> = { updatedAt };
+  const updatableKeys = [
+    'dayOfWeek',
+    'daysOfWeek',
+    'repeating',
+    'scheduledFieldId',
+    'scheduledFieldIds',
+    'startTimeMinutes',
+    'endTimeMinutes',
+    'startDate',
+    'endDate',
+    'timeZone',
+    'price',
+    'taxHandling',
+    'requiredTemplateIds',
+    'hostRequiredTemplateIds',
+  ] as const;
+  for (const key of updatableKeys) {
+    if (Object.prototype.hasOwnProperty.call(payload, key)) {
+      updateData[key] = payload[key];
+    }
+  }
+  if (payloadDivisions !== null) {
+    updateData.divisions = payloadDivisions;
+  }
+  return updateData;
+}
+
+function patchedSlotResponse(updated: TimeSlots, payloadDivisions: string[] | null): NextResponse {
+    const normalizedDays = normalizeDaysOfWeek({
+      dayOfWeek: updated.dayOfWeek ?? undefined,
+      daysOfWeek: updated.daysOfWeek ?? undefined,
+    });
+    const normalizedFieldIds = normalizeFieldIds(
+      updated.scheduledFieldIds
+        ?? (updated.scheduledFieldId ? [updated.scheduledFieldId] : []),
+    );
+    const normalizedDivisions = payloadDivisions ?? normalizeDivisionKeys(updated.divisions);
+    return NextResponse.json({
+      ...updated,
+      dayOfWeek: normalizedDays[0] ?? updated.dayOfWeek ?? null,
+      daysOfWeek: normalizedDays,
+      scheduledFieldId: normalizedFieldIds[0] ?? null,
+      scheduledFieldIds: normalizedFieldIds,
+      divisions: normalizedDivisions,
+    }, { status: 200 });
+}
+
+function invalidPatchFields(payload: Record<string, unknown>, isAdmin: boolean): NextResponse | null {
+  const unknownPayloadKeys = findUnknownKeys(payload, [...TIME_SLOT_MUTABLE_FIELDS, ...TIME_SLOT_IMMUTABLE_FIELDS]);
+  if (unknownPayloadKeys.length) {
+    return NextResponse.json({ error: 'Unknown time slot patch fields.', unknownKeys: unknownPayloadKeys }, { status: 400 });
+  }
+  const immutableKeys = findPresentKeys(payload, TIME_SLOT_IMMUTABLE_FIELDS);
+  if (immutableKeys.length && !isAdmin) {
+    return NextResponse.json({ error: 'Immutable time slot fields cannot be updated.', fields: immutableKeys }, { status: 403 });
+  }
+  return null;
+}
+
+async function canAssignPatchFields(payload: Record<string, unknown>, session: Awaited<ReturnType<typeof requireSession>>, fieldIds: string[]): Promise<boolean> {
+  const changesScheduledFields = payload.scheduledFieldIds !== undefined || payload.scheduledFieldId !== undefined;
+  return !changesScheduledFields || canManageScheduledFields(session, fieldIds);
+}
+
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession(req);
   const body = await req.json().catch(() => null);
@@ -180,50 +400,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   const payload = { ...(parsed.payload as Record<string, unknown>) };
-  const unknownPayloadKeys = findUnknownKeys(payload, [
-    ...TIME_SLOT_MUTABLE_FIELDS,
-    ...TIME_SLOT_IMMUTABLE_FIELDS,
-  ]);
-  if (unknownPayloadKeys.length) {
-    return NextResponse.json(
-      { error: 'Unknown time slot patch fields.', unknownKeys: unknownPayloadKeys },
-      { status: 400 },
-    );
-  }
-  const immutableKeys = findPresentKeys(payload, TIME_SLOT_IMMUTABLE_FIELDS);
-  if (immutableKeys.length && !session.isAdmin) {
-    return NextResponse.json(
-      { error: 'Immutable time slot fields cannot be updated.', fields: immutableKeys },
-      { status: 403 },
-    );
-  }
-  delete payload.id;
-  delete payload.createdAt;
-  delete payload.updatedAt;
-  if (payload.requiredTemplateIds !== undefined) {
-    payload.requiredTemplateIds = normalizeTemplateIds(payload.requiredTemplateIds);
-  }
-  if (payload.hostRequiredTemplateIds !== undefined) {
-    payload.hostRequiredTemplateIds = normalizeTemplateIds(payload.hostRequiredTemplateIds);
-  }
-  if (payload.taxHandling !== undefined) {
-    payload.taxHandling = normalizeRentalTaxHandling(payload.taxHandling);
-  }
-  if (payload.scheduledFieldIds !== undefined || payload.scheduledFieldId !== undefined) {
-    const normalized = normalizeFieldIds([
-      ...(Array.isArray(payload.scheduledFieldIds) ? payload.scheduledFieldIds : []),
-      ...(typeof payload.scheduledFieldId === 'string' ? [payload.scheduledFieldId] : []),
-    ]);
-    payload.scheduledFieldIds = normalized;
-    payload.scheduledFieldId = normalized[0] ?? null;
-  }
-  const effectiveScheduledFieldIds = normalizeFieldIds(
-    payload.scheduledFieldIds !== undefined
-      ? payload.scheduledFieldIds
-      : ((existingSlot as any).scheduledFieldIds ?? ((existingSlot as any).scheduledFieldId ? [(existingSlot as any).scheduledFieldId] : [])),
-  );
-  const changesScheduledFields = payload.scheduledFieldIds !== undefined || payload.scheduledFieldId !== undefined;
-  if (changesScheduledFields && !(await canManageScheduledFields(session, effectiveScheduledFieldIds))) {
+  const fieldError = invalidPatchFields(payload, Boolean(session.isAdmin));
+  if (fieldError) return fieldError;
+  normalizePatchMetadata(payload);
+  const effectiveScheduledFieldIds = normalizePatchFields(payload, existingSlot);
+  if (!(await canAssignPatchFields(payload, session, effectiveScheduledFieldIds))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
   const effectiveTimeZone = await resolveSlotTimeZone(
@@ -231,132 +412,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     payload.timeZone,
     (existingSlot as any).timeZone,
   );
-  if (payload.timeZone !== undefined || payload.scheduledFieldIds !== undefined || payload.scheduledFieldId !== undefined) {
-    payload.timeZone = effectiveTimeZone;
-  }
-  if (payload.startDate) {
-    const parsedDate = parseDateInputInTimeZone(payload.startDate, effectiveTimeZone);
-    if (parsedDate) payload.startDate = parsedDate;
-  }
-  if (payload.endDate !== undefined) {
-    if (payload.endDate === null) {
-      payload.endDate = null;
-    } else {
-      const parsedDate = parseDateInputInTimeZone(payload.endDate, effectiveTimeZone);
-      if (parsedDate) payload.endDate = parsedDate;
-    }
-  }
-  let payloadDivisions: string[] | null = null;
-  if (payload.divisions !== undefined) {
-    payloadDivisions = normalizeDivisionKeys(payload.divisions);
-    delete payload.divisions;
-  }
-  if (payload.dayOfWeek !== undefined || payload.daysOfWeek !== undefined) {
-    const normalizedDays = normalizeDaysOfWeek({
-      dayOfWeek: typeof payload.dayOfWeek === 'number' ? payload.dayOfWeek : undefined,
-      daysOfWeek: Array.isArray(payload.daysOfWeek) ? payload.daysOfWeek : undefined,
-    });
-    payload.daysOfWeek = normalizedDays;
-    payload.dayOfWeek = normalizedDays[0] ?? null;
-  }
-
-  const effectiveRepeating = typeof payload.repeating === 'boolean'
-    ? payload.repeating
-    : existingSlot.repeating;
-  const effectiveStartDate = payload.startDate instanceof Date && !Number.isNaN(payload.startDate.getTime())
-    ? payload.startDate
-    : existingSlot.startDate;
-  const currentEndDate = existingSlot.endDate instanceof Date && !Number.isNaN(existingSlot.endDate.getTime())
-    ? existingSlot.endDate
-    : null;
-  const requestedEndDate = payload.endDate instanceof Date && !Number.isNaN(payload.endDate.getTime())
-    ? payload.endDate
-    : null;
-  const endDateCandidate = Object.prototype.hasOwnProperty.call(payload, 'endDate')
-    ? requestedEndDate
-    : currentEndDate;
-  if (effectiveRepeating) {
-    payload.endDate = endDateCandidate;
-    try {
-      assertRepeatingTimeSlotsResolvable({
-        slots: [{
-          ...existingSlot,
-          ...payload,
-          id,
-          repeating: true,
-          startDate: effectiveStartDate,
-          endDate: payload.endDate,
-          timeZone: effectiveTimeZone,
-          scheduledFieldId: effectiveScheduledFieldIds[0] ?? null,
-          scheduledFieldIds: effectiveScheduledFieldIds,
-          divisions: payloadDivisions ?? existingSlot.divisions,
-        }],
-        eventStart: effectiveStartDate,
-        eventEnd: null,
-      });
-    } catch (error) {
-      const repeatingTimeSlotResponse = repeatingTimeSlotValidationResponse(error);
-      if (repeatingTimeSlotResponse) {
-        return repeatingTimeSlotResponse;
-      }
-      throw error;
-    }
-  } else {
-    try {
-      const resolved = resolveOneTimeTimeSlot({
-        ...existingSlot,
-        ...payload,
-        id,
-        repeating: false,
-        startDate: effectiveStartDate,
-        endDate: endDateCandidate,
-        timeZone: effectiveTimeZone,
-        scheduledFieldIds: effectiveScheduledFieldIds,
-        divisions: payloadDivisions ?? existingSlot.divisions,
-      }, effectiveTimeZone);
-      payload.startDate = resolved.start;
-      payload.endDate = resolved.end;
-      payload.startTimeMinutes = resolved.startTimeMinutes;
-      payload.endTimeMinutes = resolved.endTimeMinutes;
-      payload.timeZone = resolved.timeZone;
-    } catch (error) {
-      if (error instanceof TimeSlotValidationError) {
-        return NextResponse.json(
-          { error: error.message, code: 'INVALID_TIME_SLOT', slotIds: error.slotIds },
-          { status: 400 },
-        );
-      }
-      throw error;
-    }
-  }
-
-  const updatedAt = new Date();
-  const updateData: Record<string, unknown> = { updatedAt };
-  const updatableKeys = [
-    'dayOfWeek',
-    'daysOfWeek',
-    'repeating',
-    'scheduledFieldId',
-    'scheduledFieldIds',
-    'startTimeMinutes',
-    'endTimeMinutes',
-    'startDate',
-    'endDate',
-    'timeZone',
-    'price',
-    'taxHandling',
-    'requiredTemplateIds',
-    'hostRequiredTemplateIds',
-  ] as const;
-  for (const key of updatableKeys) {
-    if (Object.prototype.hasOwnProperty.call(payload, key)) {
-      updateData[key] = payload[key];
-    }
-  }
-  if (payloadDivisions !== null) {
-    updateData.divisions = payloadDivisions;
-  }
-
+  normalizePatchDates(payload, effectiveTimeZone);
+  const payloadDivisions = normalizePatchScope(payload);
+  const intervalError = validatePatchInterval(payload, existingSlot, effectiveTimeZone, effectiveScheduledFieldIds, payloadDivisions);
+  if (intervalError) return intervalError;
+  const updateData = buildPatchUpdateData(payload, payloadDivisions);
   try {
     const updated = await prisma.$transaction(async (tx) => {
       const lockedEventIds = new Set<string>();
@@ -491,23 +551,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         data: updateData as unknown as Parameters<typeof tx.timeSlots.update>[0]['data'],
       });
     });
-    const normalizedDays = normalizeDaysOfWeek({
-      dayOfWeek: updated.dayOfWeek ?? undefined,
-      daysOfWeek: updated.daysOfWeek ?? undefined,
-    });
-    const normalizedFieldIds = normalizeFieldIds(
-      updated.scheduledFieldIds
-        ?? (updated.scheduledFieldId ? [updated.scheduledFieldId] : []),
-    );
-    const normalizedDivisions = payloadDivisions ?? normalizeDivisionKeys(updated.divisions);
-    return NextResponse.json({
-      ...updated,
-      dayOfWeek: normalizedDays[0] ?? updated.dayOfWeek ?? null,
-      daysOfWeek: normalizedDays,
-      scheduledFieldId: normalizedFieldIds[0] ?? null,
-      scheduledFieldIds: normalizedFieldIds,
-      divisions: normalizedDivisions,
-    }, { status: 200 });
+    return patchedSlotResponse(updated, payloadDivisions);
   } catch (error) {
     if (error instanceof TimeSlotValidationError) {
       return NextResponse.json(

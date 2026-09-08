@@ -105,6 +105,74 @@ import kotlin.time.Instant
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class EventLifecycleMobileApiIntegrationTest {
+    @Test
+    fun given_overnight_slots_when_mobile_saves_to_site_then_dates_and_weekdays_round_trip() =
+        runTest(timeout = 5.minutes) {
+            hostSession = MobileApiTestSession.create()
+            val host = hostSession!!
+            val user = host.userRepository.login(HOST_EMAIL, HOST_PASSWORD).getOrThrow()
+            val runId = "mobile_timeslot_contract_${Clock.System.now().toEpochMilliseconds()}"
+            val source = buildVariant(
+                runId = runId, key = "overnight", hostUserId = user.id,
+                eventType = EventType.EVENT, sportId = "Basketball",
+                singleDivision = true, includePlayoffs = false,
+                officialCase = OfficialCase.NO_OFFICIALS,
+                start = Instant.parse("2035-06-11T12:00:00Z"),
+                end = Instant.parse("2035-06-12T12:00:00Z"),
+            )
+            val overnight = source.timeSlots.first().copy(
+                id = "${runId}_event_slot", repeating = false, timeZone = "UTC",
+                startDate = Instant.parse("2035-06-11T22:00:00Z"),
+                endDate = Instant.parse("2035-06-11T02:00:00Z"),
+                startTimeMinutes = 1320, endTimeMinutes = 120,
+            )
+            val event = host.createEventThroughEditor(
+                event = source.event.copy(timeZone = "UTC"),
+                fields = source.fields, timeSlots = listOf(overnight),
+                operationId = "$runId-create",
+            )
+            createdEventIds += event.id
+            val eventSlot = host.fieldRepository.getTimeSlots(event.timeSlotIds).getOrThrow().single()
+            assertEquals(Instant.parse("2035-06-12T02:00:00Z"), eventSlot.endDate)
+
+            val createdSlotIds = mutableListOf<String>()
+            try {
+                val created = host.fieldRepository.createTimeSlot(
+                    overnight.copy(id = "${runId}_rental_slot"),
+                ).getOrThrow()
+                createdSlotIds += created.id
+                assertEquals(Instant.parse("2035-06-12T02:00:00Z"), created.endDate)
+                val updated = host.fieldRepository.updateTimeSlot(
+                    created.copy(endTimeMinutes = 180, endDate = Instant.parse("2035-06-12T03:00:00Z")),
+                ).getOrThrow()
+                assertEquals(Instant.parse("2035-06-12T03:00:00Z"), updated.endDate)
+
+                val repeating = host.fieldRepository.createTimeSlot(
+                    overnight.copy(
+                        id = "${runId}_weekly_slot", repeating = true,
+                        dayOfWeek = 0, daysOfWeek = listOf(0, 2), endDate = null,
+                    ),
+                ).getOrThrow()
+                createdSlotIds += repeating.id
+                assertEquals(listOf(0, 2), repeating.daysOfWeek)
+                val changedRepeat = host.fieldRepository.updateTimeSlot(
+                    repeating.copy(dayOfWeek = 1, daysOfWeek = listOf(1, 4)),
+                ).getOrThrow()
+                assertEquals(listOf(1, 4), changedRepeat.daysOfWeek)
+                val verifier = MobileApiTestSession.create()
+                try {
+                    verifier.userRepository.login(HOST_EMAIL, HOST_PASSWORD).getOrThrow()
+                    val reloaded = verifier.fieldRepository.getTimeSlots(createdSlotIds).getOrThrow().associateBy { it.id }
+                    assertEquals(updated.endDate, reloaded.getValue(updated.id).endDate)
+                    assertEquals(listOf(1, 4), reloaded.getValue(changedRepeat.id).daysOfWeek)
+                } finally {
+                    verifier.close()
+                }
+            } finally {
+                createdSlotIds.asReversed().forEach { host.fieldRepository.deleteTimeSlot(it).getOrThrow() }
+            }
+        }
+
     private val createdEventIds = mutableListOf<String>()
     private val createdTeamIds = mutableListOf<String>()
     private var hostSession: MobileApiTestSession? = null

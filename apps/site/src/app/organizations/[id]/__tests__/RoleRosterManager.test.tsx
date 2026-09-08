@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MantineProvider } from '@mantine/core';
 import type { ComponentProps } from 'react';
 import { apiRequest } from '@/lib/apiClient';
-import RoleRosterManager from '../RoleRosterManager';
+import RoleRosterManager, { type RoleRosterEntry } from '../RoleRosterManager';
 import type { OrganizationRole } from '@/types';
 
 jest.mock('@/lib/apiClient', () => ({
@@ -38,6 +38,12 @@ const hostRole: OrganizationRole = {
   isDefault: true,
   permissions: [],
 };
+
+const rosterEntry = (overrides: Partial<RoleRosterEntry> = {}): RoleRosterEntry => ({
+  id: 'staff_1', userId: 'user_1', fullName: 'Avery Chen', userName: 'avery',
+  email: 'avery@test.com', status: 'pending', types: ['STAFF'],
+  roleId: 'role_staff', roleName: 'Staff', canRemove: true, ...overrides,
+});
 
 const renderManager = (overrides: Partial<ComponentProps<typeof RoleRosterManager>> = {}) => {
   const props: ComponentProps<typeof RoleRosterManager> = {
@@ -120,7 +126,29 @@ describe('RoleRosterManager', () => {
     });
   });
 
-  it('shows an enabled role selector for pending staff rows', () => {
+  it('retains a failed new role without retrying until the user requests it', async () => {
+    let rejectCreation!: (error: Error) => void;
+    const onCreateRole = jest.fn()
+      .mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectCreation = reject; }))
+      .mockResolvedValueOnce(undefined);
+    renderManager({ onCreateRole });
+    fireEvent.click(screen.getByText('Roles'));
+    fireEvent.click(screen.getByText('Add role'));
+    fireEvent.change(screen.getByLabelText('New role name'), { target: { value: 'Scheduler' } });
+    await act(async () => { jest.advanceTimersByTime(700); });
+    expect(screen.getByLabelText('New role name')).toBeDisabled();
+    await act(async () => { rejectCreation(new Error('Role creation failed.')); });
+    expect(screen.getByLabelText('New role name')).toHaveValue('Scheduler');
+    expect(screen.getByText('Role creation failed.')).toBeInTheDocument();
+    await act(async () => { jest.advanceTimersByTime(2000); });
+    expect(onCreateRole).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry role creation' }));
+    await act(async () => { jest.advanceTimersByTime(700); });
+    expect(onCreateRole).toHaveBeenNthCalledWith(2, 'Scheduler', []);
+    expect(screen.queryByLabelText('New role name')).not.toBeInTheDocument();
+  });
+
+  it('lets pending staff change their selected role', async () => {
     const schedulerRole: OrganizationRole = {
       $id: 'role_scheduler',
       organizationId: 'org_1',
@@ -132,7 +160,7 @@ describe('RoleRosterManager', () => {
       permissions: [],
     };
 
-    renderManager({
+    const { onRoleChange } = renderManager({
       staffRoles: [...baseRoles, schedulerRole],
       rosterEntries: [{
         id: 'staff_pending_1',
@@ -148,8 +176,54 @@ describe('RoleRosterManager', () => {
       }],
     });
 
-    expect(screen.getByDisplayValue('Scheduler')).toBeEnabled();
-    expect(screen.queryByText('Type')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByDisplayValue('Scheduler'));
+    fireEvent.click(screen.getByRole('option', { name: 'Staff' }));
+    await waitFor(() => expect(onRoleChange).toHaveBeenCalledWith('user_pending_1', 'role_staff'));
+    expect(screen.getByDisplayValue('Staff')).toBeEnabled();
+  });
+
+  it('combines local search, role, and status filters and clears them without a request', () => {
+    renderManager({
+      staffRoles: [hostRole, ...baseRoles],
+      rosterEntries: [
+        rosterEntry(),
+        rosterEntry({ id: 'staff_2', userId: 'user_2', fullName: 'Morgan Lee', userName: 'morgan',
+          email: 'morgan@test.com', status: 'active', roleId: 'role_host', roleName: 'Host' }),
+      ],
+    });
+    fireEvent.change(screen.getByLabelText('Search staff'), { target: { value: '  MORGAN@  ' } });
+    expect(screen.getByRole('button', { name: 'Morgan Lee' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Avery Chen' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Filter staff status'));
+    fireEvent.click(screen.getByRole('option', { name: 'Pending' }));
+    expect(screen.queryByRole('button', { name: 'Morgan Lee' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    fireEvent.click(screen.getByLabelText('Filter staff role'));
+    fireEvent.click(screen.getByRole('option', { name: 'Host' }));
+    expect(screen.getByRole('button', { name: 'Morgan Lee' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Avery Chen' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    expect(screen.getByRole('button', { name: 'Avery Chen' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Morgan Lee' })).toBeInTheDocument();
+    expect(apiRequest).not.toHaveBeenCalled();
+  });
+
+  it('does not roll back a newer roster role after an older request fails', async () => {
+    let rejectFirst!: (error: Error) => void;
+    let resolveSecond!: () => void;
+    const onRoleChange = jest.fn()
+      .mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectFirst = reject; }))
+      .mockImplementationOnce(() => new Promise<void>((resolve) => { resolveSecond = resolve; }));
+    renderManager({ staffRoles: [hostRole, ...baseRoles], rosterEntries: [rosterEntry()], onRoleChange });
+    fireEvent.click(screen.getByPlaceholderText('Select role'));
+    fireEvent.click(screen.getByRole('option', { name: 'Host' }));
+    fireEvent.click(screen.getByPlaceholderText('Select role'));
+    fireEvent.click(screen.getByRole('option', { name: 'Staff' }));
+    await act(async () => { resolveSecond(); });
+    await act(async () => { rejectFirst(new Error('Old request failed.')); });
+    expect(onRoleChange).toHaveBeenNthCalledWith(2, 'user_1', 'role_staff');
+    expect(screen.getByDisplayValue('Staff')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Saving role')).not.toBeInTheDocument();
   });
 
   it('updates the selected role immediately and shows a saving indicator', async () => {

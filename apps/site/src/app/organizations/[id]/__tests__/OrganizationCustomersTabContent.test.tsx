@@ -1,4 +1,4 @@
-import { createRef } from 'react';
+import { createRef, useState } from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
@@ -36,9 +36,10 @@ const baseProps = {
   isCustomerFilterDefault: true,
   customers,
   visibleCustomers: customers,
-  selectedCustomerKey: customers[0].key,
+  selectedCustomerKey: null,
   onCustomerSelect: jest.fn(),
-  renderCustomerAvatar: (name: string) => <div>{name}</div>,
+  onCustomerClose: jest.fn(),
+  renderCustomerAvatar: () => <div aria-hidden="true" />,
   renderCustomerDetail: (customer: OrganizationCustomerListRow | null) => (
     <div>{customer ? `Details for ${customer.name}` : 'No customer selected'}</div>
   ),
@@ -66,11 +67,31 @@ describe('OrganizationCustomersTabContent', () => {
     expect(screen.getByText('Spring League')).toBeInTheDocument();
     expect(screen.getByText('No events')).toBeInTheDocument();
     expect(screen.getByText('Scroll for more customers.')).toBeInTheDocument();
-    expect(screen.getByText('Details for Alex Morgan')).toBeInTheDocument();
-    expect(screen.getByRole('region', { name: 'Customer details' })).toBeInTheDocument();
 
     await user.click(screen.getAllByText('Harbor Strikers')[0]);
 
     expect(onCustomerSelect).toHaveBeenCalledWith(customers[1]);
+  });
+
+  it('opens details and returns to the same filtered list with row focus restored', async () => {
+    const user = userEvent.setup();
+    function Workspace() {
+      const [selection, select] = useState<string | null>(null);
+      const [search, setSearch] = useState('');
+      return <OrganizationCustomersTabContent {...baseProps} customerSearch={search} setCustomerSearch={setSearch}
+        visibleCustomers={customers.filter((customer) => customer.name.toLowerCase().includes(search.toLowerCase()))}
+        selectedCustomerKey={selection} onCustomerSelect={(customer) => select(customer.key)} onCustomerClose={() => select(null)} />;
+    }
+    render(<Workspace />);
+    await user.type(screen.getByRole('textbox', { name: 'Search customers' }), 'Alex');
+    const row = screen.getByRole('row', { name: /Alex Morgan/ });
+    row.focus();
+    await user.keyboard('{Enter}');
+    expect(screen.getByText('Details for Alex Morgan')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Back to all customers' }));
+    expect(screen.queryByRole('region', { name: 'Customer details' })).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Search customers' })).toHaveValue('Alex');
+    expect(screen.queryByText('Harbor Strikers')).not.toBeInTheDocument();
+    expect(row).toHaveFocus();
   });
 });

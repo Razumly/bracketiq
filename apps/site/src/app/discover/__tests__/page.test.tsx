@@ -1,4 +1,4 @@
-import { act, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { ModalsProvider } from '@mantine/modals';
 import { Notifications } from '@mantine/notifications';
@@ -16,6 +16,7 @@ const mockSportsResult: { sports: Array<{ $id: string; name: string }>; loading:
 };
 let navigationSearchParams = 'tab=organizations';
 let mockLocation: { lat: number; lng: number } | null = null;
+let mockDebouncedValue: string | null = null;
 let intersectionCallbacks: IntersectionObserverCallback[] = [];
 
 jest.mock('next/navigation', () => ({
@@ -43,7 +44,7 @@ jest.mock('@/app/hooks/useLocation', () => ({
 }));
 
 jest.mock('@/app/hooks/useDebounce', () => ({
-  useDebounce: (value: unknown) => value,
+  useDebounce: (value: unknown) => mockDebouncedValue ?? value,
 }));
 
 jest.mock('@/app/hooks/useSports', () => ({
@@ -108,7 +109,17 @@ jest.mock('@/components/ui/ResponsiveCardGrid', () => ({
 
 jest.mock('../components/EventsTabContent', () => ({
   __esModule: true,
-  default: () => null,
+  default: function MockEventsTabContent(props: React.ComponentProps<typeof import('../components/EventsTabContent').default>) {
+    const { useEventListFiltering, eventListFilterKey } = jest.requireActual('@/components/events/event-list-filtering');
+    const filters = { ...props, hideWeeklyChildren: false };
+    const { visibleEvents } = useEventListFiltering({ ...props, filters, filterKey: eventListFilterKey(filters) });
+    return <div>
+      <input aria-label="Event test search" value={props.searchTerm} onChange={(event) => props.setSearchTerm(event.target.value)} />
+      <div data-testid="event-loading-state">{props.isLoadingInitial ? 'Loading' : 'Ready'}</div>
+      {visibleEvents.map((event: { $id: string; name: string }) => <div key={event.$id}>{event.name}</div>)}
+      <div ref={props.sentinelRef} />
+    </div>;
+  },
 }));
 
 jest.mock('../components/DiscoverSearchControls', () => ({
@@ -133,6 +144,7 @@ describe('Discover organization loading', () => {
     intersectionCallbacks = [];
     navigationSearchParams = 'tab=organizations';
     mockLocation = null;
+    mockDebouncedValue = null;
     mockSportsResult.sports = [];
     getEventsPageMock.mockReset();
     searchOpenRegistrationTeamsMock.mockReset();
@@ -173,6 +185,56 @@ describe('Discover organization loading', () => {
       rootMargin = '';
       thresholds = [];
     } as unknown as typeof IntersectionObserver;
+  });
+
+  it('uses current event search while the page-level debounce is pending', async () => {
+    navigationSearchParams = 'tab=events';
+    mockDebouncedValue = '';
+    getEventsPageMock.mockResolvedValue({ events: [], pagination: { nextOffset: 18, hasMore: true, totalCount: 100 } });
+    renderWithMantine(<DiscoverPage />);
+    await waitFor(() => expect(screen.getByTestId('event-loading-state')).toHaveTextContent('Ready'));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Event test search' }), { target: { value: 'Basketball' } });
+    await waitFor(() => expect(getEventsPageMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ query: 'Basketball' }), 18, 0, 'RECOMMENDED',
+    ));
+  });
+
+  it('releases the initial loader when a filter refresh supersedes the initial request', async () => {
+    navigationSearchParams = 'tab=events';
+    let finishInitial!: (value: unknown) => void;
+    const initial = new Promise((resolve) => { finishInitial = resolve; });
+    const page = { events: [], pagination: { nextOffset: 0, hasMore: false, totalCount: 0 } };
+    getEventsPageMock.mockReturnValueOnce(initial).mockResolvedValue(page);
+    renderWithMantine(<DiscoverPage />);
+    await waitFor(() => expect(getEventsPageMock).toHaveBeenCalledTimes(1));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Event test search' }), { target: { value: 'Basketball' } });
+    await waitFor(() => expect(getEventsPageMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByTestId('event-loading-state')).toHaveTextContent('Ready'));
+    await act(async () => { finishInitial(page); await initial; });
+    expect(screen.getByTestId('event-loading-state')).toHaveTextContent('Ready');
+  });
+
+  it('ignores a late page from the previous event filter', async () => {
+    navigationSearchParams = 'tab=events';
+    let finishPage!: (value: unknown) => void;
+    const oldPage = new Promise((resolve) => { finishPage = resolve; });
+    const event = { $id: 'new', name: 'Basketball night', eventType: 'EVENT', start: '2026-09-10T18:00:00Z', sportIds: [], divisions: [] };
+    getEventsPageMock
+      .mockResolvedValueOnce({ events: [], pagination: { nextOffset: 18, hasMore: true, totalCount: 100 } })
+      .mockReturnValueOnce(oldPage)
+      .mockResolvedValue({ events: [event], pagination: { nextOffset: 1, hasMore: false, totalCount: 1 } });
+    renderWithMantine(<DiscoverPage />);
+    await waitFor(() => expect(screen.getByTestId('event-loading-state')).toHaveTextContent('Ready'));
+    act(() => { intersectionCallbacks.forEach((callback) => callback([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver)); });
+    await waitFor(() => expect(getEventsPageMock).toHaveBeenCalledTimes(2));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Event test search' }), { target: { value: 'Basketball' } });
+    expect(await screen.findByText('Basketball night')).toBeInTheDocument();
+    await act(async () => {
+      finishPage({ events: [{ ...event, $id: 'old', name: 'Basketball old query' }], pagination: { nextOffset: 36, hasMore: true, totalCount: 100 } });
+      await oldPage;
+    });
+    expect(screen.queryByText('Basketball old query')).not.toBeInTheDocument();
+    expect(screen.getByText('Basketball night')).toBeInTheDocument();
   });
 
   it('loads the first organization page once and clears the loading state', async () => {

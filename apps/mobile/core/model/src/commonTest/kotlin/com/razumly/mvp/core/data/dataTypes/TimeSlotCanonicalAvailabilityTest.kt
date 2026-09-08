@@ -35,6 +35,35 @@ class TimeSlotCanonicalAvailabilityTest {
     )
 
     @Test
+    fun given_expired_slot_when_saving_then_rejects_but_keeps_reads_valid() {
+        val historical = slot()
+        val resolved = historical.resolveOneTimeInterval()
+        assertFailsWith<OneTimeTimeSlotValidationException> { historical.assertFutureOneTimeEnd(resolved.end) }
+        historical.assertFutureOneTimeEnd(Instant.parse("2026-08-17T13:30:00Z"))
+        assertEquals(Instant.parse("2026-08-17T14:00:00Z"), historical.resolveOneTimeInterval().end)
+    }
+
+    @Test
+    fun given_one_time_overnight_slot_when_resolved_then_ends_on_next_date() {
+        val resolved = slot(startMinutes = 22 * 60, endMinutes = 2 * 60).resolveOneTimeInterval()
+        assertEquals(Instant.parse("2026-08-18T02:00:00Z"), resolved.start)
+        assertEquals(Instant.parse("2026-08-18T06:00:00Z"), resolved.end)
+    }
+
+    @Test
+    fun given_equal_clock_times_when_resolved_then_spans_one_local_day() {
+        val resolved = slot(endMinutes = 9 * 60).resolveOneTimeInterval()
+        assertEquals(Instant.parse("2026-08-18T13:00:00Z"), resolved.end)
+    }
+
+    @Test
+    fun given_multiple_local_days_when_resolved_then_rejects_without_clipping() {
+        assertFailsWith<OneTimeTimeSlotValidationException> {
+            slot().copy(endDate = Instant.parse("2026-08-19T14:00:00Z")).resolveOneTimeInterval()
+        }
+    }
+
+    @Test
     fun given_one_time_slot_when_resolved_then_returns_exact_local_interval() {
         val resolved = slot().resolveOneTimeInterval()
 
@@ -164,6 +193,16 @@ class TimeSlotCanonicalAvailabilityTest {
 
         assertEquals(Instant.parse("2026-08-17T13:00:17Z"), resolved.start)
         assertEquals(Instant.parse("2026-08-17T14:00:43Z"), resolved.end)
+    }
+
+    @Test
+    fun given_duration_over_one_local_day_by_seconds_when_resolved_then_rejects() {
+        assertFailsWith<OneTimeTimeSlotValidationException> {
+            slot(startMinutes = 9 * 60, endMinutes = 9 * 60).copy(
+                startDate = Instant.parse("2026-08-17T13:00:17Z"),
+                endDate = Instant.parse("2026-08-18T13:00:43Z"),
+            ).resolveOneTimeInterval()
+        }
     }
 
     @Test

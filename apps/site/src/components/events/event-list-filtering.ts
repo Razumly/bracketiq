@@ -25,6 +25,7 @@ export type EventListFilterState<TEventType extends string = string> = {
   hideWeeklyChildren: boolean;
   divisionFilters?: EventDivisionFilterState;
   getEventDistanceKm?: (event: Event) => number | undefined;
+  rentalEventIds?: readonly string[];
 };
 
 const normalize = (value: unknown): string => String(value ?? '').trim().toLowerCase();
@@ -48,6 +49,11 @@ const endOfDay = (value: Date): number => new Date(
   59,
   999,
 ).getTime();
+
+function expandsCacheStart(cacheStartDate: string | undefined, requestedDate: Date | null): boolean {
+  if (!cacheStartDate || !requestedDate) return false;
+  return startOfDay(requestedDate) < new Date(cacheStartDate).getTime();
+}
 
 const getDivisionDetails = (event: Event): Array<Record<string, unknown>> => (
   (event.divisionDetails ?? event.divisions ?? [])
@@ -94,7 +100,7 @@ const matchesDivisionFilters = (event: Event, filters?: EventDivisionFilterState
   return details.some((division) => matchesDivisionDetail(division, filters, selectedGenders, selectedSkillIds, selectedAgeIds));
 };
 
-const matchesSearch = (event: Event, searchTerm: string): boolean => {
+export const matchesEventSearch = (event: Event, searchTerm: string): boolean => {
   const query = normalize(searchTerm);
   if (!query) return true;
   const searchableText = [event.name, event.description, event.location, event.address, event.organizerName]
@@ -104,10 +110,11 @@ const matchesSearch = (event: Event, searchTerm: string): boolean => {
   return searchableText.includes(query);
 };
 
-const matchesEventType = <TEventType extends string>(event: Event, filters: EventListFilterState<TEventType>): boolean => (
-  filters.selectedEventTypes.length === filters.eventTypeOptions.length
-    || filters.selectedEventTypes.includes(event.eventType as TEventType)
-);
+const matchesEventType = <TEventType extends string>(event: Event, filters: EventListFilterState<TEventType>): boolean => {
+  const eventType = filters.rentalEventIds?.includes(event.$id) ? 'RENTAL' : event.eventType;
+  return filters.selectedEventTypes.length === filters.eventTypeOptions.length
+    || filters.selectedEventTypes.includes(eventType as TEventType);
+};
 
 const matchesSport = (event: Event, selectedSports: readonly string[]): boolean => {
   if (!selectedSports.length) return true;
@@ -146,7 +153,7 @@ export const eventMatchesLocalFilters = <TEventType extends string>(
     || event.eventType !== 'WEEKLY_EVENT'
     || !event.parentEvent?.trim();
   return [
-    matchesSearch(event, filters.searchTerm),
+    matchesEventSearch(event, filters.searchTerm),
     matchesEventType(event, filters),
     matchesSport(event, filters.selectedSports),
     matchesTags(event, filters.selectedTags),
@@ -161,6 +168,16 @@ export const filterLoadedEvents = <TEventType extends string>(
   events: Event[],
   filters: EventListFilterState<TEventType>,
 ): Event[] => events.filter((event) => eventMatchesLocalFilters(event, filters));
+
+export function hasEventListFilters(filters: EventListFilterState): boolean {
+  const hasBasicFilters = [
+    filters.searchTerm.trim(), filters.selectedSports.length, filters.selectedTags?.length,
+    filters.selectedStartDate, filters.selectedEndDate,
+    filters.selectedEventTypes.length !== filters.eventTypeOptions.length,
+  ].some(Boolean);
+  return hasBasicFilters || Boolean(filters.location && typeof filters.maxDistance === 'number')
+    || hasDivisionFilters(filters.divisionFilters ?? {});
+}
 
 export const eventListFilterKey = <TEventType extends string>(filters: EventListFilterState<TEventType>): string => JSON.stringify({
   searchTerm: filters.searchTerm.trim(),
@@ -182,6 +199,8 @@ export type UseEventListFilteringOptions<TEventType extends string = string> = {
   filters: EventListFilterState<TEventType>;
   filterKey: string;
   hasMoreEvents: boolean;
+  hasScopedEventCache?: boolean;
+  cacheStartDate?: string;
   onFilterChange?: () => Promise<void> | void;
   debounceMs?: number;
 };
@@ -191,25 +210,49 @@ export function useEventListFiltering<TEventType extends string>({
   filters,
   filterKey,
   hasMoreEvents,
+  hasScopedEventCache,
+  cacheStartDate,
   onFilterChange,
   debounceMs = 250,
 }: UseEventListFilteringOptions<TEventType>) {
   const previousFilterKey = useRef(filterKey);
+  const requestedStartDate = filters.selectedStartDate ?? filters.selectedEndDate;
+  const refreshOptions = useRef({ hasMoreEvents, hasScopedEventCache, cacheStartDate, requestedStartDate, onFilterChange });
+  const hasServerFilteredCache = useRef(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const visibleEvents = useMemo(() => filterLoadedEvents(events, filters), [events, filters]);
+
+  useEffect(() => {
+    if (hasScopedEventCache !== undefined) hasServerFilteredCache.current = hasScopedEventCache;
+  }, [events, hasScopedEventCache]);
+
+  useEffect(() => {
+    refreshOptions.current = { hasMoreEvents, hasScopedEventCache, cacheStartDate, requestedStartDate, onFilterChange };
+  }, [hasMoreEvents, hasScopedEventCache, cacheStartDate, requestedStartDate, onFilterChange]);
 
   useEffect(() => {
     if (previousFilterKey.current === filterKey) return;
     previousFilterKey.current = filterKey;
-    if (!hasMoreEvents || !onFilterChange) return;
+    setIsRefreshing(false);
+    setRefreshError(null);
+    const options = refreshOptions.current;
+    if (![options.hasMoreEvents, options.hasScopedEventCache, expandsCacheStart(options.cacheStartDate, options.requestedStartDate), hasServerFilteredCache.current].some(Boolean)) return;
+    if (!options.onFilterChange) return;
 
     let cancelled = false;
-    const refresh = () => {
+    const refresh = async () => {
       if (cancelled) return;
+      // A complete filtered page is not a complete unfiltered cache.
+      hasServerFilteredCache.current = true;
       setIsRefreshing(true);
-      Promise.resolve(onFilterChange()).finally(() => {
+      try {
+        await refreshOptions.current.onFilterChange?.();
+      } catch (error) {
+        if (!cancelled) setRefreshError(error instanceof Error ? error.message : 'Failed to refresh events. Please try again.');
+      } finally {
         if (!cancelled) setIsRefreshing(false);
-      });
+      }
     };
     if (debounceMs <= 0) {
       refresh();
@@ -220,7 +263,7 @@ export function useEventListFiltering<TEventType extends string>({
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [debounceMs, filterKey, hasMoreEvents, onFilterChange]);
+  }, [debounceMs, filterKey]);
 
-  return { visibleEvents, isRefreshing };
+  return { visibleEvents, isRefreshing, refreshError };
 }

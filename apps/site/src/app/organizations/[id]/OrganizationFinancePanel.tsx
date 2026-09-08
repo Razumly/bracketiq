@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type SetStateAction } from 'react';
 import {
   Alert,
   Autocomplete,
@@ -29,33 +29,29 @@ import { formatBillAmount } from '@/types';
 import {
   buildOrganizationCustomerPath,
   buildOrganizationTabPath,
-  type OrganizationCustomerRouteType,
 } from './organizationTabs';
 
-type FinanceLineItem = {
-  id: string;
-  sourceType: string;
-  sourceId?: string | null;
-  scope: 'EVENT' | 'TEAM' | 'ORGANIZATION' | 'EVENT_TEAM';
-  label: string;
-  sourceName?: string | null;
-  sourceEntityType?: 'event' | 'rental' | 'organization' | 'team' | null;
-  sourceEntityId?: string | null;
-  customerType?: OrganizationCustomerRouteType | null;
-  customerId?: string | null;
-  customerName?: string | null;
-  description?: string | null;
-  category: string;
-  amountCents: number;
-  quantity?: number | null;
-  unitLabel?: string | null;
-  classification: string;
-  status: string;
-  timing: 'ACTUAL' | 'FUTURE' | 'POTENTIAL' | 'WARNING';
-  serviceStartAt?: string | null;
-  serviceEndAt?: string | null;
-  isGenerated: boolean;
-};
+import type {
+  FinanceLineItem, StaffPayRunItem, AccountingSyncRecord, StaffPayRun,
+  LineItemStatus, LineItemDraft, PayRunAction, MarkPaidDraft, PayRunStatusFilter,
+} from './organizationFinanceTypes';
+import { dateInputValue, monthStartValue, dateInputToIso } from './organizationFinanceDates';
+import {
+  LINE_ITEM_STATUS_OPTIONS, LINE_ITEM_STATUS_LABELS, defaultLineItemDraft,
+  lineItemDraftFromItem, prepareLineItem,
+  lineItemCategoryOptions as buildLineItemCategoryOptions,
+} from './organizationFinanceLineItems';
+import {
+  sourceLabelForPayRunItem, filterPayRuns, buildPayRunLedger,
+  payRunStaffOptions as buildPayRunStaffOptions, preparePayRunUpdate,
+  type PayRunUpdateDetails,
+} from './organizationPayrollModel';
+import { buildProfitabilityRows } from './organizationProfitabilityModel';
+import { buildPayRunCsv, csvCell } from './organizationFinanceCsv';
+
+import OrganizationFinanceCharts from './OrganizationFinanceCharts';
+import { OrganizationTabHeading } from '@/components/organization/OrganizationTabLayout';
+import { OrganizationDataLoadingProvider, OrganizationLoadingValue, OrganizationTableBody } from '@/components/organization/OrganizationDataLoading';
 
 type OrganizationFinanceSummary = {
   organizationId: string;
@@ -74,49 +70,6 @@ type OrganizationFinanceSummary = {
   warnings: Array<{ code: string; message: string }>;
 };
 
-type StaffPayRunItem = {
-  id: string;
-  staffMemberId?: string | null;
-  userId?: string | null;
-  eventId?: string | null;
-  teamId?: string | null;
-  eventTeamId?: string | null;
-  eventStaffAssignmentId?: string | null;
-  teamStaffLaborEntryId?: string | null;
-  label: string;
-  description?: string | null;
-  wageType?: 'HOURLY' | 'SALARY' | 'FLAT_PER_EVENT' | null;
-  rateCents?: number | null;
-  paidMinutes?: number | null;
-  amountCents: number;
-  status: string;
-  payoutStatus: string;
-  approvedAt?: string | null;
-  paidAt?: string | null;
-  payoutProvider?: string | null;
-  payoutProviderTransferId?: string | null;
-  notes?: string | null;
-  serviceStartAt?: string | null;
-  serviceEndAt?: string | null;
-};
-
-type AccountingSyncRecord = {
-  id: string;
-  provider: 'QUICKBOOKS_ONLINE';
-  sourceType: 'STAFF_PAY_RUN' | 'FINANCE_JOURNAL_ENTRY';
-  staffPayRunId?: string | null;
-  sourceKey?: string | null;
-  status: 'PENDING' | 'SYNCED' | 'FAILED' | 'REAUTH_REQUIRED' | 'VOID';
-  externalTxnId?: string | null;
-  externalTxnType?: string | null;
-  externalTxnDocNumber?: string | null;
-  intuitTid?: string | null;
-  errorCode?: string | null;
-  errorMessage?: string | null;
-  syncedAt?: string | null;
-  syncedByUserId?: string | null;
-};
-
 type FinanceCategoryAccountingEntryType = 'REVENUE' | 'EXPENSE' | 'LIABILITY' | 'ASSET';
 
 type CategoryAccountingMapping = {
@@ -131,31 +84,6 @@ type CategoryAccountingMapping = {
   isActive: boolean;
   updatedAt?: string | null;
   updatedBy?: string | null;
-};
-
-type StaffPayRun = {
-  id: string;
-  title: string;
-  periodStart: string;
-  periodEnd: string;
-  scheduledPayDate?: string | null;
-  status: string;
-  payoutStatus: string;
-  totalAmountCents: number;
-  itemCount: number;
-  approvedAt?: string | null;
-  approvedByUserId?: string | null;
-  paidAt?: string | null;
-  paidByUserId?: string | null;
-  exportedAt?: string | null;
-  exportedByUserId?: string | null;
-  exportCount?: number | null;
-  lastExportFormat?: string | null;
-  payoutProvider?: string | null;
-  payoutProviderBatchId?: string | null;
-  notes?: string | null;
-  items: StaffPayRunItem[];
-  accountingSyncs?: AccountingSyncRecord[];
 };
 
 type FinanceResponse = {
@@ -248,28 +176,6 @@ type QuickBooksJournalSyncResponse = {
   alreadySynced: boolean;
 };
 
-type LineItemStatus = 'ESTIMATED' | 'APPROVED' | 'ACTUAL' | 'PAID' | 'VOID';
-
-type LineItemDraft = {
-  title: string;
-  category: string;
-  description: string;
-  amount: string | number;
-  status: LineItemStatus;
-  serviceStartDate: string;
-  serviceEndDate: string;
-  quantity: string | number;
-  unitLabel: string;
-};
-
-type PayRunAction = 'APPROVE' | 'MARK_PAID' | 'VOID' | 'UPDATE_ITEM_TRANSFERS' | 'RECORD_EXPORT';
-
-type MarkPaidDraft = {
-  payoutProvider: string;
-  payoutProviderBatchId: string;
-  notes: string;
-};
-
 type PayRunItemTransferDraft = {
   itemId: string;
   label: string;
@@ -296,8 +202,6 @@ type CategoryAccountingMappingDraft = {
   notes: string;
 };
 
-type PayRunStatusFilter = 'ALL' | 'DRAFT' | 'APPROVED' | 'PAID' | 'VOID';
-
 type OrganizationFinancePanelProps = {
   organizationId: string;
   isActive: boolean;
@@ -309,65 +213,9 @@ type LineItemNavigationTarget = {
   href: string;
 };
 
-const dateInputValue = (date = new Date()): string => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
-
-const monthStartValue = (): string => {
-  const now = new Date();
-  return dateInputValue(new Date(now.getFullYear(), now.getMonth(), 1));
-};
-
-const LINE_ITEM_STATUS_OPTIONS = [
-  { value: 'ESTIMATED', label: 'Estimated' },
-  { value: 'APPROVED', label: 'Approved' },
-  { value: 'ACTUAL', label: 'Incurred' },
-  { value: 'PAID', label: 'Paid' },
-  { value: 'VOID', label: 'Void' },
-] satisfies Array<{ value: LineItemStatus; label: string }>;
-
-const LINE_ITEM_STATUS_LABELS = new Map<LineItemStatus, string>(
-  LINE_ITEM_STATUS_OPTIONS.map((option) => [option.value, option.label]),
-);
-
-const dateInputToIso = (value: string, endOfDay = false): string | null => {
-  if (!value.trim()) {
-    return null;
-  }
-  const suffix = endOfDay ? 'T23:59:59.999' : 'T00:00:00.000';
-  const parsed = new Date(`${value}${suffix}`);
-  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
-};
-
-const dateValueFromIso = (value?: string | null): string => {
-  if (!value) {
-    return '';
-  }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return '';
-  }
-  return dateInputValue(parsed);
-};
-
 const centsFromDollars = (amountCents: number): string => {
   const prefix = amountCents < 0 ? '-' : '';
   return `${prefix}${formatBillAmount(Math.abs(amountCents))}`;
-};
-
-const dollarsToCents = (value: string | number): number => {
-  const numericValue = typeof value === 'number' ? value : Number(String(value).replace(/^\$/, ''));
-  return Number.isFinite(numericValue) ? Math.round(numericValue * 100) : 0;
-};
-
-const dollarsFromCents = (amountCents: number | null | undefined): string => {
-  if (!Number.isFinite(amountCents)) {
-    return '';
-  }
-  return (Number(amountCents) / 100).toFixed(2);
 };
 
 const formatDate = (value?: string | null): string => {
@@ -679,14 +527,21 @@ const buildCategoryAccountingMappingDrafts = ({
   ));
 };
 
-const defaultQuickBooksMappingDraft = (connection?: AccountingConnection | null): QuickBooksMappingDraft => ({
-  payrollExpenseAccountExternalId: connection?.payrollExpenseAccountExternalId ?? '',
-  payrollExpenseAccountName: connection?.payrollExpenseAccountName ?? '',
-  payrollLiabilityAccountExternalId: connection?.payrollLiabilityAccountExternalId ?? '',
-  payrollLiabilityAccountName: connection?.payrollLiabilityAccountName ?? '',
-  financeClearingAccountExternalId: connection?.financeClearingAccountExternalId ?? '',
-  financeClearingAccountName: connection?.financeClearingAccountName ?? '',
-});
+const QUICKBOOKS_MAPPING_FIELDS = [
+  'payrollExpenseAccountExternalId', 'payrollExpenseAccountName',
+  'payrollLiabilityAccountExternalId', 'payrollLiabilityAccountName',
+  'financeClearingAccountExternalId', 'financeClearingAccountName',
+] as const;
+
+const defaultQuickBooksMappingDraft = (connection?: AccountingConnection | null): QuickBooksMappingDraft => {
+  const draft: QuickBooksMappingDraft = {
+    payrollExpenseAccountExternalId: '', payrollExpenseAccountName: '',
+    payrollLiabilityAccountExternalId: '', payrollLiabilityAccountName: '',
+    financeClearingAccountExternalId: '', financeClearingAccountName: '',
+  };
+  for (const key of QUICKBOOKS_MAPPING_FIELDS) draft[key] = connection?.[key] ?? '';
+  return draft;
+};
 
 const normalizeQuickBooksText = (value?: string | null): string => (
   value?.trim().toLowerCase() ?? ''
@@ -703,61 +558,37 @@ const quickBooksAccountHasKeyword = (account: QuickBooksAccount, keywords: strin
   return keywords.some((keyword) => searchable.includes(keyword));
 };
 
-const quickBooksMappingScore = (
-  account: QuickBooksAccount,
-  intent: QuickBooksAccountIntent,
-): number => {
-  const accountType = normalizeQuickBooksText(account.accountType);
-  const accountSubType = normalizeQuickBooksText(account.accountSubType);
-  if (intent === 'expense') {
-    let score = accountType === 'expense' || accountType === 'cost of goods sold' || accountType === 'other expense' ? 60 : 0;
-    if (quickBooksAccountHasKeyword(account, ['payroll', 'wage', 'salary', 'labor', 'staff', 'contractor'])) {
-      score += 30;
-    }
-    if (accountSubType.includes('payroll') || accountSubType.includes('labor')) {
-      score += 10;
-    }
-    return score;
-  }
-
-  if (intent === 'revenue') {
-    let score = accountType === 'income' || accountType === 'other income' ? 60 : 0;
-    if (quickBooksAccountHasKeyword(account, ['sales', 'revenue', 'income', 'registration', 'fees'])) {
-      score += 30;
-    }
-    if (accountSubType.includes('income') || accountSubType.includes('sales')) {
-      score += 10;
-    }
-    return score;
-  }
-
-  if (intent === 'asset') {
-    let score = accountType === 'bank'
-      || accountType === 'accounts receivable'
-      || accountType === 'other current asset'
-      ? 60
-      : 0;
-    if (quickBooksAccountHasKeyword(account, ['cash', 'bank', 'receivable', 'asset', 'clearing'])) {
-      score += 30;
-    }
-    if (accountSubType.includes('cash') || accountSubType.includes('receivable')) {
-      score += 10;
-    }
-    return score;
-  }
-
-  let score = accountType === 'other current liability'
-    || accountType === 'long term liability'
-    || accountType === 'accounts payable'
-    ? 60
-    : 0;
-  if (quickBooksAccountHasKeyword(account, ['payroll', 'liabil', 'clearing', 'accrued', 'payable', 'withholding'])) {
-    score += 30;
-  }
-  if (accountSubType.includes('liabil') || accountSubType.includes('payroll')) {
-    score += 10;
-  }
-  return score;
+const QUICKBOOKS_ACCOUNT_RANKING: Record<QuickBooksAccountIntent, {
+  types: string[]; keywords: string[]; subtypes: string[];
+}> = {
+  expense: {
+    types: ['expense', 'cost of goods sold', 'other expense'],
+    keywords: ['payroll', 'wage', 'salary', 'labor', 'staff', 'contractor'],
+    subtypes: ['payroll', 'labor'],
+  },
+  revenue: {
+    types: ['income', 'other income'],
+    keywords: ['sales', 'revenue', 'income', 'registration', 'fees'],
+    subtypes: ['income', 'sales'],
+  },
+  asset: {
+    types: ['bank', 'accounts receivable', 'other current asset'],
+    keywords: ['cash', 'bank', 'receivable', 'asset', 'clearing'],
+    subtypes: ['cash', 'receivable'],
+  },
+  liability: {
+    types: ['other current liability', 'long term liability', 'accounts payable'],
+    keywords: ['payroll', 'liabil', 'clearing', 'accrued', 'payable', 'withholding'],
+    subtypes: ['liabil', 'payroll'],
+  },
+};
+const quickBooksMappingScore = (account: QuickBooksAccount, intent: QuickBooksAccountIntent): number => {
+  const rule = QUICKBOOKS_ACCOUNT_RANKING[intent];
+  const type = normalizeQuickBooksText(account.accountType);
+  const subtype = normalizeQuickBooksText(account.accountSubType);
+  return (rule.types.includes(type) ? 60 : 0)
+    + (quickBooksAccountHasKeyword(account, rule.keywords) ? 30 : 0)
+    + (rule.subtypes.some((keyword) => subtype.includes(keyword)) ? 10 : 0);
 };
 
 const sortQuickBooksAccountsForMapping = (
@@ -841,94 +672,6 @@ const defaultMarkPaidDraft = (payRun?: StaffPayRun | null): MarkPaidDraft => ({
   notes: payRun?.notes ?? '',
 });
 
-const csvCell = (value: string | number | null | undefined): string => {
-  const raw = value == null ? '' : String(value);
-  return `"${raw.replace(/"/g, '""')}"`;
-};
-
-const centsToCsvDollars = (amountCents?: number | null): string => (
-  Number.isFinite(amountCents) ? (Number(amountCents) / 100).toFixed(2) : ''
-);
-
-const sourceLabelForPayRunItem = (item: StaffPayRunItem): string => {
-  if (item.eventStaffAssignmentId) {
-    return 'Event labor';
-  }
-  if (item.teamStaffLaborEntryId) {
-    return 'Team labor';
-  }
-  return 'Staff labor';
-};
-
-const buildPayRunCsv = (payRunsToExport: StaffPayRun[]): string => {
-  const headers = [
-    'Pay Run',
-    'Pay Run Status',
-    'Payout Status',
-    'Period Start',
-    'Period End',
-    'Scheduled Pay Date',
-    'Exported At',
-    'Export Count',
-    'Export Format',
-    'Staff',
-    'User ID',
-    'Staff Member ID',
-    'Source Type',
-    'Event ID',
-    'Team ID',
-    'Event Team ID',
-    'Service Start',
-    'Service End',
-    'Wage Type',
-    'Rate',
-    'Paid Minutes',
-    'Amount',
-    'Payout Provider',
-    'Batch Reference',
-    'Transfer Reference',
-    'Item Status',
-    'Item Payout Status',
-    'Notes',
-  ];
-  const rows = payRunsToExport.flatMap((payRun) => (
-    payRun.items.map((item) => [
-      payRun.title,
-      payRun.status,
-      payRun.payoutStatus,
-      payRun.periodStart,
-      payRun.periodEnd,
-      payRun.scheduledPayDate ?? '',
-      payRun.exportedAt ?? '',
-      payRun.exportCount ?? '',
-      payRun.lastExportFormat ?? '',
-      item.label,
-      item.userId ?? '',
-      item.staffMemberId ?? '',
-      sourceLabelForPayRunItem(item),
-      item.eventId ?? '',
-      item.teamId ?? '',
-      item.eventTeamId ?? '',
-      item.serviceStartAt ?? '',
-      item.serviceEndAt ?? '',
-      item.wageType ?? '',
-      centsToCsvDollars(item.rateCents),
-      item.paidMinutes ?? '',
-      centsToCsvDollars(item.amountCents),
-      item.payoutProvider ?? payRun.payoutProvider ?? '',
-      payRun.payoutProviderBatchId ?? '',
-      item.payoutProviderTransferId ?? '',
-      item.status,
-      item.payoutStatus,
-      item.notes ?? payRun.notes ?? '',
-    ])
-  ));
-  return [
-    headers.map(csvCell).join(','),
-    ...rows.map((row) => row.map(csvCell).join(',')),
-  ].join('\n');
-};
-
 const downloadCsv = (filename: string, csv: string): void => {
   if (typeof window === 'undefined' || typeof document === 'undefined') {
     return;
@@ -943,32 +686,6 @@ const downloadCsv = (filename: string, csv: string): void => {
   document.body.removeChild(link);
   window.URL.revokeObjectURL(url);
 };
-
-const defaultLineItemDraft = (): LineItemDraft => ({
-  title: '',
-  category: 'Operations',
-  description: '',
-  amount: '',
-  status: 'ACTUAL',
-  serviceStartDate: dateInputValue(),
-  serviceEndDate: '',
-  quantity: '',
-  unitLabel: '',
-});
-
-const lineItemDraftFromItem = (item: FinanceLineItem): LineItemDraft => ({
-  title: item.label,
-  category: item.category,
-  description: item.description ?? '',
-  amount: dollarsFromCents(Math.abs(item.amountCents)),
-  status: LINE_ITEM_STATUS_OPTIONS.some((option) => option.value === item.status)
-    ? item.status as LineItemStatus
-    : 'ACTUAL',
-  serviceStartDate: dateValueFromIso(item.serviceStartAt),
-  serviceEndDate: dateValueFromIso(item.serviceEndAt),
-  quantity: item.quantity ?? '',
-  unitLabel: item.unitLabel ?? '',
-});
 
 const messageForError = (error: unknown, fallback: string): string => {
   if (isApiRequestError(error)) {
@@ -987,7 +704,7 @@ function FinanceMetric({
   tone,
 }: {
   label: string;
-  value: number;
+  value?: number;
   description: string;
   tone: 'green' | 'red' | 'orange' | 'gray';
 }) {
@@ -999,14 +716,101 @@ function FinanceMetric({
   }[tone];
 
   return (
-    <Paper withBorder radius="md" p="md" className={toneClassName}>
+    <Paper withBorder radius="md" p="md" className={`org-finance-metric ${toneClassName}`}>
       <Stack gap={4}>
-        <Text size="xs" fw={700} tt="uppercase">{label}</Text>
-        <Text size="xl" fw={800}>{centsFromDollars(value)}</Text>
+        <Text size="sm" fw={500}>{label}</Text>
+        <Text size="xl" fw={800}><OrganizationLoadingValue>{value === undefined ? '—' : centsFromDollars(value)}</OrganizationLoadingValue></Text>
         <Text size="xs">{description}</Text>
       </Stack>
     </Paper>
   );
+}
+
+function financeRequestPath(organizationId: string, fromDate: string, toDate: string) {
+  const params = new URLSearchParams();
+  if (fromDate.trim()) params.set('from', dateInputToIso(fromDate) ?? fromDate);
+  if (toDate.trim()) params.set('to', dateInputToIso(toDate, true) ?? toDate);
+  const query = params.toString();
+  return `/api/organizations/${organizationId}/finance${query ? `?${query}` : ''}`;
+}
+
+function payRunSyncActions(available: boolean, connection: AccountingConnection | null, mapped: boolean, canManage: boolean) {
+  const allowed = canManage && available;
+  return {
+    canSyncPayRunToQuickBooks: allowed && connection?.status === 'CONNECTED' && mapped,
+    canReconnectQuickBooks: allowed && connection?.status === 'REAUTH_REQUIRED',
+  };
+}
+function payRunSyncDisplay(sync: AccountingSyncRecord | null, connection: AccountingConnection | null, needsMapping: boolean) {
+  return {
+    color: needsMapping ? 'yellow' : quickBooksSyncStatusColor(sync, connection),
+    label: needsMapping ? 'Needs mapping' : quickBooksSyncStatusLabel(sync, connection),
+    error: needsMapping ? 'Set QuickBooks payroll account mapping before syncing.' : quickBooksSyncErrorMessage(sync, connection),
+    errorColor: needsMapping ? 'orange' : isRetryableQuickBooksReauthSync(sync, connection) ? 'blue' : 'red',
+  };
+}
+function payRunAccountingState(payRun: StaffPayRun, connection: AccountingConnection | null, mapped: boolean, canManage: boolean) {
+  const quickBooksSync = getQuickBooksSync(payRun);
+  const quickBooksSyncEligible = isQuickBooksPayRunSyncEligible(payRun);
+  const available = quickBooksSyncEligible && quickBooksSync?.status !== 'SYNCED';
+  const needsMapping = available && connection?.status === 'CONNECTED' && !mapped;
+  const display = payRunSyncDisplay(quickBooksSync, connection, needsMapping);
+  return {
+    quickBooksSync, quickBooksSyncEligible,
+    quickBooksSyncError: display.error, display,
+    ...payRunSyncActions(available, connection, mapped, canManage),
+  };
+}
+
+function sameQuickBooksMappingSource(before: AccountingConnection | null, after: AccountingConnection | null): boolean {
+  if (before?.id !== after?.id) return false;
+  return QUICKBOOKS_MAPPING_FIELDS.every((key) => before?.[key] === after?.[key]);
+}
+
+function useQuickBooksMappingDraft(connection: AccountingConnection | null) {
+  const [state, setState] = useState(() => ({
+    source: connection,
+    draft: defaultQuickBooksMappingDraft(connection),
+  }));
+  // Keep local edits when only the connection status changes.
+  if (!sameQuickBooksMappingSource(state.source, connection)) {
+    setState({ source: connection, draft: defaultQuickBooksMappingDraft(connection) });
+  }
+  const setDraft = useCallback((update: SetStateAction<QuickBooksMappingDraft>) => {
+    setState((current) => ({
+      ...current,
+      draft: typeof update === 'function' ? update(current.draft) : update,
+    }));
+  }, []);
+  return [state.draft, setDraft] as const;
+}
+
+function quickBooksMappingAvailability(connection: AccountingConnection | null) {
+  return {
+    quickBooksMappingReady: Boolean(connection?.payrollExpenseAccountExternalId && connection?.payrollLiabilityAccountExternalId),
+    quickBooksMappingDisabled: !connection || connection.status !== 'CONNECTED',
+    quickBooksCategoryMappingDisabled: !connection || connection.status === 'DISCONNECTED',
+  };
+}
+
+function financeMetricTones(finance: OrganizationFinanceSummary | null): {
+  profitTone: 'green' | 'red';
+  projectedTone: 'green' | 'red';
+} {
+  return {
+    profitTone: (finance?.actualProfitCents ?? 0) >= 0 ? 'green' : 'red',
+    projectedTone: (finance?.projectedProfitCents ?? 0) >= 0 ? 'green' : 'red',
+  };
+}
+
+function syncTransactionLabel(sync: AccountingSyncRecord | null): string {
+  if (!sync?.externalTxnId) return 'Not synced';
+  return `${sync.externalTxnType ?? 'Txn'} ${sync.externalTxnDocNumber || sync.externalTxnId}`;
+}
+
+function quickBooksAccountDescription(account: QuickBooksAccount | null, fallback: string): string {
+  if (!account?.accountType) return fallback;
+  return `${account.accountType}${account.accountSubType ? ` - ${account.accountSubType}` : ''}`;
 }
 
 export default function OrganizationFinancePanel({
@@ -1022,7 +826,7 @@ export default function OrganizationFinancePanel({
   const [lineItemCategories, setLineItemCategories] = useState<string[]>([]);
   const [accountingConnections, setAccountingConnections] = useState<AccountingConnection[]>([]);
   const [categoryAccountingMappings, setCategoryAccountingMappings] = useState<CategoryAccountingMapping[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(isActive);
   const [error, setError] = useState<string | null>(null);
   const [payRunTitle, setPayRunTitle] = useState('');
   const [payRunStart, setPayRunStart] = useState(monthStartValue);
@@ -1047,7 +851,6 @@ export default function OrganizationFinancePanel({
   const [payRunToFilter, setPayRunToFilter] = useState('');
   const [quickBooksSaving, setQuickBooksSaving] = useState(false);
   const [quickBooksMappingSaving, setQuickBooksMappingSaving] = useState(false);
-  const [quickBooksMappingDraft, setQuickBooksMappingDraft] = useState<QuickBooksMappingDraft>(() => defaultQuickBooksMappingDraft());
   const [quickBooksAccounts, setQuickBooksAccounts] = useState<QuickBooksAccount[]>([]);
   const [quickBooksAccountsLoading, setQuickBooksAccountsLoading] = useState(false);
   const [quickBooksAccountsError, setQuickBooksAccountsError] = useState<string | null>(null);
@@ -1077,15 +880,7 @@ export default function OrganizationFinancePanel({
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams();
-      if (fromDate.trim()) {
-        params.set('from', dateInputToIso(fromDate) ?? fromDate);
-      }
-      if (toDate.trim()) {
-        params.set('to', dateInputToIso(toDate, true) ?? toDate);
-      }
-      const suffix = params.toString() ? `?${params.toString()}` : '';
-      const response = await apiRequest<FinanceResponse>(`/api/organizations/${organizationId}/finance${suffix}`);
+      const response = await apiRequest<FinanceResponse>(financeRequestPath(organizationId, fromDate, toDate));
       setFinance(response.finance);
       setPayRuns(response.payRuns ?? []);
       setLineItemCategories(response.lineItemCategories ?? []);
@@ -1102,13 +897,14 @@ export default function OrganizationFinancePanel({
     void loadFinance();
   }, [loadFinance]);
 
+  const financeLineItems = finance?.lineItems;
   const sortedLineItems = useMemo(() => (
-    [...(finance?.lineItems ?? [])].sort((a, b) => {
+    [...(financeLineItems ?? [])].sort((a, b) => {
       const aDate = a.serviceStartAt ? new Date(a.serviceStartAt).getTime() : 0;
       const bDate = b.serviceStartAt ? new Date(b.serviceStartAt).getTime() : 0;
       return bDate - aDate;
     })
-  ), [finance?.lineItems]);
+  ), [financeLineItems]);
 
   const selectedPayRun = useMemo(() => (
     payRuns.find((payRun) => payRun.id === selectedPayRunId) ?? null
@@ -1130,24 +926,10 @@ export default function OrganizationFinancePanel({
     accountingConnections.find((connection) => connection.provider === 'QUICKBOOKS_ONLINE') ?? null
   ), [accountingConnections]);
 
-  useEffect(() => {
-    setQuickBooksMappingDraft(defaultQuickBooksMappingDraft(quickBooksConnection));
-  }, [
-    quickBooksConnection?.id,
-    quickBooksConnection?.payrollExpenseAccountExternalId,
-    quickBooksConnection?.payrollExpenseAccountName,
-    quickBooksConnection?.payrollLiabilityAccountExternalId,
-    quickBooksConnection?.payrollLiabilityAccountName,
-    quickBooksConnection?.financeClearingAccountExternalId,
-    quickBooksConnection?.financeClearingAccountName,
-  ]);
-
-  const quickBooksMappingReady = Boolean(
-    quickBooksConnection?.payrollExpenseAccountExternalId
-      && quickBooksConnection?.payrollLiabilityAccountExternalId,
-  );
-  const quickBooksMappingDisabled = !quickBooksConnection || quickBooksConnection.status !== 'CONNECTED';
-  const quickBooksCategoryMappingDisabled = !quickBooksConnection || quickBooksConnection.status === 'DISCONNECTED';
+  const [quickBooksMappingDraft, setQuickBooksMappingDraft] = useQuickBooksMappingDraft(quickBooksConnection);
+  const {
+    quickBooksMappingReady, quickBooksMappingDisabled, quickBooksCategoryMappingDisabled,
+  } = quickBooksMappingAvailability(quickBooksConnection);
 
   const activeQuickBooksAccounts = useMemo(() => (
     quickBooksAccounts.filter((account) => account.active)
@@ -1257,164 +1039,29 @@ export default function OrganizationFinancePanel({
     quickBooksMappingDraft.financeClearingAccountName,
   ]);
 
-  const payRunStaffOptions = useMemo(() => {
-    const staffByKey = new Map<string, string>();
-    payRuns.forEach((payRun) => {
-      payRun.items.forEach((item) => {
-        const key = item.userId ?? item.staffMemberId ?? item.label;
-        if (!staffByKey.has(key)) {
-          staffByKey.set(key, item.label);
-        }
-      });
-    });
-    return [
-      { value: 'ALL', label: 'All staff' },
-      ...[...staffByKey.entries()]
-        .map(([value, label]) => ({ value, label }))
-        .sort((a, b) => a.label.localeCompare(b.label)),
-    ];
-  }, [payRuns]);
+  const payRunStaffOptions = useMemo(() => buildPayRunStaffOptions(payRuns), [payRuns]);
 
-  const filteredPayRuns = useMemo(() => {
-    const filterStart = payRunFromFilter.trim() ? new Date(`${payRunFromFilter}T00:00:00.000`).getTime() : null;
-    const filterEnd = payRunToFilter.trim() ? new Date(`${payRunToFilter}T23:59:59.999`).getTime() : null;
-    return payRuns.filter((payRun) => {
-      if (payRunStatusFilter !== 'ALL' && payRun.status !== payRunStatusFilter) {
-        return false;
-      }
-      if (payRunStaffFilter !== 'ALL') {
-        const hasStaff = payRun.items.some((item) => (
-          item.userId === payRunStaffFilter
-          || item.staffMemberId === payRunStaffFilter
-          || item.label === payRunStaffFilter
-        ));
-        if (!hasStaff) {
-          return false;
-        }
-      }
-      const payRunStart = new Date(payRun.periodStart).getTime();
-      const payRunEnd = new Date(payRun.periodEnd).getTime();
-      if (filterStart != null && Number.isFinite(filterStart) && Number.isFinite(payRunEnd) && payRunEnd < filterStart) {
-        return false;
-      }
-      if (filterEnd != null && Number.isFinite(filterEnd) && Number.isFinite(payRunStart) && payRunStart > filterEnd) {
-        return false;
-      }
-      return true;
-    });
-  }, [payRunFromFilter, payRunStaffFilter, payRunStatusFilter, payRunToFilter, payRuns]);
+  const filteredPayRuns = useMemo(() => filterPayRuns(payRuns, {
+    status: payRunStatusFilter,
+    staff: payRunStaffFilter,
+    from: payRunFromFilter,
+    to: payRunToFilter,
+  }), [payRunFromFilter, payRunStaffFilter, payRunStatusFilter, payRunToFilter, payRuns]);
 
-  const payRunLedgerRows = useMemo(() => {
-    const rowsByStaff = new Map<string, {
-      key: string;
-      label: string;
-      itemCount: number;
-      minutes: number;
-      draftCents: number;
-      approvedCents: number;
-      paidCents: number;
-      totalCents: number;
-    }>();
-    filteredPayRuns.forEach((payRun) => {
-      payRun.items.forEach((item) => {
-        const key = item.userId ?? item.staffMemberId ?? item.label;
-        const current = rowsByStaff.get(key) ?? {
-          key,
-          label: item.label,
-          itemCount: 0,
-          minutes: 0,
-          draftCents: 0,
-          approvedCents: 0,
-          paidCents: 0,
-          totalCents: 0,
-        };
-        current.itemCount += 1;
-        current.minutes += item.paidMinutes ?? 0;
-        current.totalCents += item.amountCents;
-        if (item.status === 'PAID') {
-          current.paidCents += item.amountCents;
-        } else if (item.status === 'APPROVED') {
-          current.approvedCents += item.amountCents;
-        } else if (item.status === 'DRAFT') {
-          current.draftCents += item.amountCents;
-        }
-        rowsByStaff.set(key, current);
-      });
-    });
-    return [...rowsByStaff.values()].sort((a, b) => b.totalCents - a.totalCents);
-  }, [filteredPayRuns]);
-
-  const profitabilityRows = useMemo(() => {
-    const rowsBySource = new Map<string, {
-      key: string;
-      name: string;
-      type: string;
-      sourceId: string | null;
-      customerType: OrganizationCustomerRouteType | null;
-      revenueCents: number;
-      costCents: number;
-      profitCents: number;
-      itemCount: number;
-    }>();
-    (finance?.lineItems ?? []).forEach((item) => {
-      const normalizedType = item.sourceEntityType === 'team' || item.scope === 'TEAM' || item.scope === 'EVENT_TEAM'
-        ? 'Team'
-        : item.sourceEntityType === 'event' || item.scope === 'EVENT'
-          ? 'Event'
-          : null;
-      if (!normalizedType) {
-        return;
-      }
-      const sourceId = item.sourceEntityId ?? item.customerId ?? item.sourceId ?? null;
-      const key = `${normalizedType}:${sourceId ?? item.sourceName ?? item.label}`;
-      const current = rowsBySource.get(key) ?? {
-        key,
-        name: item.sourceName ?? item.customerName ?? item.label,
-        type: normalizedType,
-        sourceId,
-        customerType: normalizedType === 'Team' ? 'teams' : null,
-        revenueCents: 0,
-        costCents: 0,
-        profitCents: 0,
-        itemCount: 0,
-      };
-      if (item.amountCents >= 0) {
-        current.revenueCents += item.amountCents;
-      } else {
-        current.costCents += Math.abs(item.amountCents);
-      }
-      current.profitCents += item.amountCents;
-      current.itemCount += 1;
-      rowsBySource.set(key, current);
-    });
-    return [...rowsBySource.values()].sort((a, b) => b.profitCents - a.profitCents);
-  }, [finance?.lineItems]);
-
-  const lineItemCategoryOptions = useMemo(() => {
-    const categoriesByKey = new Map<string, string>();
-    [...lineItemCategories, ...(finance?.lineItems ?? [])
-      .filter((item) => !item.isGenerated)
-      .map((item) => item.category)]
-      .forEach((category) => {
-        const normalizedCategory = category.trim();
-        if (!normalizedCategory) {
-          return;
-        }
-        const key = normalizedCategory.toLowerCase();
-        if (!categoriesByKey.has(key)) {
-          categoriesByKey.set(key, normalizedCategory);
-        }
-      });
-    return [...categoriesByKey.values()].sort((a, b) => a.localeCompare(b));
-  }, [finance?.lineItems, lineItemCategories]);
+  const payRunLedgerRows = useMemo(() => buildPayRunLedger(filteredPayRuns), [filteredPayRuns]);
+  const profitabilityRows = useMemo(() => buildProfitabilityRows(financeLineItems ?? []), [financeLineItems]);
+  const lineItemCategoryOptions = useMemo(
+    () => buildLineItemCategoryOptions(lineItemCategories, financeLineItems ?? []),
+    [financeLineItems, lineItemCategories],
+  );
 
   useEffect(() => {
     setCategoryMappingDrafts(buildCategoryAccountingMappingDrafts({
-      lineItems: finance?.lineItems ?? [],
+      lineItems: financeLineItems ?? [],
       categories: lineItemCategories,
       mappings: categoryAccountingMappings,
     }));
-  }, [categoryAccountingMappings, finance?.lineItems, lineItemCategories]);
+  }, [categoryAccountingMappings, financeLineItems, lineItemCategories]);
 
   const updateLineItemDraft = useCallback((patch: Partial<LineItemDraft>) => {
     setLineItemDraft((current) => ({ ...current, ...patch }));
@@ -1634,7 +1281,7 @@ export default function OrganizationFinancePanel({
 
   const updateQuickBooksMappingDraft = useCallback((patch: Partial<QuickBooksMappingDraft>) => {
     setQuickBooksMappingDraft((current) => ({ ...current, ...patch }));
-  }, []);
+  }, [setQuickBooksMappingDraft]);
 
   const selectQuickBooksExpenseAccount = useCallback((accountId: string | null) => {
     const account = activeQuickBooksAccounts.find((entry) => entry.id === accountId) ?? null;
@@ -1838,40 +1485,16 @@ export default function OrganizationFinancePanel({
   }, []);
 
   const saveLineItem = useCallback(async () => {
-    const title = lineItemDraft.title.trim();
-    const category = lineItemDraft.category.trim();
-    const amountCents = dollarsToCents(lineItemDraft.amount);
-    if (!title || !category || amountCents <= 0) {
-      setLineItemError('Title, category, and amount are required.');
-      return;
-    }
-    const serviceStartAt = dateInputToIso(lineItemDraft.serviceStartDate);
-    const serviceEndAt = dateInputToIso(lineItemDraft.serviceEndDate, true);
-    if (serviceStartAt && serviceEndAt && new Date(serviceEndAt).getTime() < new Date(serviceStartAt).getTime()) {
-      setLineItemError('End date must be on or after the start date.');
-      return;
-    }
-    const quantity = lineItemDraft.quantity === '' ? null : Number(lineItemDraft.quantity);
-    if (quantity != null && (!Number.isFinite(quantity) || quantity <= 0)) {
-      setLineItemError('Quantity must be greater than zero.');
+    const prepared = prepareLineItem(lineItemDraft);
+    if (prepared.error !== null) {
+      setLineItemError(prepared.error);
       return;
     }
 
     setLineItemSaving(true);
     setLineItemError(null);
     try {
-      const baseBody = {
-        title,
-        category,
-        description: lineItemDraft.description.trim() || null,
-        amountCents,
-        quantity,
-        unitLabel: lineItemDraft.unitLabel.trim() || null,
-        status: lineItemDraft.status,
-        occurredAt: serviceStartAt,
-        serviceStartAt,
-        serviceEndAt,
-      };
+      const baseBody = prepared.body;
       if (editingLineItem?.sourceId) {
         await apiRequest(`/api/organizations/${organizationId}/finance/line-items/${editingLineItem.sourceId}`, {
           method: 'PATCH',
@@ -1923,11 +1546,7 @@ export default function OrganizationFinancePanel({
   const updatePayRun = useCallback(async (
     payRunId: string,
     action: PayRunAction,
-    details?: Partial<MarkPaidDraft> & {
-      voidReason?: string | null;
-      exportFormat?: string | null;
-      itemTransfers?: Array<{ itemId: string; payoutProviderTransferId?: string | null }>;
-    },
+    details?: PayRunUpdateDetails,
   ): Promise<boolean> => {
     setUpdatingPayRunId(payRunId);
     setPayrollError(null);
@@ -1937,15 +1556,7 @@ export default function OrganizationFinancePanel({
     try {
       await apiRequest(`/api/organizations/${organizationId}/finance/pay-runs/${payRunId}`, {
         method: 'PATCH',
-        body: {
-          action,
-          ...(details?.payoutProvider !== undefined ? { payoutProvider: details.payoutProvider.trim() || null } : {}),
-          ...(details?.payoutProviderBatchId !== undefined ? { payoutProviderBatchId: details.payoutProviderBatchId.trim() || null } : {}),
-          ...(details?.exportFormat !== undefined ? { exportFormat: details.exportFormat?.trim() || null } : {}),
-          ...(details?.notes !== undefined ? { notes: details.notes.trim() || null } : {}),
-          ...(details?.voidReason !== undefined ? { voidReason: details.voidReason?.trim() || null } : {}),
-          ...(details?.itemTransfers !== undefined ? { itemTransfers: details.itemTransfers } : {}),
-        },
+        body: preparePayRunUpdate(action, details),
       });
       await loadFinance();
       return true;
@@ -2011,8 +1622,744 @@ export default function OrganizationFinancePanel({
     }
   }, [transferDraft, transferPayRunId, updatePayRun]);
 
-  const profitTone = (finance?.actualProfitCents ?? 0) >= 0 ? 'green' : 'red';
-  const projectedTone = (finance?.projectedProfitCents ?? 0) >= 0 ? 'green' : 'red';
+  const { profitTone, projectedTone } = financeMetricTones(finance);
+
+  const renderJournalSyncSuccess = (record: AccountingSyncRecord) => (
+    <Alert color="green" variant="light">
+      Synced to QuickBooks
+      {record.externalTxnType ? ` ${record.externalTxnType}` : ''}
+      {record.externalTxnId ? ` ${record.externalTxnId}` : ''}
+      {record.externalTxnDocNumber ? ` (${record.externalTxnDocNumber})` : ''}.
+    </Alert>
+  );
+
+  const renderJournalPreviewResult = (preview: QuickBooksJournalPreview) => (
+    <Stack gap="sm">
+      <Group gap="xs">
+        <Badge color={preview.readyToSync ? 'green' : 'yellow'} variant="light">
+          {preview.readyToSync ? 'Ready to sync' : 'Needs mapping'}
+        </Badge>
+        <Badge color={preview.isBalanced ? 'green' : 'red'} variant="light">
+          {preview.isBalanced ? 'Balanced' : 'Unbalanced'}
+        </Badge>
+        <Badge variant="light">
+          {preview.includedLineItemCount} line items
+        </Badge>
+        {preview.skippedLineItemCount > 0 && (
+          <Badge color="gray" variant="light">
+            {preview.skippedLineItemCount} skipped
+          </Badge>
+        )}
+      </Group>
+      <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="sm">
+        <Stack gap={1}>
+          <Text size="xs" fw={700} tt="uppercase" c="dimmed">Txn date</Text>
+          <Text size="sm">{formatDate(preview.txnDate)}</Text>
+        </Stack>
+        <Stack gap={1}>
+          <Text size="xs" fw={700} tt="uppercase" c="dimmed">Debit total</Text>
+          <Text size="sm" fw={700}>{centsFromDollars(preview.debitTotalCents)}</Text>
+        </Stack>
+        <Stack gap={1}>
+          <Text size="xs" fw={700} tt="uppercase" c="dimmed">Credit total</Text>
+          <Text size="sm" fw={700}>{centsFromDollars(preview.creditTotalCents)}</Text>
+        </Stack>
+      </SimpleGrid>
+      {preview.warnings.length > 0 && (
+        <Alert color="yellow" variant="light">
+          <Stack gap={2}>
+            {preview.warnings.map((warning) => (
+              <Text key={warning} size="sm">{warning}</Text>
+            ))}
+          </Stack>
+        </Alert>
+      )}
+      <ScrollArea.Autosize mah={320} type="scroll" scrollHideDelay={900} offsetScrollbars>
+        <Table striped highlightOnHover withColumnBorders style={{ minWidth: 980 }}>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>Line item</Table.Th>
+              <Table.Th>Posting</Table.Th>
+              <Table.Th>Account</Table.Th>
+              <Table.Th>Role</Table.Th>
+              <Table.Th>Description</Table.Th>
+              <Table.Th ta="right">Amount</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {preview.lines.length > 0 ? preview.lines.map((line) => (
+              <Table.Tr key={line.id}>
+                <Table.Td>
+                  <Stack gap={1}>
+                    <Text size="sm" fw={600}>{line.lineItemLabel}</Text>
+                    <Text size="xs" c="dimmed">{line.category}</Text>
+                  </Stack>
+                </Table.Td>
+                <Table.Td>
+                  <Badge
+                    size="xs"
+                    color={line.postingType === 'Debit' ? 'blue' : 'green'}
+                    variant="light"
+                  >
+                    {line.postingType}
+                  </Badge>
+                </Table.Td>
+                <Table.Td>
+                  <Stack gap={1}>
+                    <Text size="sm" c={line.missingAccount ? 'red' : undefined} fw={line.missingAccount ? 700 : 500}>
+                      {line.accountName || 'Missing account'}
+                    </Text>
+                    {line.accountExternalId && (
+                      <Text size="xs" c="dimmed">ID {line.accountExternalId}</Text>
+                    )}
+                  </Stack>
+                </Table.Td>
+                <Table.Td>
+                  <Text size="xs" c="dimmed">
+                    {line.role === 'CLEARING_ACCOUNT' ? 'Clearing' : 'Mapped category'}
+                  </Text>
+                </Table.Td>
+                <Table.Td>
+                  <Text size="xs" lineClamp={2}>{line.description}</Text>
+                </Table.Td>
+                <Table.Td ta="right">
+                  <Text fw={700}>{centsFromDollars(line.amountCents)}</Text>
+                </Table.Td>
+              </Table.Tr>
+            )) : (
+              <Table.Tr>
+                <Table.Td colSpan={6}>
+                  <Text size="sm" c="dimmed">No journal entry rows are available for this range.</Text>
+                </Table.Td>
+              </Table.Tr>
+            )}
+          </Table.Tbody>
+        </Table>
+      </ScrollArea.Autosize>
+    </Stack>
+  );
+
+  const renderAccountingConnectionIdentity = () => (
+    <>
+      {quickBooksConnection?.lastIntuitTid && (
+        <Text mt="sm" size="xs" c="dimmed">
+          Last Intuit TID: {quickBooksConnection.lastIntuitTid}
+        </Text>
+      )}
+      {quickBooksConnection?.scopes?.length ? (
+        <Text mt="sm" size="xs" c="dimmed">
+          {quickBooksConnection.scopes.join(' ')}
+        </Text>
+      ) : null}
+    </>
+  );
+
+  const renderAccountingConnectionErrors = () => (
+    <>
+      {quickBooksConnection?.lastError && (
+        <Text mt="sm" size="sm" c="red" fw={600}>
+          {quickBooksConnection.lastError}
+        </Text>
+      )}
+      {quickBooksError && (
+        <Text mt="sm" size="sm" c="red" fw={600}>
+          {quickBooksError}
+        </Text>
+      )}
+    </>
+  );
+
+  const renderGeneratedLineItemActions = (item: FinanceLineItem, sourceTarget: LineItemNavigationTarget | null, customerTarget: LineItemNavigationTarget | null) => (
+    <Popover width={260} position="bottom-start" shadow="md" withArrow withinPortal>
+      <Popover.Target>
+        <button
+          type="button"
+          aria-label={`Open actions for ${item.label}`}
+          className="block w-full border-0 bg-transparent p-0 text-left"
+          onClick={(event) => event?.stopPropagation?.()}
+        >
+          <Stack gap={1}>
+            <Text size="sm" fw={600}>{item.label}</Text>
+            <Text size="xs" c="dimmed">Generated</Text>
+          </Stack>
+        </button>
+      </Popover.Target>
+      <Popover.Dropdown>
+        <Stack gap={4}>
+          <Button
+            size="xs"
+            variant="subtle"
+            justify="flex-start"
+            aria-label={`Go to "${sourceTarget?.label ?? 'Source'}"`}
+            leftSection={<ExternalLink size={14} />}
+            disabled={!sourceTarget}
+            onClick={() => navigateToLineItemTarget(sourceTarget)}
+          >
+            Go to &quot;{sourceTarget?.label ?? 'Source'}&quot;
+          </Button>
+          <Button
+            size="xs"
+            variant="subtle"
+            justify="flex-start"
+            aria-label={`Go to "${customerTarget?.label ?? 'Customer'}"`}
+            leftSection={<UserRound size={14} />}
+            disabled={!customerTarget}
+            onClick={() => navigateToLineItemTarget(customerTarget)}
+          >
+            Go to &quot;{customerTarget?.label ?? 'Customer'}&quot;
+          </Button>
+        </Stack>
+      </Popover.Dropdown>
+    </Popover>
+  );
+
+  const renderPayRunSyncMetadata = (quickBooksSync: AccountingSyncRecord | null) => (
+    <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="xs">
+      <Stack gap={1}>
+        <Text size="xs" c="dimmed">Transaction</Text>
+        <Text size="sm">
+          {syncTransactionLabel(quickBooksSync)}
+        </Text>
+      </Stack>
+      <Stack gap={1}>
+        <Text size="xs" c="dimmed">Last synced</Text>
+        <Text size="sm">{formatDateTime(quickBooksSync?.syncedAt)}</Text>
+      </Stack>
+      <Stack gap={1}>
+        <Text size="xs" c="dimmed">Synced by</Text>
+        <Text size="sm">{quickBooksSync?.syncedByUserId || 'Not set'}</Text>
+      </Stack>
+      <Stack gap={1}>
+        <Text size="xs" c="dimmed">Intuit TID</Text>
+        <Text size="sm">{quickBooksSync?.intuitTid || 'Not set'}</Text>
+      </Stack>
+    </SimpleGrid>
+  );
+
+  const renderSelectedPayRunActions = (payRun: StaffPayRun) => (
+    <Group justify="flex-end">
+      <Button
+        variant="default"
+        leftSection={<Download size={14} />}
+        onClick={() => void exportPayRunsCsv([payRun], `${payRun.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-payroll.csv`)}
+      >
+        Export CSV
+      </Button>
+      {canManage && payRun.status !== 'PAID' && payRun.status !== 'VOID' && (
+        <Button
+          variant="default"
+          leftSection={<Pencil size={14} />}
+          onClick={() => openTransferModal(payRun)}
+        >
+          Edit transfers
+        </Button>
+      )}
+      {canManage && (
+        <>
+        {payRun.status === 'DRAFT' && (
+          <Button
+            variant="light"
+            loading={updatingPayRunId === payRun.id}
+            onClick={() => void updatePayRun(payRun.id, 'APPROVE')}
+          >
+            Approve
+          </Button>
+        )}
+        {payRun.status === 'APPROVED' && (
+          <Button
+            color="green"
+            variant="light"
+            onClick={() => openMarkPaidModal(payRun)}
+          >
+            Mark paid
+          </Button>
+        )}
+        {(payRun.status === 'DRAFT' || payRun.status === 'APPROVED') && (
+          <Button
+            variant="subtle"
+            color="red"
+            loading={updatingPayRunId === payRun.id}
+            onClick={() => openVoidModal(payRun)}
+          >
+            Void
+          </Button>
+        )}
+        </>
+      )}
+      </Group>
+  );
+
+  const renderQuickBooksAccountSettings = () => (
+    <Paper withBorder radius="md" p="md">
+      <Stack gap="sm">
+        <Group justify="space-between" align="center">
+          <Title order={6}>QuickBooks account settings</Title>
+          <Button
+            size="xs"
+            variant="light"
+            loading={quickBooksMappingSaving}
+            disabled={quickBooksMappingDisabled}
+            onClick={() => void saveQuickBooksMapping()}
+          >
+            Save account settings
+          </Button>
+        </Group>
+        <Text size="xs" c="dimmed">
+          Pick accounts from the connected QuickBooks chart of accounts. The finance clearing account balances revenue, refund, fee, and expense journal-entry rows.
+        </Text>
+        <SimpleGrid cols={{ base: 1, md: 3 }} spacing="sm">
+          <Select
+            label="Payroll expense account"
+            placeholder={quickBooksAccounts.length ? 'Select an expense account' : 'Load accounts or use manual entry'}
+            searchable
+            clearable
+            nothingFoundMessage="No accounts found"
+            data={expenseAccountOptions}
+            value={quickBooksMappingDraft.payrollExpenseAccountExternalId || null}
+            onChange={selectQuickBooksExpenseAccount}
+            disabled={quickBooksMappingDisabled}
+            description={quickBooksAccountDescription(selectedExpenseAccount, 'Expense and cost accounts appear first.')}
+          />
+          <Select
+            label="Payroll liability or clearing account"
+            placeholder={quickBooksAccounts.length ? 'Select a liability account' : 'Load accounts or use manual entry'}
+            searchable
+            clearable
+            nothingFoundMessage="No accounts found"
+            data={liabilityAccountOptions}
+            value={quickBooksMappingDraft.payrollLiabilityAccountExternalId || null}
+            onChange={selectQuickBooksLiabilityAccount}
+            disabled={quickBooksMappingDisabled}
+            description={quickBooksAccountDescription(selectedLiabilityAccount, 'Liability, payable, and clearing accounts appear first.')}
+          />
+          <Select
+            label="Finance clearing account"
+            placeholder={quickBooksAccounts.length ? 'Select a clearing account' : 'Load accounts or use manual entry'}
+            searchable
+            clearable
+            nothingFoundMessage="No accounts found"
+            data={clearingAccountOptions}
+            value={quickBooksMappingDraft.financeClearingAccountExternalId || null}
+            onChange={selectQuickBooksClearingAccount}
+            disabled={quickBooksMappingDisabled}
+            description={quickBooksAccountDescription(selectedClearingAccount, 'Asset, bank, receivable, and clearing accounts appear first.')}
+          />
+        </SimpleGrid>
+        {quickBooksManualMappingOpen && (
+          <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="sm">
+            <TextInput
+              label="Expense account ID"
+              value={quickBooksMappingDraft.payrollExpenseAccountExternalId}
+              onChange={(event) => updateQuickBooksMappingDraft({
+                payrollExpenseAccountExternalId: event.currentTarget.value,
+              })}
+              disabled={quickBooksMappingDisabled}
+            />
+            <TextInput
+              label="Expense account name"
+              value={quickBooksMappingDraft.payrollExpenseAccountName}
+              onChange={(event) => updateQuickBooksMappingDraft({
+                payrollExpenseAccountName: event.currentTarget.value,
+              })}
+              disabled={quickBooksMappingDisabled}
+            />
+            <TextInput
+              label="Liability account ID"
+              value={quickBooksMappingDraft.payrollLiabilityAccountExternalId}
+              onChange={(event) => updateQuickBooksMappingDraft({
+                payrollLiabilityAccountExternalId: event.currentTarget.value,
+              })}
+              disabled={quickBooksMappingDisabled}
+            />
+            <TextInput
+              label="Liability account name"
+              value={quickBooksMappingDraft.payrollLiabilityAccountName}
+              onChange={(event) => updateQuickBooksMappingDraft({
+                payrollLiabilityAccountName: event.currentTarget.value,
+              })}
+              disabled={quickBooksMappingDisabled}
+            />
+            <TextInput
+              label="Finance clearing account ID"
+              value={quickBooksMappingDraft.financeClearingAccountExternalId}
+              onChange={(event) => {
+                updateQuickBooksMappingDraft({
+                  financeClearingAccountExternalId: event.currentTarget.value,
+                });
+                setJournalPreview(null);
+                setJournalSyncRecord(null);
+              }}
+              disabled={quickBooksMappingDisabled}
+            />
+            <TextInput
+              label="Finance clearing account name"
+              value={quickBooksMappingDraft.financeClearingAccountName}
+              onChange={(event) => {
+                updateQuickBooksMappingDraft({
+                  financeClearingAccountName: event.currentTarget.value,
+                });
+                setJournalPreview(null);
+                setJournalSyncRecord(null);
+              }}
+              disabled={quickBooksMappingDisabled}
+            />
+          </SimpleGrid>
+        )}
+      </Stack>
+    </Paper>
+  );
+
+  const renderCategoryMappings = () => (
+    <Paper withBorder radius="md" p="md">
+      <Stack gap="sm">
+        <Group justify="space-between" align="center">
+          <Stack gap={2}>
+            <Title order={6}>Financial category mappings</Title>
+            <Text size="xs" c="dimmed">
+              Map finance categories to QuickBooks accounts before previewing or syncing line-item JournalEntries.
+            </Text>
+          </Stack>
+          <Button
+            size="xs"
+            variant="light"
+            loading={categoryMappingSaving}
+            disabled={quickBooksCategoryMappingDisabled || categoryMappingDrafts.length === 0}
+            onClick={() => void saveCategoryAccountingMappings()}
+          >
+            Save category mappings
+          </Button>
+        </Group>
+        {categoryMappingError && (
+          <Alert color="red" variant="light">
+            {categoryMappingError}
+          </Alert>
+        )}
+        <ScrollArea.Autosize mah={360} type="scroll" scrollHideDelay={900} offsetScrollbars>
+          <Table striped highlightOnHover withColumnBorders style={{ minWidth: quickBooksManualMappingOpen ? 1120 : 860 }}>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Category</Table.Th>
+                <Table.Th>Type</Table.Th>
+                <Table.Th>QuickBooks account</Table.Th>
+                {quickBooksManualMappingOpen && (
+                  <>
+                    <Table.Th>Account ID</Table.Th>
+                    <Table.Th>Account name</Table.Th>
+                  </>
+                )}
+                <Table.Th>Notes</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {categoryMappingDrafts.length > 0 ? categoryMappingDrafts.map((draft) => {
+                const selectedCategoryAccount = getSelectedCategoryAccount(draft);
+                return (
+                  <Table.Tr key={draft.key}>
+                    <Table.Td>
+                      <Text size="sm" fw={600}>{draft.category}</Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Badge size="xs" variant="light" color={accountingEntryTypeColor(draft.entryType)}>
+                        {accountingEntryTypeLabel(draft.entryType)}
+                      </Badge>
+                    </Table.Td>
+                    <Table.Td>
+                      <Select
+                        aria-label={`QuickBooks account for ${draft.category} ${accountingEntryTypeLabel(draft.entryType)}`}
+                        placeholder={quickBooksAccounts.length ? 'Select account' : 'Load accounts or use manual entry'}
+                        searchable
+                        clearable
+                        nothingFoundMessage="No accounts found"
+                        data={getCategoryAccountOptions(draft)}
+                        value={draft.accountExternalId || null}
+                        onChange={(value) => selectCategoryMappingAccount(draft.key, value)}
+                        disabled={quickBooksCategoryMappingDisabled}
+                        description={quickBooksAccountDescription(selectedCategoryAccount, `${accountingEntryTypeLabel(draft.entryType)} accounts appear first.`)}
+                      />
+                    </Table.Td>
+                    {quickBooksManualMappingOpen && (
+                      <>
+                        <Table.Td>
+                          <TextInput
+                            aria-label={`Account ID for ${draft.category} ${accountingEntryTypeLabel(draft.entryType)}`}
+                            value={draft.accountExternalId}
+                            onChange={(event) => updateCategoryMappingDraft(draft.key, {
+                              accountExternalId: event.currentTarget.value,
+                            })}
+                            disabled={quickBooksCategoryMappingDisabled}
+                          />
+                        </Table.Td>
+                        <Table.Td>
+                          <TextInput
+                            aria-label={`Account name for ${draft.category} ${accountingEntryTypeLabel(draft.entryType)}`}
+                            value={draft.accountName}
+                            onChange={(event) => updateCategoryMappingDraft(draft.key, {
+                              accountName: event.currentTarget.value,
+                            })}
+                            disabled={quickBooksCategoryMappingDisabled}
+                          />
+                        </Table.Td>
+                      </>
+                    )}
+                    <Table.Td>
+                      <TextInput
+                        aria-label={`Accounting notes for ${draft.category} ${accountingEntryTypeLabel(draft.entryType)}`}
+                        value={draft.notes}
+                        onChange={(event) => updateCategoryMappingDraft(draft.key, {
+                          notes: event.currentTarget.value,
+                        })}
+                        disabled={quickBooksCategoryMappingDisabled}
+                      />
+                    </Table.Td>
+                  </Table.Tr>
+                );
+              }) : (
+                <Table.Tr>
+                  <Table.Td colSpan={quickBooksManualMappingOpen ? 6 : 4}>
+                    <Text size="sm" c="dimmed">No finance categories are available yet.</Text>
+                  </Table.Td>
+                </Table.Tr>
+              )}
+            </Table.Tbody>
+          </Table>
+        </ScrollArea.Autosize>
+      </Stack>
+    </Paper>
+  );
+
+  const renderJournalEntryPreview = () => (
+    <Paper withBorder radius="md" p="md">
+      <Stack gap="sm">
+        <Group justify="space-between" align="center">
+          <Stack gap={2}>
+            <Title order={6}>Journal entry preview</Title>
+            <Text size="xs" c="dimmed">
+              Preview the QuickBooks JournalEntry rows for the selected finance date range, then sync the reviewed rows when every account is mapped.
+            </Text>
+          </Stack>
+          <Group gap="xs">
+            <Button
+              size="xs"
+              variant="light"
+              loading={journalPreviewLoading}
+              disabled={quickBooksCategoryMappingDisabled || journalSyncLoading}
+              onClick={() => void loadJournalEntryPreview()}
+            >
+              Preview journal entry
+            </Button>
+            <Button
+              size="xs"
+              loading={journalSyncLoading}
+              disabled={quickBooksCategoryMappingDisabled || journalPreviewLoading || !journalPreview?.readyToSync}
+              onClick={() => void syncJournalEntryToQuickBooks()}
+            >
+              Sync journal entry
+            </Button>
+          </Group>
+        </Group>
+        {journalPreviewError && (
+          <Alert color="red" variant="light">
+            {journalPreviewError}
+          </Alert>
+        )}
+        {journalSyncError && (
+          <Alert color="red" variant="light">
+            {journalSyncError}
+          </Alert>
+        )}
+        {journalSyncRecord?.status === 'SYNCED' && (
+          renderJournalSyncSuccess(journalSyncRecord)
+        )}
+        {journalPreview && (
+          renderJournalPreviewResult(journalPreview)
+        )}
+      </Stack>
+    </Paper>
+  );
+
+  const renderAccountingConnectionMetadata = () => (
+    <SimpleGrid cols={{ base: 1, sm: 2, lg: 5 }} spacing="sm">
+      <Stack gap={1}>
+        <Text size="xs" fw={700} tt="uppercase" c="dimmed">Company</Text>
+        <Text size="sm">
+          <OrganizationLoadingValue>
+          {quickBooksConnection
+            ? quickBooksConnection.externalCompanyName || accountingStatusLabel(quickBooksConnection.status)
+            : 'Not connected'}
+          </OrganizationLoadingValue>
+        </Text>
+      </Stack>
+      <Stack gap={1}>
+        <Text size="xs" fw={700} tt="uppercase" c="dimmed">Environment</Text>
+        <Text size="sm" tt="capitalize"><OrganizationLoadingValue>{quickBooksConnection?.environment || 'sandbox'}</OrganizationLoadingValue></Text>
+      </Stack>
+      <Stack gap={1}>
+        <Text size="xs" fw={700} tt="uppercase" c="dimmed">Connected</Text>
+        <Text size="sm"><OrganizationLoadingValue>{formatDateTime(quickBooksConnection?.connectedAt)}</OrganizationLoadingValue></Text>
+      </Stack>
+      <Stack gap={1}>
+        <Text size="xs" fw={700} tt="uppercase" c="dimmed">Access expires</Text>
+        <Text size="sm"><OrganizationLoadingValue>{formatDateTime(quickBooksConnection?.accessTokenExpiresAt)}</OrganizationLoadingValue></Text>
+      </Stack>
+      <Stack gap={1}>
+        <Text size="xs" fw={700} tt="uppercase" c="dimmed">Last synced</Text>
+        <Text size="sm"><OrganizationLoadingValue>{formatDateTime(quickBooksConnection?.lastSyncedAt)}</OrganizationLoadingValue></Text>
+      </Stack>
+    </SimpleGrid>
+  );
+
+  const renderAccountingMappingStatus = () => (
+    <Group gap="xs">
+      <Badge size="sm" variant="light" color={quickBooksMappingReady ? 'green' : 'yellow'}>
+        <OrganizationLoadingValue>{quickBooksMappingReady ? 'Payroll mapping ready' : 'Payroll mapping needed'}</OrganizationLoadingValue>
+      </Badge>
+      <Badge size="sm" variant="light" color={configuredCategoryMappingCount > 0 ? 'blue' : 'gray'}>
+        <OrganizationLoadingValue>{configuredCategoryMappingCount}</OrganizationLoadingValue> category mappings
+      </Badge>
+    </Group>
+  );
+
+  const renderPayRunAccountingCell = (accounting: ReturnType<typeof payRunAccountingState>) => {
+    const { quickBooksSync, quickBooksSyncError, display } = accounting;
+    return (
+    <Stack gap={2}>
+      <Group gap={6}>
+        <Badge
+          size="xs"
+          variant="light"
+          color={display.color}
+        >
+          {display.label}
+        </Badge>
+        <Text size="xs" c="dimmed">QBO</Text>
+      </Group>
+      {quickBooksSync?.externalTxnId && (
+        <Text size="xs" c="dimmed">
+          {syncTransactionLabel(quickBooksSync)}
+        </Text>
+      )}
+      {quickBooksSync?.syncedAt && (
+        <Text size="xs" c="dimmed">{formatDateTime(quickBooksSync.syncedAt)}</Text>
+      )}
+      {quickBooksSync?.intuitTid && (
+        <Text size="xs" c="dimmed">TID {quickBooksSync.intuitTid}</Text>
+      )}
+      {quickBooksSyncError && (
+        <Text
+          size="xs"
+          c={
+            display.errorColor
+          }
+        >
+          {quickBooksSyncError}
+        </Text>
+      )}
+    </Stack>
+    );
+  };
+
+  const renderPayRunActions = (payRun: StaffPayRun, accounting: ReturnType<typeof payRunAccountingState>) => {
+    const { quickBooksSync, canSyncPayRunToQuickBooks, canReconnectQuickBooks } = accounting;
+    return (
+    <Group gap="xs">
+      <Button
+        size="xs"
+        variant="default"
+        leftSection={<Download size={12} />}
+        onClick={(event) => {
+          event.stopPropagation();
+          void exportPayRunsCsv([payRun], `${payRun.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-payroll.csv`);
+        }}
+      >
+        Export
+      </Button>
+      {(payRun.status === 'APPROVED' || payRun.status === 'PAID') && (
+        <>
+          {canReconnectQuickBooks && (
+            <Button
+              size="xs"
+              variant="light"
+              leftSection={<ExternalLink size={12} />}
+              loading={quickBooksSaving}
+              onClick={(event) => {
+                event.stopPropagation();
+                void connectQuickBooks();
+              }}
+            >
+              Reconnect QBO
+            </Button>
+          )}
+          <Button
+            size="xs"
+            variant="light"
+            disabled={!canSyncPayRunToQuickBooks}
+            loading={syncingQuickBooksPayRunId === payRun.id}
+            onClick={(event) => {
+              event.stopPropagation();
+              void syncPayRunToQuickBooks(payRun);
+            }}
+          >
+            {quickBooksPayRunActionLabel(quickBooksSync)}
+          </Button>
+        </>
+      )}
+      {payRun.status !== 'PAID' && payRun.status !== 'VOID' && (
+        <Button
+          size="xs"
+          variant="default"
+          leftSection={<Pencil size={12} />}
+          onClick={(event) => {
+            event.stopPropagation();
+            openTransferModal(payRun);
+          }}
+        >
+          Transfers
+        </Button>
+      )}
+      {payRun.status === 'DRAFT' && (
+        <Button
+          size="xs"
+          variant="light"
+          loading={updatingPayRunId === payRun.id}
+          onClick={(event) => {
+            event.stopPropagation();
+            void updatePayRun(payRun.id, 'APPROVE');
+          }}
+        >
+          Approve
+        </Button>
+      )}
+      {payRun.status === 'APPROVED' && (
+        <Button
+          size="xs"
+          variant="light"
+          color="green"
+          loading={updatingPayRunId === payRun.id}
+          onClick={(event) => {
+            event.stopPropagation();
+            openMarkPaidModal(payRun);
+          }}
+        >
+          Mark paid
+        </Button>
+      )}
+      {(payRun.status === 'DRAFT' || payRun.status === 'APPROVED') && (
+        <Button
+          size="xs"
+          variant="subtle"
+          color="red"
+          loading={updatingPayRunId === payRun.id}
+          onClick={(event) => {
+            event.stopPropagation();
+            openVoidModal(payRun);
+          }}
+        >
+          Void
+        </Button>
+      )}
+    </Group>
+    );
+  };
 
   const renderLineItemName = (item: FinanceLineItem, canEditLineItem: boolean) => {
     if (canEditLineItem) {
@@ -2038,47 +2385,7 @@ export default function OrganizationFinancePanel({
     const customerTarget = item.isGenerated ? getLineItemCustomerTarget(item) : null;
     if (item.isGenerated && (sourceTarget || customerTarget)) {
       return (
-        <Popover width={260} position="bottom-start" shadow="md" withArrow withinPortal>
-          <Popover.Target>
-            <button
-              type="button"
-              aria-label={`Open actions for ${item.label}`}
-              className="block w-full border-0 bg-transparent p-0 text-left"
-              onClick={(event) => event?.stopPropagation?.()}
-            >
-              <Stack gap={1}>
-                <Text size="sm" fw={600}>{item.label}</Text>
-                <Text size="xs" c="dimmed">Generated</Text>
-              </Stack>
-            </button>
-          </Popover.Target>
-          <Popover.Dropdown>
-            <Stack gap={4}>
-              <Button
-                size="xs"
-                variant="subtle"
-                justify="flex-start"
-                aria-label={`Go to "${sourceTarget?.label ?? 'Source'}"`}
-                leftSection={<ExternalLink size={14} />}
-                disabled={!sourceTarget}
-                onClick={() => navigateToLineItemTarget(sourceTarget)}
-              >
-                Go to &quot;{sourceTarget?.label ?? 'Source'}&quot;
-              </Button>
-              <Button
-                size="xs"
-                variant="subtle"
-                justify="flex-start"
-                aria-label={`Go to "${customerTarget?.label ?? 'Customer'}"`}
-                leftSection={<UserRound size={14} />}
-                disabled={!customerTarget}
-                onClick={() => navigateToLineItemTarget(customerTarget)}
-              >
-                Go to &quot;{customerTarget?.label ?? 'Customer'}&quot;
-              </Button>
-            </Stack>
-          </Popover.Dropdown>
-        </Popover>
+        renderGeneratedLineItemActions(item, sourceTarget, customerTarget)
       );
     }
 
@@ -2091,24 +2398,10 @@ export default function OrganizationFinancePanel({
   };
 
   const renderQuickBooksPayRunSyncDetails = (payRun: StaffPayRun) => {
-    const quickBooksSync = getQuickBooksSync(payRun);
-    const quickBooksSyncEligible = isQuickBooksPayRunSyncEligible(payRun);
-    const quickBooksSyncNeedsMapping = quickBooksSyncEligible
-      && quickBooksConnection?.status === 'CONNECTED'
-      && !quickBooksMappingReady
-      && quickBooksSync?.status !== 'SYNCED';
-    const quickBooksSyncError = quickBooksSyncNeedsMapping
-      ? 'Set QuickBooks payroll account mapping before syncing.'
-      : quickBooksSyncErrorMessage(quickBooksSync, quickBooksConnection);
-    const canSyncPayRunToQuickBooks = canManage
-      && quickBooksConnection?.status === 'CONNECTED'
-      && quickBooksMappingReady
-      && quickBooksSyncEligible
-      && quickBooksSync?.status !== 'SYNCED';
-    const canReconnectQuickBooks = canManage
-      && quickBooksConnection?.status === 'REAUTH_REQUIRED'
-      && quickBooksSyncEligible
-      && quickBooksSync?.status !== 'SYNCED';
+    const {
+      quickBooksSync, quickBooksSyncEligible, quickBooksSyncError,
+      canSyncPayRunToQuickBooks, canReconnectQuickBooks, display,
+    } = payRunAccountingState(payRun, quickBooksConnection, quickBooksMappingReady, canManage);
 
     return (
       <Paper withBorder radius="md" p="sm">
@@ -2119,42 +2412,17 @@ export default function OrganizationFinancePanel({
               <Badge
                 size="xs"
                 variant="light"
-                color={quickBooksSyncNeedsMapping ? 'yellow' : quickBooksSyncStatusColor(quickBooksSync, quickBooksConnection)}
+                color={display.color}
               >
-                {quickBooksSyncNeedsMapping ? 'Needs mapping' : quickBooksSyncStatusLabel(quickBooksSync, quickBooksConnection)}
+                {display.label}
               </Badge>
             </Group>
-            <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="xs">
-              <Stack gap={1}>
-                <Text size="xs" c="dimmed">Transaction</Text>
-                <Text size="sm">
-                  {quickBooksSync?.externalTxnId
-                    ? `${quickBooksSync.externalTxnType ?? 'Txn'} ${quickBooksSync.externalTxnDocNumber || quickBooksSync.externalTxnId}`
-                    : 'Not synced'}
-                </Text>
-              </Stack>
-              <Stack gap={1}>
-                <Text size="xs" c="dimmed">Last synced</Text>
-                <Text size="sm">{formatDateTime(quickBooksSync?.syncedAt)}</Text>
-              </Stack>
-              <Stack gap={1}>
-                <Text size="xs" c="dimmed">Synced by</Text>
-                <Text size="sm">{quickBooksSync?.syncedByUserId || 'Not set'}</Text>
-              </Stack>
-              <Stack gap={1}>
-                <Text size="xs" c="dimmed">Intuit TID</Text>
-                <Text size="sm">{quickBooksSync?.intuitTid || 'Not set'}</Text>
-              </Stack>
-            </SimpleGrid>
+            {renderPayRunSyncMetadata(quickBooksSync)}
             {quickBooksSyncError && (
               <Text
                 size="sm"
                 c={
-                  quickBooksSyncNeedsMapping
-                    ? 'orange'
-                    : isRetryableQuickBooksReauthSync(quickBooksSync, quickBooksConnection)
-                      ? 'blue'
-                      : 'red'
+                  display.errorColor
                 }
                 fw={600}
               >
@@ -2193,598 +2461,474 @@ export default function OrganizationFinancePanel({
     );
   };
 
-  return (
-    <Stack gap="md">
-      <Modal
-        opened={lineItemModalOpen}
-        onClose={() => {
-          setLineItemModalOpen(false);
-          setLineItemError(null);
-        }}
-        title={editingLineItem ? 'Edit financial line item' : 'Add financial line item'}
-        size="lg"
-        centered
-      >
-        <Stack gap="md">
-          {lineItemError && <Alert color="red">{lineItemError}</Alert>}
-          <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
-            <TextInput
-              label="Title"
-              aria-label="Line item title"
-              placeholder="Field rental"
-              value={lineItemDraft.title}
-              onChange={(event) => updateLineItemDraft({ title: event.currentTarget.value })}
-              required
-            />
-            <Autocomplete
-              label="Category"
-              aria-label="Line item category"
-              placeholder="Rentals"
-              data={lineItemCategoryOptions}
-              value={lineItemDraft.category}
-              onChange={(value) => updateLineItemDraft({ category: value })}
-              comboboxProps={{ withinPortal: true }}
-              required
-            />
-            <NumberInput
-              label="Amount"
-              aria-label="Line item amount"
-              prefix="$"
-              decimalScale={2}
-              min={0}
-              value={lineItemDraft.amount}
-              onChange={(value) => updateLineItemDraft({ amount: value })}
-              required
-            />
-            <Select
-              label="Status"
-              aria-label="Line item status"
-              data={LINE_ITEM_STATUS_OPTIONS}
-              value={lineItemDraft.status}
-              onChange={(value) => updateLineItemDraft({ status: (value as LineItemStatus | null) ?? 'ACTUAL' })}
-              allowDeselect={false}
-            />
-            <TextInput
-              label="Start date"
-              aria-label="Line item start date"
-              type="date"
-              value={lineItemDraft.serviceStartDate}
-              onChange={(event) => updateLineItemDraft({ serviceStartDate: event.currentTarget.value })}
-            />
-            <TextInput
-              label="End date"
-              aria-label="Line item end date"
-              type="date"
-              value={lineItemDraft.serviceEndDate}
-              onChange={(event) => updateLineItemDraft({ serviceEndDate: event.currentTarget.value })}
-            />
-            <NumberInput
-              label="Quantity"
-              aria-label="Line item quantity"
-              decimalScale={2}
-              min={0}
-              value={lineItemDraft.quantity}
-              onChange={(value) => updateLineItemDraft({ quantity: value })}
-            />
-            <TextInput
-              label="Unit"
-              aria-label="Line item unit"
-              placeholder="hours"
-              value={lineItemDraft.unitLabel}
-              onChange={(event) => updateLineItemDraft({ unitLabel: event.currentTarget.value })}
-            />
-          </SimpleGrid>
-          <Textarea
-            label="Description"
-            aria-label="Line item description"
-            value={lineItemDraft.description}
-            onChange={(event) => updateLineItemDraft({ description: event.currentTarget.value })}
-            autosize
-            minRows={3}
-          />
-          <Group justify="flex-end">
-            <Button
-              variant="default"
-              onClick={() => {
-                setLineItemModalOpen(false);
-                setLineItemError(null);
-              }}
-            >
-              Cancel
-            </Button>
-            <Button onClick={() => void saveLineItem()} loading={lineItemSaving}>
-              Save line item
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
-
-      <Modal
-        opened={Boolean(selectedPayRun)}
-        onClose={() => setSelectedPayRunId(null)}
-        title="Staff pay run details"
-        size="xl"
-        centered
-      >
-        {selectedPayRun && (
-          <Stack gap="md">
-            <Group justify="space-between" align="flex-start">
-              <Stack gap={2}>
-                <Title order={5}>{selectedPayRun.title}</Title>
-                <Text size="sm" c="dimmed">{formatPeriod(selectedPayRun.periodStart, selectedPayRun.periodEnd)}</Text>
-              </Stack>
-              <Group gap={6}>
-                <Badge size="sm" variant="light">{selectedPayRun.status}</Badge>
-                <Badge size="sm" variant="light" color={payRunPayoutColor(selectedPayRun.payoutStatus)}>
-                  {selectedPayRun.payoutStatus}
-                </Badge>
-              </Group>
-            </Group>
-
-            <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="sm">
-              <Paper withBorder radius="md" p="sm">
-                <Text size="xs" fw={700} tt="uppercase" c="dimmed">Total</Text>
-                <Text fw={800}>{centsFromDollars(selectedPayRun.totalAmountCents)}</Text>
-              </Paper>
-              <Paper withBorder radius="md" p="sm">
-                <Text size="xs" fw={700} tt="uppercase" c="dimmed">Items</Text>
-                <Text fw={800}>{selectedPayRun.itemCount}</Text>
-              </Paper>
-              <Paper withBorder radius="md" p="sm">
-                <Text size="xs" fw={700} tt="uppercase" c="dimmed">Pay date</Text>
-                <Text size="sm">{formatDate(selectedPayRun.scheduledPayDate)}</Text>
-              </Paper>
-              <Paper withBorder radius="md" p="sm">
-                <Text size="xs" fw={700} tt="uppercase" c="dimmed">Approved</Text>
-                <Text size="sm">{formatDateTime(selectedPayRun.approvedAt)}</Text>
-              </Paper>
-              <Paper withBorder radius="md" p="sm">
-                <Text size="xs" fw={700} tt="uppercase" c="dimmed">Paid</Text>
-                <Text size="sm">{formatDateTime(selectedPayRun.paidAt)}</Text>
-              </Paper>
-              <Paper withBorder radius="md" p="sm">
-                <Text size="xs" fw={700} tt="uppercase" c="dimmed">Exported</Text>
-                <Text size="sm">
-                  {selectedPayRun.exportedAt
-                    ? `${formatDateTime(selectedPayRun.exportedAt)} (${formatPayRunExportStatus(selectedPayRun)})`
-                    : 'Not exported'}
-                </Text>
-              </Paper>
-              <Paper withBorder radius="md" p="sm">
-                <Text size="xs" fw={700} tt="uppercase" c="dimmed">Provider</Text>
-                <Text size="sm">{selectedPayRun.payoutProvider || 'Not set'}</Text>
-              </Paper>
-              <Paper withBorder radius="md" p="sm">
-                <Text size="xs" fw={700} tt="uppercase" c="dimmed">Reference</Text>
-                <Text size="sm">{selectedPayRun.payoutProviderBatchId || 'Not set'}</Text>
-              </Paper>
-              <Paper withBorder radius="md" p="sm">
-                <Text size="xs" fw={700} tt="uppercase" c="dimmed">Approved by</Text>
-                <Text size="sm">{selectedPayRun.approvedByUserId || 'Not set'}</Text>
-              </Paper>
-              <Paper withBorder radius="md" p="sm">
-                <Text size="xs" fw={700} tt="uppercase" c="dimmed">Paid by</Text>
-                <Text size="sm">{selectedPayRun.paidByUserId || 'Not set'}</Text>
-              </Paper>
-            </SimpleGrid>
-
-            {selectedPayRun.notes && (
-              <Paper withBorder radius="md" p="sm">
-                <Text size="xs" fw={700} tt="uppercase" c="dimmed">Notes</Text>
-                <Text size="sm">{selectedPayRun.notes}</Text>
-              </Paper>
-            )}
-
-            {renderQuickBooksPayRunSyncDetails(selectedPayRun)}
-
-            <ScrollArea.Autosize mah={360} type="scroll" scrollHideDelay={900} offsetScrollbars>
-              <Table striped highlightOnHover withColumnBorders style={{ minWidth: 1180 }}>
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th>Staff</Table.Th>
-                    <Table.Th>Source</Table.Th>
-                    <Table.Th>Service</Table.Th>
-                    <Table.Th>Wage</Table.Th>
-                    <Table.Th>Transfer</Table.Th>
-                    <Table.Th>Status</Table.Th>
-                    <Table.Th ta="right">Amount</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {selectedPayRun.items.map((item) => {
-                    const sourceLabel = item.eventStaffAssignmentId
-                      ? 'Event labor'
-                      : item.teamStaffLaborEntryId
-                        ? 'Team labor'
-                        : 'Staff labor';
-                    const targets = getPayRunItemTargets(item);
-                    return (
-                      <Table.Tr key={item.id}>
-                        <Table.Td>
-                          <Stack gap={1}>
-                            <Text size="sm" fw={600}>{item.label}</Text>
-                            {item.description && <Text size="xs" c="dimmed">{item.description}</Text>}
-                          </Stack>
-                        </Table.Td>
-                        <Table.Td>
-                          <Stack gap={4}>
-                            <Text size="sm">{sourceLabel}</Text>
-                            {targets.length > 0 && (
-                              <Group gap={4}>
-                                {targets.map((target) => (
-                                  <Button
-                                    key={target.href}
-                                    size="xs"
-                                    variant="subtle"
-                                    px={6}
-                                    leftSection={<ExternalLink size={12} />}
-                                    onClick={() => navigateToLineItemTarget(target)}
-                                  >
-                                    {target.label}
-                                  </Button>
-                                ))}
-                              </Group>
-                            )}
-                          </Stack>
-                        </Table.Td>
-                        <Table.Td>
-                          <Stack gap={1}>
-                            <Text size="sm">{formatPeriod(item.serviceStartAt, item.serviceEndAt)}</Text>
-                            <Text size="xs" c="dimmed">{formatLaborMinutes(item.paidMinutes)}</Text>
-                          </Stack>
-                        </Table.Td>
-                        <Table.Td>
-                          <Stack gap={1}>
-                            <Text size="sm">{formatWageRate(item)}</Text>
-                            {item.payoutProvider && (
-                              <Text size="xs" c="dimmed">{item.payoutProvider}</Text>
-                            )}
-                          </Stack>
-                        </Table.Td>
-                        <Table.Td>
-                          <Text size="sm" c={item.payoutProviderTransferId ? undefined : 'dimmed'}>
-                            {item.payoutProviderTransferId || '-'}
-                          </Text>
-                        </Table.Td>
-                        <Table.Td>
-                          <Group gap={6}>
-                            <Badge size="xs" variant="light">{item.status}</Badge>
-                            <Badge size="xs" variant="light" color={payRunPayoutColor(item.payoutStatus)}>
-                              {item.payoutStatus}
-                            </Badge>
-                          </Group>
-                        </Table.Td>
-                        <Table.Td ta="right">
-                          <Text fw={700}>{centsFromDollars(item.amountCents)}</Text>
-                        </Table.Td>
-                      </Table.Tr>
-                    );
-                  })}
-                </Table.Tbody>
-              </Table>
-            </ScrollArea.Autosize>
-
-            <Group justify="flex-end">
-              <Button
-                variant="default"
-                leftSection={<Download size={14} />}
-                onClick={() => void exportPayRunsCsv([selectedPayRun], `${selectedPayRun.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-payroll.csv`)}
-              >
-                Export CSV
-              </Button>
-              {canManage && selectedPayRun.status !== 'PAID' && selectedPayRun.status !== 'VOID' && (
-                <Button
-                  variant="default"
-                  leftSection={<Pencil size={14} />}
-                  onClick={() => openTransferModal(selectedPayRun)}
-                >
-                  Edit transfers
-                </Button>
-              )}
-              {canManage && (
-                <>
-                {selectedPayRun.status === 'DRAFT' && (
-                  <Button
-                    variant="light"
-                    loading={updatingPayRunId === selectedPayRun.id}
-                    onClick={() => void updatePayRun(selectedPayRun.id, 'APPROVE')}
-                  >
-                    Approve
-                  </Button>
-                )}
-                {selectedPayRun.status === 'APPROVED' && (
-                  <Button
-                    color="green"
-                    variant="light"
-                    onClick={() => openMarkPaidModal(selectedPayRun)}
-                  >
-                    Mark paid
-                  </Button>
-                )}
-                {(selectedPayRun.status === 'DRAFT' || selectedPayRun.status === 'APPROVED') && (
-                  <Button
-                    variant="subtle"
-                    color="red"
-                    loading={updatingPayRunId === selectedPayRun.id}
-                    onClick={() => openVoidModal(selectedPayRun)}
-                  >
-                    Void
-                  </Button>
-                )}
-                </>
-              )}
-              </Group>
-          </Stack>
-        )}
-      </Modal>
-
-      <Modal
-        opened={Boolean(markPaidPayRunId)}
-        onClose={() => {
-          setMarkPaidPayRunId(null);
-          setMarkPaidDraft(defaultMarkPaidDraft());
-          setMarkPaidError(null);
-        }}
-        title="Record staff payout"
-        size="md"
-        centered
-      >
-        <Stack gap="md">
-          <Text size="sm" c="dimmed">
-            Mark {markPaidPayRun?.title ?? 'this pay run'} and its staff pay items as paid.
-          </Text>
+  const renderLineItemDialog = () => (
+    <Modal
+      opened={lineItemModalOpen}
+      onClose={() => {
+        setLineItemModalOpen(false);
+        setLineItemError(null);
+      }}
+      title={editingLineItem ? 'Edit financial line item' : 'Add financial line item'}
+      size="lg"
+      centered
+    >
+      <Stack gap="md">
+        {lineItemError && <Alert color="red">{lineItemError}</Alert>}
+        <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
           <TextInput
-            label="Payout provider"
-            aria-label="Payout provider"
-            placeholder="Check, ACH, manual, Stripe"
-            value={markPaidDraft.payoutProvider}
-            onChange={(event) => {
-              const nextValue = event.currentTarget.value;
-              setMarkPaidDraft((current) => ({
-                ...current,
-                payoutProvider: nextValue,
-              }));
-            }}
-          />
-          <TextInput
-            label="Reference or batch ID"
-            aria-label="Payout reference"
-            placeholder="check-1024"
-            value={markPaidDraft.payoutProviderBatchId}
-            onChange={(event) => {
-              const nextValue = event.currentTarget.value;
-              setMarkPaidDraft((current) => ({
-                ...current,
-                payoutProviderBatchId: nextValue,
-              }));
-            }}
-          />
-          <Textarea
-            label="Notes"
-            aria-label="Payout notes"
-            value={markPaidDraft.notes}
-            onChange={(event) => {
-              const nextValue = event.currentTarget.value;
-              setMarkPaidDraft((current) => ({
-                ...current,
-                notes: nextValue,
-              }));
-            }}
-            autosize
-            minRows={3}
-          />
-          {markPaidError && <Text size="sm" c="red" fw={600}>{markPaidError}</Text>}
-          <Group justify="flex-end">
-            <Button
-              variant="default"
-              onClick={() => {
-                setMarkPaidPayRunId(null);
-                setMarkPaidDraft(defaultMarkPaidDraft());
-                setMarkPaidError(null);
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              color="green"
-              loading={Boolean(markPaidPayRunId && updatingPayRunId === markPaidPayRunId)}
-              onClick={() => void markPayRunPaid()}
-            >
-              Mark paid
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
-
-      <Modal
-        opened={Boolean(voidPayRunId)}
-        onClose={() => {
-          setVoidPayRunId(null);
-          setVoidReason('');
-          setVoidError(null);
-        }}
-        title="Void staff pay run"
-        size="md"
-        centered
-      >
-        <Stack gap="md">
-          <Text size="sm" c="dimmed">
-            Void {voidPayRun?.title ?? 'this pay run'} and cancel its staff pay items.
-          </Text>
-          <Textarea
-            label="Void reason"
-            aria-label="Void reason"
-            value={voidReason}
-            onChange={(event) => setVoidReason(event.currentTarget.value)}
-            autosize
-            minRows={3}
+            label="Title"
+            aria-label="Line item title"
+            placeholder="Field rental"
+            value={lineItemDraft.title}
+            onChange={(event) => updateLineItemDraft({ title: event.currentTarget.value })}
             required
           />
-          {voidError && <Text size="sm" c="red" fw={600}>{voidError}</Text>}
-          <Group justify="flex-end">
-            <Button
-              variant="default"
-              onClick={() => {
-                setVoidPayRunId(null);
-                setVoidReason('');
-                setVoidError(null);
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              color="red"
-              loading={Boolean(voidPayRunId && updatingPayRunId === voidPayRunId)}
-              onClick={() => void voidSelectedPayRun()}
-            >
-              Void pay run
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
-
-      <Modal
-        opened={Boolean(transferPayRunId)}
-        onClose={() => {
-          setTransferPayRunId(null);
-          setTransferDraft([]);
-          setTransferError(null);
-        }}
-        title="Edit transfer references"
-        size="lg"
-        centered
-      >
-        <Stack gap="md">
-          <Text size="sm" c="dimmed">
-            Add item-level payout references for {transferPayRun?.title ?? 'this pay run'} before marking the batch paid.
-          </Text>
-          <ScrollArea.Autosize mah={360} type="scroll" scrollHideDelay={900} offsetScrollbars>
-            <Stack gap="sm">
-              {transferDraft.map((item) => (
-                <TextInput
-                  key={item.itemId}
-                  label={item.label}
-                  aria-label={`Transfer reference for ${item.label}`}
-                  placeholder="transfer-1024"
-                  value={item.payoutProviderTransferId}
-                  onChange={(event) => {
-                    const nextValue = event.currentTarget.value;
-                    setTransferDraft((current) => current.map((draftItem) => (
-                      draftItem.itemId === item.itemId
-                        ? { ...draftItem, payoutProviderTransferId: nextValue }
-                        : draftItem
-                    )));
-                  }}
-                />
-              ))}
-            </Stack>
-          </ScrollArea.Autosize>
-          {transferError && <Text size="sm" c="red" fw={600}>{transferError}</Text>}
-          <Group justify="flex-end">
-            <Button
-              variant="default"
-              onClick={() => {
-                setTransferPayRunId(null);
-                setTransferDraft([]);
-                setTransferError(null);
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              loading={Boolean(transferPayRunId && updatingPayRunId === transferPayRunId)}
-              onClick={() => void saveTransferReferences()}
-            >
-              Save references
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
-
-      <Group justify="space-between" align="flex-start">
-        <Stack gap={2}>
-          <Title order={5}>Finance and payroll</Title>
-          <Text size="sm" c="dimmed">
-            Organization-level revenue, refunds, labor costs, custom costs, and internal staff pay runs.
-          </Text>
-        </Stack>
-        <Button variant="default" onClick={() => void loadFinance()} loading={loading}>
-          Refresh
-        </Button>
-      </Group>
-
-      <Paper withBorder radius="md" p="md" className="org-tab-surface">
-        <Group align="end" gap="sm">
-          <TextInput
-            label="From"
-            type="date"
-            value={fromDate}
-            onChange={(event) => setFromDate(event.currentTarget.value)}
+          <Autocomplete
+            label="Category"
+            aria-label="Line item category"
+            placeholder="Rentals"
+            data={lineItemCategoryOptions}
+            value={lineItemDraft.category}
+            onChange={(value) => updateLineItemDraft({ category: value })}
+            comboboxProps={{ withinPortal: true }}
+            required
+          />
+          <NumberInput
+            label="Amount"
+            aria-label="Line item amount"
+            prefix="$"
+            decimalScale={2}
+            min={0}
+            value={lineItemDraft.amount}
+            onChange={(value) => updateLineItemDraft({ amount: value })}
+            required
+          />
+          <Select
+            label="Status"
+            aria-label="Line item status"
+            data={LINE_ITEM_STATUS_OPTIONS}
+            value={lineItemDraft.status}
+            onChange={(value) => updateLineItemDraft({ status: (value as LineItemStatus | null) ?? 'ACTUAL' })}
+            allowDeselect={false}
           />
           <TextInput
-            label="To"
+            label="Start date"
+            aria-label="Line item start date"
             type="date"
-            value={toDate}
-            onChange={(event) => setToDate(event.currentTarget.value)}
+            value={lineItemDraft.serviceStartDate}
+            onChange={(event) => updateLineItemDraft({ serviceStartDate: event.currentTarget.value })}
           />
-          <Button variant="light" onClick={() => void loadFinance()} loading={loading}>
-            Apply
+          <TextInput
+            label="End date"
+            aria-label="Line item end date"
+            type="date"
+            value={lineItemDraft.serviceEndDate}
+            onChange={(event) => updateLineItemDraft({ serviceEndDate: event.currentTarget.value })}
+          />
+          <NumberInput
+            label="Quantity"
+            aria-label="Line item quantity"
+            decimalScale={2}
+            min={0}
+            value={lineItemDraft.quantity}
+            onChange={(value) => updateLineItemDraft({ quantity: value })}
+          />
+          <TextInput
+            label="Unit"
+            aria-label="Line item unit"
+            placeholder="hours"
+            value={lineItemDraft.unitLabel}
+            onChange={(event) => updateLineItemDraft({ unitLabel: event.currentTarget.value })}
+          />
+        </SimpleGrid>
+        <Textarea
+          label="Description"
+          aria-label="Line item description"
+          value={lineItemDraft.description}
+          onChange={(event) => updateLineItemDraft({ description: event.currentTarget.value })}
+          autosize
+          minRows={3}
+        />
+        <Group justify="flex-end">
+          <Button
+            variant="default"
+            onClick={() => {
+              setLineItemModalOpen(false);
+              setLineItemError(null);
+            }}
+          >
+            Cancel
+          </Button>
+          <Button onClick={() => void saveLineItem()} loading={lineItemSaving}>
+            Save line item
           </Button>
         </Group>
-      </Paper>
+      </Stack>
+    </Modal>
+  );
 
-      {error && <Alert color="red">{error}</Alert>}
+  const renderPayRunDetailsDialog = () => (
+    <Modal
+      opened={Boolean(selectedPayRun)}
+      onClose={() => setSelectedPayRunId(null)}
+      title="Staff pay run details"
+      size="xl"
+      centered
+    >
+      {selectedPayRun && (
+        <Stack gap="md">
+          <Group justify="space-between" align="flex-start">
+            <Stack gap={2}>
+              <Title order={5}>{selectedPayRun.title}</Title>
+              <Text size="sm" c="dimmed">{formatPeriod(selectedPayRun.periodStart, selectedPayRun.periodEnd)}</Text>
+            </Stack>
+            <Group gap={6}>
+              <Badge size="sm" variant="light">{selectedPayRun.status}</Badge>
+              <Badge size="sm" variant="light" color={payRunPayoutColor(selectedPayRun.payoutStatus)}>
+                {selectedPayRun.payoutStatus}
+              </Badge>
+            </Group>
+          </Group>
 
-      {loading && !finance ? (
-        <Group gap="sm">
-          <Loader size="sm" />
-          <Text size="sm" c="dimmed">Loading finance...</Text>
+          <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="sm">
+            <Paper withBorder radius="md" p="sm">
+              <Text size="xs" fw={700} tt="uppercase" c="dimmed">Total</Text>
+              <Text fw={800}>{centsFromDollars(selectedPayRun.totalAmountCents)}</Text>
+            </Paper>
+            <Paper withBorder radius="md" p="sm">
+              <Text size="xs" fw={700} tt="uppercase" c="dimmed">Items</Text>
+              <Text fw={800}>{selectedPayRun.itemCount}</Text>
+            </Paper>
+            <Paper withBorder radius="md" p="sm">
+              <Text size="xs" fw={700} tt="uppercase" c="dimmed">Pay date</Text>
+              <Text size="sm">{formatDate(selectedPayRun.scheduledPayDate)}</Text>
+            </Paper>
+            <Paper withBorder radius="md" p="sm">
+              <Text size="xs" fw={700} tt="uppercase" c="dimmed">Approved</Text>
+              <Text size="sm">{formatDateTime(selectedPayRun.approvedAt)}</Text>
+            </Paper>
+            <Paper withBorder radius="md" p="sm">
+              <Text size="xs" fw={700} tt="uppercase" c="dimmed">Paid</Text>
+              <Text size="sm">{formatDateTime(selectedPayRun.paidAt)}</Text>
+            </Paper>
+            <Paper withBorder radius="md" p="sm">
+              <Text size="xs" fw={700} tt="uppercase" c="dimmed">Exported</Text>
+              <Text size="sm">
+                {selectedPayRun.exportedAt
+                  ? `${formatDateTime(selectedPayRun.exportedAt)} (${formatPayRunExportStatus(selectedPayRun)})`
+                  : 'Not exported'}
+              </Text>
+            </Paper>
+            <Paper withBorder radius="md" p="sm">
+              <Text size="xs" fw={700} tt="uppercase" c="dimmed">Provider</Text>
+              <Text size="sm">{selectedPayRun.payoutProvider || 'Not set'}</Text>
+            </Paper>
+            <Paper withBorder radius="md" p="sm">
+              <Text size="xs" fw={700} tt="uppercase" c="dimmed">Reference</Text>
+              <Text size="sm">{selectedPayRun.payoutProviderBatchId || 'Not set'}</Text>
+            </Paper>
+            <Paper withBorder radius="md" p="sm">
+              <Text size="xs" fw={700} tt="uppercase" c="dimmed">Approved by</Text>
+              <Text size="sm">{selectedPayRun.approvedByUserId || 'Not set'}</Text>
+            </Paper>
+            <Paper withBorder radius="md" p="sm">
+              <Text size="xs" fw={700} tt="uppercase" c="dimmed">Paid by</Text>
+              <Text size="sm">{selectedPayRun.paidByUserId || 'Not set'}</Text>
+            </Paper>
+          </SimpleGrid>
+
+          {selectedPayRun.notes && (
+            <Paper withBorder radius="md" p="sm">
+              <Text size="xs" fw={700} tt="uppercase" c="dimmed">Notes</Text>
+              <Text size="sm">{selectedPayRun.notes}</Text>
+            </Paper>
+          )}
+
+          {renderQuickBooksPayRunSyncDetails(selectedPayRun)}
+
+          <ScrollArea.Autosize mah={360} type="scroll" scrollHideDelay={900} offsetScrollbars>
+            <Table striped highlightOnHover withColumnBorders style={{ minWidth: 1180 }}>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Staff</Table.Th>
+                  <Table.Th>Source</Table.Th>
+                  <Table.Th>Service</Table.Th>
+                  <Table.Th>Wage</Table.Th>
+                  <Table.Th>Transfer</Table.Th>
+                  <Table.Th>Status</Table.Th>
+                  <Table.Th ta="right">Amount</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {selectedPayRun.items.map((item) => {
+                  const sourceLabel = item.eventStaffAssignmentId
+                    ? 'Event labor'
+                    : item.teamStaffLaborEntryId
+                      ? 'Team labor'
+                      : 'Staff labor';
+                  const targets = getPayRunItemTargets(item);
+                  return (
+                    <Table.Tr key={item.id}>
+                      <Table.Td>
+                        <Stack gap={1}>
+                          <Text size="sm" fw={600}>{item.label}</Text>
+                          {item.description && <Text size="xs" c="dimmed">{item.description}</Text>}
+                        </Stack>
+                      </Table.Td>
+                      <Table.Td>
+                        <Stack gap={4}>
+                          <Text size="sm">{sourceLabel}</Text>
+                          {targets.length > 0 && (
+                            <Group gap={4}>
+                              {targets.map((target) => (
+                                <Button
+                                  key={target.href}
+                                  size="xs"
+                                  variant="subtle"
+                                  px={6}
+                                  leftSection={<ExternalLink size={12} />}
+                                  onClick={() => navigateToLineItemTarget(target)}
+                                >
+                                  {target.label}
+                                </Button>
+                              ))}
+                            </Group>
+                          )}
+                        </Stack>
+                      </Table.Td>
+                      <Table.Td>
+                        <Stack gap={1}>
+                          <Text size="sm">{formatPeriod(item.serviceStartAt, item.serviceEndAt)}</Text>
+                          <Text size="xs" c="dimmed">{formatLaborMinutes(item.paidMinutes)}</Text>
+                        </Stack>
+                      </Table.Td>
+                      <Table.Td>
+                        <Stack gap={1}>
+                          <Text size="sm">{formatWageRate(item)}</Text>
+                          {item.payoutProvider && (
+                            <Text size="xs" c="dimmed">{item.payoutProvider}</Text>
+                          )}
+                        </Stack>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="sm" c={item.payoutProviderTransferId ? undefined : 'dimmed'}>
+                          {item.payoutProviderTransferId || '-'}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Group gap={6}>
+                          <Badge size="xs" variant="light">{item.status}</Badge>
+                          <Badge size="xs" variant="light" color={payRunPayoutColor(item.payoutStatus)}>
+                            {item.payoutStatus}
+                          </Badge>
+                        </Group>
+                      </Table.Td>
+                      <Table.Td ta="right">
+                        <Text fw={700}>{centsFromDollars(item.amountCents)}</Text>
+                      </Table.Td>
+                    </Table.Tr>
+                  );
+                })}
+              </Table.Tbody>
+            </Table>
+          </ScrollArea.Autosize>
+
+          {renderSelectedPayRunActions(selectedPayRun)}
+        </Stack>
+      )}
+    </Modal>
+  );
+
+  const renderMarkPaidDialog = () => (
+    <Modal
+      opened={Boolean(markPaidPayRunId)}
+      onClose={() => {
+        setMarkPaidPayRunId(null);
+        setMarkPaidDraft(defaultMarkPaidDraft());
+        setMarkPaidError(null);
+      }}
+      title="Record staff payout"
+      size="md"
+      centered
+    >
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">
+          Mark {markPaidPayRun?.title ?? 'this pay run'} and its staff pay items as paid.
+        </Text>
+        <TextInput
+          label="Payout provider"
+          aria-label="Payout provider"
+          placeholder="Check, ACH, manual, Stripe"
+          value={markPaidDraft.payoutProvider}
+          onChange={(event) => {
+            const nextValue = event.currentTarget.value;
+            setMarkPaidDraft((current) => ({
+              ...current,
+              payoutProvider: nextValue,
+            }));
+          }}
+        />
+        <TextInput
+          label="Reference or batch ID"
+          aria-label="Payout reference"
+          placeholder="check-1024"
+          value={markPaidDraft.payoutProviderBatchId}
+          onChange={(event) => {
+            const nextValue = event.currentTarget.value;
+            setMarkPaidDraft((current) => ({
+              ...current,
+              payoutProviderBatchId: nextValue,
+            }));
+          }}
+        />
+        <Textarea
+          label="Notes"
+          aria-label="Payout notes"
+          value={markPaidDraft.notes}
+          onChange={(event) => {
+            const nextValue = event.currentTarget.value;
+            setMarkPaidDraft((current) => ({
+              ...current,
+              notes: nextValue,
+            }));
+          }}
+          autosize
+          minRows={3}
+        />
+        {markPaidError && <Text size="sm" c="red" fw={600}>{markPaidError}</Text>}
+        <Group justify="flex-end">
+          <Button
+            variant="default"
+            onClick={() => {
+              setMarkPaidPayRunId(null);
+              setMarkPaidDraft(defaultMarkPaidDraft());
+              setMarkPaidError(null);
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            color="green"
+            loading={Boolean(markPaidPayRunId && updatingPayRunId === markPaidPayRunId)}
+            onClick={() => void markPayRunPaid()}
+          >
+            Mark paid
+          </Button>
         </Group>
-      ) : finance ? (
-        <>
-          <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="md">
-            <FinanceMetric
-              label="Gross sales"
-              value={finance.grossRevenueCents}
-              tone="green"
-              description="Paid organization, event, team, rental, and product bills."
-            />
-            <FinanceMetric
-              label="Refunds and fees"
-              value={-(finance.refundCents + finance.feeCents)}
-              tone="red"
-              description={`${centsFromDollars(-finance.refundCents)} refunds, ${centsFromDollars(-finance.feeCents)} fees.`}
-            />
-            <FinanceMetric
-              label="Current profit"
-              value={finance.actualProfitCents}
-              tone={profitTone}
-              description="Net revenue minus staff and custom costs."
-            />
-            <FinanceMetric
-              label="Projected profit"
-              value={finance.projectedProfitCents}
-              tone={finance.futureCostCents > 0 ? 'orange' : projectedTone}
-              description={`${centsFromDollars(finance.potentialRevenueCents)} potential revenue, ${centsFromDollars(-finance.futureCostCents)} future costs.`}
-            />
-          </SimpleGrid>
+      </Stack>
+    </Modal>
+  );
 
-          <SimpleGrid cols={{ base: 1, md: 3 }} spacing="md">
-            <Paper withBorder radius="md" p="md" className="org-tab-surface">
-              <Text size="xs" fw={700} tt="uppercase" c="dimmed">Staff costs</Text>
-              <Text size="lg" fw={800}>{centsFromDollars(-finance.staffCostCents)}</Text>
-            </Paper>
-            <Paper withBorder radius="md" p="md" className="org-tab-surface">
-              <Text size="xs" fw={700} tt="uppercase" c="dimmed">Custom costs</Text>
-              <Text size="lg" fw={800}>{centsFromDollars(-finance.customCostCents)}</Text>
-            </Paper>
-            <Paper withBorder radius="md" p="md" className="org-tab-surface">
-              <Text size="xs" fw={700} tt="uppercase" c="dimmed">Warnings</Text>
-              <Text size="lg" fw={800}>{finance.warnings.length}</Text>
-            </Paper>
-          </SimpleGrid>
+  const renderVoidDialog = () => (
+    <Modal
+      opened={Boolean(voidPayRunId)}
+      onClose={() => {
+        setVoidPayRunId(null);
+        setVoidReason('');
+        setVoidError(null);
+      }}
+      title="Void staff pay run"
+      size="md"
+      centered
+    >
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">
+          Void {voidPayRun?.title ?? 'this pay run'} and cancel its staff pay items.
+        </Text>
+        <Textarea
+          label="Void reason"
+          aria-label="Void reason"
+          value={voidReason}
+          onChange={(event) => setVoidReason(event.currentTarget.value)}
+          autosize
+          minRows={3}
+          required
+        />
+        {voidError && <Text size="sm" c="red" fw={600}>{voidError}</Text>}
+        <Group justify="flex-end">
+          <Button
+            variant="default"
+            onClick={() => {
+              setVoidPayRunId(null);
+              setVoidReason('');
+              setVoidError(null);
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            color="red"
+            loading={Boolean(voidPayRunId && updatingPayRunId === voidPayRunId)}
+            onClick={() => void voidSelectedPayRun()}
+          >
+            Void pay run
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
 
-          {finance.warnings.length > 0 && (
+  const renderTransferDialog = () => (
+    <Modal
+      opened={Boolean(transferPayRunId)}
+      onClose={() => {
+        setTransferPayRunId(null);
+        setTransferDraft([]);
+        setTransferError(null);
+      }}
+      title="Edit transfer references"
+      size="lg"
+      centered
+    >
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">
+          Add item-level payout references for {transferPayRun?.title ?? 'this pay run'} before marking the batch paid.
+        </Text>
+        <ScrollArea.Autosize mah={360} type="scroll" scrollHideDelay={900} offsetScrollbars>
+          <Stack gap="sm">
+            {transferDraft.map((item) => (
+              <TextInput
+                key={item.itemId}
+                label={item.label}
+                aria-label={`Transfer reference for ${item.label}`}
+                placeholder="transfer-1024"
+                value={item.payoutProviderTransferId}
+                onChange={(event) => {
+                  const nextValue = event.currentTarget.value;
+                  setTransferDraft((current) => current.map((draftItem) => (
+                    draftItem.itemId === item.itemId
+                      ? { ...draftItem, payoutProviderTransferId: nextValue }
+                      : draftItem
+                  )));
+                }}
+              />
+            ))}
+          </Stack>
+        </ScrollArea.Autosize>
+        {transferError && <Text size="sm" c="red" fw={600}>{transferError}</Text>}
+        <Group justify="flex-end">
+          <Button
+            variant="default"
+            onClick={() => {
+              setTransferPayRunId(null);
+              setTransferDraft([]);
+              setTransferError(null);
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            loading={Boolean(transferPayRunId && updatingPayRunId === transferPayRunId)}
+            onClick={() => void saveTransferReferences()}
+          >
+            Save references
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+
+  const renderFinanceWarnings = () => (finance && !loading && finance.warnings.length > 0 && (
             <Alert color="yellow">
               <Stack gap={4}>
                 {finance.warnings.map((warning) => (
@@ -2792,1075 +2936,592 @@ export default function OrganizationFinancePanel({
                 ))}
               </Stack>
             </Alert>
-          )}
+          ));
 
-          <SimpleGrid cols={{ base: 1, xl: 2 }} spacing="md">
-            <Paper withBorder radius="md" p="md" className="org-tab-surface">
-              <Group justify="space-between" align="center" mb="sm">
-                <Title order={6}>Staff payroll ledger</Title>
-                <Text size="sm" c="dimmed">{payRunLedgerRows.length} staff</Text>
-              </Group>
-              <ScrollArea.Autosize mah={320} type="scroll" scrollHideDelay={900} offsetScrollbars>
-                <Table striped highlightOnHover withColumnBorders style={{ minWidth: 720 }}>
-                  <Table.Thead>
-                    <Table.Tr>
-                      <Table.Th>Staff</Table.Th>
-                      <Table.Th>Items</Table.Th>
-                      <Table.Th>Time</Table.Th>
-                      <Table.Th ta="right">Draft</Table.Th>
-                      <Table.Th ta="right">Approved</Table.Th>
-                      <Table.Th ta="right">Paid</Table.Th>
-                      <Table.Th ta="right">Total</Table.Th>
-                    </Table.Tr>
-                  </Table.Thead>
-                  <Table.Tbody>
-                    {payRunLedgerRows.length > 0 ? payRunLedgerRows.map((row) => (
-                      <Table.Tr key={row.key}>
-                        <Table.Td>{row.label}</Table.Td>
-                        <Table.Td>{row.itemCount}</Table.Td>
-                        <Table.Td>{formatLaborMinutes(row.minutes)}</Table.Td>
-                        <Table.Td ta="right">{centsFromDollars(row.draftCents)}</Table.Td>
-                        <Table.Td ta="right">{centsFromDollars(row.approvedCents)}</Table.Td>
-                        <Table.Td ta="right">{centsFromDollars(row.paidCents)}</Table.Td>
-                        <Table.Td ta="right">
-                          <Text fw={700}>{centsFromDollars(row.totalCents)}</Text>
-                        </Table.Td>
-                      </Table.Tr>
-                    )) : (
-                      <Table.Tr>
-                        <Table.Td colSpan={7}>
-                          <Text size="sm" c="dimmed">No payroll items match the current filters.</Text>
-                        </Table.Td>
-                      </Table.Tr>
-                    )}
-                  </Table.Tbody>
-                </Table>
-              </ScrollArea.Autosize>
-            </Paper>
+  const renderFinanceHeading = () => (
+    <OrganizationTabHeading title="Finance" description="Track revenue, refunds, costs, and staff pay runs.">
+      <Popover><Popover.Target><Button variant="outline">{fromDate} – {toDate}</Button></Popover.Target><Popover.Dropdown>
+        <Stack gap="sm">
+          <TextInput label="From" type="date" value={fromDate} onChange={(event) => setFromDate(event.currentTarget.value)} />
+          <TextInput label="To" type="date" value={toDate} onChange={(event) => setToDate(event.currentTarget.value)} />
+          <Button onClick={() => void loadFinance()} loading={loading}>Apply</Button>
+        </Stack>
+      </Popover.Dropdown></Popover>
+      <Button variant="outline" leftSection={<Download size={16} />} disabled={!finance} onClick={() => {
+        if (!finance) return;
+        const rows = [['Date', 'Item', 'Category', 'Status', 'Amount (USD)'], ...finance.lineItems.map((item) => [item.serviceStartAt || '', item.label, item.category, item.status, String(item.amountCents / 100)])];
+        downloadCsv('organization-finance.csv', rows.map((row) => row.map(csvCell).join(',')).join('\n'));
+      }}>Export report</Button>
+      <Button variant="subtle" onClick={() => void loadFinance()} loading={loading}>Refresh</Button>
+    </OrganizationTabHeading>
+  );
 
-            <Paper withBorder radius="md" p="md" className="org-tab-surface">
-              <Group justify="space-between" align="center" mb="sm">
-                <Title order={6}>Event and team profitability</Title>
-                <Text size="sm" c="dimmed">{profitabilityRows.length} sources</Text>
-              </Group>
-              <ScrollArea.Autosize mah={320} type="scroll" scrollHideDelay={900} offsetScrollbars>
-                <Table striped highlightOnHover withColumnBorders style={{ minWidth: 780 }}>
-                  <Table.Thead>
-                    <Table.Tr>
-                      <Table.Th>Source</Table.Th>
-                      <Table.Th>Type</Table.Th>
-                      <Table.Th>Items</Table.Th>
-                      <Table.Th ta="right">Revenue</Table.Th>
-                      <Table.Th ta="right">Costs</Table.Th>
-                      <Table.Th ta="right">Profit</Table.Th>
-                      <Table.Th>Actions</Table.Th>
-                    </Table.Tr>
-                  </Table.Thead>
-                  <Table.Tbody>
-                    {profitabilityRows.length > 0 ? profitabilityRows.map((row) => {
-                      const target = row.type === 'Event' && row.sourceId
-                        ? { label: row.name, href: `/events/${encodeURIComponent(row.sourceId)}?tab=details` }
-                        : row.type === 'Team' && row.sourceId
-                          ? { label: row.name, href: buildOrganizationCustomerPath(organizationId, 'teams', row.sourceId) }
-                          : null;
-                      return (
-                        <Table.Tr key={row.key}>
-                          <Table.Td>{row.name}</Table.Td>
-                          <Table.Td>{row.type}</Table.Td>
-                          <Table.Td>{row.itemCount}</Table.Td>
-                          <Table.Td ta="right">{centsFromDollars(row.revenueCents)}</Table.Td>
-                          <Table.Td ta="right">{centsFromDollars(-row.costCents)}</Table.Td>
-                          <Table.Td ta="right">
-                            <Text fw={700} c={row.profitCents >= 0 ? 'green' : 'red'}>
-                              {centsFromDollars(row.profitCents)}
-                            </Text>
-                          </Table.Td>
-                          <Table.Td>
-                            <Button
-                              size="xs"
-                              variant="subtle"
-                              leftSection={<ExternalLink size={12} />}
-                              disabled={!target}
-                              onClick={() => navigateToLineItemTarget(target)}
-                            >
-                              Open
-                            </Button>
-                          </Table.Td>
-                        </Table.Tr>
-                      );
-                    }) : (
-                      <Table.Tr>
-                        <Table.Td colSpan={7}>
-                          <Text size="sm" c="dimmed">No event or team line items for this range.</Text>
-                        </Table.Td>
-                      </Table.Tr>
-                    )}
-                  </Table.Tbody>
-                </Table>
-              </ScrollArea.Autosize>
-            </Paper>
-          </SimpleGrid>
+  const renderFinanceMetrics = () => (
+    <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="md">
+      <FinanceMetric
+        label="Gross sales"
+        value={finance?.grossRevenueCents}
+        tone="green"
+        description="Paid organization, event, team, rental, and product bills."
+      />
+      <FinanceMetric
+        label="Refunds and fees"
+        value={finance ? -(finance.refundCents + finance.feeCents) : undefined}
+        tone="red"
+        description="Refunds and payment processing fees."
+      />
+      <FinanceMetric
+        label="Current profit"
+        value={finance?.actualProfitCents}
+        tone={profitTone}
+        description="Net revenue minus staff and custom costs."
+      />
+      <FinanceMetric
+        label="Projected profit"
+        value={finance?.projectedProfitCents}
+        tone={finance && finance.futureCostCents > 0 ? 'orange' : projectedTone}
+        description="Potential revenue minus future costs."
+      />
+    </SimpleGrid>
+  );
 
-          <Paper withBorder radius="md" p="md" className="org-tab-surface">
-            <Group justify="space-between" align="center" mb="sm">
-              <Title order={6}>Finance line items</Title>
-              {canManage && (
-                <Button size="xs" variant="light" leftSection={<Plus size={14} />} onClick={openNewLineItem}>
-                  Add line item
-                </Button>
-              )}
-            </Group>
-            <ScrollArea.Autosize mah={440} type="scroll" scrollHideDelay={900} offsetScrollbars>
-              <Table striped highlightOnHover withColumnBorders style={{ minWidth: 900 }}>
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th>Date</Table.Th>
-                    <Table.Th>Item</Table.Th>
-                    <Table.Th>Category</Table.Th>
-                    <Table.Th>Quantity</Table.Th>
-                    <Table.Th>Status</Table.Th>
-                    <Table.Th ta="right">Amount</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {sortedLineItems.length > 0 ? sortedLineItems.map((item) => {
-                    const canEditLineItem = canManage && !item.isGenerated && Boolean(item.sourceId);
-                    return (
-                      <Table.Tr
-                        key={item.id}
-                        data-testid={canEditLineItem ? `finance-line-item-${item.sourceId}` : undefined}
-                        onClick={canEditLineItem ? () => openEditLineItem(item) : undefined}
-                        style={{ cursor: canEditLineItem ? 'pointer' : undefined }}
-                      >
-                        <Table.Td>{formatPeriod(item.serviceStartAt, item.serviceEndAt)}</Table.Td>
-                        <Table.Td>
-                          {renderLineItemName(item, canEditLineItem)}
-                        </Table.Td>
-                        <Table.Td>{item.category}</Table.Td>
-                        <Table.Td>{formatQuantityAndUnit(item.quantity, item.unitLabel)}</Table.Td>
-                        <Table.Td>
-                          <Group gap={6}>
-                            <Badge size="xs" variant="light">{formatLineItemStatus(item.status)}</Badge>
-                            <Badge size="xs" color={item.timing === 'FUTURE' ? 'orange' : item.timing === 'WARNING' ? 'yellow' : 'green'} variant="light">
-                              {formatLineItemTiming(item.timing)}
-                            </Badge>
-                          </Group>
-                        </Table.Td>
-                        <Table.Td ta="right">
-                          <Text fw={700} c={item.amountCents >= 0 ? 'green' : 'red'}>
-                            {centsFromDollars(item.amountCents)}
-                          </Text>
-                        </Table.Td>
-                      </Table.Tr>
-                    );
-                  }) : (
-                    <Table.Tr>
-                      <Table.Td colSpan={6}>
-                        <Text size="sm" c="dimmed">No finance line items for this range.</Text>
-                      </Table.Td>
-                    </Table.Tr>
-                  )}
-                </Table.Tbody>
-              </Table>
-            </ScrollArea.Autosize>
-          </Paper>
-
-          {canManage && (
-            <Modal
-              opened={quickBooksSettingsOpen}
-              onClose={() => setQuickBooksSettingsOpen(false)}
-              title="QuickBooks settings"
-              size="xl"
-              centered
-            >
-              <Stack gap="md">
-                <Group justify="space-between" align="flex-start">
-                  <Stack gap={2}>
-                    <Group gap="xs">
-                      <Badge
-                        size="sm"
-                        variant="light"
-                        color={accountingStatusColor(quickBooksConnection?.status)}
-                      >
-                        {accountingStatusLabel(quickBooksConnection?.status)}
-                      </Badge>
-                      <Badge size="sm" variant="light" color={quickBooksMappingReady ? 'green' : 'yellow'}>
-                        {quickBooksMappingReady ? 'Payroll mapping ready' : 'Payroll mapping needed'}
-                      </Badge>
-                    </Group>
-                    <Text size="sm" c="dimmed">
-                      Configure QuickBooks account mappings for payroll and finance line-item JournalEntry sync.
-                    </Text>
-                  </Stack>
-                  <Group gap="xs">
-                    <Button
-                      size="xs"
-                      variant="subtle"
-                      loading={quickBooksAccountsLoading}
-                      disabled={quickBooksMappingDisabled}
-                      onClick={() => void loadQuickBooksAccounts()}
-                    >
-                      {quickBooksAccounts.length ? 'Refresh accounts' : 'Load accounts'}
-                    </Button>
-                    <Button
-                      size="xs"
-                      variant="subtle"
-                      disabled={quickBooksMappingDisabled}
-                      onClick={() => setQuickBooksManualMappingOpen((current) => !current)}
-                    >
-                      {quickBooksManualMappingOpen ? 'Hide manual entry' : 'Manual entry'}
-                    </Button>
-                  </Group>
-                </Group>
-
-                {quickBooksAccountsError && (
-                  <Alert color="yellow" variant="light">
-                    {quickBooksAccountsError}
-                  </Alert>
-                )}
-
-                <Paper withBorder radius="md" p="md">
-                  <Stack gap="sm">
-                    <Group justify="space-between" align="center">
-                      <Title order={6}>QuickBooks account settings</Title>
-                      <Button
-                        size="xs"
-                        variant="light"
-                        loading={quickBooksMappingSaving}
-                        disabled={quickBooksMappingDisabled}
-                        onClick={() => void saveQuickBooksMapping()}
-                      >
-                        Save account settings
-                      </Button>
-                    </Group>
-                    <Text size="xs" c="dimmed">
-                      Pick accounts from the connected QuickBooks chart of accounts. The finance clearing account balances revenue, refund, fee, and expense journal-entry rows.
-                    </Text>
-                    <SimpleGrid cols={{ base: 1, md: 3 }} spacing="sm">
-                      <Select
-                        label="Payroll expense account"
-                        placeholder={quickBooksAccounts.length ? 'Select an expense account' : 'Load accounts or use manual entry'}
-                        searchable
-                        clearable
-                        nothingFoundMessage="No accounts found"
-                        data={expenseAccountOptions}
-                        value={quickBooksMappingDraft.payrollExpenseAccountExternalId || null}
-                        onChange={selectQuickBooksExpenseAccount}
-                        disabled={quickBooksMappingDisabled}
-                        description={selectedExpenseAccount?.accountType
-                          ? `${selectedExpenseAccount.accountType}${selectedExpenseAccount.accountSubType ? ` - ${selectedExpenseAccount.accountSubType}` : ''}`
-                          : 'Expense and cost accounts appear first.'}
-                      />
-                      <Select
-                        label="Payroll liability or clearing account"
-                        placeholder={quickBooksAccounts.length ? 'Select a liability account' : 'Load accounts or use manual entry'}
-                        searchable
-                        clearable
-                        nothingFoundMessage="No accounts found"
-                        data={liabilityAccountOptions}
-                        value={quickBooksMappingDraft.payrollLiabilityAccountExternalId || null}
-                        onChange={selectQuickBooksLiabilityAccount}
-                        disabled={quickBooksMappingDisabled}
-                        description={selectedLiabilityAccount?.accountType
-                          ? `${selectedLiabilityAccount.accountType}${selectedLiabilityAccount.accountSubType ? ` - ${selectedLiabilityAccount.accountSubType}` : ''}`
-                          : 'Liability, payable, and clearing accounts appear first.'}
-                      />
-                      <Select
-                        label="Finance clearing account"
-                        placeholder={quickBooksAccounts.length ? 'Select a clearing account' : 'Load accounts or use manual entry'}
-                        searchable
-                        clearable
-                        nothingFoundMessage="No accounts found"
-                        data={clearingAccountOptions}
-                        value={quickBooksMappingDraft.financeClearingAccountExternalId || null}
-                        onChange={selectQuickBooksClearingAccount}
-                        disabled={quickBooksMappingDisabled}
-                        description={selectedClearingAccount?.accountType
-                          ? `${selectedClearingAccount.accountType}${selectedClearingAccount.accountSubType ? ` - ${selectedClearingAccount.accountSubType}` : ''}`
-                          : 'Asset, bank, receivable, and clearing accounts appear first.'}
-                      />
-                    </SimpleGrid>
-                    {quickBooksManualMappingOpen && (
-                      <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="sm">
-                        <TextInput
-                          label="Expense account ID"
-                          value={quickBooksMappingDraft.payrollExpenseAccountExternalId}
-                          onChange={(event) => updateQuickBooksMappingDraft({
-                            payrollExpenseAccountExternalId: event.currentTarget.value,
-                          })}
-                          disabled={quickBooksMappingDisabled}
-                        />
-                        <TextInput
-                          label="Expense account name"
-                          value={quickBooksMappingDraft.payrollExpenseAccountName}
-                          onChange={(event) => updateQuickBooksMappingDraft({
-                            payrollExpenseAccountName: event.currentTarget.value,
-                          })}
-                          disabled={quickBooksMappingDisabled}
-                        />
-                        <TextInput
-                          label="Liability account ID"
-                          value={quickBooksMappingDraft.payrollLiabilityAccountExternalId}
-                          onChange={(event) => updateQuickBooksMappingDraft({
-                            payrollLiabilityAccountExternalId: event.currentTarget.value,
-                          })}
-                          disabled={quickBooksMappingDisabled}
-                        />
-                        <TextInput
-                          label="Liability account name"
-                          value={quickBooksMappingDraft.payrollLiabilityAccountName}
-                          onChange={(event) => updateQuickBooksMappingDraft({
-                            payrollLiabilityAccountName: event.currentTarget.value,
-                          })}
-                          disabled={quickBooksMappingDisabled}
-                        />
-                        <TextInput
-                          label="Finance clearing account ID"
-                          value={quickBooksMappingDraft.financeClearingAccountExternalId}
-                          onChange={(event) => {
-                            updateQuickBooksMappingDraft({
-                              financeClearingAccountExternalId: event.currentTarget.value,
-                            });
-                            setJournalPreview(null);
-                            setJournalSyncRecord(null);
-                          }}
-                          disabled={quickBooksMappingDisabled}
-                        />
-                        <TextInput
-                          label="Finance clearing account name"
-                          value={quickBooksMappingDraft.financeClearingAccountName}
-                          onChange={(event) => {
-                            updateQuickBooksMappingDraft({
-                              financeClearingAccountName: event.currentTarget.value,
-                            });
-                            setJournalPreview(null);
-                            setJournalSyncRecord(null);
-                          }}
-                          disabled={quickBooksMappingDisabled}
-                        />
-                      </SimpleGrid>
-                    )}
-                  </Stack>
-                </Paper>
-
-                <Paper withBorder radius="md" p="md">
-                  <Stack gap="sm">
-                    <Group justify="space-between" align="center">
-                      <Stack gap={2}>
-                        <Title order={6}>Financial category mappings</Title>
-                        <Text size="xs" c="dimmed">
-                          Map finance categories to QuickBooks accounts before previewing or syncing line-item JournalEntries.
-                        </Text>
-                      </Stack>
-                      <Button
-                        size="xs"
-                        variant="light"
-                        loading={categoryMappingSaving}
-                        disabled={quickBooksCategoryMappingDisabled || categoryMappingDrafts.length === 0}
-                        onClick={() => void saveCategoryAccountingMappings()}
-                      >
-                        Save category mappings
-                      </Button>
-                    </Group>
-                    {categoryMappingError && (
-                      <Alert color="red" variant="light">
-                        {categoryMappingError}
-                      </Alert>
-                    )}
-                    <ScrollArea.Autosize mah={360} type="scroll" scrollHideDelay={900} offsetScrollbars>
-                      <Table striped highlightOnHover withColumnBorders style={{ minWidth: quickBooksManualMappingOpen ? 1120 : 860 }}>
-                        <Table.Thead>
-                          <Table.Tr>
-                            <Table.Th>Category</Table.Th>
-                            <Table.Th>Type</Table.Th>
-                            <Table.Th>QuickBooks account</Table.Th>
-                            {quickBooksManualMappingOpen && (
-                              <>
-                                <Table.Th>Account ID</Table.Th>
-                                <Table.Th>Account name</Table.Th>
-                              </>
-                            )}
-                            <Table.Th>Notes</Table.Th>
-                          </Table.Tr>
-                        </Table.Thead>
-                        <Table.Tbody>
-                          {categoryMappingDrafts.length > 0 ? categoryMappingDrafts.map((draft) => {
-                            const selectedCategoryAccount = getSelectedCategoryAccount(draft);
-                            return (
-                              <Table.Tr key={draft.key}>
-                                <Table.Td>
-                                  <Text size="sm" fw={600}>{draft.category}</Text>
-                                </Table.Td>
-                                <Table.Td>
-                                  <Badge size="xs" variant="light" color={accountingEntryTypeColor(draft.entryType)}>
-                                    {accountingEntryTypeLabel(draft.entryType)}
-                                  </Badge>
-                                </Table.Td>
-                                <Table.Td>
-                                  <Select
-                                    aria-label={`QuickBooks account for ${draft.category} ${accountingEntryTypeLabel(draft.entryType)}`}
-                                    placeholder={quickBooksAccounts.length ? 'Select account' : 'Load accounts or use manual entry'}
-                                    searchable
-                                    clearable
-                                    nothingFoundMessage="No accounts found"
-                                    data={getCategoryAccountOptions(draft)}
-                                    value={draft.accountExternalId || null}
-                                    onChange={(value) => selectCategoryMappingAccount(draft.key, value)}
-                                    disabled={quickBooksCategoryMappingDisabled}
-                                    description={selectedCategoryAccount?.accountType
-                                      ? `${selectedCategoryAccount.accountType}${selectedCategoryAccount.accountSubType ? ` - ${selectedCategoryAccount.accountSubType}` : ''}`
-                                      : `${accountingEntryTypeLabel(draft.entryType)} accounts appear first.`}
-                                  />
-                                </Table.Td>
-                                {quickBooksManualMappingOpen && (
-                                  <>
-                                    <Table.Td>
-                                      <TextInput
-                                        aria-label={`Account ID for ${draft.category} ${accountingEntryTypeLabel(draft.entryType)}`}
-                                        value={draft.accountExternalId}
-                                        onChange={(event) => updateCategoryMappingDraft(draft.key, {
-                                          accountExternalId: event.currentTarget.value,
-                                        })}
-                                        disabled={quickBooksCategoryMappingDisabled}
-                                      />
-                                    </Table.Td>
-                                    <Table.Td>
-                                      <TextInput
-                                        aria-label={`Account name for ${draft.category} ${accountingEntryTypeLabel(draft.entryType)}`}
-                                        value={draft.accountName}
-                                        onChange={(event) => updateCategoryMappingDraft(draft.key, {
-                                          accountName: event.currentTarget.value,
-                                        })}
-                                        disabled={quickBooksCategoryMappingDisabled}
-                                      />
-                                    </Table.Td>
-                                  </>
-                                )}
-                                <Table.Td>
-                                  <TextInput
-                                    aria-label={`Accounting notes for ${draft.category} ${accountingEntryTypeLabel(draft.entryType)}`}
-                                    value={draft.notes}
-                                    onChange={(event) => updateCategoryMappingDraft(draft.key, {
-                                      notes: event.currentTarget.value,
-                                    })}
-                                    disabled={quickBooksCategoryMappingDisabled}
-                                  />
-                                </Table.Td>
-                              </Table.Tr>
-                            );
-                          }) : (
-                            <Table.Tr>
-                              <Table.Td colSpan={quickBooksManualMappingOpen ? 6 : 4}>
-                                <Text size="sm" c="dimmed">No finance categories are available yet.</Text>
-                              </Table.Td>
-                            </Table.Tr>
-                          )}
-                        </Table.Tbody>
-                      </Table>
-                    </ScrollArea.Autosize>
-                  </Stack>
-                </Paper>
-
-                <Paper withBorder radius="md" p="md">
-                  <Stack gap="sm">
-                    <Group justify="space-between" align="center">
-                      <Stack gap={2}>
-                        <Title order={6}>Journal entry preview</Title>
-                        <Text size="xs" c="dimmed">
-                          Preview the QuickBooks JournalEntry rows for the selected finance date range, then sync the reviewed rows when every account is mapped.
-                        </Text>
-                      </Stack>
-                      <Group gap="xs">
-                        <Button
-                          size="xs"
-                          variant="light"
-                          loading={journalPreviewLoading}
-                          disabled={quickBooksCategoryMappingDisabled || journalSyncLoading}
-                          onClick={() => void loadJournalEntryPreview()}
-                        >
-                          Preview journal entry
-                        </Button>
-                        <Button
-                          size="xs"
-                          loading={journalSyncLoading}
-                          disabled={quickBooksCategoryMappingDisabled || journalPreviewLoading || !journalPreview?.readyToSync}
-                          onClick={() => void syncJournalEntryToQuickBooks()}
-                        >
-                          Sync journal entry
-                        </Button>
-                      </Group>
-                    </Group>
-                    {journalPreviewError && (
-                      <Alert color="red" variant="light">
-                        {journalPreviewError}
-                      </Alert>
-                    )}
-                    {journalSyncError && (
-                      <Alert color="red" variant="light">
-                        {journalSyncError}
-                      </Alert>
-                    )}
-                    {journalSyncRecord?.status === 'SYNCED' && (
-                      <Alert color="green" variant="light">
-                        Synced to QuickBooks
-                        {journalSyncRecord.externalTxnType ? ` ${journalSyncRecord.externalTxnType}` : ''}
-                        {journalSyncRecord.externalTxnId ? ` ${journalSyncRecord.externalTxnId}` : ''}
-                        {journalSyncRecord.externalTxnDocNumber ? ` (${journalSyncRecord.externalTxnDocNumber})` : ''}.
-                      </Alert>
-                    )}
-                    {journalPreview && (
-                      <Stack gap="sm">
-                        <Group gap="xs">
-                          <Badge color={journalPreview.readyToSync ? 'green' : 'yellow'} variant="light">
-                            {journalPreview.readyToSync ? 'Ready to sync' : 'Needs mapping'}
-                          </Badge>
-                          <Badge color={journalPreview.isBalanced ? 'green' : 'red'} variant="light">
-                            {journalPreview.isBalanced ? 'Balanced' : 'Unbalanced'}
-                          </Badge>
-                          <Badge variant="light">
-                            {journalPreview.includedLineItemCount} line items
-                          </Badge>
-                          {journalPreview.skippedLineItemCount > 0 && (
-                            <Badge color="gray" variant="light">
-                              {journalPreview.skippedLineItemCount} skipped
-                            </Badge>
-                          )}
-                        </Group>
-                        <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="sm">
-                          <Stack gap={1}>
-                            <Text size="xs" fw={700} tt="uppercase" c="dimmed">Txn date</Text>
-                            <Text size="sm">{formatDate(journalPreview.txnDate)}</Text>
-                          </Stack>
-                          <Stack gap={1}>
-                            <Text size="xs" fw={700} tt="uppercase" c="dimmed">Debit total</Text>
-                            <Text size="sm" fw={700}>{centsFromDollars(journalPreview.debitTotalCents)}</Text>
-                          </Stack>
-                          <Stack gap={1}>
-                            <Text size="xs" fw={700} tt="uppercase" c="dimmed">Credit total</Text>
-                            <Text size="sm" fw={700}>{centsFromDollars(journalPreview.creditTotalCents)}</Text>
-                          </Stack>
-                        </SimpleGrid>
-                        {journalPreview.warnings.length > 0 && (
-                          <Alert color="yellow" variant="light">
-                            <Stack gap={2}>
-                              {journalPreview.warnings.map((warning) => (
-                                <Text key={warning} size="sm">{warning}</Text>
-                              ))}
-                            </Stack>
-                          </Alert>
-                        )}
-                        <ScrollArea.Autosize mah={320} type="scroll" scrollHideDelay={900} offsetScrollbars>
-                          <Table striped highlightOnHover withColumnBorders style={{ minWidth: 980 }}>
-                            <Table.Thead>
-                              <Table.Tr>
-                                <Table.Th>Line item</Table.Th>
-                                <Table.Th>Posting</Table.Th>
-                                <Table.Th>Account</Table.Th>
-                                <Table.Th>Role</Table.Th>
-                                <Table.Th>Description</Table.Th>
-                                <Table.Th ta="right">Amount</Table.Th>
-                              </Table.Tr>
-                            </Table.Thead>
-                            <Table.Tbody>
-                              {journalPreview.lines.length > 0 ? journalPreview.lines.map((line) => (
-                                <Table.Tr key={line.id}>
-                                  <Table.Td>
-                                    <Stack gap={1}>
-                                      <Text size="sm" fw={600}>{line.lineItemLabel}</Text>
-                                      <Text size="xs" c="dimmed">{line.category}</Text>
-                                    </Stack>
-                                  </Table.Td>
-                                  <Table.Td>
-                                    <Badge
-                                      size="xs"
-                                      color={line.postingType === 'Debit' ? 'blue' : 'green'}
-                                      variant="light"
-                                    >
-                                      {line.postingType}
-                                    </Badge>
-                                  </Table.Td>
-                                  <Table.Td>
-                                    <Stack gap={1}>
-                                      <Text size="sm" c={line.missingAccount ? 'red' : undefined} fw={line.missingAccount ? 700 : 500}>
-                                        {line.accountName || 'Missing account'}
-                                      </Text>
-                                      {line.accountExternalId && (
-                                        <Text size="xs" c="dimmed">ID {line.accountExternalId}</Text>
-                                      )}
-                                    </Stack>
-                                  </Table.Td>
-                                  <Table.Td>
-                                    <Text size="xs" c="dimmed">
-                                      {line.role === 'CLEARING_ACCOUNT' ? 'Clearing' : 'Mapped category'}
-                                    </Text>
-                                  </Table.Td>
-                                  <Table.Td>
-                                    <Text size="xs" lineClamp={2}>{line.description}</Text>
-                                  </Table.Td>
-                                  <Table.Td ta="right">
-                                    <Text fw={700}>{centsFromDollars(line.amountCents)}</Text>
-                                  </Table.Td>
-                                </Table.Tr>
-                              )) : (
-                                <Table.Tr>
-                                  <Table.Td colSpan={6}>
-                                    <Text size="sm" c="dimmed">No journal entry rows are available for this range.</Text>
-                                  </Table.Td>
-                                </Table.Tr>
-                              )}
-                            </Table.Tbody>
-                          </Table>
-                        </ScrollArea.Autosize>
-                      </Stack>
-                    )}
-                  </Stack>
-                </Paper>
-              </Stack>
-            </Modal>
-          )}
-
-          <Paper withBorder radius="md" p="md" className="org-tab-surface">
-            <Group justify="space-between" align="flex-start" mb="sm">
-              <Stack gap={2}>
-                <Group gap="xs">
-                  <Title order={6}>QuickBooks</Title>
-                  <Badge
-                    size="sm"
-                    variant="light"
-                    color={accountingStatusColor(quickBooksConnection?.status)}
-                  >
-                    {accountingStatusLabel(quickBooksConnection?.status)}
-                  </Badge>
-                </Group>
-                <Text size="sm" c="dimmed">
-                  Accounting connection for payroll handoffs and future sync.
-                </Text>
-              </Stack>
-              {canManage && (
-                <Group gap="xs">
-                  <Button
-                    size="xs"
-                    variant="light"
-                    leftSection={<ExternalLink size={14} />}
-                    loading={quickBooksSaving}
-                    onClick={() => void connectQuickBooks()}
-                  >
-                    {quickBooksConnectionActionLabel(quickBooksConnection)}
-                  </Button>
-                  {quickBooksConnection?.status === 'CONNECTED' && (
-                    <Button
-                      size="xs"
-                      variant="subtle"
-                      color="red"
-                      loading={quickBooksSaving}
-                      onClick={() => void disconnectQuickBooks()}
-                    >
-                      Disconnect
-                    </Button>
-                  )}
-                </Group>
-              )}
-            </Group>
-            <SimpleGrid cols={{ base: 1, sm: 2, lg: 5 }} spacing="sm">
-              <Stack gap={1}>
-                <Text size="xs" fw={700} tt="uppercase" c="dimmed">Company</Text>
-                <Text size="sm">
-                  {quickBooksConnection
-                    ? quickBooksConnection.externalCompanyName || accountingStatusLabel(quickBooksConnection.status)
-                    : 'Not connected'}
-                </Text>
-              </Stack>
-              <Stack gap={1}>
-                <Text size="xs" fw={700} tt="uppercase" c="dimmed">Environment</Text>
-                <Text size="sm" tt="capitalize">{quickBooksConnection?.environment || 'sandbox'}</Text>
-              </Stack>
-              <Stack gap={1}>
-                <Text size="xs" fw={700} tt="uppercase" c="dimmed">Connected</Text>
-                <Text size="sm">{formatDateTime(quickBooksConnection?.connectedAt)}</Text>
-              </Stack>
-              <Stack gap={1}>
-                <Text size="xs" fw={700} tt="uppercase" c="dimmed">Access expires</Text>
-                <Text size="sm">{formatDateTime(quickBooksConnection?.accessTokenExpiresAt)}</Text>
-              </Stack>
-              <Stack gap={1}>
-                <Text size="xs" fw={700} tt="uppercase" c="dimmed">Last synced</Text>
-                <Text size="sm">{formatDateTime(quickBooksConnection?.lastSyncedAt)}</Text>
-              </Stack>
-            </SimpleGrid>
-            {quickBooksConnection?.lastIntuitTid && (
-              <Text mt="sm" size="xs" c="dimmed">
-                Last Intuit TID: {quickBooksConnection.lastIntuitTid}
-              </Text>
-            )}
-            {quickBooksConnection?.scopes?.length ? (
-              <Text mt="sm" size="xs" c="dimmed">
-                {quickBooksConnection.scopes.join(' ')}
-              </Text>
-            ) : null}
-            {canManage && (
-              <Group mt="md" justify="space-between" align="center">
-                <Group gap="xs">
-                  <Badge size="sm" variant="light" color={quickBooksMappingReady ? 'green' : 'yellow'}>
-                    {quickBooksMappingReady ? 'Payroll mapping ready' : 'Payroll mapping needed'}
-                  </Badge>
-                  <Badge size="sm" variant="light" color={configuredCategoryMappingCount > 0 ? 'blue' : 'gray'}>
-                    {configuredCategoryMappingCount} category mappings
-                  </Badge>
-                </Group>
-                <Button
-                  size="xs"
-                  variant="light"
-                  leftSection={<Settings2 size={14} />}
-                  aria-label="QuickBooks settings"
-                  disabled={!quickBooksConnection}
-                  onClick={() => setQuickBooksSettingsOpen(true)}
+  const renderFinanceLineItems = () => (
+    <Paper withBorder radius="md" p="md" className="org-tab-surface">
+      <Group justify="space-between" align="center" mb="sm">
+        <Title order={6}>Finance line items</Title>
+        {canManage && (
+          <Button size="xs" variant="light" leftSection={<Plus size={14} />} onClick={openNewLineItem}>
+            Add line item
+          </Button>
+        )}
+      </Group>
+      <ScrollArea.Autosize mah={440} type="scroll" scrollHideDelay={900} offsetScrollbars>
+        <Table striped highlightOnHover withColumnBorders style={{ minWidth: 900 }}>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>Date</Table.Th>
+              <Table.Th>Item</Table.Th>
+              <Table.Th>Category</Table.Th>
+              <Table.Th>Quantity</Table.Th>
+              <Table.Th>Status</Table.Th>
+              <Table.Th ta="right">Amount</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <OrganizationTableBody columns={6} label="finance line items" unavailable={!finance}>
+            {sortedLineItems.length > 0 ? sortedLineItems.map((item) => {
+              const canEditLineItem = canManage && !item.isGenerated && Boolean(item.sourceId);
+              return (
+                <Table.Tr
+                  key={item.id}
+                  data-testid={canEditLineItem ? `finance-line-item-${item.sourceId}` : undefined}
+                  onClick={canEditLineItem ? () => openEditLineItem(item) : undefined}
+                  style={{ cursor: canEditLineItem ? 'pointer' : undefined }}
                 >
-                  Settings
-                </Button>
-              </Group>
+                  <Table.Td>{formatPeriod(item.serviceStartAt, item.serviceEndAt)}</Table.Td>
+                  <Table.Td>
+                    {renderLineItemName(item, canEditLineItem)}
+                  </Table.Td>
+                  <Table.Td>{item.category}</Table.Td>
+                  <Table.Td>{formatQuantityAndUnit(item.quantity, item.unitLabel)}</Table.Td>
+                  <Table.Td>
+                    <Group gap={6}>
+                      <Badge size="xs" variant="light">{formatLineItemStatus(item.status)}</Badge>
+                      <Badge size="xs" color={item.timing === 'FUTURE' ? 'orange' : item.timing === 'WARNING' ? 'yellow' : 'green'} variant="light">
+                        {formatLineItemTiming(item.timing)}
+                      </Badge>
+                    </Group>
+                  </Table.Td>
+                  <Table.Td ta="right">
+                    <Text fw={700} c={item.amountCents >= 0 ? 'green' : 'red'}>
+                      {centsFromDollars(item.amountCents)}
+                    </Text>
+                  </Table.Td>
+                </Table.Tr>
+              );
+            }) : (
+              <Table.Tr>
+                <Table.Td colSpan={6}>
+                  <Text size="sm" c="dimmed">No finance line items for this range.</Text>
+                </Table.Td>
+              </Table.Tr>
             )}
-            {quickBooksConnection?.lastError && (
-              <Text mt="sm" size="sm" c="red" fw={600}>
-                {quickBooksConnection.lastError}
-              </Text>
-            )}
-            {quickBooksError && (
-              <Text mt="sm" size="sm" c="red" fw={600}>
-                {quickBooksError}
-              </Text>
-            )}
-          </Paper>
+          </OrganizationTableBody>
+        </Table>
+      </ScrollArea.Autosize>
+    </Paper>
+  );
 
-          <Paper withBorder radius="md" p="md" className="org-tab-surface">
-            <Group justify="space-between" align="flex-start" mb="sm">
-              <Stack gap={2}>
-                <Title order={6}>Staff pay runs</Title>
-                <Text size="sm" c="dimmed">Create internal payroll batches from unpaid staff labor.</Text>
-              </Stack>
+  const renderFinanceCostMetrics = () => (
+    <SimpleGrid cols={{ base: 1, md: 3 }} spacing="md">
+      <Paper withBorder radius="md" p="md" className="org-tab-surface">
+        <Text size="xs" fw={700} tt="uppercase" c="dimmed">Staff costs</Text>
+        <Text size="lg" fw={800}><OrganizationLoadingValue>{finance ? centsFromDollars(-finance.staffCostCents) : '—'}</OrganizationLoadingValue></Text>
+      </Paper>
+      <Paper withBorder radius="md" p="md" className="org-tab-surface">
+        <Text size="xs" fw={700} tt="uppercase" c="dimmed">Custom costs</Text>
+        <Text size="lg" fw={800}><OrganizationLoadingValue>{finance ? centsFromDollars(-finance.customCostCents) : '—'}</OrganizationLoadingValue></Text>
+      </Paper>
+      <Paper withBorder radius="md" p="md" className="org-tab-surface">
+        <Text size="xs" fw={700} tt="uppercase" c="dimmed">Warnings</Text>
+        <Text size="lg" fw={800}><OrganizationLoadingValue>{finance?.warnings.length ?? '—'}</OrganizationLoadingValue></Text>
+      </Paper>
+    </SimpleGrid>
+  );
+
+  const renderFinanceLedgers = () => (
+    <SimpleGrid cols={{ base: 1, xl: 2 }} spacing="md">
+      <Paper withBorder radius="md" p="md" className="org-tab-surface">
+        <Group justify="space-between" align="center" mb="sm">
+          <Title order={6}>Staff payroll ledger</Title>
+          <Text size="sm" c="dimmed"><OrganizationLoadingValue>{finance ? payRunLedgerRows.length : '—'}</OrganizationLoadingValue> staff</Text>
+        </Group>
+        <ScrollArea.Autosize mah={320} type="scroll" scrollHideDelay={900} offsetScrollbars>
+          <Table striped highlightOnHover withColumnBorders style={{ minWidth: 720 }}>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Staff</Table.Th>
+                <Table.Th>Items</Table.Th>
+                <Table.Th>Time</Table.Th>
+                <Table.Th ta="right">Draft</Table.Th>
+                <Table.Th ta="right">Approved</Table.Th>
+                <Table.Th ta="right">Paid</Table.Th>
+                <Table.Th ta="right">Total</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <OrganizationTableBody columns={7} label="payroll ledger" unavailable={!finance}>
+              {payRunLedgerRows.length > 0 ? payRunLedgerRows.map((row) => (
+                <Table.Tr key={row.key}>
+                  <Table.Td>{row.label}</Table.Td>
+                  <Table.Td>{row.itemCount}</Table.Td>
+                  <Table.Td>{formatLaborMinutes(row.minutes)}</Table.Td>
+                  <Table.Td ta="right">{centsFromDollars(row.draftCents)}</Table.Td>
+                  <Table.Td ta="right">{centsFromDollars(row.approvedCents)}</Table.Td>
+                  <Table.Td ta="right">{centsFromDollars(row.paidCents)}</Table.Td>
+                  <Table.Td ta="right">
+                    <Text fw={700}>{centsFromDollars(row.totalCents)}</Text>
+                  </Table.Td>
+                </Table.Tr>
+              )) : (
+                <Table.Tr>
+                  <Table.Td colSpan={7}>
+                    <Text size="sm" c="dimmed">No payroll items match the current filters.</Text>
+                  </Table.Td>
+                </Table.Tr>
+              )}
+            </OrganizationTableBody>
+          </Table>
+        </ScrollArea.Autosize>
+      </Paper>
+
+      <Paper withBorder radius="md" p="md" className="org-tab-surface">
+        <Group justify="space-between" align="center" mb="sm">
+          <Title order={6}>Event and team profitability</Title>
+          <Text size="sm" c="dimmed"><OrganizationLoadingValue>{finance ? profitabilityRows.length : '—'}</OrganizationLoadingValue> sources</Text>
+        </Group>
+        <ScrollArea.Autosize mah={320} type="scroll" scrollHideDelay={900} offsetScrollbars>
+          <Table striped highlightOnHover withColumnBorders style={{ minWidth: 780 }}>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Source</Table.Th>
+                <Table.Th>Type</Table.Th>
+                <Table.Th>Items</Table.Th>
+                <Table.Th ta="right">Revenue</Table.Th>
+                <Table.Th ta="right">Costs</Table.Th>
+                <Table.Th ta="right">Profit</Table.Th>
+                <Table.Th>Actions</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <OrganizationTableBody columns={7} label="profitability" unavailable={!finance}>
+              {profitabilityRows.length > 0 ? profitabilityRows.map((row) => {
+                const target = row.type === 'Event' && row.sourceId
+                  ? { label: row.name, href: `/events/${encodeURIComponent(row.sourceId)}?tab=details` }
+                  : row.type === 'Team' && row.sourceId
+                    ? { label: row.name, href: buildOrganizationCustomerPath(organizationId, 'teams', row.sourceId) }
+                    : null;
+                return (
+                  <Table.Tr key={row.key}>
+                    <Table.Td>{row.name}</Table.Td>
+                    <Table.Td>{row.type}</Table.Td>
+                    <Table.Td>{row.itemCount}</Table.Td>
+                    <Table.Td ta="right">{centsFromDollars(row.revenueCents)}</Table.Td>
+                    <Table.Td ta="right">{centsFromDollars(-row.costCents)}</Table.Td>
+                    <Table.Td ta="right">
+                      <Text fw={700} c={row.profitCents >= 0 ? 'green' : 'red'}>
+                        {centsFromDollars(row.profitCents)}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Button
+                        size="xs"
+                        variant="subtle"
+                        leftSection={<ExternalLink size={12} />}
+                        disabled={!target}
+                        onClick={() => navigateToLineItemTarget(target)}
+                      >
+                        Open
+                      </Button>
+                    </Table.Td>
+                  </Table.Tr>
+                );
+              }) : (
+                <Table.Tr>
+                  <Table.Td colSpan={7}>
+                    <Text size="sm" c="dimmed">No event or team line items for this range.</Text>
+                  </Table.Td>
+                </Table.Tr>
+              )}
+            </OrganizationTableBody>
+          </Table>
+        </ScrollArea.Autosize>
+      </Paper>
+    </SimpleGrid>
+  );
+
+  const renderQuickBooksSettings = () => (
+    <Modal
+      opened={quickBooksSettingsOpen}
+      onClose={() => setQuickBooksSettingsOpen(false)}
+      title="QuickBooks settings"
+      size="xl"
+      centered
+    >
+      <Stack gap="md">
+        <Group justify="space-between" align="flex-start">
+          <Stack gap={2}>
+            <Group gap="xs">
+              <Badge
+                size="sm"
+                variant="light"
+                color={accountingStatusColor(quickBooksConnection?.status)}
+              >
+                {accountingStatusLabel(quickBooksConnection?.status)}
+              </Badge>
+              <Badge size="sm" variant="light" color={quickBooksMappingReady ? 'green' : 'yellow'}>
+                {quickBooksMappingReady ? 'Payroll mapping ready' : 'Payroll mapping needed'}
+              </Badge>
+            </Group>
+            <Text size="sm" c="dimmed">
+              Configure QuickBooks account mappings for payroll and finance line-item JournalEntry sync.
+            </Text>
+          </Stack>
+          <Group gap="xs">
+            <Button
+              size="xs"
+              variant="subtle"
+              loading={quickBooksAccountsLoading}
+              disabled={quickBooksMappingDisabled}
+              onClick={() => void loadQuickBooksAccounts()}
+            >
+              {quickBooksAccounts.length ? 'Refresh accounts' : 'Load accounts'}
+            </Button>
+            <Button
+              size="xs"
+              variant="subtle"
+              disabled={quickBooksMappingDisabled}
+              onClick={() => setQuickBooksManualMappingOpen((current) => !current)}
+            >
+              {quickBooksManualMappingOpen ? 'Hide manual entry' : 'Manual entry'}
+            </Button>
+          </Group>
+        </Group>
+
+        {quickBooksAccountsError && (
+          <Alert color="yellow" variant="light">
+            {quickBooksAccountsError}
+          </Alert>
+        )}
+
+        {renderQuickBooksAccountSettings()}
+
+        {renderCategoryMappings()}
+
+        {renderJournalEntryPreview()}
+      </Stack>
+    </Modal>
+  );
+
+  const renderAccountingConnection = () => (
+    <Paper withBorder radius="md" p="md" className="org-tab-surface">
+      <Group justify="space-between" align="flex-start" mb="sm">
+        <Stack gap={2}>
+          <Group gap="xs">
+            <Title order={6}>QuickBooks</Title>
+            <Badge
+              size="sm"
+              variant="light"
+              color={accountingStatusColor(quickBooksConnection?.status)}
+            >
+              <OrganizationLoadingValue>{accountingStatusLabel(quickBooksConnection?.status)}</OrganizationLoadingValue>
+            </Badge>
+          </Group>
+          <Text size="sm" c="dimmed">
+            Accounting connection for payroll handoffs and future sync.
+          </Text>
+        </Stack>
+        {canManage && (
+          <Group gap="xs">
+            <Button
+              size="xs"
+              variant="light"
+              leftSection={<ExternalLink size={14} />}
+              loading={quickBooksSaving}
+              disabled={loading || !finance}
+              onClick={() => void connectQuickBooks()}
+            >
+              {quickBooksConnectionActionLabel(quickBooksConnection)}
+            </Button>
+            {quickBooksConnection?.status === 'CONNECTED' && (
               <Button
                 size="xs"
-                variant="default"
-                leftSection={<Download size={14} />}
-                onClick={() => void exportPayRunsCsv(filteredPayRuns)}
+                variant="subtle"
+                color="red"
+                loading={quickBooksSaving}
+                onClick={() => void disconnectQuickBooks()}
               >
-                Export filtered CSV
+                Disconnect
               </Button>
-            </Group>
-
-            {canManage && (
-              <Group align="end" gap="sm" mb="md">
-                <TextInput
-                  label="Pay run title"
-                  placeholder="June payroll"
-                  value={payRunTitle}
-                  onChange={(event) => setPayRunTitle(event.currentTarget.value)}
-                />
-                <TextInput
-                  label="Period start"
-                  type="date"
-                  value={payRunStart}
-                  onChange={(event) => setPayRunStart(event.currentTarget.value)}
-                />
-                <TextInput
-                  label="Period end"
-                  type="date"
-                  value={payRunEnd}
-                  onChange={(event) => setPayRunEnd(event.currentTarget.value)}
-                />
-                <TextInput
-                  label="Pay date"
-                  type="date"
-                  value={payRunPayDate}
-                  onChange={(event) => setPayRunPayDate(event.currentTarget.value)}
-                />
-                <Button onClick={() => void createPayRun()} loading={payRunSaving}>
-                  Create pay run
-                </Button>
-                {payrollError && (
-                  <Text size="sm" c="red" fw={600}>
-                    {payrollError}
-                  </Text>
-                )}
-              </Group>
             )}
+          </Group>
+        )}
+      </Group>
+      {renderAccountingConnectionMetadata()}
+      {renderAccountingConnectionIdentity()}
+      {canManage && (
+        <Group mt="md" justify="space-between" align="center">
+          {renderAccountingMappingStatus()}
+          <Button
+            size="xs"
+            variant="light"
+            leftSection={<Settings2 size={14} />}
+            aria-label="QuickBooks settings"
+            disabled={!quickBooksConnection}
+            onClick={() => setQuickBooksSettingsOpen(true)}
+          >
+            Settings
+          </Button>
+        </Group>
+      )}
+      {renderAccountingConnectionErrors()}
+    </Paper>
+  );
 
-            <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="sm" mb="md">
-              <Select
-                label="Payroll status"
-                data={[
-                  { value: 'ALL', label: 'All statuses' },
-                  { value: 'DRAFT', label: 'Draft' },
-                  { value: 'APPROVED', label: 'Approved' },
-                  { value: 'PAID', label: 'Paid' },
-                  { value: 'VOID', label: 'Void' },
-                ]}
-                value={payRunStatusFilter}
-                onChange={(value) => setPayRunStatusFilter((value as PayRunStatusFilter | null) ?? 'ALL')}
-                allowDeselect={false}
-              />
-              <Select
-                label="Staff"
-                data={payRunStaffOptions}
-                value={payRunStaffFilter}
-                onChange={(value) => setPayRunStaffFilter(value ?? 'ALL')}
-                searchable
-                allowDeselect={false}
-              />
-              <TextInput
-                label="Payroll from"
-                type="date"
-                value={payRunFromFilter}
-                onChange={(event) => setPayRunFromFilter(event.currentTarget.value)}
-              />
-              <TextInput
-                label="Payroll to"
-                type="date"
-                value={payRunToFilter}
-                onChange={(event) => setPayRunToFilter(event.currentTarget.value)}
-              />
-            </SimpleGrid>
+  const renderPayrollHistory = () => (
+    <Paper withBorder radius="md" p="md" className="org-tab-surface">
+      <Group justify="space-between" align="flex-start" mb="sm">
+        <Stack gap={2}>
+          <Title order={6}>Staff pay runs</Title>
+          <Text size="sm" c="dimmed">Create internal payroll batches from unpaid staff labor.</Text>
+        </Stack>
+        <Button
+          size="xs"
+          variant="default"
+          leftSection={<Download size={14} />}
+          onClick={() => void exportPayRunsCsv(filteredPayRuns)}
+        >
+          Export filtered CSV
+        </Button>
+      </Group>
 
-            <ScrollArea.Autosize mah={420} type="scroll" scrollHideDelay={900} offsetScrollbars>
-              <Table striped highlightOnHover withColumnBorders style={{ minWidth: 1040 }}>
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th>Pay run</Table.Th>
-                    <Table.Th>Period</Table.Th>
-                    <Table.Th>Pay date</Table.Th>
-                    <Table.Th>Status</Table.Th>
-                    <Table.Th>Export</Table.Th>
-                    <Table.Th>Accounting</Table.Th>
-                    <Table.Th>Items</Table.Th>
-                    <Table.Th ta="right">Amount</Table.Th>
-                    {canManage && <Table.Th>Actions</Table.Th>}
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {filteredPayRuns.length > 0 ? filteredPayRuns.map((payRun) => {
-                    const quickBooksSync = getQuickBooksSync(payRun);
-                    const quickBooksSyncEligible = isQuickBooksPayRunSyncEligible(payRun);
-                    const quickBooksSyncNeedsMapping = quickBooksSyncEligible
-                      && quickBooksConnection?.status === 'CONNECTED'
-                      && !quickBooksMappingReady
-                      && quickBooksSync?.status !== 'SYNCED';
-                    const quickBooksSyncError = quickBooksSyncNeedsMapping
-                      ? 'Set QuickBooks payroll account mapping before syncing.'
-                      : quickBooksSyncErrorMessage(quickBooksSync, quickBooksConnection);
-                    const canSyncPayRunToQuickBooks = canManage
-                      && quickBooksConnection?.status === 'CONNECTED'
-                      && quickBooksMappingReady
-                      && quickBooksSyncEligible
-                      && quickBooksSync?.status !== 'SYNCED';
-                    const canReconnectQuickBooks = canManage
-                      && quickBooksConnection?.status === 'REAUTH_REQUIRED'
-                      && quickBooksSyncEligible
-                      && quickBooksSync?.status !== 'SYNCED';
-                    return (
-                    <Table.Tr
-                      key={payRun.id}
-                      onClick={() => setSelectedPayRunId(payRun.id)}
-                      style={{ cursor: 'pointer' }}
+      {canManage && (
+        <Group align="end" gap="sm" mb="md">
+          <TextInput
+            label="Pay run title"
+            placeholder="June payroll"
+            value={payRunTitle}
+            onChange={(event) => setPayRunTitle(event.currentTarget.value)}
+          />
+          <TextInput
+            label="Period start"
+            type="date"
+            value={payRunStart}
+            onChange={(event) => setPayRunStart(event.currentTarget.value)}
+          />
+          <TextInput
+            label="Period end"
+            type="date"
+            value={payRunEnd}
+            onChange={(event) => setPayRunEnd(event.currentTarget.value)}
+          />
+          <TextInput
+            label="Pay date"
+            type="date"
+            value={payRunPayDate}
+            onChange={(event) => setPayRunPayDate(event.currentTarget.value)}
+          />
+          <Button onClick={() => void createPayRun()} loading={payRunSaving}>
+            Create pay run
+          </Button>
+          {payrollError && (
+            <Text size="sm" c="red" fw={600}>
+              {payrollError}
+            </Text>
+          )}
+        </Group>
+      )}
+
+      <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="sm" mb="md">
+        <Select
+          label="Payroll status"
+          data={[
+            { value: 'ALL', label: 'All statuses' },
+            { value: 'DRAFT', label: 'Draft' },
+            { value: 'APPROVED', label: 'Approved' },
+            { value: 'PAID', label: 'Paid' },
+            { value: 'VOID', label: 'Void' },
+          ]}
+          value={payRunStatusFilter}
+          onChange={(value) => setPayRunStatusFilter((value as PayRunStatusFilter | null) ?? 'ALL')}
+          allowDeselect={false}
+        />
+        <Select
+          label="Staff"
+          data={payRunStaffOptions}
+          value={payRunStaffFilter}
+          onChange={(value) => setPayRunStaffFilter(value ?? 'ALL')}
+          searchable
+          allowDeselect={false}
+        />
+        <TextInput
+          label="Payroll from"
+          type="date"
+          value={payRunFromFilter}
+          onChange={(event) => setPayRunFromFilter(event.currentTarget.value)}
+        />
+        <TextInput
+          label="Payroll to"
+          type="date"
+          value={payRunToFilter}
+          onChange={(event) => setPayRunToFilter(event.currentTarget.value)}
+        />
+      </SimpleGrid>
+
+      <ScrollArea.Autosize mah={420} type="scroll" scrollHideDelay={900} offsetScrollbars>
+        <Table striped highlightOnHover withColumnBorders style={{ minWidth: 1040 }}>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>Pay run</Table.Th>
+              <Table.Th>Period</Table.Th>
+              <Table.Th>Pay date</Table.Th>
+              <Table.Th>Status</Table.Th>
+              <Table.Th>Export</Table.Th>
+              <Table.Th>Accounting</Table.Th>
+              <Table.Th>Items</Table.Th>
+              <Table.Th ta="right">Amount</Table.Th>
+              {canManage && <Table.Th>Actions</Table.Th>}
+            </Table.Tr>
+          </Table.Thead>
+          <OrganizationTableBody columns={canManage ? 9 : 8} label="staff pay runs" unavailable={!finance}>
+            {filteredPayRuns.length > 0 ? filteredPayRuns.map((payRun) => {
+              const accounting = payRunAccountingState(payRun, quickBooksConnection, quickBooksMappingReady, canManage);
+              return (
+              <Table.Tr
+                key={payRun.id}
+                onClick={() => setSelectedPayRunId(payRun.id)}
+                style={{ cursor: 'pointer' }}
+              >
+                <Table.Td>
+                  <Stack gap={1}>
+                    <button
+                      type="button"
+                      aria-label={`View pay run ${payRun.title}`}
+                      className="block w-full border-0 bg-transparent p-0 text-left"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setSelectedPayRunId(payRun.id);
+                      }}
                     >
-                      <Table.Td>
-                        <Stack gap={1}>
-                          <button
-                            type="button"
-                            aria-label={`View pay run ${payRun.title}`}
-                            className="block w-full border-0 bg-transparent p-0 text-left"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setSelectedPayRunId(payRun.id);
-                            }}
-                          >
-                            <Text size="sm" fw={600}>{payRun.title}</Text>
-                          </button>
-                          {payRun.items.slice(0, 2).map((item) => (
-                            <Text key={item.id} size="xs" c="dimmed">{item.label} • {centsFromDollars(item.amountCents)}</Text>
-                          ))}
-                          {payRun.items.length > 2 && (
-                            <Text size="xs" c="dimmed">+{payRun.items.length - 2} more</Text>
-                          )}
-                        </Stack>
-                      </Table.Td>
-                      <Table.Td>{formatPeriod(payRun.periodStart, payRun.periodEnd)}</Table.Td>
-                      <Table.Td>{formatDate(payRun.scheduledPayDate)}</Table.Td>
-                      <Table.Td>
-                        <Group gap={6}>
-                          <Badge size="xs" variant="light">{payRun.status}</Badge>
-                          <Badge size="xs" variant="light" color={payRunPayoutColor(payRun.payoutStatus)}>
-                            {payRun.payoutStatus}
-                          </Badge>
-                        </Group>
-                      </Table.Td>
-                      <Table.Td>
-                        <Stack gap={1}>
-                          <Text size="sm" fw={payRun.exportedAt ? 600 : 400} c={payRun.exportedAt ? undefined : 'dimmed'}>
-                            {formatPayRunExportStatus(payRun)}
-                          </Text>
-                          {payRun.exportedAt && (
-                            <Text size="xs" c="dimmed">{formatDateTime(payRun.exportedAt)}</Text>
-                          )}
-                        </Stack>
-                      </Table.Td>
-                      <Table.Td>
-                        <Stack gap={2}>
-                          <Group gap={6}>
-                            <Badge
-                              size="xs"
-                              variant="light"
-                              color={quickBooksSyncNeedsMapping ? 'yellow' : quickBooksSyncStatusColor(quickBooksSync, quickBooksConnection)}
-                            >
-                              {quickBooksSyncNeedsMapping ? 'Needs mapping' : quickBooksSyncStatusLabel(quickBooksSync, quickBooksConnection)}
-                            </Badge>
-                            <Text size="xs" c="dimmed">QBO</Text>
-                          </Group>
-                          {quickBooksSync?.externalTxnId && (
-                            <Text size="xs" c="dimmed">
-                              {quickBooksSync.externalTxnType ?? 'Txn'} {quickBooksSync.externalTxnDocNumber || quickBooksSync.externalTxnId}
-                            </Text>
-                          )}
-                          {quickBooksSync?.syncedAt && (
-                            <Text size="xs" c="dimmed">{formatDateTime(quickBooksSync.syncedAt)}</Text>
-                          )}
-                          {quickBooksSync?.intuitTid && (
-                            <Text size="xs" c="dimmed">TID {quickBooksSync.intuitTid}</Text>
-                          )}
-                          {quickBooksSyncError && (
-                            <Text
-                              size="xs"
-                              c={
-                                quickBooksSyncNeedsMapping
-                                  ? 'orange'
-                                  : isRetryableQuickBooksReauthSync(quickBooksSync, quickBooksConnection)
-                                    ? 'blue'
-                                    : 'red'
-                              }
-                            >
-                              {quickBooksSyncError}
-                            </Text>
-                          )}
-                        </Stack>
-                      </Table.Td>
-                      <Table.Td>{payRun.itemCount}</Table.Td>
-                      <Table.Td ta="right">
-                        <Text fw={700}>{centsFromDollars(payRun.totalAmountCents)}</Text>
-                      </Table.Td>
-                      {canManage && (
-                        <Table.Td>
-                          <Group gap="xs">
-                            <Button
-                              size="xs"
-                              variant="default"
-                              leftSection={<Download size={12} />}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                void exportPayRunsCsv([payRun], `${payRun.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-payroll.csv`);
-                              }}
-                            >
-                              Export
-                            </Button>
-                            {(payRun.status === 'APPROVED' || payRun.status === 'PAID') && (
-                              <>
-                                {canReconnectQuickBooks && (
-                                  <Button
-                                    size="xs"
-                                    variant="light"
-                                    leftSection={<ExternalLink size={12} />}
-                                    loading={quickBooksSaving}
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      void connectQuickBooks();
-                                    }}
-                                  >
-                                    Reconnect QBO
-                                  </Button>
-                                )}
-                                <Button
-                                  size="xs"
-                                  variant="light"
-                                  disabled={!canSyncPayRunToQuickBooks}
-                                  loading={syncingQuickBooksPayRunId === payRun.id}
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    void syncPayRunToQuickBooks(payRun);
-                                  }}
-                                >
-                                  {quickBooksPayRunActionLabel(quickBooksSync)}
-                                </Button>
-                              </>
-                            )}
-                            {payRun.status !== 'PAID' && payRun.status !== 'VOID' && (
-                              <Button
-                                size="xs"
-                                variant="default"
-                                leftSection={<Pencil size={12} />}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  openTransferModal(payRun);
-                                }}
-                              >
-                                Transfers
-                              </Button>
-                            )}
-                            {payRun.status === 'DRAFT' && (
-                              <Button
-                                size="xs"
-                                variant="light"
-                                loading={updatingPayRunId === payRun.id}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  void updatePayRun(payRun.id, 'APPROVE');
-                                }}
-                              >
-                                Approve
-                              </Button>
-                            )}
-                            {payRun.status === 'APPROVED' && (
-                              <Button
-                                size="xs"
-                                variant="light"
-                                color="green"
-                                loading={updatingPayRunId === payRun.id}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  openMarkPaidModal(payRun);
-                                }}
-                              >
-                                Mark paid
-                              </Button>
-                            )}
-                            {(payRun.status === 'DRAFT' || payRun.status === 'APPROVED') && (
-                              <Button
-                                size="xs"
-                                variant="subtle"
-                                color="red"
-                                loading={updatingPayRunId === payRun.id}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  openVoidModal(payRun);
-                                }}
-                              >
-                                Void
-                              </Button>
-                            )}
-                          </Group>
-                        </Table.Td>
-                      )}
-                    </Table.Tr>
-                    );
-                  }) : (
-                    <Table.Tr>
-                      <Table.Td colSpan={canManage ? 9 : 8}>
-                        <Text size="sm" c="dimmed">No staff pay runs match the current filters.</Text>
-                      </Table.Td>
-                    </Table.Tr>
-                  )}
-                </Table.Tbody>
-              </Table>
-            </ScrollArea.Autosize>
-          </Paper>
-        </>
-      ) : null}
+                      <Text size="sm" fw={600}>{payRun.title}</Text>
+                    </button>
+                    {payRun.items.slice(0, 2).map((item) => (
+                      <Text key={item.id} size="xs" c="dimmed">{item.label} • {centsFromDollars(item.amountCents)}</Text>
+                    ))}
+                    {payRun.items.length > 2 && (
+                      <Text size="xs" c="dimmed">+{payRun.items.length - 2} more</Text>
+                    )}
+                  </Stack>
+                </Table.Td>
+                <Table.Td>{formatPeriod(payRun.periodStart, payRun.periodEnd)}</Table.Td>
+                <Table.Td>{formatDate(payRun.scheduledPayDate)}</Table.Td>
+                <Table.Td>
+                  <Group gap={6}>
+                    <Badge size="xs" variant="light">{payRun.status}</Badge>
+                    <Badge size="xs" variant="light" color={payRunPayoutColor(payRun.payoutStatus)}>
+                      {payRun.payoutStatus}
+                    </Badge>
+                  </Group>
+                </Table.Td>
+                <Table.Td>
+                  <Stack gap={1}>
+                    <Text size="sm" fw={payRun.exportedAt ? 600 : 400} c={payRun.exportedAt ? undefined : 'dimmed'}>
+                      {formatPayRunExportStatus(payRun)}
+                    </Text>
+                    {payRun.exportedAt && (
+                      <Text size="xs" c="dimmed">{formatDateTime(payRun.exportedAt)}</Text>
+                    )}
+                  </Stack>
+                </Table.Td>
+                <Table.Td>
+                  {renderPayRunAccountingCell(accounting)}
+                </Table.Td>
+                <Table.Td>{payRun.itemCount}</Table.Td>
+                <Table.Td ta="right">
+                  <Text fw={700}>{centsFromDollars(payRun.totalAmountCents)}</Text>
+                </Table.Td>
+                {canManage && (
+                  <Table.Td>
+                    {renderPayRunActions(payRun, accounting)}
+                  </Table.Td>
+                )}
+              </Table.Tr>
+              );
+            }) : (
+              <Table.Tr>
+                <Table.Td colSpan={canManage ? 9 : 8}>
+                  <Text size="sm" c="dimmed">No staff pay runs match the current filters.</Text>
+                </Table.Td>
+              </Table.Tr>
+            )}
+          </OrganizationTableBody>
+        </Table>
+      </ScrollArea.Autosize>
+    </Paper>
+  );
+
+  return (
+    <Stack gap="md" className="org-section org-finance">
+      {renderLineItemDialog()}
+
+      {renderPayRunDetailsDialog()}
+
+      {renderMarkPaidDialog()}
+
+      {renderVoidDialog()}
+
+      {renderTransferDialog()}
+
+      {renderFinanceHeading()}
+
+      {error && <Alert color="red">{error}</Alert>}
+
+      <OrganizationDataLoadingProvider loading={loading}>
+          {renderFinanceMetrics()}
+
+          <OrganizationFinanceCharts items={financeLineItems ?? []} unavailable={!finance} />
+
+          {renderFinanceLineItems()}
+
+          {renderFinanceCostMetrics()}
+
+          {renderFinanceWarnings()}
+
+          {renderFinanceLedgers()}
+
+          {canManage && renderQuickBooksSettings()}
+
+          {renderAccountingConnection()}
+
+          {renderPayrollHistory()}
+      </OrganizationDataLoadingProvider>
     </Stack>
   );
 }

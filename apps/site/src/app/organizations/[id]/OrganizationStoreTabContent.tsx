@@ -1,8 +1,14 @@
 'use client';
 
+import { useState, type HTMLAttributes } from 'react';
+import { Package, ShoppingBag, RefreshCw, Plus } from 'lucide-react';
+import { OrganizationStatStrip, OrganizationTabHeading } from '@/components/organization/OrganizationTabLayout';
+import { OrganizationDataRegion } from '@/components/organization/OrganizationDataLoading';
 import type { Product, ProductType } from '@/types';
 import {
   Button,
+  Modal,
+  Select,
   Group,
   Paper,
   SimpleGrid,
@@ -15,7 +21,6 @@ import {
   formatProductPeriodLabel,
   formatProductPriceLabel,
   isSinglePurchasePeriod,
-  PRODUCT_PERIOD_OPTIONS,
   resolveProductCheckoutLabel,
 } from './organizationStoreUtils';
 
@@ -43,6 +48,27 @@ export type OrganizationStoreTabContentProps = {
   onProductEdit: (product: Product) => void;
 };
 
+function productCardInteractions(
+  product: Product,
+  canManage: boolean,
+  onEdit: (product: Product) => void,
+): HTMLAttributes<HTMLDivElement> {
+  if (!canManage) return { style: { cursor: 'default' } };
+  return {
+    role: 'button',
+    tabIndex: 0,
+    'aria-label': `Edit ${product.name}`,
+    style: { cursor: 'pointer' },
+    onClick: () => onEdit(product),
+    onKeyDown: (event) => {
+      if (event.target !== event.currentTarget) return;
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      onEdit(product);
+    },
+  };
+}
+
 export default function OrganizationStoreTabContent({
   organizationHasStripeAccount,
   canManageProducts,
@@ -66,20 +92,31 @@ export default function OrganizationStoreTabContent({
   onProductPurchase,
   onProductEdit,
 }: OrganizationStoreTabContentProps) {
+  const [creating, setCreating] = useState(false);
+  const [query, setQuery] = useState('');
+  const [status, setStatus] = useState<string | null>(null);
+  const visibleProducts = products.filter((product) => (
+    `${product.name} ${product.description || ''}`.toLowerCase().includes(query.trim().toLowerCase())
+    && (!status || (status === 'active') === (product.isActive !== false))
+  ));
   return (
-    <Paper withBorder p="md" radius="md" className="org-tab-surface">
-      <Group justify="space-between" align="center" mb="md">
-        <Title order={5}>Store</Title>
+    <section className="org-section org-store">
+      <OrganizationTabHeading title="Store" description="Manage products, memberships, and one-time purchases.">
+        {canManageProducts && <Button leftSection={<Plus size={16} />} onClick={() => setCreating(true)}>Add product</Button>}
+      </OrganizationTabHeading>
         {!organizationHasStripeAccount && (
           <Text size="sm" c="red">
             Connect Stripe to accept payments for products.
           </Text>
         )}
-      </Group>
+      <OrganizationStatStrip items={[
+        { label: 'products', value: products.length, icon: <Package /> },
+        { label: 'active products', value: products.filter((product) => product.isActive !== false).length, icon: <ShoppingBag /> },
+        { label: 'recurring products', value: products.filter((product) => !isSinglePurchasePeriod(product.period)).length, icon: <RefreshCw /> },
+      ]} />
 
       {canManageProducts && (
-        <Paper withBorder radius="md" p="md" mb="lg" className="org-tab-item">
-          <Title order={6} mb="xs">Add product</Title>
+        <Modal opened={creating} onClose={() => setCreating(false)} title="Add product" size="lg">
           <Text size="sm" c="dimmed" mb="md">
             Create a recurring or one-time product that users can purchase.
           </Text>
@@ -107,38 +144,27 @@ export default function OrganizationStoreTabContent({
               Add Product
             </Button>
           </Group>
-        </Paper>
+        </Modal>
       )}
 
-      <Title order={6} mb="sm">Products</Title>
+      <div className="org-filter-toolbar">
+        <TextInput aria-label="Search products" placeholder="Search" value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
+        <Select aria-label="Filter product status" placeholder="Status" value={status} onChange={setStatus} clearable data={[{ value: 'active', label: 'Active' }, { value: 'inactive', label: 'Inactive' }]} />
+        <Button variant="subtle" onClick={() => { setQuery(''); setStatus(null); }}>Clear all</Button>
+      </div>
+      <OrganizationDataRegion label="products" layout="cards">
       {products.length === 0 ? (
         <Text size="sm" c="dimmed">No products yet.</Text>
       ) : (
         <SimpleGrid cols={{ base: 1, md: 2, lg: 3 }} spacing="md">
-          {products.map((product) => (
+          {visibleProducts.map((product) => (
             <Paper
               key={product.$id}
               withBorder
               radius="md"
               p="md"
-              className="org-tab-item"
-              role={canManageProducts ? 'button' : undefined}
-              tabIndex={canManageProducts ? 0 : undefined}
-              aria-label={canManageProducts ? `Edit ${product.name}` : undefined}
-              onClick={() => {
-                if (canManageProducts) onProductEdit(product);
-              }}
-              onKeyDown={(event) => {
-                if (
-                  canManageProducts
-                  && event.target === event.currentTarget
-                  && (event.key === 'Enter' || event.key === ' ')
-                ) {
-                  event.preventDefault();
-                  onProductEdit(product);
-                }
-              }}
-              style={{ cursor: canManageProducts ? 'pointer' : 'default' }}
+              className="org-store-product"
+              {...productCardInteractions(product, canManageProducts, onProductEdit)}
             >
               <Group justify="space-between" align="flex-start" mb="xs">
                 <div>
@@ -188,6 +214,8 @@ export default function OrganizationStoreTabContent({
           ))}
         </SimpleGrid>
       )}
-    </Paper>
+      {products.length > 0 && visibleProducts.length === 0 && <p className="org-empty-copy">No products match these filters.</p>}
+      </OrganizationDataRegion>
+    </section>
   );
 }
