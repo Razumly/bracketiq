@@ -112,6 +112,17 @@ class BillingRepository(
         discountCode = discountCode,
     )
 
+    override suspend fun createChildPurchaseIntent(
+        event: Event,
+        childUserId: String,
+        priceCents: Int,
+        occurrence: EventOccurrenceSelection?,
+        divisionId: String?,
+        answers: Map<String, String>,
+    ): Result<PurchaseIntent> = checkoutCoordinator.createPurchaseIntent(
+        event, null, priceCents, null, occurrence, divisionId, answers, null, childUserId,
+    )
+
     override suspend fun previewEventRegistrationDiscount(
         event: Event,
         teamId: String?,

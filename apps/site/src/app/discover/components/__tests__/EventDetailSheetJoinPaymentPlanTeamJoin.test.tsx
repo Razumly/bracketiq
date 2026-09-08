@@ -167,6 +167,7 @@ const completeBillingAddressProfile = {
 };
 
 async function findDivisionButton(name: RegExp) {
+  fireEvent.click(await screen.findByRole('button', { name: /^(Register|Continue registration)$/i }));
   try {
     const buttons = await screen.findAllByRole('button', { name });
     expect(buttons.length).toBeGreaterThan(0);
@@ -521,6 +522,7 @@ describe('EventDetailSheet payment-plan team join', () => {
       <EventDetailSheet event={event} isOpen={true} onClose={jest.fn()} renderInline={true} />,
     );
 
+    fireEvent.click(await screen.findByRole('button', { name: /^(Register|Continue registration)$/i }));
     const joinAsTeamButton = await screen.findByRole('button', { name: /Change team/i });
     fireEvent.click(joinAsTeamButton);
 

@@ -12,7 +12,7 @@ import {
 } from './divisionRegistration';
 
 export type JoinIntent = {
-    mode: 'user' | 'team' | 'child' | 'child_free_agent' | 'user_waitlist' | 'team_waitlist' | 'child_waitlist';
+    mode: 'user' | 'team' | 'child' | 'child_free_agent' | 'user_free_agent' | 'user_waitlist' | 'team_waitlist' | 'child_waitlist';
     team?: Team | null;
     childId?: string;
     childEmail?: string | null;
@@ -45,6 +45,7 @@ export function getJoinIntentRegistrationType(intent: JoinIntent): RegistrationA
         case 'team_waitlist':
             return 'team_waitlist';
         case 'child_free_agent':
+        case 'user_free_agent':
             return 'free_agent';
         case 'user':
         default:
@@ -75,6 +76,28 @@ export function normalizeEmailValue(value?: string | null): string | null {
     return normalized.length > 0 ? normalized : null;
 }
 
+function normalizeBillInstallments(billing: RegistrationBillingPlan) {
+    return {
+        installmentAmounts: billing.allowPaymentPlans ? normalizeInstallmentAmountsCents(billing.installmentAmounts) : [],
+        installmentDueDates: billing.allowPaymentPlans ? normalizeInstallmentDueDateValues(billing.installmentDueDates) : [],
+        installmentDueRelativeDays: billing.allowPaymentPlans ? normalizeInstallmentDueRelativeDayValues(billing.installmentDueRelativeDays) : [],
+    };
+}
+
+function billSchedule(event: Event, billing: RegistrationBillingPlan, occurrence?: WeeklyOccurrenceSelection) {
+    const installments = normalizeBillInstallments(billing);
+    if (event.eventType !== 'WEEKLY_EVENT' || event.parentEvent) {
+        return { ...installments, installmentDueRelativeDays: [], slotId: null, occurrenceDate: null };
+    }
+    if (!occurrence?.slotId || !occurrence.occurrenceDate) {
+        throw new Error('Select a weekly session before starting a payment plan.');
+    }
+    if (installments.installmentDueRelativeDays.length !== installments.installmentAmounts.length) {
+        throw new Error('Weekly payment plans need a due date offset for each installment.');
+    }
+    return { ...installments, installmentDueDates: [], slotId: occurrence.slotId, occurrenceDate: occurrence.occurrenceDate };
+}
+
 export async function createEventRegistrationBill({
     ownerType,
     ownerId,
@@ -101,36 +124,19 @@ export async function createEventRegistrationBill({
         throw new Error('This event does not have a price set for a payment plan.');
     }
 
-    const installmentAmounts = billing.allowPaymentPlans
-        ? normalizeInstallmentAmountsCents(billing.installmentAmounts)
-        : [];
-    const installmentDueDates = billing.allowPaymentPlans
-        ? normalizeInstallmentDueDateValues(billing.installmentDueDates)
-        : [];
-    const installmentDueRelativeDays = billing.allowPaymentPlans
-        ? normalizeInstallmentDueRelativeDayValues(billing.installmentDueRelativeDays)
-        : [];
-    const useRelativeDueDates = event.eventType === 'WEEKLY_EVENT' && !event.parentEvent;
-    if (useRelativeDueDates) {
-        if (!occurrence?.slotId || !occurrence.occurrenceDate) {
-            throw new Error('Select a weekly session before starting a payment plan.');
-        }
-        if (installmentDueRelativeDays.length !== installmentAmounts.length) {
-            throw new Error('Weekly payment plans need a due date offset for each installment.');
-        }
-    }
+    const schedule = billSchedule(event, billing, occurrence);
 
     return billService.createBill({
         ownerType,
         ownerId,
         totalAmountCents: priceCents,
         eventId: event.$id,
-        slotId: useRelativeDueDates ? occurrence?.slotId ?? null : null,
-        occurrenceDate: useRelativeDueDates ? occurrence?.occurrenceDate ?? null : null,
+        slotId: schedule.slotId,
+        occurrenceDate: schedule.occurrenceDate,
         organizationId: event.organizationId ?? null,
-        installmentAmounts,
-        installmentDueDates: useRelativeDueDates ? [] : installmentDueDates,
-        installmentDueRelativeDays: useRelativeDueDates ? installmentDueRelativeDays : [],
+        installmentAmounts: schedule.installmentAmounts,
+        installmentDueDates: schedule.installmentDueDates,
+        installmentDueRelativeDays: schedule.installmentDueRelativeDays,
         allowSplit: ownerType === 'TEAM' ? Boolean(event.allowTeamSplitDefault) : false,
         paymentPlanEnabled: true,
         timeoutMs,
@@ -138,12 +144,18 @@ export async function createEventRegistrationBill({
             $id: event.$id,
             start: event.start,
             price: priceCents,
-            installmentAmounts,
-            installmentDueDates: useRelativeDueDates ? [] : installmentDueDates,
-            installmentDueRelativeDays: useRelativeDueDates ? installmentDueRelativeDays : [],
+            installmentAmounts: schedule.installmentAmounts,
+            installmentDueDates: schedule.installmentDueDates,
+            installmentDueRelativeDays: schedule.installmentDueRelativeDays,
         },
         user,
     });
+}
+
+function collectChildSignatureInSession(intent: JoinIntent, userEmail: string) {
+    const accountEmail = normalizeEmailValue(userEmail);
+    const childEmail = normalizeEmailValue(intent.childEmail);
+    return isChildJoinIntent(intent) && Boolean(intent.childId && accountEmail && childEmail && accountEmail === childEmail);
 }
 
 export async function loadRequiredEventSignLinks({
@@ -176,12 +188,7 @@ export async function loadRequiredEventSignLinks({
         timeoutMs,
     });
 
-    const shouldCollectChildSignatureInSameSession = isChildJoinIntent(intent) && Boolean(
-        intent.childId
-        && normalizeEmailValue(userEmail)
-        && normalizeEmailValue(intent.childEmail ?? null)
-        && normalizeEmailValue(userEmail) === normalizeEmailValue(intent.childEmail ?? null),
-    );
+    const shouldCollectChildSignatureInSameSession = collectChildSignatureInSession(intent, userEmail);
     if (!shouldCollectChildSignatureInSameSession || !intent.childId) {
         return dedupeSignSteps(parentLinks, signerContext);
     }

@@ -2538,6 +2538,17 @@ class EventRepository(
             joinWaitlist = joinWaitlist,
             occurrence = occurrence,
         )
+    override suspend fun registerChildForEvent(
+        eventId: String,
+        childUserId: String,
+        joinWaitlist: Boolean,
+        occurrence: EventOccurrenceSelection?,
+        divisionId: String?,
+        answers: Map<String, String>,
+    ): Result<ChildRegistrationResult> = registrationMutationCoordinator.registerChild(
+        eventId, childUserId, joinWaitlist, occurrence, divisionId, answers,
+    )
+
     override suspend fun addTeamToEvent(
         event: Event,
         team: Team,

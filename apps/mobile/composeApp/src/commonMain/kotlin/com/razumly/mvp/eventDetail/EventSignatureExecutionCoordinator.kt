@@ -389,6 +389,7 @@ internal class EventSignatureExecutionCoordinator(
             registrationFlowCoordinator.showTextSignaturePrompt(
                 TextSignaturePromptState(
                     step = currentStep,
+                    registrantName = registrationFlowCoordinator.signatureRegistrantName(),
                     currentStep = currentStepState.currentStep,
                     totalSteps = currentStepState.totalSteps,
                 )
@@ -406,6 +407,7 @@ internal class EventSignatureExecutionCoordinator(
         registrationFlowCoordinator.showWebSignaturePrompt(
             WebSignaturePromptState(
                 step = currentStep,
+                registrantName = registrationFlowCoordinator.signatureRegistrantName(),
                 url = signingUrl,
                 currentStep = currentStepState.currentStep,
                 totalSteps = currentStepState.totalSteps,

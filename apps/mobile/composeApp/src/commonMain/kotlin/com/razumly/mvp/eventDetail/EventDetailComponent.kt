@@ -365,6 +365,7 @@ data class TextSignaturePromptState(
     val step: SignStep,
     val currentStep: Int,
     val totalSteps: Int,
+    val registrantName: String? = null,
 )
 
 data class WebSignaturePromptState(
@@ -372,6 +373,7 @@ data class WebSignaturePromptState(
     val url: String,
     val currentStep: Int,
     val totalSteps: Int,
+    val registrantName: String? = null,
 )
 
 data class JoinChildOption(
@@ -379,6 +381,8 @@ data class JoinChildOption(
     val fullName: String,
     val email: String?,
     val hasEmail: Boolean,
+    val dateOfBirth: String? = null,
+    val ageAtEvent: Int? = null,
 )
 
 data class JoinChoiceDialogState(
@@ -400,6 +404,7 @@ data class EventRegistrationQuestionDialogState(
     val eventName: String,
     val questions: List<TeamJoinQuestion>,
     val answers: Map<String, String>,
+    val registrantName: String? = null,
 )
 
 data class SelectedWeeklyOccurrenceState(

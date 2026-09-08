@@ -22,7 +22,8 @@ class EventCheckoutReviewCoordinatorTest {
         assertEquals(EventCheckoutAction.PLAN, action(plan = paid.copy(allowPaymentPlans = true)))
         assertEquals(EventCheckoutAction.REGISTER, action(teamEvent = true))
         assertEquals(EventCheckoutAction.REGISTER, action(full = true, forTeam = true))
-        assertEquals(EventCheckoutAction.CHILD, checkoutReviewAction(JoinExecutionAction.CREATE_PURCHASE_INTENT, true))
+        assertEquals(EventCheckoutAction.PAYMENT, checkoutReviewAction(JoinExecutionAction.CREATE_PURCHASE_INTENT, true))
+        assertEquals(EventCheckoutAction.CHILD, checkoutReviewAction(JoinExecutionAction.JOIN_DIRECTLY, true))
     }
 
     @Test
