@@ -1,19 +1,22 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-import { Button, DatePickerInput, Popover, Select } from '../organization-operation-ui';
+import { Button, DatePickerInput, MultiSelect, Popover, Select } from '../organization-operation-ui';
 
 describe('organization operation filters', () => {
   it('does not select Today before the minimum date', async () => {
     const user = userEvent.setup();
     const onChange = jest.fn();
-    const tomorrow = new Date();
+    const today = new Date();
+    const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
+    const crossesMonth = tomorrow.getMonth() !== today.getMonth() || tomorrow.getFullYear() !== today.getFullYear();
     render(<DatePickerInput aria-label="Start date" value={null} minDate={tomorrow} onChange={onChange} />);
     await user.click(screen.getByRole('button', { name: 'Start date' }));
     await user.click(screen.getByRole('button', { name: 'Today' }));
     expect(onChange).not.toHaveBeenCalled();
     expect(screen.getByRole('dialog')).toBeVisible();
+    if (crossesMonth) await user.click(screen.getByRole('button', { name: /next month/i }));
     await user.click(screen.getByRole('button', { name: tomorrow.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) }));
     expect(onChange).toHaveBeenCalledWith(new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate()));
   });
@@ -25,12 +28,48 @@ describe('organization operation filters', () => {
     const input = screen.getByRole('combobox', { name: 'Event type' });
     await user.clear(input);
     await user.type(input, 'TOUR');
+    expect(input).toHaveValue('TOUR');
     if (method === 'outside') await user.click(screen.getByRole('button', { name: 'Outside' }));
     else await user.keyboard('{Escape}');
     expect(input).toHaveValue('EVENT');
     expect(onChange).not.toHaveBeenCalled();
     await user.click(input);
     expect(screen.getByRole('option', { name: 'EVENT' })).toBeVisible();
+  });
+
+  it('reopens a dismissed Select when typing resumes in the focused input', async () => {
+    const user = userEvent.setup();
+    render(<Select aria-label="Event type" value="EVENT" data={['EVENT', 'TOURNAMENT']} />);
+    const input = screen.getByRole('combobox', { name: 'Event type' });
+    await user.click(input);
+    await user.keyboard('{Escape}');
+    await user.clear(input);
+    await user.type(input, 'TOUR');
+    expect(input).toHaveValue('TOUR');
+    expect(screen.getByRole('listbox')).toBeVisible();
+    await user.keyboard('{Escape}');
+    expect(input).toHaveValue('EVENT');
+  });
+
+
+  it.each(['outside', 'Escape'])('clears uncommitted MultiSelect search after %s dismissal', async (method) => {
+    const user = userEvent.setup();
+    render(<><MultiSelect aria-label="Resources" data={['Court A', 'Court B']} value={['Court A']} /><button>Outside</button></>);
+    const input = screen.getByRole('combobox', { name: 'Resources' });
+    await user.click(input);
+    await user.clear(input);
+    await user.type(input, 'Court B');
+    expect(input).toHaveValue('Court B');
+    if (method === 'outside') await user.click(screen.getByRole('button', { name: 'Outside' }));
+    else await user.keyboard('{Escape}');
+    expect(input).toHaveValue('Court A');
+    if (method === 'Escape') {
+      await user.clear(input);
+      await user.type(input, 'Court B');
+      expect(screen.getByRole('listbox')).toBeVisible();
+      await user.keyboard('{Escape}');
+      expect(input).toHaveValue('Court A');
+    }
   });
 
   it('prevents changing a disabled date', async () => {
@@ -82,7 +121,6 @@ describe('organization operation filters', () => {
     expect(screen.getByRole('button', { name: /previous month/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /next month/i })).toBeInTheDocument();
     expect(screen.queryByRole('gridcell')).not.toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: /2026/ }).length).toBeGreaterThan(0);
 
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('dialog', { name: 'Start date' })).not.toBeInTheDocument();

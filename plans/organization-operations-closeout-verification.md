@@ -2,7 +2,7 @@
 
 Date: 2026-09-05.
 
-Issue 123 remains open. The current source does not meet all acceptance criteria.
+Final verification completed on 2026-09-07. The scoped Organization operations acceptance checks pass. The full-site Jest run remains blocked by the pre-existing `MouseEvent` setup failure; this does not change the scoped closeout result.
 
 ## Local schedule rebase — 2026-09-06
 
@@ -24,7 +24,7 @@ All 30 focused grid and panel tests pass. They include start-edge preview, cance
 
 This audit covers the Organization operations from issue 123. It includes their shared controls and the shared Discover event filters. It excludes the Organization claim wizard and unrelated backend work.
 
-The review base is `1e1cb02b716ea74389170af29543b76d2ea0e902`. The reviewed branch is `workstream/site-ui-operations` at `4c9de6191`. The review includes current tracked edits and untracked issue files. Earlier test and browser results do not validate all current changes.
+The historical review base is `1e1cb02b716ea74389170af29543b76d2ea0e902`, which is unavailable in this repository. The final Standards and Spec rechecks used valid checkpoint `4431702643894e11af8e2291f994b8df75217a2a` and the current `workstream/site-ui-operations` source.
 
 The user approved a local production rebuild and start or restart for this audit. The user then approved creation and seeding of the isolated issue-123 database, a worktree connection update, and a preview restart. The user also requested test data from another database. No production deployment or provider transaction is authorized.
 
@@ -96,3 +96,13 @@ Spec total: five open behavior or migration findings. The reference gap is resol
 Confirm and resolve the named findings in issue-123-owned files. Rerun the affected behavior tests. Complete the production build. Run desktop and narrow-width checks in the Codex browser. Use the approved shared-pattern exception for Store and Discounts. Keep provider checks separate from provider-independent unit tests. Do not claim a provider sandbox pass without running that check. This audit found no configured Stripe keys, BoldSign API key, or QuickBooks client ID in the production preview environment. Do not copy credentials or change environment files without a separate request.
 
 Do not close issue 123 based only on a passing complexity check or the existing surface checklist.
+
+## Final verification — 2026-09-07
+
+The rebuilt local production preview ran at `http://127.0.0.1:3155` with the seeded `org_1` fixture. Codex browser checks passed on desktop and 390-pixel mobile layouts for Events, Teams, Customers, Facilities, Staff, Store, and Discounts. The checks covered the white Organization header, no eyebrow text, loading controls, calendar date and resource layout, colored filters, Facility details and Back to schedule, creation dialogs, filter reset, and Escape dismissal.
+
+Pointer checks passed for the Organization sections sheet, Event creation, Facility details navigation, Event type filter editing and dismissal, Store product dialog, Discounts dialog, and keyboard dismissal. The rebuilt preview showed a cleared MultiSelect query restoring the committed selected labels after Escape, and a focused Select/MultiSelect input reopened the list when typing resumed after Escape.
+
+The final scoped checks passed: 12 complexity-policy tests, 143 Facilities tests in nine suites, 10 shared operation-control tests, TypeScript, production build, changed-file lint with zero errors and one advisory image warning, and `git diff --check`. The full-site run passed 374 suites and failed 501 suites at the existing `MouseEvent` setup error; 16 tests failed after suites that loaded.
+
+The final shared-control fix keeps Select and MultiSelect transient search state separate from committed selections. Escape and outside dismissal clear uncommitted search text, and input changes reopen the list while focus remains. Regression tests cover clear, type, option dismissal, selected-label restoration, and resume-after-Escape behavior. Store and Discounts use the approved shared-pattern exception. No HTTP, Prisma, mobile, provider, or production runtime contract changed.

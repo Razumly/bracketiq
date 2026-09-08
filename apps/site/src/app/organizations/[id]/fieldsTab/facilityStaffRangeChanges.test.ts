@@ -143,14 +143,29 @@ it.each([
   expect(prepareStaffCalendarRangeChange(changeFor(parent, start, end), [], [court], 'move')).toBeNull();
 });
 
-it('rejects invalid ranges and skips a missing source identity', () => {
+it('rejects reversed ranges and skips a missing source identity', () => {
   expect(prepareStaffCalendarRangeChange(
     changeFor(parent, date(3, 12), date(3, 10)), [], [court], 'move',
   )).toEqual({ error: { color: 'red', message: 'Unable to move this staff assignment.' } });
   expect(prepareStaffCalendarRangeChange(
-    changeFor(parent, date(3, 22), date(4, 1)), [], [court], 'resize',
-  )).toEqual({ error: { color: 'red', message: 'Unable to resize this staff assignment.' } });
-  expect(prepareStaffCalendarRangeChange(
     changeFor({ ...parent, id: '' }, date(3, 10), date(3, 12)), [], [court], 'move',
   )).toBeNull();
+});
+
+it('accepts an overnight parent resize within one local day', () => {
+  const result = preparedChanges(prepareStaffCalendarRangeChange(
+    changeFor(parent, date(3, 22), date(4, 1)), [], [court], 'resize',
+  ));
+  expect(result.start).toEqual(date(3, 22));
+  expect(result.overrides).toHaveLength(1);
+  expect(result.overrides[0]).toMatchObject({
+    assignmentId: parent.id,
+    override: {
+      action: 'update',
+      assignment: {
+        plannedMinutes: 180,
+        timeSlot: { startTimeMinutes: 1320, endTimeMinutes: 60 },
+      },
+    },
+  });
 });
