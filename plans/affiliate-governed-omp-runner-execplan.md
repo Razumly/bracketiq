@@ -615,7 +615,7 @@ automatic scraping.
 
 ### Retry implementation verification
 
-The new retry path passed 380 tests across 11 focused suites, TypeScript,
+The new retry path passed 388 tests across 11 focused suites, TypeScript,
 targeted ESLint, and the pinned SDK no-provider probe. A bundled read-only
 preview also ran against the actual held records. PostgreSQL reported
 `default_transaction_read_only=on` before the preview. Both parents were
@@ -638,3 +638,22 @@ bundle and current exports hashes to
 Publication now supplies an OCI revision label on both images so fresh
 container evidence can bind the six refreshed services to the exact source
 commit. The five dormant services remain stopped and unchanged.
+
+The retry review required stronger historical identity and replay checks.
+The source now binds all parent envelope/result identity and contract fields,
+the child catalog to its audit, and root identity across ancestors. It resolves
+original admission proof through the chain for a pass-3 retry. Replay requires
+the actual audited child and permits normal later root progress. Any retained
+active job pointer blocks apply, even without an ACTIVE claim row.
+
+The compatibility fixture now uses authentic role/prompt-2 hashes and invokes
+the real admission apply writer. Its audit shape reflects the original writer:
+the stored selected row is `PROPOSED`, the report row is `APPLIED`, and a
+`CREATE_ROOT` selected row has no root ID before creation. Validation binds
+the deterministic hash fields and the resulting audit root rather than treating
+these expected differences as corruption.
+
+After these fixes, an enforced read-only preview against the actual two
+parents again returned two eligible pass-2 attempts, no held rows, and a stable
+report hash. Old parent rows remain unchanged. Independent re-review is the
+remaining source gate before main integration and image publication.

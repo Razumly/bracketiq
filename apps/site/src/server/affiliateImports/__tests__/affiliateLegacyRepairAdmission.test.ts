@@ -8,9 +8,10 @@ import {
   affiliateAgentContractBundleSchema,
   hashAffiliateAgentValue,
 } from '../agentGatewayContracts';
-import { normalizeAffiliateSupplyIdentity } from '../affiliateSupplyLifecycle';
+import type { EnsureAffiliateSupplySourceResult } from '../affiliateSupplyPersistence';
+import { buildAffiliateSupplyContractManifest, normalizeAffiliateSupplyIdentity } from '../affiliateSupplyLifecycle';
 import { affiliateSportsCatalogSha256 } from '../affiliateSportsCatalog';
-import { buildAffiliateSupplyContractManifest } from '../affiliateSupplyLifecycle';
+import * as affiliateSupplyPersistence from '../affiliateSupplyPersistence';
 import {
   applyAffiliateLegacyRepairAdmission,
   applyAffiliateLegacyRepairRetry,
@@ -163,11 +164,16 @@ const retryFixture = () => {
   const mappingRole = AFFILIATE_AGENT_ROLE_CONTRACTS.MAPPING_PRODUCER;
   const mappingPrompt = AFFILIATE_AGENT_PROMPT_TEMPLATES.MAPPING_PRODUCER;
   const mappingJobs: Record<string, unknown>[] = [];
+  const historicalMappingRoleVersion = 2;
+  const historicalMappingRoleHash = 'ac454e9c59388187e51a70e5dd24c9e8cf8dbf85ed983c6c36a510f4383a40e8';
+  const historicalMappingPromptVersion = 2;
+  const historicalMappingPromptHash = '8756108df1589b5058dd19e4440864f629fd9491f91a1707ddad20db5f2e07d1';
   const intakes: Record<string, unknown>[] = [];
   const runs: Record<string, unknown>[] = [];
   const pages: Record<string, unknown>[] = [];
   const artifacts: Record<string, unknown>[] = [];
-  const priorDeploymentContractHash = 'c'.repeat(64);
+  const priorDeploymentContractVersion = 3;
+  const priorDeploymentContractHash = '15c37807d319b38b1c8558bfb3b1b84a16e5a85e4734aaf861d2f1259e4a7679';
   const files: Record<string, unknown>[] = [];
   const sources: Record<string, unknown>[] = [];
   const mappings: Record<string, unknown>[] = [];
@@ -272,14 +278,14 @@ const retryFixture = () => {
       supplySourceId: rootId,
       claimGeneration: 1,
       lifecycleGeneration: 1,
-      deploymentContractVersion: bundle.deploymentContract.version,
+      deploymentContractVersion: priorDeploymentContractVersion,
       deploymentContractHash: priorDeploymentContractHash,
       supplyContractVersion: manifest.supplyContract.version,
       supplyContractHash: manifest.supplyContract.hash,
-      roleContractVersion: mappingRole.version,
-      roleContractHash: mappingRole.hash,
-      promptTemplateVersion: mappingPrompt.version,
-      promptTemplateHash: mappingPrompt.hash,
+      roleContractVersion: historicalMappingRoleVersion,
+      roleContractHash: historicalMappingRoleHash,
+      promptTemplateVersion: historicalMappingPromptVersion,
+      promptTemplateHash: historicalMappingPromptHash,
       executionClass: 'PRODUCTION_OMP' as const,
       workerId: `worker-${suffix}`,
       invocationId: `invocation-${suffix}`,
@@ -296,14 +302,14 @@ const retryFixture = () => {
       claimId: parentClaimId,
       claimGeneration: 1,
       lifecycleGeneration: 1,
-      deploymentContractVersion: bundle.deploymentContract.version,
+      deploymentContractVersion: priorDeploymentContractVersion,
       deploymentContractHash: priorDeploymentContractHash,
       supplyContractVersion: manifest.supplyContract.version,
       supplyContractHash: manifest.supplyContract.hash,
-      roleContractVersion: mappingRole.version,
-      roleContractHash: mappingRole.hash,
-      promptTemplateVersion: mappingPrompt.version,
-      promptTemplateHash: mappingPrompt.hash,
+      roleContractVersion: historicalMappingRoleVersion,
+      roleContractHash: historicalMappingRoleHash,
+      promptTemplateVersion: historicalMappingPromptVersion,
+      promptTemplateHash: historicalMappingPromptHash,
       workerId: `worker-${suffix}`,
       invocationId: `invocation-${suffix}`,
       reasonCodes: ['CONTRACT_REQUIREMENT_MISSING' as const],
@@ -323,7 +329,7 @@ const retryFixture = () => {
       disposition: 'CONTRACT_GAP' as const,
       completedAt: '2026-08-20T00:04:00.000Z',
     };
-    const root = rootFor(sourceUrl, rootId, intakeId);
+    const root = rootFor(`${sourceUrl}/events`, rootId, intakeId);
     roots.push(root);
     organizations.push({
       id: `organization-${suffix}`,
@@ -386,19 +392,7 @@ const retryFixture = () => {
           strategyRevision: 'sport-evidence-v1',
           archivedPriorResultSummary: { result: { jobId: mappingJobId } },
         }],
-        legacyRepairAdmissionHistory: [{
-          schemaVersion: 1,
-          kind: 'LEGACY_SPORT_REPAIR_ADMISSION',
-          reportHash: 'a'.repeat(64),
-          rootId,
-          gatewayDedupeKey: `legacy-sport-repair:${mappingJobId}`,
-          repairContext,
-          manifest: evidenceManifest,
-          sourceId,
-          mappingId,
-          evidenceRunId: runId,
-          selectedWrite: { sourceId, mappingId },
-        }],
+        legacyRepairAdmissionHistory: [],
       },
       errorMessage: null,
     });
@@ -440,7 +434,14 @@ const retryFixture = () => {
     });
     gatewayJobs.push({
       id: parentGatewayJobId,
-      dedupeKey: `legacy-sport-repair:${mappingJobId}`,
+      dedupeKey: [
+        'legacy-sport-repair',
+        mappingJobId,
+        root.identityKey,
+        runId,
+        manifest.supplyContract.version,
+        manifest.supplyContract.hash,
+      ].join(':'),
       queue: 'AFFILIATE_MAPPING',
       lane: 'MAPPING_PRODUCTION',
       role: 'MAPPING_PRODUCER',
@@ -473,12 +474,12 @@ const retryFixture = () => {
       invocationId: `invocation-${suffix}`,
       workspaceId: `workspace-${suffix}`,
       status: 'COMPLETED',
-      deploymentContractVersion: bundle.deploymentContract.version,
+      deploymentContractVersion: priorDeploymentContractVersion,
       deploymentContractHash: priorDeploymentContractHash,
-      roleContractVersion: mappingRole.version,
-      roleContractHash: mappingRole.hash,
-      promptTemplateVersion: mappingPrompt.version,
-      promptTemplateHash: mappingPrompt.hash,
+      roleContractVersion: historicalMappingRoleVersion,
+      roleContractHash: historicalMappingRoleHash,
+      promptTemplateVersion: historicalMappingPromptVersion,
+      promptTemplateHash: historicalMappingPromptHash,
       supplyContractVersion: manifest.supplyContract.version,
       supplyContractHash: manifest.supplyContract.hash,
       claimEnvelopeHash: hashAffiliateAgentValue(claimEnvelope),
@@ -506,7 +507,24 @@ const retryFixture = () => {
   const findByWhere = (rows: readonly Record<string, unknown>[], where: Record<string, unknown> | undefined) => {
     const id = typeof where?.id === 'string' ? where.id : null;
     const dedupeKey = typeof where?.dedupeKey === 'string' ? where.dedupeKey : null;
-    return rows.find((row) => (id !== null && row.id === id) || (dedupeKey !== null && row.dedupeKey === dedupeKey)) ?? null;
+    const identityKey = typeof where?.identityKey === 'string' ? where.identityKey : null;
+    return rows.find((row) => (
+      (id !== null && row.id === id)
+      || (dedupeKey !== null && row.dedupeKey === dedupeKey)
+      || (identityKey !== null && row.identityKey === identityKey)
+    )) ?? null;
+  };
+  const updateManyRows = (
+    rows: Record<string, unknown>[],
+    where: Record<string, unknown>,
+    data: Record<string, unknown>,
+  ): { count: number } => {
+    const row = rows.find((candidate) => Object.entries(where).every(([key, value]) => (
+      value === undefined || candidate[key] === value
+    )));
+    if (!row) return { count: 0 };
+    Object.assign(row, data);
+    return { count: 1 };
   };
   const mappingJobDelegate = {
     findMany: jest.fn(async () => mappingJobs),
@@ -528,6 +546,49 @@ const retryFixture = () => {
       return { count: 1 };
     }),
   };
+  const intakeDelegate = {
+    findMany: jest.fn(async () => intakes),
+    findUnique: jest.fn(async ({ where }: { where: Record<string, unknown> }) => findByWhere(intakes, where)),
+    updateMany: jest.fn(async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => (
+      updateManyRows(intakes, where, data)
+    )),
+  };
+  const sourceDelegate = {
+    findMany: jest.fn(async () => sources),
+    findUnique: jest.fn(async ({ where }: { where: Record<string, unknown> }) => findByWhere(sources, where)),
+    updateMany: jest.fn(async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => (
+      updateManyRows(sources, where, data)
+    )),
+  };
+  const mappingDelegate = {
+    findMany: jest.fn(async () => mappings),
+    findUnique: jest.fn(async ({ where }: { where: Record<string, unknown> }) => findByWhere(mappings, where)),
+    updateMany: jest.fn(async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => (
+      updateManyRows(mappings, where, data)
+    )),
+  };
+  const artifactDelegate = {
+    findMany: jest.fn(async () => artifacts),
+    updateMany: jest.fn(async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => (
+      updateManyRows(artifacts, where, data)
+    )),
+  };
+  const rootDelegate = {
+    findMany: jest.fn(async () => roots),
+    findUnique: jest.fn(async ({ where }: { where: Record<string, unknown> }) => findByWhere(roots, where)),
+    create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+      const created = data;
+      roots.push(created);
+      return created;
+    }),
+    updateMany: jest.fn(async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => (
+      updateManyRows(roots, where, data)
+    )),
+  };
+  const organizationDelegate = {
+    findMany: jest.fn(async () => organizations),
+    findUnique: jest.fn(async ({ where }: { where: Record<string, unknown> }) => findByWhere(organizations, where)),
+  };
   const gatewayJobDelegate = {
     findMany: jest.fn(async () => gatewayJobs),
     findUnique: jest.fn(async ({ where }: { where: Record<string, unknown> }) => findByWhere(gatewayJobs, where)),
@@ -535,18 +596,24 @@ const retryFixture = () => {
       gatewayJobs.push(data);
       return data;
     }),
+    upsert: jest.fn(async ({ where, create }: { where: Record<string, unknown>; create: Record<string, unknown> }) => {
+      const existing = findByWhere(gatewayJobs, where);
+      if (existing) return existing;
+      gatewayJobs.push(create);
+      return create;
+    }),
   };
   const database = {
     affiliateSourceMappingJobs: mappingJobDelegate,
-    affiliateSourceIntakes: { findMany: jest.fn(async () => intakes) },
+    affiliateSourceIntakes: intakeDelegate,
     affiliateSourceIntakeRuns: { findMany: jest.fn(async () => runs) },
     affiliateSourceIntakePages: { findMany: jest.fn(async () => pages) },
-    affiliateSourceIntakeArtifacts: { findMany: jest.fn(async () => artifacts) },
-    affiliateScrapeSources: { findMany: jest.fn(async () => sources) },
-    affiliateScrapeMappings: { findMany: jest.fn(async () => mappings) },
+    affiliateSourceIntakeArtifacts: artifactDelegate,
+    affiliateScrapeSources: sourceDelegate,
+    affiliateScrapeMappings: mappingDelegate,
     affiliateImportCandidates: { findMany: jest.fn(async () => candidates) },
-    organizations: { findMany: jest.fn(async () => organizations) },
-    affiliateSupplySources: { findMany: jest.fn(async () => roots) },
+    organizations: organizationDelegate,
+    affiliateSupplySources: rootDelegate,
     affiliateSupplyTargets: { findMany: jest.fn(async () => []) },
     affiliateApprovalJobs: { findMany: jest.fn(async () => []) },
     affiliateAgentGatewayJobs: gatewayJobDelegate,
@@ -582,8 +649,250 @@ const retryFixture = () => {
     roots,
     organizations,
     sources,
+    intakes,
+    mappings,
+    artifacts,
+    candidates,
     database,
   };
+};
+
+type RetryFixtureState = {
+  input: {
+    prisma: PrismaClient;
+    bundle: typeof bundle;
+    gatewayJobIds: string[];
+    reason: string;
+  };
+  mappingJobs: Record<string, unknown>[];
+  gatewayJobs: Record<string, unknown>[];
+  gatewayClaims: Record<string, unknown>[];
+  gatewayReceipts: Record<string, unknown>[];
+  intakes: Record<string, unknown>[];
+  sources: Record<string, unknown>[];
+  mappings: Record<string, unknown>[];
+  artifacts: Record<string, unknown>[];
+
+  candidates: Record<string, unknown>[];
+  roots: Record<string, unknown>[];
+  organizations: Record<string, unknown>[];
+};
+const admitRetryFixture = async (state: RetryFixtureState): Promise<RetryFixtureState> => {
+  const historicalGatewayJobs = [...state.gatewayJobs];
+  const historicalGatewayClaims = [...state.gatewayClaims];
+  const historicalGatewayReceipts = [...state.gatewayReceipts];
+  const rootTemplates = [...state.roots];
+  state.gatewayJobs.splice(0, state.gatewayJobs.length);
+  state.gatewayClaims.splice(0, state.gatewayClaims.length);
+  state.gatewayReceipts.splice(0, state.gatewayReceipts.length);
+  state.roots.splice(0, state.roots.length);
+  for (const job of state.mappingJobs) {
+    job.supplySourceId = null;
+    job.status = 'QUEUED';
+    job.resultSummary = {
+      sportReconciliationHistory: [{
+        strategyRevision: 'sport-evidence-v1',
+        archivedPriorResultSummary: { result: { jobId: job.id } },
+      }],
+      legacyRepairAdmissionHistory: [],
+    };
+  }
+  for (const intake of state.intakes) intake.supplySourceId = null;
+  for (const source of state.sources) source.supplySourceId = null;
+  for (const mapping of state.mappings) mapping.supplySourceId = null;
+  for (const artifact of state.artifacts) {
+    artifact.supplySourceId = null;
+    artifact.isPinned = false;
+  }
+  for (const candidate of state.candidates) candidate.supplySourceId = null;
+  const ensureSpy = jest.spyOn(affiliateSupplyPersistence, 'ensureAffiliateSupplySource')
+    .mockImplementation(async (request) => {
+      const root = rootTemplates.find((candidate) => (
+        candidate.intakeId === request.intakeId
+        || candidate.canonicalUrl === (request.resolvedCanonicalUrl ?? request.requestedUrl)
+      ));
+      if (!root) throw new Error(`No root template for ${request.requestedUrl}.`);
+      state.roots.push(root);
+      const intake = state.intakes.find((candidate) => candidate.id === request.intakeId);
+      if (intake) intake.supplySourceId = root.id;
+      const source = state.sources.find((candidate) => candidate.id === request.liveSourceId);
+      if (source) source.supplySourceId = root.id;
+      return {
+        supplySource: root as unknown as EnsureAffiliateSupplySourceResult['supplySource'],
+        identity: normalizeAffiliateSupplyIdentity({
+          requestedUrl: request.requestedUrl,
+          resolvedCanonicalUrl: request.resolvedCanonicalUrl,
+          operatorDomain: request.operatorDomain,
+        }),
+        isCreated: true,
+        isSuccessorCreated: false,
+        predecessorId: null,
+      };
+    });
+  const admissionInput = {
+    prisma: state.input.prisma,
+    bundle: state.input.bundle,
+    jobIds: state.mappingJobs.map((job) => String(job.id)),
+    limit: 2,
+  };
+  try {
+    const preview = await previewAffiliateLegacyRepairAdmission(admissionInput);
+    if (preview.selectedJobIds.length !== 2) throw new Error('Admission fixture did not select both mapping jobs.');
+    await applyAffiliateLegacyRepairAdmission({
+      ...admissionInput,
+      operatorId: 'affiliate-gateway-operator',
+      expectedReportHash: preview.reportHash,
+    });
+  } finally {
+    ensureSpy.mockRestore();
+  }
+  state.gatewayJobs.splice(0, state.gatewayJobs.length, ...historicalGatewayJobs);
+  state.gatewayClaims.splice(0, state.gatewayClaims.length, ...historicalGatewayClaims);
+  state.gatewayReceipts.splice(0, state.gatewayReceipts.length, ...historicalGatewayReceipts);
+  for (const job of state.mappingJobs) job.status = 'REVIEW_REQUIRED';
+  return state;
+};
+const retryFixtureWithAdmission = async (): Promise<RetryFixtureState> => (
+  admitRetryFixture(retryFixture())
+);
+
+const completeRetryChild = (
+  state: RetryFixtureState,
+  suffix: 'softball' | 'boomtown',
+): string => {
+  const parentClaimId = `claim-parent-${suffix}`;
+  const child = state.gatewayJobs.find((candidate) => (
+    candidate.parentClaimId === parentClaimId
+    && candidate.id !== `gateway-parent-${suffix}`
+  ));
+  if (!child) throw new Error(`Retry child for ${suffix} was not created.`);
+  const childSubject = child.subjectJson as Record<string, unknown>;
+  const repairContext = childSubject.repairContext as Record<string, unknown>;
+  const evidenceManifest = child.evidenceManifestJson as Record<string, unknown>;
+  const childClaimId = `claim-retry-${suffix}`;
+  const childReceiptId = `receipt-retry-${suffix}`;
+  const roleContract = AFFILIATE_AGENT_ROLE_CONTRACTS.MAPPING_PRODUCER;
+  const promptTemplate = AFFILIATE_AGENT_PROMPT_TEMPLATES.MAPPING_PRODUCER;
+  const claimEnvelope = {
+    schemaVersion: 1 as const,
+    role: 'MAPPING_PRODUCER' as const,
+    queue: 'AFFILIATE_MAPPING' as const,
+    lane: 'MAPPING_PRODUCTION' as const,
+    jobId: child.id,
+    claimId: childClaimId,
+    supplySourceId: child.supplySourceId,
+    claimGeneration: 1,
+    lifecycleGeneration: child.expectedLifecycleGeneration,
+    deploymentContractVersion: 3,
+    deploymentContractHash: '15c37807d319b38b1c8558bfb3b1b84a16e5a85e4734aaf861d2f1259e4a7679',
+    supplyContractVersion: manifest.supplyContract.version,
+    supplyContractHash: manifest.supplyContract.hash,
+    roleContractVersion: roleContract.version,
+    roleContractHash: roleContract.hash,
+    promptTemplateVersion: promptTemplate.version,
+    promptTemplateHash: promptTemplate.hash,
+    executionClass: 'PRODUCTION_OMP' as const,
+    workerId: `retry-worker-${suffix}`,
+    invocationId: `retry-invocation-${suffix}`,
+    workspaceId: `retry-workspace-${suffix}`,
+    claimedAt: '2026-08-20T00:05:00.000Z',
+    expiresAt: '2026-08-20T00:30:00.000Z',
+    evidenceManifest,
+    permittedCommands: roleContract.permittedCommands,
+    subject: childSubject,
+  };
+  const result = {
+    schemaVersion: 1 as const,
+    jobId: child.id,
+    claimId: childClaimId,
+    claimGeneration: 1,
+    lifecycleGeneration: child.expectedLifecycleGeneration,
+    deploymentContractVersion: 3,
+    deploymentContractHash: '15c37807d319b38b1c8558bfb3b1b84a16e5a85e4734aaf861d2f1259e4a7679',
+    supplyContractVersion: manifest.supplyContract.version,
+    supplyContractHash: manifest.supplyContract.hash,
+    roleContractVersion: roleContract.version,
+    roleContractHash: roleContract.hash,
+    promptTemplateVersion: promptTemplate.version,
+    promptTemplateHash: promptTemplate.hash,
+    workerId: `retry-worker-${suffix}`,
+    invocationId: `retry-invocation-${suffix}`,
+    reasonCodes: ['CONTRACT_REQUIREMENT_MISSING' as const],
+    evidenceRefs: (Array.isArray(evidenceManifest.entries) ? evidenceManifest.entries : [])
+      .map((entry) => String((entry as Record<string, unknown>).evidenceRef)),
+    summary: 'The retry fixture completed with a contract gap.',
+    role: 'MAPPING_PRODUCER' as const,
+    disposition: 'CONTRACT_GAP' as const,
+    payload: {
+      contractArea: 'MAPPING_EVIDENCE' as const,
+      requestedChange: 'Retry the mapping with the current reviewed contract.',
+      sportEvidence: {
+        evidenceRunId: String(repairContext.evidenceRunId),
+        sportsCatalogSha256: String((repairContext.sportsCatalog as Record<string, unknown>).sha256),
+        sportDeterminations: [],
+      },
+    },
+  };
+  const terminalAccepted = {
+    kind: 'TERMINAL_ACCEPTED' as const,
+    receiptId: childReceiptId,
+    resultHash: hashAffiliateAgentValue(result),
+    disposition: 'CONTRACT_GAP' as const,
+    completedAt: '2026-08-20T00:06:00.000Z',
+  };
+  child.status = 'COMPLETED';
+  child.claimGeneration = 1;
+  child.terminalDisposition = 'CONTRACT_GAP';
+  child.resultHash = hashAffiliateAgentValue(result);
+  child.resultJson = result;
+  child.terminalReceiptId = childReceiptId;
+  child.finishedAt = new Date('2026-08-20T00:06:00Z');
+  state.gatewayClaims.push({
+    id: childClaimId,
+    jobId: child.id,
+    parentClaimId,
+    claimGeneration: 1,
+    lifecycleGeneration: child.expectedLifecycleGeneration,
+    queue: 'AFFILIATE_MAPPING',
+    lane: 'MAPPING_PRODUCTION',
+    role: 'MAPPING_PRODUCER',
+    workerId: `retry-worker-${suffix}`,
+    invocationId: `retry-invocation-${suffix}`,
+    workspaceId: `retry-workspace-${suffix}`,
+    status: 'COMPLETED',
+    deploymentContractVersion: 3,
+    deploymentContractHash: '15c37807d319b38b1c8558bfb3b1b84a16e5a85e4734aaf861d2f1259e4a7679',
+    roleContractVersion: roleContract.version,
+    roleContractHash: roleContract.hash,
+    promptTemplateVersion: promptTemplate.version,
+    promptTemplateHash: promptTemplate.hash,
+    supplyContractVersion: manifest.supplyContract.version,
+    supplyContractHash: manifest.supplyContract.hash,
+    claimEnvelopeHash: hashAffiliateAgentValue(claimEnvelope),
+    claimEnvelopeJson: claimEnvelope,
+    evidenceManifestHash: String(evidenceManifest.hash),
+    schemaCorrectionCount: 0,
+    terminalReceiptId: childReceiptId,
+  });
+  state.gatewayReceipts.push({
+    id: childReceiptId,
+    claimId: childClaimId,
+    jobId: child.id,
+    claimGeneration: 1,
+    idempotencyKey: `submit-retry-${suffix}`,
+    operationKind: 'SUBMIT_RESULT',
+    commandName: null,
+    requestHash: 'b'.repeat(64),
+    status: 'SUCCEEDED',
+    responseHash: hashAffiliateAgentValue(terminalAccepted),
+    responseJson: terminalAccepted,
+    safeErrorCode: null,
+    completedAt: new Date('2026-08-20T00:06:00Z'),
+  });
+  const mappingJob = state.mappingJobs.find((candidate) => candidate.id === `mapping-retry-${suffix}`);
+  if (!mappingJob) throw new Error(`Mapping job for ${suffix} was not found.`);
+  mappingJob.status = 'REVIEW_REQUIRED';
+  return child.id;
 };
 
 describe('legacy repair admission with real contract validators', () => {
@@ -649,8 +958,20 @@ describe('legacy repair admission with real contract validators', () => {
       ...input, operatorId: ' ', expectedReportHash: 'a'.repeat(64),
     })).rejects.toMatchObject({ code: 'OPERATOR_REQUIRED' });
   });
+  it('builds retry admission evidence through the actual admission writer', async () => {
+    const state = await retryFixtureWithAdmission();
+    const mappingJob = state.mappingJobs.find((job) => job.id === 'mapping-retry-softball');
+    if (!mappingJob) throw new Error('Softball mapping job was not created.');
+    const summary = mappingJob.resultSummary as Record<string, unknown>;
+    const history = summary.legacyRepairAdmissionHistory as Record<string, unknown>[];
+    expect(history).toHaveLength(1);
+    expect(history[0]).not.toHaveProperty('schemaVersion');
+    expect((history[0].selectedRow as Record<string, unknown>).rootId).toBeNull();
+    expect((history[0].selectedWrite as Record<string, unknown>).rootAction).toBe('CREATE_ROOT');
+  });
+
   it('previews both bounded retries as one deterministic all-or-nothing proposal', async () => {
-    const { input } = retryFixture();
+    const { input } = await retryFixtureWithAdmission();
     const first = await previewAffiliateLegacyRepairRetry(input);
     const second = await previewAffiliateLegacyRepairRetry(input);
 
@@ -661,8 +982,8 @@ describe('legacy repair admission with real contract validators', () => {
     expect(calculateAffiliateLegacyRepairRetryReportHash(first)).toBe(first.reportHash);
   });
 
-  it('applies both retries without mutating parent history and replays idempotently', async () => {
-    const fixtureState = retryFixture();
+  it('replays both retries after normal root progress without mutating parent history', async () => {
+    const fixtureState = await retryFixtureWithAdmission();
     const preview = await previewAffiliateLegacyRepairRetry(fixtureState.input);
     const parentSnapshots = fixtureState.gatewayJobs.map((job) => JSON.stringify(job));
     const claimSnapshots = fixtureState.gatewayClaims.map((claim) => JSON.stringify(claim));
@@ -679,6 +1000,7 @@ describe('legacy repair admission with real contract validators', () => {
     expect(fixtureState.gatewayJobs.slice(0, 2).map((job) => JSON.stringify(job))).toEqual(parentSnapshots);
     expect(fixtureState.gatewayClaims.map((claim) => JSON.stringify(claim))).toEqual(claimSnapshots);
     expect(fixtureState.gatewayReceipts.map((receipt) => JSON.stringify(receipt))).toEqual(receiptSnapshots);
+    fixtureState.roots[0].lifecycleGeneration = 2;
     const replay = await applyAffiliateLegacyRepairRetry({
       ...fixtureState.input,
       operatorId: 'affiliate-gateway-operator',
@@ -715,14 +1037,14 @@ describe('legacy repair admission with real contract validators', () => {
   });
 
   it('holds a retry when a source becomes public and refuses stale apply state', async () => {
-    const publicFixture = retryFixture();
+    const publicFixture = await retryFixtureWithAdmission();
     publicFixture.organizations[0].status = 'LISTED';
     const held = await previewAffiliateLegacyRepairRetry(publicFixture.input);
     expect(held.selectedGatewayJobIds).toEqual([]);
     const publicRow = held.rows.find((row) => row.gatewayJobId === 'gateway-parent-softball');
     expect(publicRow?.reasonCodes).toContain('PUBLIC_ORGANIZATION_PAGE');
 
-    const driftFixture = retryFixture();
+    const driftFixture = await retryFixtureWithAdmission();
     const preview = await previewAffiliateLegacyRepairRetry(driftFixture.input);
     driftFixture.roots[0].derivedStage = 'MAPPED';
     await expect(applyAffiliateLegacyRepairRetry({
@@ -733,7 +1055,7 @@ describe('legacy repair admission with real contract validators', () => {
   });
 
   it('holds an active descendant and exhausted parent pass rather than creating another child', async () => {
-    const descendantFixture = retryFixture();
+    const descendantFixture = await retryFixtureWithAdmission();
     descendantFixture.gatewayJobs.push({
       id: 'active-retry-child',
       dedupeKey: 'active-retry-child-dedupe',
@@ -759,7 +1081,7 @@ describe('legacy repair admission with real contract validators', () => {
     const softballRow = descendantHeld.rows.find((row) => row.gatewayJobId === 'gateway-parent-softball');
     expect(softballRow?.reasonCodes).toContain('ACTIVE_RETRY_DESCENDANT');
 
-    const exhaustedFixture = retryFixture();
+    const exhaustedFixture = await retryFixtureWithAdmission();
     const exhaustedParent = exhaustedFixture.gatewayJobs.find((job) => job.id === 'gateway-parent-boomtown');
     const exhaustedSubject = exhaustedParent?.subjectJson;
     if (exhaustedSubject && typeof exhaustedSubject === 'object'
@@ -772,7 +1094,7 @@ describe('legacy repair admission with real contract validators', () => {
     expect(exhausted.selectedGatewayJobIds).toEqual([]);
   });
   it('rejects non-null foreign run and page root links while accepting null legacy links', async () => {
-    const foreignFixture = retryFixture();
+    const foreignFixture = await retryFixtureWithAdmission();
     foreignFixture.runs[0].supplySourceId = 'foreign-root';
     foreignFixture.pages[0].supplySourceId = 'foreign-root';
     const held = await previewAffiliateLegacyRepairRetry(foreignFixture.input);
@@ -783,4 +1105,161 @@ describe('legacy repair admission with real contract validators', () => {
       'EVIDENCE_ROOT_OWNERSHIP_CONFLICT',
     ]));
   });
+  it('rejects replay when the audited retry child is deleted', async () => {
+    const state = await retryFixtureWithAdmission();
+    const preview = await previewAffiliateLegacyRepairRetry(state.input);
+    await applyAffiliateLegacyRepairRetry({
+      ...state.input,
+      operatorId: 'affiliate-gateway-operator',
+      expectedReportHash: preview.reportHash,
+    });
+    const childIndex = state.gatewayJobs.findIndex((job) => (
+      job.parentClaimId === 'claim-parent-softball'
+      && job.id !== 'gateway-parent-softball'
+    ));
+    expect(childIndex).toBeGreaterThanOrEqual(0);
+    state.gatewayJobs.splice(childIndex, 1);
+    await expect(applyAffiliateLegacyRepairRetry({
+      ...state.input,
+      operatorId: 'affiliate-gateway-operator',
+      expectedReportHash: preview.reportHash,
+    })).rejects.toMatchObject({ code: 'RETRY_STATE_DRIFT' });
+  });
+
+  it('rejects replay when the audited child sports catalog is tampered', async () => {
+    const state = await retryFixtureWithAdmission();
+    const preview = await previewAffiliateLegacyRepairRetry(state.input);
+    await applyAffiliateLegacyRepairRetry({
+      ...state.input,
+      operatorId: 'affiliate-gateway-operator',
+      expectedReportHash: preview.reportHash,
+    });
+    const child = state.gatewayJobs.find((job) => (
+      job.parentClaimId === 'claim-parent-softball'
+      && job.id !== 'gateway-parent-softball'
+    ));
+    if (!child) throw new Error('Retry child was not created.');
+    const subject = child.subjectJson as Record<string, unknown>;
+    const repairContext = subject.repairContext as Record<string, unknown>;
+    const sportsCatalog = repairContext.sportsCatalog as Record<string, unknown>;
+    sportsCatalog.sha256 = '0'.repeat(64);
+    await expect(applyAffiliateLegacyRepairRetry({
+      ...state.input,
+      operatorId: 'affiliate-gateway-operator',
+      expectedReportHash: preview.reportHash,
+    })).rejects.toMatchObject({ code: 'RETRY_STATE_DRIFT' });
+  });
+
+  it('blocks retry apply when only the gateway job active-claim pointer is set', async () => {
+    const state = await retryFixtureWithAdmission();
+    const preview = await previewAffiliateLegacyRepairRetry(state.input);
+    state.gatewayJobs[0].activeClaimId = 'claim-pointer-only';
+    await expect(applyAffiliateLegacyRepairRetry({
+      ...state.input,
+      operatorId: 'affiliate-gateway-operator',
+      expectedReportHash: preview.reportHash,
+    })).rejects.toMatchObject({ code: 'CLAIM_DRIFT' });
+  });
+  it('requires sport assessment evidence for a version-three parent result', async () => {
+    const state = await retryFixtureWithAdmission();
+    const parentClaim = state.gatewayClaims.find((claim) => claim.id === 'claim-parent-softball');
+    const parentJob = state.gatewayJobs.find((job) => job.id === 'gateway-parent-softball');
+    const parentReceipt = state.gatewayReceipts.find((receipt) => receipt.id === 'receipt-parent-softball');
+    if (!parentClaim || !parentJob || !parentReceipt) throw new Error('Softball parent contract rows were not created.');
+    const roleContract = AFFILIATE_AGENT_ROLE_CONTRACTS.MAPPING_PRODUCER;
+    const promptTemplate = AFFILIATE_AGENT_PROMPT_TEMPLATES.MAPPING_PRODUCER;
+    parentClaim.roleContractVersion = roleContract.version;
+    parentClaim.roleContractHash = roleContract.hash;
+    parentClaim.promptTemplateVersion = promptTemplate.version;
+    parentClaim.promptTemplateHash = promptTemplate.hash;
+    const claimEnvelope = parentClaim.claimEnvelopeJson as Record<string, unknown>;
+    claimEnvelope.roleContractVersion = roleContract.version;
+    claimEnvelope.roleContractHash = roleContract.hash;
+    claimEnvelope.promptTemplateVersion = promptTemplate.version;
+    claimEnvelope.promptTemplateHash = promptTemplate.hash;
+    parentClaim.claimEnvelopeHash = hashAffiliateAgentValue(claimEnvelope);
+    const result = parentJob.resultJson as Record<string, unknown>;
+    result.roleContractVersion = roleContract.version;
+    result.roleContractHash = roleContract.hash;
+    result.promptTemplateVersion = promptTemplate.version;
+    result.promptTemplateHash = promptTemplate.hash;
+    const payload = result.payload as Record<string, unknown>;
+    delete payload.sportEvidence;
+    parentJob.resultHash = hashAffiliateAgentValue(result);
+    const receiptResponse = parentReceipt.responseJson as Record<string, unknown>;
+    receiptResponse.resultHash = parentJob.resultHash;
+    parentReceipt.responseHash = hashAffiliateAgentValue(receiptResponse);
+    const report = await previewAffiliateLegacyRepairRetry(state.input);
+    const row = report.rows.find((candidate) => candidate.gatewayJobId === 'gateway-parent-softball');
+    expect(row?.reasonCodes).toContain('PARENT_SPORT_EVIDENCE_MISSING');
+  });
+  it('holds malformed historical admission evidence instead of trusting a partial record', async () => {
+    const state = await retryFixtureWithAdmission();
+    const mappingJob = state.mappingJobs.find((job) => job.id === 'mapping-retry-softball');
+    if (!mappingJob) throw new Error('Softball mapping job was not created.');
+    const summary = mappingJob.resultSummary as Record<string, unknown>;
+    const history = summary.legacyRepairAdmissionHistory as Record<string, unknown>[];
+    history[0].reportHash = '0'.repeat(64);
+    const report = await previewAffiliateLegacyRepairRetry(state.input);
+    const row = report.rows.find((candidate) => candidate.gatewayJobId === 'gateway-parent-softball');
+    expect(row?.reasonCodes).toContain('ADMISSION_EVIDENCE_INVALID');
+    expect(row?.eligible).toBe(false);
+  });
+  it('admits a completed pass-two child for a bounded pass-three retry', async () => {
+    const state = await retryFixtureWithAdmission();
+    const passTwoPreview = await previewAffiliateLegacyRepairRetry(state.input);
+    await applyAffiliateLegacyRepairRetry({
+      ...state.input,
+      operatorId: 'affiliate-gateway-operator',
+      expectedReportHash: passTwoPreview.reportHash,
+    });
+    const childId = completeRetryChild(state, 'softball');
+    const passThreeInput = { ...state.input, gatewayJobIds: [childId] };
+    const passThreePreview = await previewAffiliateLegacyRepairRetry(passThreeInput);
+    expect(passThreePreview.selectedGatewayJobIds).toEqual([childId]);
+    expect(passThreePreview.rows[0]).toMatchObject({ parentPass: 2, retryPass: 3, eligible: true });
+    const applied = await applyAffiliateLegacyRepairRetry({
+      ...passThreeInput,
+      operatorId: 'affiliate-gateway-operator',
+      expectedReportHash: passThreePreview.reportHash,
+    });
+    expect(applied.writeCount).toBe(1);
+    expect(applied.appliedGatewayJobIds).toHaveLength(1);
+    expect(state.gatewayJobs.some((job) => (
+      job.parentClaimId === 'claim-retry-softball'
+      && job.dedupeKey === `legacy-sport-repair-retry:${childId}`
+    ))).toBe(true);
+  });
+  it('rejects a retry chain whose ancestor resolves to a different root', async () => {
+    const state = await retryFixtureWithAdmission();
+    const passTwoPreview = await previewAffiliateLegacyRepairRetry(state.input);
+    await applyAffiliateLegacyRepairRetry({
+      ...state.input,
+      operatorId: 'affiliate-gateway-operator',
+      expectedReportHash: passTwoPreview.reportHash,
+    });
+    const childId = completeRetryChild(state, 'softball');
+    const child = state.gatewayJobs.find((candidate) => candidate.id === childId);
+    if (!child) throw new Error('Retry child was not created.');
+    child.supplySourceId = 'foreign-root';
+    const subject = child.subjectJson as Record<string, unknown>;
+    subject.supplySourceId = 'foreign-root';
+    const childClaim = state.gatewayClaims.find((candidate) => candidate.jobId === childId);
+    if (!childClaim) throw new Error('Retry child claim was not created.');
+    const claimEnvelope = childClaim.claimEnvelopeJson as Record<string, unknown>;
+    claimEnvelope.supplySourceId = 'foreign-root';
+    (claimEnvelope.subject as Record<string, unknown>).supplySourceId = 'foreign-root';
+    childClaim.claimEnvelopeHash = hashAffiliateAgentValue(claimEnvelope);
+    const report = await previewAffiliateLegacyRepairRetry({
+      ...state.input,
+      gatewayJobIds: [childId],
+    });
+    expect(report.selectedGatewayJobIds).toEqual([]);
+    expect(report.rows[0].reasonCodes).toContain('MALFORMED_PARENT_LINEAGE');
+  });
+
+
+
+
+
 });

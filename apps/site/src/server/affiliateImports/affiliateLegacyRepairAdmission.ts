@@ -1285,6 +1285,96 @@ const admissionEvidenceForGateway = (
   && sameRepairContext(entry.repairContext, repairContext)
   && sameAdmissionValue(entry.manifest, manifest)
 )) ?? null;
+const productionAdmissionEvidenceMatches = (input: Readonly<{
+  entry: JsonRecord;
+  mappingJob: MappingJobRow;
+  intake: IntakeRow;
+  source: SourceRow;
+  mapping: MappingRow | null;
+  root: SupplyRootRow;
+  run: CaptureRunRow;
+  artifacts: readonly ArtifactRow[];
+  ancestor: RetryParentParts;
+  manifest: Record<string, unknown>;
+}>): boolean => {
+  const entry = input.entry;
+  const report = recordValue(entry.reportSnapshot);
+  const reportRows = Array.isArray(report.rows) ? report.rows.map(recordValue) : null;
+  const reportWrites = Array.isArray(report.proposedWrites) ? report.proposedWrites.map(recordValue) : null;
+  const selectedRow = recordValue(entry.selectedRow);
+  const selectedWrite = recordValue(entry.selectedWrite);
+  const reportRow = reportRows?.find((row) => row.jobId === input.mappingJob.id) ?? null;
+  const reportWrite = reportWrites?.find((write) => write.gatewayDedupeKey === entry.gatewayDedupeKey) ?? null;
+  const reportSelectedJobIds = stringArrayValue(report.selectedJobIds);
+  const entrySelectedJobIds = stringArrayValue(entry.selectedJobIds);
+  const entryRequestedJobIds = stringArrayValue(entry.requestedJobIds);
+  const reportRequestedJobIds = stringArrayValue(report.requestedJobIds);
+  const reportProposedJobIds = stringArrayValue(report.proposedJobIds);
+  const reportAppliedJobIds = stringArrayValue(report.appliedJobIds);
+  const entryArtifactIds = stringArrayValue(entry.artifactIds);
+  const expectedArtifactIds = input.artifacts.map((artifact) => `intake-artifact:${artifact.id}`).sort();
+  const selectedRootId = selectedWrite.rootAction === 'CREATE_ROOT'
+    ? null
+    : selectedWrite.rootAction === 'REUSE_ROOT'
+      ? input.root.id
+      : undefined;
+  let reportHashValid = false;
+  try {
+    reportHashValid = typeof entry.reportHash === 'string'
+      && report.reportHash === entry.reportHash
+      && reportHashFor(report as unknown as AffiliateLegacyRepairAdmissionReport) === entry.reportHash;
+  } catch {
+    reportHashValid = false;
+  }
+  return entry.strategyRevision === AFFILIATE_LEGACY_REPAIR_STRATEGY_REVISION
+    && stringValue(entry.operatorId) !== null
+    && reportHashValid
+    && sameAdmissionValue(entrySelectedJobIds, reportSelectedJobIds)
+    && sameAdmissionValue(entryRequestedJobIds, reportRequestedJobIds)
+    && entry.selectionLimit === report.selectionLimit
+    && sameAdmissionValue(reportProposedJobIds, reportSelectedJobIds)
+    && sameAdmissionValue(reportAppliedJobIds, reportSelectedJobIds)
+    && report.writeCount === reportAppliedJobIds?.length
+    && report.reviewedReportHash === null
+    && report.replayed === false
+    && report.schemaVersion === AFFILIATE_LEGACY_REPAIR_ADMISSION_SCHEMA_VERSION
+    && report.mode === 'APPLY'
+    && report.contractVersion === input.ancestor.result.supplyContractVersion
+    && report.contractHash === input.ancestor.result.supplyContractHash
+    && reportSelectedJobIds?.includes(input.mappingJob.id) === true
+    && reportRow !== null
+    && reportWrite !== null
+    && selectedRow.jobId === input.mappingJob.id
+    && selectedRow.intakeId === input.intake.id
+    && selectedRow.sourceId === input.source.id
+    && selectedRow.mappingId === (input.mapping?.id ?? null)
+    && (selectedWrite.rootAction === 'CREATE_ROOT' || selectedWrite.rootAction === 'REUSE_ROOT')
+    && selectedRow.rootId === selectedRootId
+    && selectedRow.evidenceRunId === input.ancestor.subject.repairContext.evidenceRunId
+    && selectedRow.gatewayDedupeKey === entry.gatewayDedupeKey
+    && selectedWrite.gatewayDedupeKey === entry.gatewayDedupeKey
+    && selectedWrite.intakeId === input.intake.id
+    && selectedWrite.rootIdentityKey === input.root.identityKey
+    && selectedWrite.sourceId === input.source.id
+    && selectedWrite.mappingId === (input.mapping?.id ?? null)
+    && selectedWrite.evidenceRunId === input.run.id
+    && sameAdmissionValue(selectedWrite.artifactIds, expectedArtifactIds)
+    && sameAdmissionValue(reportWrite, selectedWrite)
+    && reportRow.jobId === selectedRow.jobId
+    && sameAdmissionValue(
+      Object.fromEntries(Object.entries(reportRow).filter(([key]) => key !== 'outcome')),
+      Object.fromEntries(Object.entries(selectedRow).filter(([key]) => key !== 'outcome')),
+    )
+    && entry.rootId === input.root.id
+    && entry.rootLifecycleGeneration === input.root.lifecycleGeneration
+    && entry.sourceId === input.source.id
+    && entry.mappingId === (input.mapping?.id ?? null)
+    && entry.evidenceRunId === input.run.id
+    && entry.sportsCatalogSha256 === input.ancestor.subject.repairContext.sportsCatalog.sha256
+    && sameAdmissionValue(entry.artifactIds, expectedArtifactIds)
+    && sameRepairContext(entry.repairContext, input.ancestor.subject.repairContext)
+    && sameAdmissionValue(entry.gatewayDedupeKey, input.ancestor.gatewayJob.dedupeKey)
+};
 
 const gatewayIdentityMatches = (
   gatewayJob: GatewayJobRow,
@@ -2830,6 +2920,22 @@ const retryParentPartsFor = (
       if (envelope.jobId !== gatewayJob.id || envelope.claimId !== claim.id) reasons.push('PARENT_CLAIM_IDENTITY_INVALID');
       if (envelope.subject.type !== 'MAPPING_PRODUCER') reasons.push('PARENT_CLAIM_SUBJECT_INVALID');
       if (
+        envelope.role !== claim.role
+        || envelope.role !== gatewayJob.role
+        || envelope.queue !== claim.queue
+        || envelope.queue !== gatewayJob.queue
+        || envelope.lane !== claim.lane
+        || envelope.lane !== gatewayJob.lane
+        || envelope.supplySourceId !== gatewayJob.supplySourceId
+        || !subject
+        || envelope.supplySourceId !== subject.supplySourceId
+        || envelope.claimGeneration !== claim.claimGeneration
+        || envelope.lifecycleGeneration !== claim.lifecycleGeneration
+        || envelope.workerId !== claim.workerId
+        || envelope.invocationId !== claim.invocationId
+        || envelope.workspaceId !== claim.workspaceId
+      ) reasons.push('PARENT_CLAIM_ROUTING_MISMATCH');
+      if (
         envelope.deploymentContractVersion !== claim.deploymentContractVersion
         || envelope.deploymentContractHash !== claim.deploymentContractHash
         || envelope.roleContractVersion !== claim.roleContractVersion
@@ -2883,6 +2989,11 @@ const retryParentPartsFor = (
       result.jobId !== gatewayJob.id
       || result.claimId !== claim?.id
       || result.claimGeneration !== claim?.claimGeneration
+      || result.lifecycleGeneration !== claim?.lifecycleGeneration
+      || result.roleContractVersion !== claim?.roleContractVersion
+      || result.roleContractHash !== claim?.roleContractHash
+      || result.promptTemplateVersion !== claim?.promptTemplateVersion
+      || result.promptTemplateHash !== claim?.promptTemplateHash
       || result.role !== 'MAPPING_PRODUCER'
       || result.disposition !== 'CONTRACT_GAP'
       || result.deploymentContractVersion !== claim?.deploymentContractVersion
@@ -2892,6 +3003,10 @@ const retryParentPartsFor = (
       || result.workerId !== claim?.workerId
       || result.invocationId !== claim?.invocationId
     ) reasons.push('PARENT_TERMINAL_RESULT_IDENTITY_INVALID');
+    if (
+      (claim?.roleContractVersion ?? 0) >= 3
+      && recordValue(result.payload).sportEvidence === undefined
+    ) reasons.push('PARENT_SPORT_EVIDENCE_MISSING');
     const parentManifest = affiliateAgentEvidenceManifestSchema.safeParse(gatewayJob.evidenceManifestJson);
     if (!parentManifest.success) {
       reasons.push('PARENT_EVIDENCE_MANIFEST_INVALID');
@@ -2949,6 +3064,7 @@ const retryParentLineageValid = (
   const ancestorParts = retryParentPartsFor(snapshot, ancestorJob.id).parts;
   if (!ancestorParts || ancestorParts.subject.pass !== parent.subject.pass - 1) return false;
   return ancestorParts.subject.mappingJobId === parent.subject.mappingJobId
+    && ancestorParts.subject.supplySourceId === parent.subject.supplySourceId
     && sameRetryLineageContext(ancestorParts.subject.repairContext, parent.subject.repairContext)
     && sameAdmissionValue(ancestorJob.evidenceManifestJson, parent.gatewayJob.evidenceManifestJson)
     && retryParentLineageValid(snapshot, ancestorParts, seen);
@@ -2969,6 +3085,35 @@ const retryAncestorGatewayJobIds = (
     parentClaimId = job.parentClaimId ?? null;
   }
   return result;
+};
+const retryOriginalAncestorFor = (
+  snapshot: RetrySnapshot,
+  parent: RetryParentParts,
+): RetryParentParts | null => {
+  let current = parent;
+  const seen = new Set<string>();
+  while (current.subject.pass > 1) {
+    if (seen.has(current.gatewayJob.id)) return null;
+    seen.add(current.gatewayJob.id);
+    const parentClaimId = current.gatewayJob.parentClaimId;
+    if (!parentClaimId) return null;
+    const ancestorClaim = snapshot.gatewayClaims.find((claim) => claim.id === parentClaimId);
+    const ancestorJob = ancestorClaim
+      ? snapshot.gatewayJobs.find((job) => job.id === ancestorClaim.jobId)
+      : null;
+    if (!ancestorJob) return null;
+    const ancestor = retryParentPartsFor(snapshot, ancestorJob.id).parts;
+    if (
+      !ancestor
+      || ancestor.subject.pass !== current.subject.pass - 1
+      || ancestor.subject.mappingJobId !== current.subject.mappingJobId
+      || ancestor.subject.supplySourceId !== current.subject.supplySourceId
+      || !sameRetryLineageContext(ancestor.subject.repairContext, current.subject.repairContext)
+      || !sameAdmissionValue(ancestor.gatewayJob.evidenceManifestJson, current.gatewayJob.evidenceManifestJson)
+    ) return null;
+    current = ancestor;
+  }
+  return current.subject.pass === 1 ? current : null;
 };
 
 const retryDedupeKeyFor = (gatewayJobId: string): string => (
@@ -3079,6 +3224,9 @@ const retryAuditedChildMatches = (
 ): boolean => {
   if (!child) return false;
   const parsedSubject = affiliateAgentSubjectSchema.safeParse(child.subjectJson);
+  const auditRootLifecycleGeneration = typeof audit.rootLifecycleGeneration === 'number'
+    ? audit.rootLifecycleGeneration
+    : null;
   return child.id === stringValue(audit.childGatewayJobId)
     && child.dedupeKey === stringValue(audit.childDedupeKey)
     && child.role === 'MAPPING_PRODUCER'
@@ -3086,13 +3234,14 @@ const retryAuditedChildMatches = (
     && child.subjectId === mappingJob.id
     && child.parentClaimId === parent.claim.id
     && child.supplySourceId === root.id
-    && child.expectedLifecycleGeneration === root.lifecycleGeneration
+    && auditRootLifecycleGeneration !== null
+    && child.expectedLifecycleGeneration === auditRootLifecycleGeneration
     && parsedSubject.success
     && parsedSubject.data.type === 'MAPPING_PRODUCER'
     && parsedSubject.data.mappingJobId === mappingJob.id
     && parsedSubject.data.supplySourceId === root.id
     && parsedSubject.data.pass === retryPass
-    && sameRetryLineageContext(parsedSubject.data.repairContext, parent.subject.repairContext)
+    && sameAdmissionValue(parsedSubject.data.repairContext, audit.repairContext)
     && sameAdmissionValue(child.evidenceManifestJson, manifest);
 };
 
@@ -3303,13 +3452,14 @@ const retryEvaluateJob = (
           reasons.push('INVALID_EVIDENCE_MANIFEST');
         }
       }
-      admissionEvidence = manifest && root
+      const admittedParent = retryOriginalAncestorFor(snapshot, parent);
+      admissionEvidence = manifest && root && admittedParent
         ? admissionEvidenceForGateway(
           mappingJob,
-          root.id,
-          parent.subject.repairContext,
+          admittedParent.subject.supplySourceId,
+          admittedParent.subject.repairContext,
           manifest,
-          parent.gatewayJob.dedupeKey,
+          admittedParent.gatewayJob.dedupeKey,
         )
         : null;
       if (!admissionEvidence) reasons.push('MISSING_ADMISSION_EVIDENCE');
@@ -3322,6 +3472,25 @@ const retryEvaluateJob = (
           || stringValue(selectedWrite.sourceId) !== source.id
           || stringValue(selectedWrite.mappingId) !== (mapping?.id ?? null)
         ) reasons.push('ADMISSION_IDENTITY_DRIFT');
+        if (
+          admissionEvidence
+          && admittedParent
+          && run
+          && root
+          && manifest
+          && !productionAdmissionEvidenceMatches({
+            entry: admissionEvidence,
+            mappingJob,
+            intake,
+            source: currentSource,
+            mapping,
+            root,
+            run,
+            artifacts,
+            ancestor: admittedParent,
+            manifest,
+          })
+        ) reasons.push('ADMISSION_EVIDENCE_INVALID');
       }
     }
   }
@@ -3917,6 +4086,7 @@ const retryReplayReport = async (
     if (
       !parentParts
       || !childId
+      || !childMatches
       || (child !== null && child.status === 'COMPLETED' && child.terminalReceiptId === null)
       || write.gatewayJobId !== gatewayJobIds[index]
       || !sameAdmissionValue(write.gatewayDedupeKey, audit.childDedupeKey)
@@ -3985,6 +4155,8 @@ export const applyAffiliateLegacyRepairRetry = async (
     if (
       retrySnapshot.admission.gatewayClaims.some((claim) => normalizedUpper(claim.status) === 'ACTIVE')
       || retrySnapshot.gatewayClaims.some((claim) => normalizedUpper(claim.status) === 'ACTIVE')
+      || retrySnapshot.admission.gatewayJobs.some((gatewayJob) => gatewayJob.activeClaimId !== null)
+      || retrySnapshot.gatewayJobs.some((gatewayJob) => gatewayJob.activeClaimId !== null)
     ) {
       throw new AffiliateLegacyRepairAdmissionError(
         'CLAIM_DRIFT',
