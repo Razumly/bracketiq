@@ -19,8 +19,9 @@ The operator selected OMP with two ChatGPT accounts. The governed affiliate work
 - [x] (2026-09-07) Add private broker and model gateway deployment configuration with inspected credential, image, mount, network, and lifecycle evidence.
 - [x] (2026-09-07) Construct a real restricted SDK session without a provider call. Both active and registered tools contain only `read_artifact`, `execute_command`, and `submit_result`. No session file, MCP connection, or model fallback exists.
 - [x] (2026-09-07) Pass TypeScript and all 440 tests across 15 focused suites. Targeted ESLint and helper/wizard syntax checks pass.
-- [ ] Obtain two fresh interactive account logins into the dedicated broker store.
-- [ ] Verify both accounts and the production-equivalent runtime before another claim.
+- [x] Complete two direct device-code logins in the dedicated broker profile.
+- [x] Verify two healthy distinct accounts, broker-managed refresh, exact Luna catalog entry, and one bounded native inference.
+- [ ] Verify the workload runner and a real claim after separate workload approval.
 - [x] (2026-09-07) Record conditional `AUTH SETUP` approval: after source review/checks, publish governed affiliate OMP images and start only the broker, gateway, and two temporary login helpers; keep existing Gateway/workers unchanged and do not restart mapping claim, RootRunner, or workload.
 - [ ] Obtain later separate approval for workload Linux/root-runner/canary deployment.
 - [ ] Deploy the approved images after a fresh preflight.
@@ -73,7 +74,7 @@ Decision: Keep an invocation-local idempotency key for each identical operation.
 ## Outcomes & Retrospective
 
 
-The source is implemented, verified, reviewed, and pushed. The approved images are published, and the OMP auth broker is healthy. Two browser logins, model-gateway startup, and model checks remain pending. The workload runtime and canary still require separate approval. No runtime change is authorized by this plan alone; only the explicit approval record permits the completed auth setup operations.
+The source is implemented, verified, reviewed, and pushed. Both approved auth services are healthy. Two distinct ChatGPT accounts passed provider health checks. A bounded native Luna request returned `OK`. The workload runtime and canary still require separate approval. No business worker was started and no mapping claim ran.
 
 ## Context and Orientation
 
@@ -165,7 +166,7 @@ The final unified source gate passed `npx tsc --noEmit --pretty false` and 440 t
 
 A real isolated OMP 18.1.13 session on Bun 1.3.14 exposed exactly the three trusted tools. It included all three opaque evidence references from the fixture manifest. It had no session file, persistent artifacts, MCP manager, model fallback, or WebSocket preference. Native schema conversion accepted the declarative command and rejected arbitrary execution. No provider request was made.
 
-The new bearer preparation module parses with the pinned Bun transpiler. Both shell entrypoints pass syntax checks. The two-account wizard is `/tmp/issue70-omp-login.sh`, mode `0700`; it has not been executed. ShellCheck is not installed. These source checks ran before the approved image publication and broker startup recorded below.
+The new bearer preparation module parses with the pinned Bun transpiler. Both shell entrypoints passed syntax checks. The wizard later failed before callback readiness and was retired at the operator's request. Direct `omp auth-broker login openai-codex-device` inside the broker container completed both logins without a callback tunnel. ShellCheck is not installed.
 
 The repaired capture programs were exercised with credential-free transformation fixtures. They remove bearer text, retain the normalized fingerprint, distinguish internal from external networks, retain an unmanaged broker-volume consumer, reject a stale worker topology and forbidden model bearer environment, preserve a complete refreshed inventory, and reject relabeled stale process data. The updated evidence-path manifest includes the new capture artifacts and uses the documented newline-inclusive SHA-256 convention.
 
@@ -197,9 +198,10 @@ It is mode `0600`. The canonical `governed-deployment.env` remains unchanged.
 Only the two model containers were created. The broker was started and is
 healthy. Its container ID is
 `83dd08b3b5498f7d0c37ee09dcfa5569e4d9c663d931197d599870880712500a`.
-It runs as `1003:1003`, reports Bun `1.3.14` and OMP `18.1.13`, and has zero
-stored ChatGPT accounts. The model gateway remains `created`, not running;
-its ID is `ddff3bf5ba780f7d75e301463473966e422ddf44d9316c91d48315b25617a10e`.
+It runs as `1003:1003` and reports Bun `1.3.14` and OMP `18.1.13`.
+It now stores two active, distinct ChatGPT OAuth identities. The model gateway
+was started under the existing auth-only approval and is healthy. Its ID is
+`ddff3bf5ba780f7d75e301463473966e422ddf44d9316c91d48315b25617a10e`.
 
 Actual Docker inspection confirmed the two internal model networks, separate
 egress, no production database network intersection, no host-published
@@ -221,10 +223,25 @@ The copy is root-owned. It is not installed on the global PATH. Use this
 reviewed runtime for the host capture helper instead of assuming Node is
 installed.
 
-The operator must now run the local `/tmp/issue70-omp-login.sh` wizard with
-the exact agent image, broker container ID, and broker volume above. Both
-browser logins are still pending. Start the model gateway only after those
-logins complete, then verify account health and the exact Luna model.
+The operator completed both logins through SSH with the native device flow:
+
+    docker exec -it --user 1003:1003 bracketiq-affiliate-governed-affiliate-model-auth-broker-1 sh -c 'umask 077; exec /workspace/apps/site/node_modules/.bin/omp auth-broker login openai-codex-device'
+
+Read-only broker inspection confirmed two active, distinct identities.
+The model gateway's authenticated credential check returned HTTP 200 with
+two healthy accounts, zero failed or unverified accounts, and broker-managed
+refresh for both. Its authenticated catalog contains
+`openai-codex/gpt-5.6-luna` with a 1,000,000-token context and 128,000-token
+maximum output.
+
+A no-tool operator connectivity probe used the real pinned SDK and
+`pi-native` transport through the model gateway. It returned `OK`, stopped
+normally, and reported 26 input tokens and 5 output tokens. The initial
+probe was rejected before inference because its system prompt was a string;
+the corrected probe used the native array-of-strings context contract.
+One successful pool request does not prove rotation between both accounts.
+
 The existing BracketIQ Gateway remains healthy. Mapping workers, the root
 runner, coverage, and replenishment were not started or reconfigured.
-No new mapping claim ran.
+No new mapping claim ran. Workload, Linux runner, and canary actions still
+require separate current approval.
