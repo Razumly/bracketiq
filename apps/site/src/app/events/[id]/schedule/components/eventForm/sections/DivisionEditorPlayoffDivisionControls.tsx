@@ -1,8 +1,6 @@
 import type { Dispatch, SetStateAction } from 'react';
-import {
-    NumberInput,
-    TextInput,
-} from '@mantine/core';
+import { NumberInput,
+TextInput, } from '@/components/organization/organization-operation-ui';
 import { motion } from 'motion/react';
 
 import TournamentFields from '@/app/discover/components/TournamentFields';

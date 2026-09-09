@@ -2,17 +2,15 @@
 
 import type { ComponentProps } from 'react';
 import { Controller } from 'react-hook-form';
-import {
-    Alert,
-    Loader,
-    MultiSelect,
-    Select as MantineSelect,
-    Stack,
-    Text,
-    TextInput,
-    Textarea,
-    Title,
-} from '@mantine/core';
+import { Alert,
+Loader,
+MultiSelect,
+Select as MantineSelect,
+Stack,
+Text,
+TextInput,
+Textarea,
+Title, } from '@/components/organization/organization-operation-ui';
 
 import { ImageUploader } from '@/components/ui/ImageUploader';
 

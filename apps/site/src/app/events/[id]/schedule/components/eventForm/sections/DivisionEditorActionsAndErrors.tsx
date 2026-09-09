@@ -1,9 +1,7 @@
-import {
-    Alert,
-    Button,
-    Group,
-    Text,
-} from '@mantine/core';
+import { Alert,
+Button,
+Group,
+Text, } from '@/components/organization/organization-operation-ui';
 
 type DivisionEditorActionsAndErrorsProps = {
     isEditing: boolean;

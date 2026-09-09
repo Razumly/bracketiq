@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { TextInput, Button, Paper } from '@mantine/core';
+import { Button, Paper, TextInput } from '@/components/organization/organization-operation-ui';
 import { GoogleMap, useJsApiLoader } from '@react-google-maps/api';
 import { locationService, type PlacePrediction, type PlacePredictionOptions } from '@/lib/locationService';
 import { GOOGLE_MAP_OPTIONS_WITH_MAP_ID, GOOGLE_MAPS_LIBRARIES, GOOGLE_MAPS_MAP_ID, GOOGLE_MAPS_SCRIPT_ID } from '@/lib/googleMapsLoader';

@@ -46,6 +46,7 @@ type EventDetailsPanelProps = {
     onToggle: () => void;
     onEventTypeChange: ComponentProps<typeof EventDetailsTypeControls>['onEventTypeChange'];
     onAffiliateEventChange: ComponentProps<typeof EventDetailsTypeControls>['onAffiliateEventChange'];
+    onAffiliateUrlChange: ComponentProps<typeof EventDetailsTypeControls>['onAffiliateUrlChange'];
     onIncludePlayoffsChange: (checked: boolean) => void;
     onIncludePoolPlayChange: (checked: boolean) => void;
     onStartChange: (value: Date) => void;
@@ -112,6 +113,7 @@ export const EventDetailsPanel = ({
     onToggle,
     onEventTypeChange,
     onAffiliateEventChange,
+    onAffiliateUrlChange,
     onIncludePlayoffsChange,
     onIncludePoolPlayChange,
     onStartChange,
@@ -174,6 +176,7 @@ export const EventDetailsPanel = ({
                 isImmutableField={isImmutableField}
                 onEventTypeChange={onEventTypeChange}
                 onAffiliateEventChange={onAffiliateEventChange}
+                onAffiliateUrlChange={onAffiliateUrlChange}
                 onIncludePlayoffsChange={onIncludePlayoffsChange}
                 onIncludePoolPlayChange={onIncludePoolPlayChange}
             /> : null}

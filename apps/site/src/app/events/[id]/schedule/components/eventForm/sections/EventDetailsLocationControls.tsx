@@ -1,11 +1,9 @@
 import type { ComponentProps, ReactNode } from 'react';
 import { Controller, type Control } from 'react-hook-form';
-import {
-    Alert,
-    MultiSelect as MantineMultiSelect,
-    NumberInput,
-    Text,
-} from '@mantine/core';
+import { Alert,
+MultiSelect as MantineMultiSelect,
+NumberInput,
+Text, } from '@/components/organization/organization-operation-ui';
 
 import LocationSelector, { type LocationSelectionMeta } from '@/components/location/LocationSelector';
 import { minimumParticipantCountForEventType } from '@/lib/divisionTypes';

@@ -8,7 +8,7 @@ import {
   Paper,
   Stack,
   Text,
-} from '@mantine/core';
+} from '@/components/organization/organization-operation-ui';
 
 import PaymentModal, { type PaymentEventSummary } from '@/components/ui/PaymentModal';
 import type { SignStep } from '@/lib/boldsignService';

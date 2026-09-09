@@ -1,22 +1,22 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight } from 'lucide-react';
 import {
-  NumberInput,
-  Switch,
-  Select as MantineSelect,
-  MultiSelect as MantineMultiSelect,
-  Button,
-  Group,
-  Text,
   Alert,
-  Loader,
-  Stack,
   Badge,
+  Button,
+  DatePickerInput,
+  Group,
+  Loader,
+  MultiSelect as MantineMultiSelect,
+  NumberInput,
   Paper,
-  Title,
+  Select as MantineSelect,
+  Stack,
+  Switch,
+  Text,
   TextInput,
-} from '@mantine/core';
-import { DatePickerInput } from '@mantine/dates';
+  Title,
+} from '@/components/organization/organization-operation-ui';
 import type { Field, LeagueConfig, Sport, TimeSlot } from '@/types';
 import { MIN_BRACKET_TEAM_COUNT } from '@/lib/divisionTypes';
 import { BRACKET_TEAM_COUNT_ERROR } from '@/app/events/[id]/schedule/components/eventForm/divisionMessages';

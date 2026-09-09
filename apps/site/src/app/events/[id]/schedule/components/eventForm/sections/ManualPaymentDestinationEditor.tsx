@@ -1,4 +1,4 @@
-import { Button, Group, Image, Select, Stack, TextInput } from '@mantine/core';
+import { Button, Group, Image, Select, Stack, TextInput } from '@/components/organization/organization-operation-ui';
 import { Link as LinkIcon } from 'lucide-react';
 import { useController, type Control } from 'react-hook-form';
 

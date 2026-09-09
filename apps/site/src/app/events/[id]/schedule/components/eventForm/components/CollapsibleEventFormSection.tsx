@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Badge, Button, Collapse, Paper, Text } from '@mantine/core';
+import { Badge, Button, Collapse, Paper, Text } from '@/components/organization/organization-operation-ui';
 
 import { SECTION_ANIMATION_DURATION_MS } from '../constants';
 
@@ -38,8 +38,7 @@ export const CollapsibleEventFormSection = ({
             radius="md"
             withBorder
             p="lg"
-            className="scroll-mt-20 bg-gray-50"
-            style={hasErrors ? { borderColor: 'var(--mantine-color-red-6)' } : undefined}
+            className={`scroll-mt-20 bg-white ${hasErrors ? 'border-red-300' : 'border-slate-200'}`}
         >
             <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">

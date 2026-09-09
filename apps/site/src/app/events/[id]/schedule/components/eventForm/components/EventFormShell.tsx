@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Alert } from '@mantine/core';
+import { Alert } from '@/components/organization/organization-operation-ui';
 
 import {
     SectionNavigation,
@@ -33,56 +33,52 @@ export const EventFormShell = ({
     firstValidationError,
     children,
 }: EventFormShellProps) => (
-    <div className="w-full space-y-6">
-        <div className="p-4">
-            <div className={hideSectionNavigation
-                ? 'grid grid-cols-1 gap-6'
-                : 'grid grid-cols-1 gap-6 xl:grid-cols-[240px_minmax(0,1fr)]'}>
+    <div className="w-full">
+        <div className={hideSectionNavigation
+            ? 'grid grid-cols-1 gap-5'
+            : 'grid grid-cols-1 gap-5 xl:grid-cols-[220px_minmax(0,1fr)]'}>
+            {!hideSectionNavigation ? <SectionNavigation
+                items={sectionNavItems}
+                activeSectionId={activeSectionId}
+                variant="desktop"
+                onSelectSection={onSelectSection}
+            /> : null}
+
+            <div className="min-w-0">
+                {validationErrorCount > 0 ? (
+                    <Alert color="red" variant="light" radius="md" mb="md" role="status" aria-live="polite">
+                        {validationErrorCount} {validationErrorCount === 1 ? 'issue needs' : 'issues need'} attention.
+                        {firstValidationError ? ` ${firstValidationError}` : ''}
+                    </Alert>
+                ) : null}
                 {!hideSectionNavigation ? <SectionNavigation
                     items={sectionNavItems}
                     activeSectionId={activeSectionId}
-                    variant="desktop"
+                    variant="mobile"
                     onSelectSection={onSelectSection}
                 /> : null}
-
-                <div className="min-w-0">
-                    {validationErrorCount > 0 ? (
-                        <Alert color="red" variant="light" radius="md" mb="md" role="status" aria-live="polite">
-                            {validationErrorCount} {validationErrorCount === 1 ? 'issue needs' : 'issues need'} attention.
-                            {firstValidationError ? ` ${firstValidationError}` : ''}
+                <div className="w-full">
+                    {mobileEditUnsupportedWarning && (
+                        <Alert color="yellow" variant="light" radius="md" mb="md">
+                            {mobileEditUnsupportedWarning}
                         </Alert>
-                    ) : null}
-                    {!hideSectionNavigation ? <SectionNavigation
-                        items={sectionNavItems}
-                        activeSectionId={activeSectionId}
-                        variant="mobile"
-                        onSelectSection={onSelectSection}
-                    /> : null}
-                    <div className="w-full">
-                        <form id={formId} className="space-y-8">
-                            {mobileEditUnsupportedWarning && (
-                                <Alert color="yellow" variant="light" radius="md">
-                                    {mobileEditUnsupportedWarning}
-                                </Alert>
-                            )}
-                            {children}
-                        </form>
-                    </div>
+                    )}
+                    <form id={formId} className={hideSectionNavigation ? 'grid grid-cols-1 gap-6 lg:grid-cols-2' : 'space-y-6'}>
+                        {children}
+                    </form>
+                </div>
 
-                    <div className="border-t p-6 flex justify-between items-center">
-                        <div className="flex flex-col gap-3">
-                            {leagueWarning && (
-                                <Alert color="yellow" radius="md">
-                                    {leagueWarning}
-                                </Alert>
-                            )}
-                            {leagueError && (
-                                <Alert color="red" radius="md">
-                                    {leagueError}
-                                </Alert>
-                            )}
-                        </div>
-                    </div>
+                <div className="mt-5 flex flex-col gap-3">
+                    {leagueWarning && (
+                        <Alert color="yellow" radius="md">
+                            {leagueWarning}
+                        </Alert>
+                    )}
+                    {leagueError && (
+                        <Alert color="red" radius="md">
+                            {leagueError}
+                        </Alert>
+                    )}
                 </div>
             </div>
         </div>

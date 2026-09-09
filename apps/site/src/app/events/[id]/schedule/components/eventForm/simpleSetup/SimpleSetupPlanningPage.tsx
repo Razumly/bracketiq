@@ -1,19 +1,17 @@
 "use client";
 
 import { Controller, type Control } from "react-hook-form";
-import {
-  Alert,
-  Button,
-  NumberInput,
-  Radio,
-  Select,
-  SimpleGrid,
-  Stack,
-  Checkbox,
-  Switch,
-  Text,
-  Title,
-} from "@mantine/core";
+import { Alert,
+Button,
+NumberInput,
+Radio,
+Select,
+SimpleGrid,
+Stack,
+Checkbox,
+Switch,
+Text,
+Title, } from '@/components/organization/organization-operation-ui';
 
 import type { Event } from "@/types";
 
@@ -152,6 +150,7 @@ export const SimpleSetupPlanningPage = ({
               control={control}
               render={({ field, fieldState }) => (
                 <Select
+                  native
                   label="Event type"
                   description="Tryouts are available only to organizations with club features enabled."
                   data={eventTypeOptions}

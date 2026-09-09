@@ -1,4 +1,4 @@
-import { Button, Paper, Popover, Stack, Text } from '@mantine/core';
+import { Button, Paper, Popover, Stack, Text } from '@/components/organization/organization-operation-ui';
 import { ListChecks } from 'lucide-react';
 
 import type { PendingSaveChangeItem } from './helpers';

@@ -1,13 +1,11 @@
-import {
-    Button,
-    Group,
-    Paper,
-    SimpleGrid,
-    Stack,
-    Text,
-    TextInput,
-    Title,
-} from '@mantine/core';
+import { Button,
+Group,
+Paper,
+SimpleGrid,
+Stack,
+Text,
+TextInput,
+Title, } from '@/components/organization/organization-operation-ui';
 
 import UserCard from '@/components/ui/UserCard';
 import type { UserData } from '@/types';

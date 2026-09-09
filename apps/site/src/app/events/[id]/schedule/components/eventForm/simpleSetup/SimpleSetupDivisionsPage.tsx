@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useMemo, type ComponentProps } from 'react';
-import { Stack, Text, Title } from '@mantine/core';
+import { Stack, Text, Title } from '@/components/organization/organization-operation-ui';
 import LeagueScoringConfigPanel from '@/app/discover/components/LeagueScoringConfigPanel';
 
 import {

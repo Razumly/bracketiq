@@ -1,7 +1,8 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 
-import { Button, DatePickerInput, MultiSelect, Popover, Select } from '../organization-operation-ui';
+import { Button, Collapse, DatePickerInput, DateTimePicker, MultiSelect, NumberInput, PillsInput, Popover, Select, TextInput } from '../organization-operation-ui';
 
 describe('organization operation filters', () => {
   it('does not select Today before the minimum date', async () => {
@@ -19,6 +20,15 @@ describe('organization operation filters', () => {
     if (crossesMonth) await user.click(screen.getByRole('button', { name: /next month/i }));
     await user.click(screen.getByRole('button', { name: tomorrow.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) }));
     expect(onChange).toHaveBeenCalledWith(new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate()));
+  });
+
+  it('preserves local time in DateTimePicker string values', async () => {
+    const user = userEvent.setup();
+    render(<DateTimePicker aria-label="Start time" value="2030-01-02T13:45" onChange={jest.fn()} />);
+
+    await user.click(screen.getByRole('button', { name: 'Start time' }));
+
+    expect(screen.getByLabelText('Start time time')).toHaveValue('13:45');
   });
 
   it.each(['outside', 'Escape'])('restores the selected label after dismissal with %s', async (method) => {
@@ -50,6 +60,163 @@ describe('organization operation filters', () => {
     await user.keyboard('{Escape}');
     expect(input).toHaveValue('EVENT');
   });
+  it('restores a clearable Select to its empty value', async () => {
+    const user = userEvent.setup();
+    const onChange = jest.fn();
+    render(<Select aria-label="Event type" value="EVENT" data={['EVENT', 'TOURNAMENT']} clearable onChange={onChange} />);
+
+    await user.click(screen.getByRole('button', { name: 'Clear selection' }));
+
+    expect(onChange).toHaveBeenCalledWith(null);
+  });
+  it('selects an option with ArrowDown and Enter', async () => {
+    const user = userEvent.setup();
+    const onChange = jest.fn();
+    render(<Select aria-label="Sport" data={['Soccer', 'Tennis']} value={null} onChange={onChange} />);
+    const input = screen.getByRole('combobox', { name: 'Sport' });
+
+    await user.click(input);
+    await user.keyboard('{ArrowDown}{Enter}');
+
+    expect(onChange).toHaveBeenCalledWith('Soccer');
+  });
+  it('scrolls the active Select option into view', async () => {
+    const user = userEvent.setup();
+    const scrollIntoView = jest.fn();
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView });
+
+    try {
+      render(<Select aria-label="Sport" data={Array.from({ length: 30 }, (_, index) => `Sport ${index + 1}`)} value={null} />);
+      const input = screen.getByRole('combobox', { name: 'Sport' });
+      await user.click(input);
+      await user.keyboard('{ArrowDown}');
+
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+    } finally {
+      Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: originalScrollIntoView });
+    }
+  });
+
+
+  it('associates field help and errors with the input', () => {
+    render(<TextInput label="Event name" description="Use a clear name." error="Event name is required" />);
+    const input = screen.getByRole('textbox', { name: 'Event name' });
+    const describedBy = input.getAttribute('aria-describedby')?.split(' ') ?? [];
+
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(describedBy).toHaveLength(2);
+    expect(describedBy.every((id) => document.getElementById(id))).toBe(true);
+  });
+
+
+  it('preserves decimal editing while the controlled value updates', async () => {
+    const user = userEvent.setup();
+    function ControlledNumberInput() {
+      const [value, setValue] = useState<number | string>(0);
+      return <NumberInput aria-label="Duration" value={value} onChange={setValue} />;
+    }
+
+    render(<ControlledNumberInput />);
+    const input = screen.getByRole('textbox', { name: 'Duration' });
+    await user.clear(input);
+    await user.type(input, '1.');
+
+    expect(input).toHaveValue('1.');
+
+    await user.type(input, '50');
+
+    expect(input).toHaveValue('1.50');
+  });
+  it('preserves strict bounds and clamps blur bounds', async () => {
+    const user = userEvent.setup();
+    function BoundedInputs() {
+      const [strictValue, setStrictValue] = useState<number | string>(5);
+      const [blurValue, setBlurValue] = useState<number | string>(5);
+      return (
+        <>
+          <NumberInput aria-label="Strict value" value={strictValue} min={1} max={10} clampBehavior="strict" onChange={setStrictValue} />
+          <NumberInput aria-label="Blur value" value={blurValue} min={1} max={10} clampBehavior="blur" onChange={setBlurValue} />
+        </>
+      );
+    }
+
+    render(<BoundedInputs />);
+    const strictInput = screen.getByRole('textbox', { name: 'Strict value' });
+    const blurInput = screen.getByRole('textbox', { name: 'Blur value' });
+    await user.clear(strictInput);
+    await user.type(strictInput, '100');
+    expect(strictInput).toHaveValue('10');
+    await user.clear(blurInput);
+    await user.type(blurInput, '100');
+    expect(blurInput).toHaveValue('100');
+    await user.tab();
+    expect(blurInput).toHaveValue('10');
+  });
+  it('rejects invalid numeric text without emitting NaN', async () => {
+    const user = userEvent.setup();
+    const onChange = jest.fn();
+    render(<NumberInput aria-label="Points" value={5} onChange={onChange} />);
+    const input = screen.getByRole('textbox', { name: 'Points' });
+
+    await user.type(input, 'a');
+
+    expect(input).toHaveValue('5');
+    expect(onChange).not.toHaveBeenCalled();
+  });
+  it('clears the form value when a nonnumeric draft blurs', async () => {
+    const user = userEvent.setup();
+    const onChange = jest.fn();
+    render(<NumberInput aria-label="Teams" value={3} clampBehavior="none" onChange={onChange} />);
+    const input = screen.getByRole('textbox', { name: 'Teams' });
+
+    await user.clear(input);
+    await user.type(input, '-');
+    await user.tab();
+
+    expect(onChange).toHaveBeenLastCalledWith('');
+    expect(input).toHaveValue('');
+  });
+
+
+
+
+  it('marks collapsed content as hidden and inert', () => {
+    const { container } = render(<Collapse in={false}><button type="button">Hidden action</button></Collapse>);
+    const collapsed = container.firstElementChild;
+
+    expect(collapsed).toHaveAttribute('aria-hidden', 'true');
+    expect(collapsed).toHaveAttribute('inert');
+  });
+  it('associates a PillsInput label with its editable field', () => {
+    render(<PillsInput label="Tags"><PillsInput.Field /></PillsInput>);
+    const input = screen.getByRole('textbox', { name: 'Tags' });
+    const label = screen.getByText('Tags');
+
+    expect(input).toHaveAttribute('id');
+    expect(label).toHaveAttribute('for', input.getAttribute('id'));
+  });
+
+  it('does not auto-toggle a controlled Popover target', async () => {
+    const user = userEvent.setup();
+    function ControlledPopover() {
+      const [opened, setOpened] = useState(false);
+      return (
+        <Popover opened={opened} onChange={setOpened}>
+          <Popover.Target><Button onClick={() => setOpened(true)}>Open</Button></Popover.Target>
+          <Popover.Dropdown>Content</Popover.Dropdown>
+        </Popover>
+      );
+    }
+
+    render(<ControlledPopover />);
+    await user.click(screen.getByRole('button', { name: 'Open' }));
+    expect(screen.getByText('Content')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Open' }));
+    expect(screen.getByText('Content')).toBeVisible();
+  });
+
+
 
 
   it.each(['outside', 'Escape'])('clears uncommitted MultiSelect search after %s dismissal', async (method) => {

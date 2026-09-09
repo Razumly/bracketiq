@@ -1,5 +1,5 @@
 import type { ComponentProps } from 'react';
-import { NumberInput } from '@mantine/core';
+import { NumberInput } from '@/components/organization/organization-operation-ui';
 
 import { AnimatedLayoutSection } from '../components/AnimatedSection';
 import { DIVISION_NUMBER_FIELD_CLASS } from '../divisionLayout';

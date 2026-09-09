@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo } from 'react';
-import { Badge, Button, Group, NumberInput, SimpleGrid, Stack, Switch, TagsInput, Text } from '@mantine/core';
+import { Badge, Button, Group, NumberInput, SimpleGrid, Stack, Switch, TagsInput, Text } from '@/components/organization/organization-operation-ui';
 
 import type {
   EventOfficialPosition,

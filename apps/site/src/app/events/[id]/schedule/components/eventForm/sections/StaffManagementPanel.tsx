@@ -2,7 +2,7 @@ import type {
     ComponentProps,
     UIEvent,
 } from 'react';
-import { Text } from '@mantine/core';
+import { Text } from '@/components/organization/organization-operation-ui';
 import type { Control } from 'react-hook-form';
 
 import type {

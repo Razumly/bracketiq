@@ -1,13 +1,11 @@
 import type { UIEvent } from 'react';
-import {
-    Badge,
-    Button,
-    Group,
-    Paper,
-    Stack,
-    Text,
-    Title,
-} from '@mantine/core';
+import { Badge,
+Button,
+Group,
+Paper,
+Stack,
+Text,
+Title, } from '@/components/organization/organization-operation-ui';
 
 import UserCard from '@/components/ui/UserCard';
 

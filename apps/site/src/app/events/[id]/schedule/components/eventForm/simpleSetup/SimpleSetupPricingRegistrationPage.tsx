@@ -1,13 +1,11 @@
 'use client';
 
 import { Controller } from 'react-hook-form';
-import {
-    Alert,
-    Stack,
-    Text,
-    Textarea,
-    Title,
-} from '@mantine/core';
+import { Alert,
+Stack,
+Text,
+Textarea,
+Title, } from '@/components/organization/organization-operation-ui';
 
 import { EventDetailsLocationControls } from '../sections/EventDetailsLocationControls';
 import { EventDetailsTimingControls } from '../sections/EventDetailsTimingControls';
