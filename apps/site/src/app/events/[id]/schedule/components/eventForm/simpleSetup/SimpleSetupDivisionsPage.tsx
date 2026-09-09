@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useMemo, type ComponentProps } from 'react';
-import { Stack, Text, Title } from '@/components/organization/organization-operation-ui';
+import { Stack, Title } from '@/components/organization/organization-operation-ui';
 import LeagueScoringConfigPanel from '@/app/discover/components/LeagueScoringConfigPanel';
 
 import {
@@ -159,13 +159,6 @@ export const SimpleSetupDivisionsPage = ({
 
     return (
         <Stack gap="lg">
-            <div>
-                <Title order={4}>Division configuration</Title>
-                <Text size="sm" c="dimmed">
-                    Configure capacity, classification, and division-owned competition settings.
-                </Text>
-            </div>
-
             {eventData.eventType === 'TRYOUT' ? (
                 <TryoutDivisionSelector
                     organizationId={organizationId}

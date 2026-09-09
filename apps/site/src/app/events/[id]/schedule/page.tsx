@@ -256,6 +256,12 @@ import {
 } from "./schedulePage/helpers";
 import useEventBilling from "./schedulePage/useEventBilling";
 import {
+  clearCreateEventDraft,
+  createEventDraftStorageKey,
+  readCreateEventDraft,
+  writeCreateEventDraft,
+} from "./schedulePage/createEventDraftStorage";
+import {
   useCreateEventFlow,
   useRentalCheckoutFlow,
 } from "./schedulePage/useCreateEventFlow";
@@ -806,6 +812,25 @@ function EventScheduleContent() {
     EventDetailBootstrapResponse["capabilities"] | null
   >(null);
   const editorDraftRef = useRef<EventEditorDraft | null>(null);
+  const createDraftStorageKey = useMemo(
+    () =>
+      isCreateMode && user?.$id
+        ? createEventDraftStorageKey({
+            userId: user.$id,
+            eventId,
+            organizationId: resolvedHostOrgId ?? orgIdParam,
+            rentalBookingId: rentalBookingIdParam,
+          })
+        : null,
+    [
+      eventId,
+      isCreateMode,
+      orgIdParam,
+      rentalBookingIdParam,
+      resolvedHostOrgId,
+      user?.$id,
+    ],
+  );
   const createdEditorEventIdRef = useRef<string | null>(null);
   const [createBootstrap, setCreateBootstrap] =
     useState<EventEditorCreateBootstrap | null>(null);
@@ -1270,12 +1295,22 @@ function EventScheduleContent() {
       result: EventEditorCreateBootstrap,
       hydrateEditorSnapshot: boolean,
     ) => {
-      createBootstrapRef.current = result;
+      const draft = editorDraftRef.current;
+      const hydratedResult = draft
+        ? {
+            ...result,
+            snapshot: {
+              ...result.snapshot,
+              draft,
+            },
+          }
+        : result;
+      createBootstrapRef.current = hydratedResult;
       createBootstrapKeyRef.current = query.key;
       pendingCreateCommandRef.current = null;
-      setCreateBootstrap(result);
+      setCreateBootstrap(hydratedResult);
       if (hydrateEditorSnapshot) {
-        setEditorSnapshot(result.snapshot);
+        setEditorSnapshot(hydratedResult.snapshot);
       }
     },
     [],
@@ -1287,6 +1322,22 @@ function EventScheduleContent() {
       ),
     [],
   );
+
+  useEffect(() => {
+    if (!isCreateMode || !createDraftStorageKey || typeof window === "undefined") {
+      editorDraftRef.current = null;
+      return;
+    }
+    const savedDraft = readCreateEventDraft(
+      window.sessionStorage,
+      createDraftStorageKey,
+    );
+    editorDraftRef.current = savedDraft;
+    if (!savedDraft) {
+      return;
+    }
+    setEditorDraftEventType(savedDraft.basics.eventType);
+  }, [createDraftStorageKey, isCreateMode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -5493,10 +5544,17 @@ function EventScheduleContent() {
       editorDraftRef.current = draft;
       setEditorDraftEventType(draft.basics.eventType);
       if (isCreateMode) {
+        if (createDraftStorageKey && typeof window !== "undefined") {
+          writeCreateEventDraft(
+            window.sessionStorage,
+            createDraftStorageKey,
+            draft,
+          );
+        }
         setEditorDraftBootstrapKey(buildCreateEditorBootstrapQuery(draft).key);
       }
     },
-    [buildCreateEditorBootstrapQuery, isCreateMode],
+    [buildCreateEditorBootstrapQuery, createDraftStorageKey, isCreateMode],
   );
   const getDraftFromForm = useCallback(
     async (): Promise<EventEditorDraft | null> => {
@@ -5824,6 +5882,9 @@ function EventScheduleContent() {
           "Accepted schedule proposal did not return an Event id.",
         );
       }
+      if (createDraftStorageKey && typeof window !== "undefined") {
+        clearCreateEventDraft(window.sessionStorage, createDraftStorageKey);
+      }
       const scheduleMatches =
         result.scheduleOutcome.matches?.map((match) =>
           normalizeApiMatch(match as unknown as Match),
@@ -5896,6 +5957,7 @@ function EventScheduleContent() {
     getDraftFromForm,
     handlePreviewEventUpdate,
     partialAcceptanceOperationId,
+    createDraftStorageKey,
     router,
     scheduleProposal,
     searchParams,
@@ -6073,6 +6135,9 @@ function EventScheduleContent() {
         if (!persistedEventId) {
           throw new Error("Failed to create event.");
         }
+        if (createDraftStorageKey && typeof window !== "undefined") {
+          clearCreateEventDraft(window.sessionStorage, createDraftStorageKey);
+        }
         const params = new URLSearchParams(searchParams?.toString() ?? "");
         params.delete("create");
         params.delete("preview");
@@ -6096,7 +6161,7 @@ function EventScheduleContent() {
         setPublishing(false);
       }
     },
-    [router, saveEditorConfiguration, searchParams],
+    [createDraftStorageKey, router, saveEditorConfiguration, searchParams],
   );
 
   const scheduleRegularEvent = useCallback(
@@ -6130,6 +6195,9 @@ function EventScheduleContent() {
         if (!persistedEventId) {
           throw new Error("Failed to create event.");
         }
+        if (createDraftStorageKey && typeof window !== "undefined") {
+          clearCreateEventDraft(window.sessionStorage, createDraftStorageKey);
+        }
         const params = new URLSearchParams(searchParams?.toString() ?? "");
         params.delete("create");
         params.delete("mode");
@@ -6155,7 +6223,7 @@ function EventScheduleContent() {
         setPublishing(false);
       }
     },
-    [router, saveEditorConfiguration, searchParams],
+    [createDraftStorageKey, router, saveEditorConfiguration, searchParams],
   );
 
 

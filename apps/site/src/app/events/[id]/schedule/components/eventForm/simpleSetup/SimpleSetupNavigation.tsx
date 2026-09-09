@@ -218,7 +218,11 @@ export const SimpleSetupPageFrame = ({
           disabled={isLastUsedPage && !canSubmit}
           onClick={isLastUsedPage && onSubmit ? onSubmit : onNext}
         >
-          {isLastUsedPage ? "Create Event" : "Next"}
+          {isLastUsedPage
+            ? page.id === "review-publish"
+              ? "Publish Event"
+              : "Create Event"
+            : "Next"}
         </button>
       </div>
     </section>

@@ -82,7 +82,7 @@ export const BasicInformationSection = ({
                     <p className="text-red-600 text-sm mt-1">{errors.imageId.message as string}</p>
                 ) : null}
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-4 md:items-end">
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-4 md:items-start">
                 <Controller
                     name="name"
                     control={control}

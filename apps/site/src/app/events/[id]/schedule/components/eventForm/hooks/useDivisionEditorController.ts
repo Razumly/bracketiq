@@ -299,7 +299,7 @@ export const useDivisionEditorController = ({
         const currentDetails = Array.isArray(eventData.divisionDetails) ? eventData.divisionDetails : [];
         const nextDetails = currentDetails.filter((detail) => detail.id !== divisionId);
         const nextDivisionIds = nextDetails.map((detail) => detail.id);
-        setValue('divisionDetails', nextDetails, { shouldDirty: true, shouldValidate: false });
+        setValue('divisionDetails', nextDetails, { shouldDirty: true, shouldValidate: true });
         setValue('divisions', nextDivisionIds, { shouldDirty: true, shouldValidate: true });
 
         const currentFieldMap = getValues('divisionFieldIds') ?? {};

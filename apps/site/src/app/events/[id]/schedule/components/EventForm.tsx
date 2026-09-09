@@ -638,6 +638,7 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
       [eventData.divisionDetails, setValue],
     );
     const paymentController = useEventPaymentController({
+      control,
       currentUser,
       eventData,
       getValues,
@@ -1744,11 +1745,7 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
             ))}
           </div>
         ) : null}
-        <div
-          className={`rounded-xl border border-gray-200 bg-white shadow-sm ${
-            setupMode === "SIMPLE" ? "overflow-hidden" : ""
-          }`}
-        >
+        <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
           {setupMode === "SIMPLE" && validationErrorIndex.ordered.length > 0 ? (
             <div
               role="status"

@@ -172,7 +172,7 @@ export const DivisionPhaseConfigurationControls = ({
 
   return (
     <div className="mt-4 border-t border-gray-200 pt-4">
-      <Group align="flex-end" gap="md" wrap="wrap">
+      <Group align="flex-start" gap="md" wrap="wrap">
         {!usesSets ? (
           <>
             <NumberInput
