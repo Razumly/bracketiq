@@ -114,7 +114,7 @@ export const SingleDivisionPaymentPlanControls = ({
                             );
 
                             return (
-                                <Group key={index} align="flex-end" gap="sm" wrap="wrap">
+                                <Group key={index} align="flex-start" gap="sm" wrap="wrap">
                                     {useRelativeDueDates ? (
                                         <NumberInput
                                             label={`Installment ${index + 1} due date offset`}

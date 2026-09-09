@@ -496,7 +496,7 @@ export const useDivisionCommitController = ({
             : [...currentDetails, nextDetail];
         const nextDivisionIds = nextDetails.map((detail) => detail.id);
 
-        setValue('divisionDetails', nextDetails, { shouldDirty: true, shouldValidate: false });
+        setValue('divisionDetails', nextDetails, { shouldDirty: true, shouldValidate: true });
         setValue('divisions', nextDivisionIds, { shouldDirty: true, shouldValidate: true });
 
         const currentFieldMap = getValues('divisionFieldIds') ?? {};

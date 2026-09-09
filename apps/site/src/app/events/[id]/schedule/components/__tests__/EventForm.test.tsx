@@ -665,7 +665,7 @@ describe('EventForm dirty state', () => {
 
     expect(await screen.findByRole('heading', { name: 'Options' })).toBeInTheDocument();
     const formatPageFrame = screen.getByRole('region', { name: 'Options' });
-    expect(formatPageFrame.parentElement).toHaveClass('overflow-hidden');
+    expect(formatPageFrame.parentElement).not.toHaveClass('overflow-hidden');
     expect(formatPageFrame).not.toHaveClass('rounded-lg', 'border', 'shadow-sm');
     expect(screen.getByTestId('simple-setup-format-layout')).toHaveClass('flex', 'flex-wrap');
     expect(screen.getByRole('button', { name: 'Basics: Locked' })).toBeInTheDocument();
@@ -917,6 +917,49 @@ describe('EventForm dirty state', () => {
 
     expect(await screen.findByText('Select at least one division')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Divisions' })).toBeInTheDocument();
+  });
+
+  it('clears division validation after adding a division', async () => {
+    renderForm(jest.fn(), undefined, {
+      divisions: [],
+      divisionDetails: [],
+      singleDivision: false,
+    }, null, {
+      initialSetupMode: 'SIMPLE',
+    });
+
+    expect(await screen.findByRole('heading', { name: 'Options' })).toBeInTheDocument();
+    const progress = screen.getByRole('navigation', { name: 'Event setup progress' });
+    fireEvent.click(within(progress).getByRole('button', { name: 'Divisions: Available' }));
+    expect(await screen.findByRole('heading', { name: 'Divisions' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    expect(await screen.findByText('Select at least one division')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Divisions' })).toBeInTheDocument();
+
+    const selectFirstAvailableOption = (label: string) => {
+      const select = screen.getByLabelText(label);
+      fireEvent.click(select);
+      const option = within(screen.getByRole('listbox'))
+        .getAllByRole('option')
+        .find((candidate) => !candidate.hasAttribute('disabled'));
+      expect(option).toBeDefined();
+      fireEvent.click(option!);
+    };
+    selectFirstAvailableOption('Gender');
+    selectFirstAvailableOption('Skill Division');
+    selectFirstAvailableOption('Age Division');
+    fireEvent.change(screen.getByLabelText('Division Name'), {
+      target: { value: 'River City Open' },
+    });
+    fireEvent.change(screen.getByLabelText('Division Max Participants'), {
+      target: { value: '8' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add Division' }));
+
+    await waitFor(() => {
+      expect(screen.queryByText('Select at least one division')).not.toBeInTheDocument();
+    });
   });
 
   it('blocks Schedule and Location when a Weekly Event has no repeating timeslot', async () => {
@@ -1180,7 +1223,7 @@ describe('EventForm dirty state', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
     expect(await screen.findByRole('heading', { name: 'Divisions' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Division configuration' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Division configuration' })).not.toBeInTheDocument();
     expect(screen.queryByTestId('division-mode-switches')).not.toBeInTheDocument();
     expect(screen.getByTestId('division-field-row')).toHaveClass('flex', 'flex-wrap');
     expect(screen.queryByTestId('cents-input')).not.toBeInTheDocument();
@@ -1455,7 +1498,7 @@ describe('EventForm dirty state', () => {
     await waitFor(() => expect(screen.getByLabelText('Cash App username')).toHaveValue('$'));
     fireEvent.click(screen.getByLabelText('Simple Setup'));
     expect(screen.queryByRole('button', { name: 'Review event' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Create Event' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Publish Event' })).toBeDisabled();
   });
 
   it('renders the current draft in the full review and edits the owning page', async () => {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { UseFormGetValues } from 'react-hook-form';
+import { useWatch, type Control, type UseFormGetValues } from 'react-hook-form';
 
 import { resolveClientPublicOrigin } from '@/lib/clientPublicOrigin';
 import { normalizeManualPaymentProvider } from '@/lib/manualRegistrationPayments';
@@ -29,6 +29,7 @@ type PaymentFieldOptions = {
 };
 
 type UseEventPaymentControllerOptions = {
+    control: Control<EventFormValues>;
     currentUser: UserData;
     eventData: EventFormValues;
     getValues: UseFormGetValues<EventFormValues>;
@@ -42,6 +43,7 @@ const PAYMENT_RESET_OPTIONS: PaymentFieldOptions = { shouldDirty: false, shouldV
 const EMPTY_MANUAL_PAYMENT_LINKS: ManualPaymentLink[] = [];
 
 export const useEventPaymentController = ({
+    control,
     currentUser,
     eventData,
     getValues,
@@ -50,6 +52,10 @@ export const useEventPaymentController = ({
     setValue,
 }: UseEventPaymentControllerOptions) => {
     const [connectingStripe, setConnectingStripe] = useState(false);
+    const watchedManualPaymentLinks = useWatch({
+        control,
+        name: 'manualPaymentLinks',
+    });
 
     const resolvedOrganizationId = (resolvedOrganization?.$id ?? '').trim();
     const hasStripeAccount = resolvedOrganization
@@ -57,8 +63,8 @@ export const useEventPaymentController = ({
         : Boolean(currentUser?.hasStripeAccount);
     const manualPaymentsEnabled = eventData.registrationPaymentMode === 'MANUAL';
     const pricingControlsEnabled = hasStripeAccount || manualPaymentsEnabled;
-    const manualPaymentLinks = Array.isArray(eventData.manualPaymentLinks)
-        ? eventData.manualPaymentLinks
+    const manualPaymentLinks = Array.isArray(watchedManualPaymentLinks)
+        ? watchedManualPaymentLinks
         : EMPTY_MANUAL_PAYMENT_LINKS;
 
     const automaticRefundsAvailable = useMemo(

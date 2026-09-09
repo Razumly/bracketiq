@@ -970,6 +970,7 @@ describe('League schedule page', () => {
   });
   beforeEach(() => {
     window.localStorage.clear();
+    window.sessionStorage.clear();
     useSearchParamsMock.mockReset();
     mockRouter.push.mockReset();
     mockRouter.replace.mockReset();

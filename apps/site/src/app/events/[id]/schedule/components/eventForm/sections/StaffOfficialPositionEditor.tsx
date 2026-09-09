@@ -85,7 +85,7 @@ export const StaffOfficialPositionEditor = ({
             </Group> : null}
             {showPositions ? <Stack gap="xs">
                 {officialPositions.map((position) => (
-                    <Group key={position.id} align="flex-end" gap="sm" wrap="nowrap">
+                    <Group key={position.id} align="flex-start" gap="sm" wrap="nowrap">
                         <TextInput
                             label="Position"
                             placeholder="Referee"

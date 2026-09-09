@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { useForm } from 'react-hook-form';
 
 import { renderWithMantine } from '../../../../../../../../../test/utils/renderWithMantine';
@@ -38,12 +39,16 @@ const Harness = () => {
 };
 
 describe('ManualPaymentDestinationEditor', () => {
-    it('shows provider artwork, provider-specific input copy, and inline errors', () => {
+    it('shows provider artwork, provider-specific input copy, and inline errors', async () => {
+        const user = userEvent.setup();
         renderWithMantine(
             <Harness />,
         );
 
-        expect(screen.getAllByAltText('Cash App logo').length).toBeGreaterThan(0);
+        expect(screen.getAllByAltText('Cash App logo')).toHaveLength(1);
+        await user.click(screen.getByRole('combobox', { name: 'Provider: Cash App' }));
+        expect(screen.getAllByAltText('Cash App logo')).toHaveLength(2);
+        expect(screen.getByRole('option', { name: 'Cash App' })).toHaveTextContent('Cash App');
         expect(screen.getByLabelText('Cash App username')).toHaveAttribute(
             'placeholder',
             '$bracketiq',

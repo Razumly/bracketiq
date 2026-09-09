@@ -223,7 +223,7 @@ export const SimpleSetupDivisionPricingList = ({
                                         onChange={(value) => syncInstallments(index, Number(value) || 1)}
                                     />
                                     {installmentAmounts.map((amount, installmentIndex) => (
-                                        <Group key={installmentIndex} align="flex-end" wrap="wrap">
+                                        <Group key={installmentIndex} align="flex-start" wrap="wrap">
                                             {useRelativeDueDates ? (
                                                 <NumberInput
                                                     label={`Installment ${installmentIndex + 1} due date offset`}

@@ -123,12 +123,12 @@ describe("SimpleSetupNavigation", () => {
     });
   });
 
-  it("uses the final action to create the event and disables it until the form is valid", () => {
+  it("uses the final action to publish the event and disables it until the form is valid", () => {
     const onSubmit = jest.fn();
     const { rerender } = renderWithProvider(
       <SimpleSetupPageFrame
         page={{
-          id: "review",
+          id: "review-publish",
           label: "Review and Publish",
           status: "current",
           used: true,
@@ -148,13 +148,13 @@ describe("SimpleSetupNavigation", () => {
     expect(
       screen.queryByRole("button", { name: "Review event" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Create Event" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Publish Event" })).toBeDisabled();
 
     rerender(
       <MantineProvider>
         <SimpleSetupPageFrame
           page={{
-            id: "review",
+            id: "review-publish",
             label: "Review and Publish",
             status: "current",
             used: true,
@@ -172,7 +172,7 @@ describe("SimpleSetupNavigation", () => {
       </MantineProvider>,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Create Event" }));
+    fireEvent.click(screen.getByRole("button", { name: "Publish Event" }));
     expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 });

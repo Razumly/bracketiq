@@ -222,6 +222,28 @@ describe('useEventSlotController', () => {
         expect(result.current.formValues.leagueSlots[0].key).toBe('slot_new_1');
         expect(result.current.isDirty).toBe(true);
     });
+    it('clears one-time date overrides when switching a slot to repeating', async () => {
+        const { result } = renderHook(() => useSlotHarness({
+            eventData: buildEventData({
+                leagueSlots: [buildSlot({
+                    repeating: false,
+                    startDate: '2026-07-20T18:00:00',
+                    endDate: '2026-07-20T20:00:00',
+                })],
+            }),
+        }));
+
+        act(() => result.current.handleUpdateSlot(0, { repeating: true }));
+
+        await waitFor(() => expect(result.current.formValues.leagueSlots[0]).toEqual(expect.objectContaining({
+            repeating: true,
+            startDate: undefined,
+            endDate: undefined,
+            startTimeMinutes: 18 * 60,
+            endTimeMinutes: 20 * 60,
+        })));
+    });
+
 
     it('keeps a Simple Setup fixed window synchronized with event timing and ownership', async () => {
         const eventData = buildEventData({
