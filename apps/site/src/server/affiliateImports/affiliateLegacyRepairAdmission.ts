@@ -3434,7 +3434,7 @@ const retryAuditMatchesEdge = (
     })))
     && sameAdmissionValue(audit.manifest, parent.gatewayJob.evidenceManifestJson)
     && sameAdmissionValue(audit.manifest, child.evidenceManifestJson)
-    && sameAdmissionValue(auditManifest.data.entries.map((entry) => entry.artifactId), reportWrite.artifactIds)
+    && sameAdmissionValue(sortedUnique(auditManifest.data.entries.map((entry) => entry.artifactId)), reportWrite.artifactIds)
     && reportRow.gatewayJobId === parent.gatewayJob.id
     && reportRow.childGatewayJobId === child.id
     && reportRow.parentClaimId === parent.claim.id

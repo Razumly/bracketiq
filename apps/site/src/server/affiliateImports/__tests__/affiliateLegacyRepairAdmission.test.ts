@@ -244,7 +244,8 @@ const retryFixture = () => {
       const bytes = Buffer.from(`${suffix} source evidence confirms Grass Soccer for ${kind}.`, 'utf8');
       artifactBytesByFileId.set(fileId, bytes);
       return {
-        id: `artifact-retry-${suffix}-${kind.toLowerCase()}`,
+        // Capture IDs need not sort in manifest evidence-reference order.
+        id: `artifact-retry-${suffix}-${kind === 'PAGE_HTML' ? 'z-html' : 'a-markdown'}`,
         intakeId,
         supplySourceId: rootId,
         pageId,

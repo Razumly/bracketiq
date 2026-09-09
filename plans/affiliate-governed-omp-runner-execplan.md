@@ -678,3 +678,39 @@ Eligibility and incoming-audit validation use the same deployment and Supply
 identity rules: both deployment version and hash must change, and the Supply
 version/hash must match the parent. Immutable source and mapping-job IDs remain
 bound even when the historical mapping pointer is permitted to advance.
+
+### First version-4 deployment and replay ordering correction
+
+Commit `cda1a1e88bd9e6088620cf800666417c73abd160` passed Site CI run
+`34299836392`. Governed image publication run `34300445707` succeeded.
+The worker image digest is
+`sha256:9107033201c5dc8778f4144ecd7c54eab2dbb8f7424195d3e25d6052d70e0776`.
+The Gateway image digest is
+`sha256:6d07efc8594036b96d3239a14a2c1c97e2d437debdef4c85957584892bdfff7b`.
+Both image revision labels match the reviewed commit.
+
+The approved six services were refreshed. Both broker logins remained healthy
+and distinct. The actual Linux worker image passed producer/reviewer containment
+and the SDK no-provider probe. Fresh preflight passed with no findings:
+`0d10b842721ec130cee67c0e11a1cd0f3c77039270497efcfb4ed3d47d431182`.
+The version-4 environment is in
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v4-retry-cda1a1e88`.
+
+The exact retry apply created Softball child
+`91f4fbe2-7247-4277-a124-0cfb013bbb3c` and Boomtown child
+`bbdb8376-2736-4e0a-b8b7-121cb398a1c5`. All 19 original job, claim, and
+receipt row fingerprints remained unchanged.
+
+An immediate replay safely returned `RETRY_STATE_DRIFT`. A read-only predicate
+probe showed that the child identity and every audit check matched except one
+artifact-ID comparison. Manifest entries use evidence-reference order, while
+the approved write uses sorted unique artifact IDs. Real UUIDs exposed the
+ordering difference that the original fixture names had hidden.
+
+The source now compares the same sorted artifact-ID set. The fixture deliberately
+reverses ID order relative to evidence kind. It reproduced the live failure
+before the correction and passed afterward. Both focused suites passed
+(78 tests), as did TypeScript and lint. A corrected replay against the actual
+rows, with PostgreSQL writes forbidden, returned the same two child IDs and
+zero writes. No child claim was consumed. Admission remains closed and the
+idle trial workers/runner were stopped for the correction rollout.
