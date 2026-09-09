@@ -82,6 +82,7 @@ export const SingleDivisionPricingControls = ({
         <AnimatedLayoutSection
             in={visible}
             className={DIVISION_PRICE_FIELD_CLASS}
+            allowOverflow
         >
             <Controller
                 name="price"
@@ -113,7 +114,6 @@ export const SingleDivisionPricingControls = ({
                         control={control}
                         render={({ field }) => (
                             <MantineSelect
-                                native
                                 label="Tax handling"
                                 value={field.value}
                                 data={organizerTaxCollectionAllowed

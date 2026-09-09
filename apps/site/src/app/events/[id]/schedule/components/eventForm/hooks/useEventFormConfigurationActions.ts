@@ -60,17 +60,46 @@ type UseEventFormConfigurationActionsParams = {
     tournamentData: TournamentConfig;
 };
 
-const countUpDuration = (template: MatchRulesConfig | null, override: MatchRulesConfig | null, fallbackCount: number | undefined): number | null => {
+const countUpDuration = (
+    template: MatchRulesConfig | null,
+    override: MatchRulesConfig | null,
+    fallbackCount: number | undefined,
+): number | null => {
     const timekeeping = (config: MatchRulesConfig | null) => config?.timekeeping ?? {};
     const templateTimekeeping = timekeeping(template);
     const overrideTimekeeping = timekeeping(override);
     const timerMode = overrideTimekeeping.timerMode ?? templateTimekeeping.timerMode;
-    const segmentDuration = normalizeNumber(overrideTimekeeping.segmentDurationMinutes ?? templateTimekeeping.segmentDurationMinutes);
+    const segmentDuration = normalizeNumber(
+        overrideTimekeeping.segmentDurationMinutes ?? templateTimekeeping.segmentDurationMinutes,
+    );
     const segmentCount = normalizeNumber(template?.segmentCount) ?? fallbackCount ?? 1;
     if (timerMode !== 'COUNT_UP' || !segmentDuration || segmentCount <= 0) return null;
     return Math.max(1, Math.trunc(segmentDuration * segmentCount));
 };
 
+const getRepairedEndValue = (
+    startValue: EventFormValues['start'],
+    endValue: EventFormValues['end'],
+    minimumDurationMinutes?: number,
+): string | null => {
+    const parsedStart = parseLocalDateTime(startValue);
+    const parsedEnd = parseLocalDateTime(endValue);
+    if (!parsedStart) {
+        return null;
+    }
+    const startTime = parsedStart.getTime();
+    const minimumEndTime = minimumDurationMinutes === undefined
+        ? null
+        : startTime + minimumDurationMinutes * 60 * 1000;
+    const endIsInvalid = !parsedEnd || parsedEnd.getTime() <= startTime;
+    const endIsTooShort = minimumEndTime !== null
+        && parsedEnd !== null
+        && parsedEnd.getTime() < minimumEndTime;
+    if (!endIsInvalid && !endIsTooShort) {
+        return null;
+    }
+    return formatLocalDateTime(new Date(minimumEndTime ?? startTime + 60 * 60 * 1000));
+};
 export const useEventFormConfigurationActions = ({
     clearLeagueSlotErrors,
     eventData,
@@ -161,12 +190,14 @@ export const useEventFormConfigurationActions = ({
         clearLeagueSlotErrors();
         const enforcingTeamSettings = nextType === 'LEAGUE' || nextType === 'TOURNAMENT';
         const enforcingTryoutSettings = nextType === 'TRYOUT';
-        const ensureFiniteEndAfterStart = () => {
-            const parsedStart = parseLocalDateTime(getValues('start'));
-            const parsedEnd = parseLocalDateTime(getValues('end'));
-            if (parsedStart && (!parsedEnd || parsedEnd.getTime() <= parsedStart.getTime())) {
-                const minimumEnd = new Date(parsedStart.getTime() + 60 * 60 * 1000);
-                setValue('end', formatLocalDateTime(minimumEnd), { shouldDirty: true, shouldValidate: true });
+        const ensureFiniteEndAfterStart = (minimumDurationMinutes?: number) => {
+            const repairedEnd = getRepairedEndValue(
+                getValues('start'),
+                getValues('end'),
+                minimumDurationMinutes,
+            );
+            if (repairedEnd) {
+                setValue('end', repairedEnd, { shouldDirty: true, shouldValidate: true });
             }
         };
         const nextIsAutomatedScheduling =
@@ -186,6 +217,7 @@ export const useEventFormConfigurationActions = ({
             setValue('teamSignup', true, { shouldDirty: true });
             setValue('singleDivision', true, { shouldDirty: true, shouldValidate: true });
             setValue('noFixedEndDateTime', true, { shouldDirty: true, shouldValidate: true });
+            ensureFiniteEndAfterStart(nextType === 'LEAGUE' ? 360 : 180);
             return;
         }
         if (enforcingTryoutSettings) {

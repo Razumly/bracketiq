@@ -150,8 +150,7 @@ export const SimpleSetupPlanningPage = ({
               control={control}
               render={({ field, fieldState }) => (
                 <Select
-                  native
-                  label="Event type"
+                  aria-label="Event type"
                   description="Tryouts are available only to organizations with club features enabled."
                   data={eventTypeOptions}
                   value={field.value}
