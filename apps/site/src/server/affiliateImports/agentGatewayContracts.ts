@@ -714,8 +714,8 @@ export const AFFILIATE_AGENT_ROLES = [
 ] as const;
 
 export type AffiliateAgentRole = (typeof AFFILIATE_AGENT_ROLES)[number];
-export const AFFILIATE_AGENT_ROLE_CONTRACT_VERSION = 4 as const;
-export const AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION = 4 as const;
+export const AFFILIATE_AGENT_ROLE_CONTRACT_VERSION = 5 as const;
+export const AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION = 5 as const;
 
 const AFFILIATE_AGENT_TERMINAL_RESULT_PAYLOAD_SHAPES: Readonly<
   Record<AffiliateAgentRole, readonly string[]>
@@ -788,15 +788,15 @@ const ROLE_PROMPT_INSTRUCTIONS: Readonly<
   ],
   MAPPING_PRODUCER: [
     "Use the inlined Authority Projection as the complete claim context. Use only the trusted OMP tools listed in the gateway protocol. Read listed evidence refs through read_artifact({evidenceRef}).",
-    "listUrlRef is the evidenceRef of the listed PAGE_HTML or PAGE_MARKDOWN artifact for the source listing page, not a raw URL and not its artifactId. The Gateway resolves that reference through the artifact's stored finalUrl or sourceUrl. Use the existing page artifact when it contains the needed evidence. Its listUrlRef does not require CAPTURE_CLAIM_URL or a captureProfileRef; those inputs are needed only for a separately authorized new capture.",
+    "listUrlRef is the evidenceRef of the listed PAGE_HTML artifact used for CSS extraction, not a raw URL and not its artifactId. Use PAGE_MARKDOWN for reading and sport citations, not as CSS listing input. The Gateway resolves the HTML artifact's stored finalUrl or sourceUrl. Existing stored HTML needs no capture profile. If the claim has no HTML artifact, report that specific evidence gap.",
     "Extract officialActionUrl from an evidenced link with an ATTRIBUTE selector and ABSOLUTE_URL transform. An outbound registration link in stored evidence does not require a new capture just to preserve that link.",
     "Build only the closed declarative package shape defined by the mapping contract. Keep live mappings and provider access behind the Gateway. Never submit executable code.",
     "Validate the package before you commit it. Commit only the validated package receipt.",
     "Set declarative package listingKind to the claim subject listingKind. The Gateway rejects packages whose listing kind differs from the persisted source target kind.",
     ...LEGACY_SPORT_EVIDENCE_INSTRUCTIONS,
-    "Use the explicit CONSTANT sportName field only when sportEvidence proves the exact canonical sport union. Include every sport citation's manifest evidence reference in package evidenceRefs.",
+    "For every legacy sport repair validation, put sportEvidence inside candidatePackage. Extract the exact resolved sport union: use a CONSTANT sportName field when the source label needs canonical normalization, or an evidence-backed selector that emits the exact catalog name. A sport citation alone does not create an extracted sport field. Include every sport citation's manifest evidenceRef in package evidenceRefs.",
     "Every legacy sport repair CONTRACT_GAP must include payload.sportEvidence and all cited evidenceRefs, even when reasonCodes are generic. A sport-related gap must use the matching SPORT_ reason codes. A non-sport gap may carry verified RESOLVED sports and explain the separate obstacle.",
-    "Do not claim the package is blocked only because a raw URL was rejected. Correct listUrlRef to the authorized page evidenceRef, follow bounded validation feedback, and submit only the remaining evidenced obstacle.",
+    "Use the Gateway message to correct the package. If CSS extraction requires PAGE_HTML, select the claim-owned HTML listing. If extracted sports do not match the resolved evidence, fix the sport field. Neither error means the stored citation is unavailable. Revalidate only after changing the rejected input.",
     "Use execute_command({command}) only with a non-terminal command listed in the Authority Projection.",
     "Return one evidence-backed terminal disposition through submit_result(...). Use only the listed terminal dispositions.",
   ],
@@ -1869,7 +1869,7 @@ export const affiliateAgentDeclarativePackageSchema = z
     schemaVersion: z.literal(1),
     supplySourceId: identifierSchema,
     listingKind: affiliateAgentListingKindSchema,
-    listUrlRef: identifierSchema.describe("The claim evidenceRef of the listing PAGE_HTML or PAGE_MARKDOWN artifact. The Gateway resolves its stored finalUrl/sourceUrl. Do not supply a raw URL or artifactId; existing stored evidence needs no capture profile."),
+    listUrlRef: identifierSchema.describe("The claim evidenceRef of the PAGE_HTML artifact used for CSS extraction. PAGE_MARKDOWN remains valid for sport citations, not CSS listing input. Use the returned finalUrl/sourceUrl as provenance; existing stored HTML needs no capture profile."),
     itemSelector: z.string().trim().min(1).max(500),
     fields: z
       .array(affiliateAgentDeclarativePackageFieldSchema)

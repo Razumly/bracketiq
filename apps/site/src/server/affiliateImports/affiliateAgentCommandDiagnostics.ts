@@ -94,6 +94,16 @@ export const AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_REASON_CODES = [
   "SOURCE_KIND_MISMATCH",
   "PACKAGE_MANIFEST_MISMATCH",
   "PACKAGE_EVIDENCE_OUTSIDE_CLAIM",
+  "PAGE_HTML_REQUIRED",
+  "PACKAGE_SELECTOR_INVALID",
+  "PACKAGE_NO_CANDIDATES",
+  "PACKAGE_REQUIRED_FIELDS_MISSING",
+  "PACKAGE_SPORT_EVIDENCE_REQUIRED",
+  "PACKAGE_CITATION_REFERENCE_MISSING",
+  "SPORT_EVIDENCE_RUN_MISMATCH",
+  "SPORT_CATALOG_MISMATCH",
+  "SPORT_OUTPUT_MISMATCH",
+  "SPORT_EVIDENCE_INVALID",
 ] as const;
 export type AffiliateAgentCommandDiagnosticReasonCode =
   typeof AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_REASON_CODES[number];
@@ -353,6 +363,31 @@ const gatewayReasonCodeFor = (
       return "PACKAGE_MANIFEST_MISMATCH";
     case "The package references evidence outside the claim manifest.":
       return "PACKAGE_EVIDENCE_OUTSIDE_CLAIM";
+    case "Declarative CSS extraction requires PAGE_HTML listing evidence.":
+      return "PAGE_HTML_REQUIRED";
+    case "The declarative package selectors are invalid.":
+      return "PACKAGE_SELECTOR_INVALID";
+    case "The declarative package selectors produced no candidates.":
+      return "PACKAGE_NO_CANDIDATES";
+    case "The declarative package must map title and official action URL.":
+    case "The declarative package output must include title and official action URL.":
+      return "PACKAGE_REQUIRED_FIELDS_MISSING";
+    case "Legacy sport repair packages require sportEvidence.":
+      return "PACKAGE_SPORT_EVIDENCE_REQUIRED";
+    case "Legacy sport citations must be included in package evidenceRefs.":
+      return "PACKAGE_CITATION_REFERENCE_MISSING";
+    case "The package sport evidence run does not match the repair context.":
+      return "SPORT_EVIDENCE_RUN_MISMATCH";
+    case "The package sport evidence catalog does not match the repair context.":
+    case "The current sports catalog differs from the claim catalog.":
+      return "SPORT_CATALOG_MISMATCH";
+    case "Extracted sports do not match the resolved sport evidence.":
+    case "A CONSTANT sportName field is not supported by sportEvidence.":
+      return "SPORT_OUTPUT_MISMATCH";
+    case "Legacy sport repair sport evidence could not be verified.":
+    case "sportEvidence is permitted only for legacy sport repairs.":
+    case "CONSTANT sportName fields are permitted only for legacy sport repairs.":
+      return "SPORT_EVIDENCE_INVALID";
     default:
       return "UNKNOWN";
   }

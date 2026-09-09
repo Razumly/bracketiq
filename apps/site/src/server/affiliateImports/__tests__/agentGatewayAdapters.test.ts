@@ -227,12 +227,18 @@ type PackageEvidenceMetadata = Readonly<{
   finalUrl: string | null;
 }>;
 
-const packageAdapterFixtureFor = (initialMetadata: PackageEvidenceMetadata) => {
+const packageAdapterFixtureFor = (
+  initialMetadata: PackageEvidenceMetadata,
+  evidenceKind: "PAGE_HTML" | "PAGE_MARKDOWN" = "PAGE_HTML",
+) => {
   const evidenceBytes = Buffer.from(
-    '<div class="event"><span class="title">Sample event</span><a class="link" href="https://outbound.example.test/events/sample">Details</a></div>',
+    evidenceKind === "PAGE_HTML"
+      ? '<div class="event"><span class="title">Sample event</span><a class="link" href="https://outbound.example.test/events/sample">Details</a></div>'
+      : '# Sample event\n\n[Details](https://outbound.example.test/events/sample)',
     "utf8",
   );
   const evidenceHash = createHash("sha256").update(evidenceBytes).digest("hex");
+  const evidenceMimeType = evidenceKind === "PAGE_HTML" ? "text/html" : "text/markdown";
   const metadata = { ...initialMetadata };
   const storedObjects = new Map<string, StoredObject>();
   const storage: StorageProvider = {
@@ -274,7 +280,7 @@ const packageAdapterFixtureFor = (initialMetadata: PackageEvidenceMetadata) => {
   const artifacts = {
     readImmutable: jest.fn(async ({ fileId }: { fileId: string }) => {
       const stored = fileId === "list-artifact"
-        ? { bytes: evidenceBytes, contentType: "text/html" }
+        ? { bytes: evidenceBytes, contentType: evidenceMimeType }
         : storedObjects.get(fileId);
       if (!stored) throw new Error(`Missing artifact ${fileId}.`);
       return {
@@ -361,10 +367,10 @@ const packageAdapterFixtureFor = (initialMetadata: PackageEvidenceMetadata) => {
     schemaVersion: 1 as const,
     entries: [{
       evidenceRef: "list-evidence",
-      kind: "PAGE_HTML" as const,
+      kind: evidenceKind,
       artifactId: "list-artifact",
       sha256: evidenceHash,
-      mimeType: "text/html",
+      mimeType: evidenceMimeType,
       byteSize: evidenceBytes.byteLength,
       retention: "INDEFINITE" as const,
     }],
@@ -425,12 +431,15 @@ const captureRecordSummaryFor = (value: Record<string, unknown>) => {
     byteSize: Buffer.byteLength(canonical, "utf8"),
   };
 };
-const legacySportRepairFixture = () => {
+const legacySportRepairFixture = (artifactKind: "PAGE_HTML" | "PAGE_MARKDOWN" = "PAGE_HTML") => {
   const bytes = Buffer.from(
-    '<a href="https://source.example/events/grass-soccer">Outdoor grass soccer registration</a>',
+    artifactKind === "PAGE_HTML"
+      ? '<a href="https://source.example/events/grass-soccer">Outdoor grass soccer registration</a>'
+      : '[Outdoor grass soccer registration](https://source.example/events/grass-soccer)',
     "utf8",
   );
   const artifactSha256 = createHash("sha256").update(bytes).digest("hex");
+  const mimeType = artifactKind === "PAGE_HTML" ? "text/html" : "text/markdown";
   const catalog = buildAffiliateSportsCatalogSnapshot(
     [{ id: "sport-grass", name: "Grass Soccer" }],
     "2026-09-06T00:00:00.000Z",
@@ -447,7 +456,7 @@ const legacySportRepairFixture = () => {
       evidence: [{
         artifactId: "sport-artifact-1",
         artifactSha256,
-        artifactKind: "PAGE_HTML",
+        artifactKind,
         pageUrl: "https://source.example/events",
         excerpt: "Outdoor grass soccer",
       }],
@@ -457,10 +466,10 @@ const legacySportRepairFixture = () => {
     schemaVersion: 1 as const,
     entries: [{
       evidenceRef: "sport-evidence-1",
-      kind: "PAGE_HTML" as const,
+      kind: artifactKind,
       artifactId: "sport-artifact-1",
       sha256: artifactSha256,
-      mimeType: "text/html",
+      mimeType,
       byteSize: bytes.byteLength,
       retention: "INDEFINITE" as const,
     }],
@@ -487,7 +496,7 @@ const legacySportRepairFixture = () => {
   const artifacts = {
     readImmutable: jest.fn(async () => ({
       bytes,
-      mimeType: "text/html",
+      mimeType,
       byteSize: bytes.byteLength,
       sourceUrl: "https://source.example/events",
       finalUrl: "https://source.example/events",
@@ -753,6 +762,19 @@ describe("legacy sport repair evidence verifier", () => {
       expectedSportNames: ["Grass Soccer"],
       observedSportNames: ["Grass Soccer"],
     }));
+  });
+
+  it("distinguishes a missing extracted sport from a rejected citation", async () => {
+    const fixture = legacySportRepairFixture();
+    await expect(verifyAffiliateAgentLegacySportRepair({
+      ...fixture,
+      resultKind: "REVIEW_REQUIRED",
+      observedSportNames: [],
+    })).rejects.toMatchObject({
+      code: "EVIDENCE_REFERENCE_NOT_PERMITTED",
+      safeMessage: "Extracted sports do not match the resolved sport evidence.",
+      isRetryable: false,
+    });
   });
 
   it("rejects a forged citation URL even when the artifact bytes hash matches", async () => {
@@ -1448,6 +1470,100 @@ describe("production Affiliate Agent activation effect", () => {
 describe("production Affiliate Agent package URL provenance", () => {
   afterEach(() => {
     jest.restoreAllMocks();
+  });
+
+  it("rejects Markdown CSS listing evidence before writing validation artifacts", async () => {
+    const fixture = packageAdapterFixtureFor({
+      sourceUrl: "https://source.example/events",
+      finalUrl: "https://source.example/events",
+    }, "PAGE_MARKDOWN");
+    const adapter = fixture.adapters.commands.transactional.VALIDATE_DECLARATIVE_PACKAGE!;
+    await expect(adapter.execute({
+      transaction: fixture.transaction as unknown as Prisma.TransactionClient,
+      claim: fixture.claim,
+      receiptId: "markdown-validation",
+      command: {
+        type: "VALIDATE_DECLARATIVE_PACKAGE",
+        data: { candidatePackage: fixture.candidatePackage, evidenceManifestHash: fixture.claim.evidenceManifest.hash },
+      },
+    })).rejects.toMatchObject({
+      code: "COMMAND_SCHEMA_INVALID",
+      safeMessage: "Declarative CSS extraction requires PAGE_HTML listing evidence.",
+      isRetryable: false,
+    });
+    expect(fixture.transaction.affiliateAgentGatewayArtifacts.createMany).not.toHaveBeenCalled();
+    expect(fixture.mappingJobUpdate).not.toHaveBeenCalled();
+  });
+
+  it("returns safe selector feedback without exposing rejected selector text", async () => {
+    const fixture = packageAdapterFixtureFor({
+      sourceUrl: "https://source.example/events",
+      finalUrl: "https://source.example/events",
+    });
+    const adapter = fixture.adapters.commands.transactional.VALIDATE_DECLARATIVE_PACKAGE!;
+    const failure = await adapter.execute({
+      transaction: fixture.transaction as unknown as Prisma.TransactionClient,
+      claim: fixture.claim,
+      receiptId: "invalid-selector-validation",
+      command: {
+        type: "VALIDATE_DECLARATIVE_PACKAGE",
+        data: {
+          candidatePackage: { ...fixture.candidatePackage, itemSelector: "[private-selector-value" },
+          evidenceManifestHash: fixture.claim.evidenceManifest.hash,
+        },
+      },
+    }).then(() => { throw new Error("Expected selector rejection."); }, (error: unknown) => error);
+    expect(failure).toMatchObject({
+      code: "COMMAND_SCHEMA_INVALID",
+      safeMessage: "The declarative package selectors are invalid.",
+      isRetryable: false,
+    });
+    expect(JSON.stringify(failure)).not.toContain("private-selector-value");
+    expect(fixture.mappingJobUpdate).not.toHaveBeenCalled();
+  });
+
+  it("validates HTML extraction with a separate Markdown sport citation", async () => {
+    const fixture = packageAdapterFixtureFor({
+      sourceUrl: "https://source.example/events",
+      finalUrl: "https://source.example/events",
+    });
+    const citation = legacySportRepairFixture("PAGE_MARKDOWN");
+    if (citation.claim.subject.type !== "MAPPING_PRODUCER") throw new Error("Expected producer evidence.");
+    const manifest = {
+      schemaVersion: 1 as const,
+      entries: [...fixture.claim.evidenceManifest.entries, ...citation.claim.evidenceManifest.entries],
+    };
+    const claim = {
+      ...fixture.claim,
+      subject: { ...fixture.claim.subject, repairContext: citation.claim.subject.repairContext },
+      evidenceManifest: { ...manifest, hash: hashAffiliateAgentValue(manifest) },
+    } as AffiliateAgentClaimEnvelope;
+    const readOriginal = fixture.artifacts.readImmutable.getMockImplementation()!;
+    fixture.artifacts.readImmutable.mockImplementation(async (input) => (
+      input.fileId === "sport-artifact-1"
+        ? citation.artifacts.readImmutable()
+        : readOriginal(input)
+    ));
+    const candidatePackage = {
+      ...fixture.candidatePackage,
+      fields: [
+        fixture.candidatePackage.fields[0]!,
+        { field: "sportName" as const, mode: "CONSTANT" as const, value: "Grass Soccer" },
+        fixture.candidatePackage.fields[1]!,
+      ],
+      sportEvidence: citation.sportEvidence,
+      evidenceRefs: ["list-evidence", "sport-evidence-1"],
+    };
+    const adapter = fixture.adapters.commands.transactional.VALIDATE_DECLARATIVE_PACKAGE!;
+    await expect(adapter.execute({
+      transaction: { ...fixture.transaction, sports: citation.prisma.sports } as unknown as Prisma.TransactionClient,
+      claim,
+      receiptId: "html-with-markdown-citation",
+      command: {
+        type: "VALIDATE_DECLARATIVE_PACKAGE",
+        data: { candidatePackage, evidenceManifestHash: claim.evidenceManifest.hash },
+      },
+    })).resolves.toMatchObject({ isValid: true });
   });
 
   it("rejects a page list reference without stored provenance during package validation", async () => {

@@ -1094,3 +1094,77 @@ Boomtown's mapped repair and approval are complete. Softball is not repaired.
 Further production work requires a diagnosed validation correction and an
 explicitly approved bounded continuation. Do not raise the retry limit or
 rewrite completed attempts merely to clear the queue.
+
+## Softball validation contract correction
+
+
+The operator requested continued diagnosis after the pass-three blocker.
+This step changes source and runs offline verification only. It does not
+authorize a fourth claim, a retry-limit change, deployment, or runtime restart.
+
+The exact rejected command arguments were not retained. The investigation
+therefore used reconstructed packages against the actual claim and
+hash-verified stored artifacts, not a claimed replay of the model's requests.
+The production read used PostgreSQL `default_transaction_read_only=on`.
+No new page capture or production write occurred.
+
+The unmodified production preparation function accepted the stored HTML,
+its evidenceRef, an h1 title selector, the stored registration-link selector,
+a CONSTANT Softball field, and the verified Markdown sport citation. It
+produced one candidate with the correct registration URL. Replacing only the
+listing artifact with Markdown produced a generic no-candidates error.
+Removing only the extracted sport field produced the misleading generic
+EVIDENCE_REFERENCE_NOT_PERMITTED error. Missing sportEvidence and use of an
+artifact ID instead of an evidenceRef also produced generic internal errors.
+
+These probes establish two contract defects, but do not prove every failed
+historical request. The generated instructions advertised Markdown as CSS
+listing input even though the extractor parses HTML. Sport-output mismatch
+was also reported as if the citation itself was unavailable.
+
+The correction requires PAGE_HTML for declarative CSS listing input in
+validation, commit, and reviewer re-extraction. PAGE_MARKDOWN remains valid
+for reading and citations. The producer instructions now require
+candidatePackage.sportEvidence and an extracted canonical sport field.
+Current role and prompt contracts advance from version 4 to version 5.
+A future deployment must bind those hashes in a new deployment contract.
+Historical claim and result records are unchanged.
+
+Deterministic package errors now return non-retryable, fixed safe messages.
+Bounded diagnostic reason codes distinguish HTML input, selector syntax,
+empty extraction, required fields, missing sport evidence, citation
+references, catalog/run drift, and sport-output mismatch. Unknown sport
+verification failures remain fail-closed and never expose arbitrary error
+text. No evidence check or retry cap is relaxed.
+
+The regression loop is `npx jest --runInBand --runTestsByPath
+src/server/affiliateImports/__tests__/agentGatewayAdapters.test.ts
+scripts/__tests__/runAffiliateAgentRunnerDiagnostics.test.ts` from `apps/site`.
+The new Markdown-input and sport-output regressions failed before the
+correction. They pass afterward. The two complete suites passed 48 tests.
+The real-evidence probe also passes for HTML with the Markdown citation and
+returns the distinct safe failures for the invalid package variants.
+The complete affected run passed 538 tests across 15 suites, including both
+isolated PostgreSQL integration suites. TypeScript, targeted ESLint, and the
+pinned Bun 1.3.14 OMP SDK no-provider probe passed. Independent Standards and
+Spec reviews both returned PASS with no findings.
+
+Decision: Require the actual HTML format at the CSS extraction boundary
+rather than add a Markdown conversion path with different selector
+semantics. Preserve Markdown as valid citation evidence. Keep every
+verification failure fail-closed, but report a fixed safe message that
+identifies the input the producer can correct.
+
+Outcome: The demonstrated source contract defects are corrected. A valid
+minimal Softball extraction works against the retained source evidence.
+This does not prove the exact contents of the failed model requests and
+does not repair the production record by itself. Production remained
+PRE_MAPPED for Softball and APPROVED for Boomtown, with both legacy holds,
+disabled automation, zero active claims, and zero queued jobs.
+
+Verification evidence is recorded in `/tmp/softball-validation-report.json`
+and `/tmp/softball-validation-tests.json`. Temporary copied source evidence
+and the throwaway probe are removed after this record is saved. The original
+production artifacts and completed attempts remain unchanged. This
+correction is source-only; a new deployment and an explicitly approved,
+bounded Softball recovery are still required before further production work.

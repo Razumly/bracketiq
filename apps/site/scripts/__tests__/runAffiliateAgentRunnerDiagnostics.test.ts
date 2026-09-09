@@ -102,4 +102,22 @@ describe("affiliate agent runner child diagnostics", () => {
     expect(untrusted).toMatchObject({ reasonCode: "UNKNOWN" });
     expect(JSON.stringify(untrusted)).not.toContain("private-source-value");
   });
+  it.each([
+    ["COMMAND_SCHEMA_INVALID", "Declarative CSS extraction requires PAGE_HTML listing evidence.", "PAGE_HTML_REQUIRED"],
+    ["COMMAND_SCHEMA_INVALID", "Legacy sport repair packages require sportEvidence.", "PACKAGE_SPORT_EVIDENCE_REQUIRED"],
+    ["EVIDENCE_REFERENCE_NOT_PERMITTED", "Extracted sports do not match the resolved sport evidence.", "SPORT_OUTPUT_MISMATCH"],
+  ])("retains actionable %s feedback as %s", (errorCode, safeMessage, reasonCode) => {
+    const diagnostic = gatewayCommandRejectionDiagnosticFor({
+      command: { type: "VALIDATE_DECLARATIVE_PACKAGE", data: { privateValue: "not-for-diagnostics" } },
+      errorCode,
+      safeMessage,
+      isRetryable: false,
+    });
+    expect(parseAffiliateAgentCommandRejectionDiagnostic(diagnostic)).toMatchObject({
+      stage: "GATEWAY",
+      reasonCode,
+      isRetryable: false,
+    });
+    expect(JSON.stringify(diagnostic)).not.toContain("not-for-diagnostics");
+  });
 });

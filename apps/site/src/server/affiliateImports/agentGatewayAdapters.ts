@@ -1088,12 +1088,19 @@ export type AffiliateAgentLegacySportRepairVerificationInput = Readonly<{
 }>;
 
 const legacySportRepairEvidenceError = (
-  message = "Legacy sport repair evidence is not permitted.",
+  message = "Legacy sport repair sport evidence could not be verified.",
 ): AffiliateAgentGatewayError => new AffiliateAgentGatewayError({
   code: "EVIDENCE_REFERENCE_NOT_PERMITTED",
   isRetryable: false,
   safeMessage: message,
 });
+
+const packageValidationError = (safeMessage: string): AffiliateAgentGatewayError =>
+  new AffiliateAgentGatewayError({
+    code: "COMMAND_SCHEMA_INVALID",
+    isRetryable: false,
+    safeMessage,
+  });
 const legacySportRepairContextFor = (
   claim: ProducerClaimEnvelopeForRead,
 ): AffiliateAgentLegacySportRepairContext => {
@@ -1232,7 +1239,14 @@ export const verifyAffiliateAgentLegacySportRepair = async (
   };
   try {
     return await verifyAffiliateSportCompletion(verificationInput);
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.name === "SPORT_CATALOG_MISMATCH") {
+      throw legacySportRepairEvidenceError("The current sports catalog differs from the claim catalog.");
+    }
+    if (error instanceof Error
+      && error.message === "Disposable sport quality did not prove the exact determination sport union.") {
+      throw legacySportRepairEvidenceError("Extracted sports do not match the resolved sport evidence.");
+    }
     throw legacySportRepairEvidenceError();
   }
 };
@@ -1252,6 +1266,21 @@ const productionEvidence = async (
     finalUrl: artifact.finalUrl ?? null,
     text: Buffer.from(artifact.bytes).toString("utf8"),
   };
+};
+
+const productionListingEvidence = async (
+  input: ProductionAdapterInput,
+  claim: ProducerClaimEnvelopeForRead,
+  evidenceRef: string,
+) => {
+  const entry = claim.evidenceManifest.entries.find((candidate) => candidate.evidenceRef === evidenceRef);
+  if (!entry) {
+    throw packageValidationError("The package references evidence outside the claim manifest.");
+  }
+  if (entry.kind !== "PAGE_HTML") {
+    throw packageValidationError("Declarative CSS extraction requires PAGE_HTML listing evidence.");
+  }
+  return productionEvidence(input, claim, evidenceRef);
 };
 
 const productionExternalJson = (text: string, label: string): unknown => {
@@ -2897,7 +2926,7 @@ const assertLegacySportRepairApprovalFresh = async (
   if (productionHash(committedPackage) !== committedPackageHash) {
     throw legacySportRepairEvidenceError("The committed mapping package changed after producer commit.");
   }
-  const listEvidence = await productionEvidence(input, producerEnvelope, committedPackage.listUrlRef);
+  const listEvidence = await productionListingEvidence(input, producerEnvelope, committedPackage.listUrlRef);
   const extraction = extractProductionValidationCandidates(committedPackage, producerEnvelope, listEvidence);
   if (!committedPackage.sportEvidence) {
     throw legacySportRepairEvidenceError("Legacy sport repair packages require sportEvidence.");
@@ -3359,32 +3388,32 @@ const assertProductionMappingPackage: (
     "Only a Mapping Producer may validate a declarative package.",
   );
   if (candidatePackage.supplySourceId !== claim.subject.supplySourceId) {
-    throw new Error("The declarative package Supply Source does not match the claim.");
+    throw packageValidationError("The package Supply Source does not match the claim.");
   }
   const fields = new Set(candidatePackage.fields.map((field) => field.field));
   if (!fields.has("title") || !fields.has("officialActionUrl")) {
-    throw new Error("The declarative package must map title and official action URL.");
+    throw packageValidationError("The declarative package must map title and official action URL.");
   }
   const constantSportValues = candidatePackage.fields
     .filter((field) => field.mode === "CONSTANT")
     .map((field) => field.value);
   const repairContext = claim.subject.repairContext;
   if (!repairContext && candidatePackage.sportEvidence) {
-    throw new Error("sportEvidence is permitted only for legacy sport repairs.");
+    throw packageValidationError("sportEvidence is permitted only for legacy sport repairs.");
   }
   if (!repairContext && constantSportValues.length > 0) {
-    throw new Error("CONSTANT sportName fields are permitted only for legacy sport repairs.");
+    throw packageValidationError("CONSTANT sportName fields are permitted only for legacy sport repairs.");
   }
   if (repairContext) {
     const sportEvidence = candidatePackage.sportEvidence;
     if (!sportEvidence) {
-      throw new Error("Legacy sport repair packages require sportEvidence.");
+      throw packageValidationError("Legacy sport repair packages require sportEvidence.");
     }
     if (sportEvidence.evidenceRunId !== repairContext.evidenceRunId) {
-      throw new Error("The package sport evidence run does not match the repair context.");
+      throw packageValidationError("The package sport evidence run does not match the repair context.");
     }
     if (sportEvidence.sportsCatalogSha256.toLowerCase() !== repairContext.sportsCatalog.sha256.toLowerCase()) {
-      throw new Error("The package sport evidence catalog does not match the repair context.");
+      throw packageValidationError("The package sport evidence catalog does not match the repair context.");
     }
     const resolvedNames = new Set(
       sportEvidence.sportDeterminations.flatMap((determination) => (
@@ -3392,7 +3421,7 @@ const assertProductionMappingPackage: (
       )),
     );
     if (constantSportValues.some((sportName) => !resolvedNames.has(sportName))) {
-      throw new Error("A CONSTANT sportName field is not supported by sportEvidence.");
+      throw packageValidationError("A CONSTANT sportName field is not supported by sportEvidence.");
     }
     const packageEvidenceRefs = new Set(candidatePackage.evidenceRefs);
     for (const citation of sportEvidence.sportDeterminations.flatMap(
@@ -3402,7 +3431,7 @@ const assertProductionMappingPackage: (
         (entry) => entry.artifactId === citation.artifactId,
       );
       if (!manifestEntry || !packageEvidenceRefs.has(manifestEntry.evidenceRef)) {
-        throw new Error("Legacy sport citations must be included in package evidenceRefs.");
+        throw packageValidationError("Legacy sport citations must be included in package evidenceRefs.");
       }
     }
   }
@@ -3434,17 +3463,16 @@ const extractProductionValidationCandidates = (
   let candidates: AffiliateCandidateInput[];
   try {
     candidates = extractAffiliateCandidatesFromPage(page, mapping);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "unknown selector error";
-    throw new Error(`The declarative package selectors could not be executed: ${message}`);
+  } catch {
+    throw packageValidationError("The declarative package selectors are invalid.");
   }
   if (candidates.length === 0) {
-    throw new Error("The declarative package selectors produced no candidates.");
+    throw packageValidationError("The declarative package selectors produced no candidates.");
   }
   if (candidates.some((candidate) => (
     !candidate.title.trim() || !candidate.officialActionUrl.trim()
   ))) {
-    throw new Error("The declarative package output must include title and official action URL.");
+    throw packageValidationError("The declarative package output must include title and official action URL.");
   }
   const observedSportNames = sortUniqueAffiliateSportNames(
     candidates.flatMap((candidate) => [
@@ -3492,11 +3520,11 @@ const prepareProductionValidation = async (
   if (!listUrlRef) {
     throw new Error("The declarative package has no list URL evidence reference.");
   }
-  const listEvidence = await productionEvidence(input, claim, listUrlRef);
+  const listEvidence = await productionListingEvidence(input, claim, listUrlRef);
   const evidenceEntries = evidenceRefs.map((evidenceRef) =>
     claim.evidenceManifest.entries.find((entry) => entry.evidenceRef === evidenceRef));
   if (evidenceEntries.some((entry) => !entry)) {
-    throw new Error("The declarative package references evidence outside the claim manifest.");
+    throw packageValidationError("The package references evidence outside the claim manifest.");
   }
   for (const evidenceRef of evidenceRefs) {
     await productionEvidence(input, claim, evidenceRef);
@@ -3915,7 +3943,7 @@ const buildProductionCommitMapping = async (
   assertProductionMappingPackage(claim, parsedCandidatePackage);
   const listUrlRef = productionString(parsedCandidatePackage.listUrlRef);
   if (!listUrlRef) throw new Error("The committed package has no list URL evidence reference.");
-  const listEvidence = await productionEvidence(input, claim, listUrlRef);
+  const listEvidence = await productionListingEvidence(input, claim, listUrlRef);
   const listUrl = productionUrlFromEvidence(listEvidence);
   assertProductionSourceKind(
     source,
