@@ -81,6 +81,24 @@ describe("schedule proposal display", () => {
     expect(proposalDisplayIssues(proposal).errors).toContain(
       "Match 1 has an unassigned officiating slot.",
     );
+
+    const bestAvailableProposal = {
+      ...proposal,
+      graph: {
+        ...proposal.graph,
+        event: {
+          ...proposal.graph.event,
+          staffingPriority: "BEST_AVAILABLE_COVERAGE",
+        },
+      },
+    };
+    const bestAvailableIssues = proposalDisplayIssues(bestAvailableProposal);
+    expect(bestAvailableIssues.errors).not.toContain(
+      "Match 1 has an unassigned officiating slot.",
+    );
+    expect(bestAvailableIssues.warnings).toContain(
+      "Match 1 has an unassigned officiating slot.",
+    );
   });
   it("resolves phase-specific officiating positions and team duty", () => {
     const proposal = {

@@ -91,6 +91,17 @@ describe('OnboardingPage', () => {
     expect(updateUser).not.toHaveBeenCalled();
     expect(replaceMock).toHaveBeenCalledWith('/discover');
   });
+  it('routes guest event creators to signup instead of a blocked editor', async () => {
+    renderPage();
+
+    fireEvent.click(screen.getByText(/create events as an individual/i).closest('button') as HTMLButtonElement);
+
+    await waitFor(() => {
+      expect(replaceMock).toHaveBeenCalledWith(
+        '/login?mode=signup&onboardingIntent=INDIVIDUAL_EVENTS&next=%2Fevents%2Fevent_1%2Fschedule%3Fcreate%3D1%26mode%3Dedit%26tab%3Ddetails',
+      );
+    });
+  });
 
   it('saves signed-in user selections once before routing', async () => {
     const updateUser = jest.fn().mockResolvedValue({

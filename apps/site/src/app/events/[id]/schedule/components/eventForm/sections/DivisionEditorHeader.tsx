@@ -28,7 +28,6 @@ export const DivisionEditorHeader = ({
         </Text>
         <AnimatedSection in={splitDivisionEditorEnabled} collapseClassName="max-w-xs">
             <MantineSelect
-                native
                 label="Division Type"
                 data={[
                     { value: 'LEAGUE', label: 'League' },

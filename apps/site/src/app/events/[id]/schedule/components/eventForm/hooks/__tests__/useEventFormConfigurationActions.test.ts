@@ -152,6 +152,44 @@ describe('useEventFormConfigurationActions', () => {
         expect(clearLeagueSlotErrors).toHaveBeenCalledTimes(1);
     });
 
+    it('gives tournaments a schedule window for the minimum bracket', async () => {
+        const { result } = renderHook(() => useConfigurationActionsHarness(
+            buildEventData({
+                start: '2026-07-20T09:00',
+                end: '2026-07-20T10:00',
+            }),
+            jest.fn(),
+        ));
+
+        act(() => result.current.actions.handleEventTypeChange(
+            'TOURNAMENT',
+            result.current.applyEventType,
+        ));
+
+        await waitFor(() => {
+            expect(result.current.eventData.end).toBe('2026-07-20T12:00:00');
+        });
+    });
+
+    it('gives leagues a schedule window for the default round robin', async () => {
+        const { result } = renderHook(() => useConfigurationActionsHarness(
+            buildEventData({
+                start: '2026-07-20T09:00',
+                end: '2026-07-20T10:00',
+            }),
+            jest.fn(),
+        ));
+
+        act(() => result.current.actions.handleEventTypeChange(
+            'LEAGUE',
+            result.current.applyEventType,
+        ));
+
+        await waitFor(() => {
+            expect(result.current.eventData.end).toBe('2026-07-20T15:00:00');
+        });
+    });
+
     it('repairs the end time when a non-team event type requires a fixed end', async () => {
         const { result } = renderHook(() => useConfigurationActionsHarness(
             buildEventData({ noFixedEndDateTime: true }),
@@ -166,6 +204,24 @@ describe('useEventFormConfigurationActions', () => {
         await waitFor(() => {
             expect(result.current.eventData.noFixedEndDateTime).toBe(false);
             expect(result.current.eventData.end).toBe('2026-07-20T10:00:00');
+        });
+    });
+    it('preserves a valid short window for a one-off event', async () => {
+        const { result } = renderHook(() => useConfigurationActionsHarness(
+            buildEventData({
+                start: '2026-07-20T09:00',
+                end: '2026-07-20T09:30',
+            }),
+            jest.fn(),
+        ));
+
+        act(() => result.current.actions.handleEventTypeChange(
+            'EVENT',
+            result.current.applyEventType,
+        ));
+
+        await waitFor(() => {
+            expect(result.current.eventData.end).toBe('2026-07-20T09:30');
         });
     });
 

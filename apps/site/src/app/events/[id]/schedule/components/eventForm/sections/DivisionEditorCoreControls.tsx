@@ -91,7 +91,6 @@ export const DivisionEditorCoreControls = ({
 }: DivisionEditorCoreControlsProps) => (
     <>
         <MantineSelect
-            native
             label="Gender"
             placeholder="Select gender"
             data={genderOptions}
@@ -103,7 +102,6 @@ export const DivisionEditorCoreControls = ({
             onChange={(value) => onGenderChange((value as '' | 'M' | 'F' | 'C') || '')}
         />
         <MantineSelect
-            native
             label="Skill Division"
             placeholder="Select skill division"
             data={skillDivisionTypeOptions}
@@ -117,7 +115,6 @@ export const DivisionEditorCoreControls = ({
             onChange={(value) => onSkillDivisionChange(value || '')}
         />
         <MantineSelect
-            native
             label="Age Division"
             placeholder="Select age division"
             data={ageDivisionTypeOptions}

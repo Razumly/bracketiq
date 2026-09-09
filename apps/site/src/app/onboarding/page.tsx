@@ -30,6 +30,7 @@ import {
   isPrivateToOrganizationsVisibility,
   type AccountVisibility,
 } from '@/lib/accountVisibility';
+import { buildGuestSignupDestination } from '@/lib/guestOnboarding';
 import { buildIndividualEventCreateUrl } from '@/lib/eventCreateNavigation';
 import { getHomePathForUser } from '@/lib/homePage';
 import {
@@ -258,7 +259,12 @@ export default function OnboardingPage() {
           throw new Error('Unable to save your selection.');
         }
       }
-      router.replace(getIntentDestination(intent));
+      const destination = getIntentDestination(intent);
+      if (isGuest && intent === 'INDIVIDUAL_EVENTS') {
+        router.replace(buildGuestSignupDestination({ target: 'event', next: destination }));
+      } else {
+        router.replace(destination);
+      }
     } catch (selectError: unknown) {
       selectionInProgressRef.current = false;
       setError(selectError instanceof Error ? selectError.message : 'Unable to save your selection.');

@@ -105,7 +105,6 @@ export const StaffOrganizationRosterPicker = ({
                     maxLength={maxMediumTextLength}
                 />
                 <MantineSelect
-                    native
                     label="Role filter"
                     data={ORGANIZATION_STAFF_TYPE_OPTIONS}
                     value={typeFilter}
@@ -113,7 +112,6 @@ export const StaffOrganizationRosterPicker = ({
                     comboboxProps={comboboxProps}
                 />
                 <MantineSelect
-                    native
                     label="Status filter"
                     data={ORGANIZATION_STAFF_STATUS_OPTIONS}
                     value={statusFilter}

@@ -24,7 +24,11 @@ export const DivisionEditorPlayoffPlacementControls = ({
     disabled,
     onPlacementDivisionChange,
 }: DivisionEditorPlayoffPlacementControlsProps) => (
-    <AnimatedLayoutSection in={visible} className={DIVISION_FULL_WIDTH_CLASS}>
+    <AnimatedLayoutSection
+        in={visible}
+        className={DIVISION_FULL_WIDTH_CLASS}
+        allowOverflow
+    >
         <div className="space-y-2">
             <Text size="sm" fw={600}>Playoff Placement Mapping</Text>
             {playoffDivisionOptions.length === 0 ? (
@@ -35,7 +39,6 @@ export const DivisionEditorPlayoffPlacementControls = ({
                 <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                     {Array.from({ length: Math.max(0, Math.trunc(playoffTeamCount ?? 0)) }).map((_, placementIndex) => (
                         <MantineSelect
-                            native
                             key={`editor-placement-${placementIndex}`}
                             label={`Placement #${placementIndex + 1}`}
                             placeholder="Select playoff division"

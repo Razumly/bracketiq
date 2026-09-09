@@ -49,7 +49,6 @@ export const StaffOfficialPositionEditor = ({
     <Paper withBorder radius="md" p="md" bg="white">
         <Stack gap="sm">
             <MantineSelect
-                native
                 label="Staffing Priority"
                 description="Choose how staffing shortages affect match placement."
                 data={STAFFING_PRIORITY_OPTIONS}

@@ -58,7 +58,6 @@ export const EventDetailsTypeControls = ({
                 render={({ field }) => (
                     <div className="space-y-2">
                         <MantineSelect
-                            native
                             label="Event Type"
                             data={eventTypeOptions}
                             value={field.value}
