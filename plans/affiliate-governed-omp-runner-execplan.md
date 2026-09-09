@@ -32,10 +32,10 @@ The operator selected OMP with two ChatGPT accounts. The governed affiliate work
 - [x] Require structured evidence for every legacy producer contract gap.
 - [x] Retain bounded, redacted command rejection diagnostics after successful claims.
 - [x] Run focused regressions and the recorded-evidence replay before source delivery.
-- [ ] Add and verify the guarded completed-hold retry operation.
-- [ ] Publish and deploy the reviewed retry-capable correction.
-- [ ] Run the two linked mapping attempts and required independent review.
-- [ ] Verify final records, close admission, and stop trial workers.
+- [x] Add and verify the guarded completed-hold retry operation.
+- [x] Publish and deploy the reviewed retry-capable correction.
+- [ ] Complete both linked repairs and independent review. Blocked by Softball validation errors and Boomtown review reconciliation.
+- [x] Verify final records, close admission, and stop trial workers.
 ## Current approval record
 
 Conditional `AUTH SETUP` approval (recorded 2026-09-07): after source
@@ -134,7 +134,7 @@ Container log retention is not a permanent database audit.
 ## Outcomes & Retrospective
 
 
-The approved OMP runtime completed the initial canary and the later two-source trial without invocation failures. All three results were `CONTRACT_GAP`. No mapping package or independent reviewer job was produced. The two-source trial did not repair the records. Its old organization values and candidates remain unchanged. Admission is closed. Both trial workers and the root runner are stopped. The Gateway, model gateway, and auth broker remain healthy. Repair holds and prior history remain intact. Two accounts passed health checks; account rotation was not measured.
+The corrected version-4 runtime is deployed. Both linked producer attempts ran. Softball produced a verified sport assessment but no package because validation returned internal errors. Boomtown committed a validated version-2 mapping and reached independent review. The reviewer selected APPROVED, but its terminal effect is UNKNOWN and the review job requires reconciliation. This is partial repair progress, not a completed approval. Admission is closed; mapper 1, reviewer 1, and the root runner are stopped. Both model services and the Gateway remain healthy. Holds, private organization state, and all original job/claim/receipt rows remain preserved.
 
 ## Context and Orientation
 
@@ -714,3 +714,71 @@ before the correction and passed afterward. Both focused suites passed
 rows, with PostgreSQL writes forbidden, returned the same two child IDs and
 zero writes. No child claim was consumed. Admission remains closed and the
 idle trial workers/runner were stopped for the correction rollout.
+
+### Corrected rollout and bounded retry outcome
+
+The ordering fix `1f21c7a2193dd77f12cbb73ba515d106f0c35aaf` passed Site CI
+`34307963777` and publication `34308977192`. The deployed worker/model digest is
+`sha256:99a3feb33b6b9a2553da562e78c1410e91fe4b000c0dbd7179abfdf19ee6abc4`.
+The Gateway digest is
+`sha256:410dde0e7e027c943df8cc76c2aea5a29abe35254021927aaf0aab26af542b8c`.
+The deployment contract remains version 4 with the same hash. Fresh preflight
+passed with hash
+`4899fd9b59527a75fb7f59314c4fd86b1d83024b8f3af8ade115a2781753ea54`.
+The live exact retry replay returned the original two children with zero writes.
+
+Softball child `91f4fbe2-7247-4277-a124-0cfb013bbb3c` completed as
+`CONTRACT_GAP`, receipt `agw-receipt-b6831693-7ccb-40f4-b7db-9cfdc4c2cb92`.
+It supplied a verified `RESOLVED` Softball determination and an owned Markdown
+citation with the correct page URL. The root log retained one local schema
+rejection and six Gateway `VALIDATE_DECLARATIVE_PACKAGE` internal errors.
+No validation or commit receipt was produced. The model described EVENT
+validation attempts; the existing source is CLUB. The exact cause of those
+internal errors is not proven. Do not treat the model's layout explanation
+as an authoritative backend diagnosis.
+
+Boomtown child `bbdb8376-2736-4e0a-b8b7-121cb398a1c5` completed as
+`BOUNDED_REPAIR_SUBMITTED`, receipt
+`agw-receipt-b1a5c2b6-a012-413e-8851-02468358845d`.
+Commit receipt `agw-receipt-e939a5e0-5f75-4eef-8739-f117c16a6781` records
+package `60df90cb66416a314a2dc8a8f96260dcac414d91627785d472a8660a5e2fc4bf`.
+It created mapping `agw-artifact-53fb238e-f15a-452f-a694-2bb4049ac7b5`,
+version 2. The mapping carries verified Indoor Volleyball evidence, the
+source page URL, venue/address selectors, and a registration action.
+It remains inactive and has no `validatedAt`. Existing candidate values
+and the private organization remain unchanged.
+
+Independent reviewer job `d2489e87-490e-495f-9e76-fa38d97ef02f`, claim
+`agw-claim-7d3e9235-39c9-451a-b2fe-efd66ebb04b7`, read the committed package,
+deterministic validation, and durable evidence. Its `active-contract` read
+failed. A separate read-only store probe confirmed zero File rows and
+`NoSuchKey` for the supplied `supply-contract:<hash>` handle.
+
+The reviewer selected APPROVED with source-backed rationale. The intended
+result is retained in terminal-effect receipt
+`agw-receipt-42ec1599-5b1a-4583-98d4-1e7e197ca45c`, but that receipt is
+UNKNOWN with `PARTIAL_COMMAND_UNRESOLVED`. The job and claim are
+`RECONCILIATION_REQUIRED`. No APPROVE lifecycle transition or successful
+review terminal receipt exists. The root's stage named APPROVED, generation 2,
+came from RECORD_MAPPING; it is not proof that this independent approval
+completed. The exact terminal-effect failure cause remains unproven.
+
+Main closed admission and stopped mapper 1, reviewer 1, and the root runner.
+The workspace volume is empty. The Gateway and both model services are healthy.
+There are zero ACTIVE claims and zero claimable jobs, but one unresolved
+review claim pointer remains. Both roots retain `LEGACY_SPORT_REPAIR` with
+automation disabled and zero supply targets. Both organizations remain
+unlisted with public surfaces disabled; automatic scraping remains off.
+All 19 original Gateway job, claim, and receipt row fingerprints are unchanged.
+No direct database repair or forced completion was performed.
+
+Private final evidence is under
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v4-retry-1f21c7a21/run`.
+It includes the applied/replayed scope, old fingerprints, producer results,
+retained diagnostics, committed mapping, reviewer intent/ledger, failed
+active-contract read, final records, and final runtime state.
+
+Further work must resolve the Softball validation failure, make the supplied
+contract artifact readable through the governed path, and safely reconcile
+the unknown reviewer effect. Do not reset the completed jobs, remove the
+holds, or call a reviewer recommendation a recorded approval.
