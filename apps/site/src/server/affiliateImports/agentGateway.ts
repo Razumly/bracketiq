@@ -1,3 +1,5 @@
+
+import { z } from "zod";
 import type {
   AffiliateAgentClaimEnvelope,
   AffiliateAgentCommand,
@@ -6,6 +8,54 @@ import type {
   AffiliateAgentSchemaIssue,
   AffiliateAgentTerminalDisposition,
 } from "./agentGatewayContracts";
+
+const affiliateAgentGatewayIdentifierSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(200);
+
+const affiliateAgentGatewayRecoveryReasonSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(1_000)
+  .refine(
+    (value) => Buffer.byteLength(value, "utf8") <= 1_000,
+    "reason must not exceed 1,000 UTF-8 bytes.",
+  );
+
+/**
+ * One strict recovery request contract shared by the core operation and HTTP
+ * transport. The parsed value is normalized before it reaches persistence.
+ */
+export const affiliateAgentReviewerEffectRecoveryRequestSchema = z
+  .object({
+    mode: z.enum(["PREVIEW", "APPLY"]),
+    receiptId: affiliateAgentGatewayIdentifierSchema,
+    jobId: affiliateAgentGatewayIdentifierSchema,
+    claimId: affiliateAgentGatewayIdentifierSchema,
+    supplySourceId: affiliateAgentGatewayIdentifierSchema,
+    reason: affiliateAgentGatewayRecoveryReasonSchema,
+    expectedReportHash: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.mode === "APPLY" && !value.expectedReportHash) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["expectedReportHash"],
+        message: "Apply requires a reviewed report hash.",
+      });
+    }
+    if (value.mode === "PREVIEW" && value.expectedReportHash !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["expectedReportHash"],
+        message: "Preview does not accept a reviewed report hash.",
+      });
+    }
+  });
 
 export const AFFILIATE_AGENT_HEARTBEAT_INTERVAL_SECONDS = 60 as const;
 export const AFFILIATE_AGENT_LEASE_SECONDS = 300 as const;
@@ -217,6 +267,78 @@ export type AffiliateAgentReconcileReport = Readonly<{
   unresolvedReceipts: number;
   isAdmissionHalted: boolean;
 }>;
+export type AffiliateAgentReviewerEffectRecoveryRequest = Readonly<{
+  mode: "PREVIEW" | "APPLY";
+  receiptId: string;
+  jobId: string;
+  claimId: string;
+  supplySourceId: string;
+  reason: string;
+  expectedReportHash?: string;
+}>;
+
+export type AffiliateAgentReviewerEffectRecoveryOperator = Readonly<{
+  operatorId: string;
+}>;
+
+export type AffiliateAgentReviewerEffectRecoveryCurrentState = Readonly<{
+  receipt:
+    | "PENDING"
+    | "SUCCEEDED"
+    | "FAILED"
+    | "UNKNOWN"
+    | null;
+  claim:
+    | "ACTIVE"
+    | "COMPLETED"
+    | "FAILED"
+    | "EXPIRED"
+    | "REVOKED"
+    | "RECONCILIATION_REQUIRED"
+    | null;
+  job:
+    | "QUEUED"
+    | "CLAIMED"
+    | "RETRY_WAIT"
+    | "COMPLETED"
+    | "PIPELINE_BLOCKED"
+    | "RECONCILIATION_REQUIRED"
+    | null;
+  sourceStage:
+    | "PRE_MAPPED"
+    | "MAPPED"
+    | "APPROVED"
+    | "ACTIVATED"
+    | "PUBLISHED"
+    | "SOURCE_EXCLUDED"
+    | "HUMAN_REVIEW_REQUIRED"
+    | null;
+  sourceLifecycleGeneration: number | null;
+}>;
+
+export type AffiliateAgentReviewerEffectRecoveryOutcome =
+  | "PREVIEW"
+  | "COMPLETED"
+  | "REPLAYED"
+  | "RECONCILIATION_REQUIRED";
+
+export type AffiliateAgentReviewerEffectRecoveryReport = Readonly<{
+  schemaVersion: 1;
+  mode: AffiliateAgentReviewerEffectRecoveryRequest["mode"];
+  eligible: boolean;
+  reasonCodes: readonly string[];
+  reportHash: string;
+  receiptId: string;
+  jobId: string;
+  claimId: string;
+  supplySourceId: string;
+  currentState: AffiliateAgentReviewerEffectRecoveryCurrentState;
+  outcome: AffiliateAgentReviewerEffectRecoveryOutcome;
+  replayed: boolean;
+  /** Coordinator state/audit row mutations; lifecycle/diagnostic writes are excluded. Exact no-op replay is always 0. */
+  writeCount: number;
+}>;
+
 
 export type AffiliateAgentGatewayErrorCode =
   | "ROLE_CREDENTIAL_INVALID"
@@ -253,6 +375,10 @@ export type AffiliateAgentGatewayErrorCode =
   | "PARTIAL_COMMAND_UNRESOLVED"
   | "DUPLICATE_LIVE_CLAIM"
   | "GATEWAY_ADMISSION_HALTED"
+  | "REVIEWER_EFFECT_RECOVERY_NOT_ELIGIBLE"
+  | "REVIEWER_EFFECT_RECOVERY_STALE"
+  | "REVIEWER_EFFECT_RECOVERY_IN_PROGRESS"
+  | "REVIEWER_EFFECT_RECOVERY_HASH_MISMATCH"
   | "INTERNAL_ERROR";
 
 export class AffiliateAgentGatewayError extends Error {

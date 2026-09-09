@@ -930,3 +930,80 @@ accepted `APPROVE` decision. Replay stdout is preserved at
 This record does not authorize production deployment, retry, automation
 enablement, writes, or UNKNOWN reconciliation. Those operational actions were
 not performed.
+
+## Authorized production completion
+
+
+The operator confirmed that the goal remains repair of Softball Academy
+Chicago and Boomtown Athletics. The operator then authorized integration,
+deployment, and continued bounded repair and review for those two sources.
+This approval permits the required governed Gateway, runner, mapper 1,
+reviewer 1, and model-service image updates. It does not permit publication,
+automatic scraping, coverage, replenishment, site, or mobile changes.
+Close admission and stop the trial workers after the bounded operation.
+
+Source commit `b0827c8a086f03dd583a591767c50eaf336295b2` was integrated
+by fast-forward and pushed to canonical `main`. Site CI run `34392793823`
+is the image-publication prerequisite.
+
+Before deployment, read-only inspection confirmed zero active claims and
+zero queued or retry-wait jobs. Softball pass two remains a completed
+CONTRACT_GAP. Boomtown retains its committed replacement mapping and
+RECONCILIATION_REQUIRED reviewer claim. Its original effect receipt remains
+UNKNOWN with no response hash. Recovery must use an authorized, guarded
+Gateway operation. Never reset that receipt or forge a new claim in SQL.
+
+### Guarded reviewer-effect recovery prerequisite
+
+
+The ordinary reconciler excludes UNKNOWN receipts and cannot resume this
+reviewer claim. Add operator-only `POST /reviewer-effects/recover` with strict
+PREVIEW and APPLY modes. Both require closed admission and exact receipt,
+job, claim, and Supply Source IDs. APPLY requires the deterministic preview
+hash. The server supplies the operator identity.
+
+Limit this operation to retained APPROVED decisions for legacy sport repair.
+Validate original envelope, result, receipt request, producer package, current
+Supply Contract, current source generation, and bound evidence. Reject
+unrelated active claims or claim pointers. PREVIEW must not write. APPLY
+must preserve original state in a durable audit before a guarded resumption.
+The old token stays invalidated. Reuse the original effect receipt as the
+lifecycle idempotency key and retain safe failure diagnostics. Only a
+verified actual effect can complete the reviewer claim and clear its pointer.
+Exact replay must not repeat the lifecycle effect.
+
+Recover Boomtown first. Its unresolved claim pointer blocks the producer
+retry operation. After verified review completion, preview and apply one
+pass-three retry for Softball job `91f4fbe2-7247-4277-a124-0cfb013bbb3c`.
+Preserve its schema-one incoming audit and every completed producer row.
+The operation has no authority to rerun Boomtown's completed producer.
+
+Verify zero-write preview, stale report rejection, lineage and evidence
+tamper rejection, failed recovery quarantine, concurrent replay, token
+invalidation, and actual successful completion with isolated PostgreSQL.
+Review the new operator boundary independently before publication.
+
+## Final guarded recovery verification
+
+- [x] (2026-09-09) Verify the source prerequisite at fixed base
+  `b0827c8a086f03dd583a591767c50eaf336295b2`. Final Standards and Spec
+  reviews both passed.
+- [x] (2026-09-09) Complete the isolated database gates: core recovery
+  integration **45/45**, HTTP recovery subset **55/55**, and the exact
+  complete run of **15 suites / 531 tests**. TypeScript and targeted ESLint
+  both passed.
+- [x] (2026-09-09) Run the real production PREVIEW with a temporary process
+  using `default_transaction_read_only=on`. The active source was eligible
+  with `reasonCodes: ["ELIGIBLE"]`, `outcome: "PREVIEW"`, and `writeCount: 0`.
+  Safe report is preserved at
+  `/tmp/recovery-production-preview.safe.json`; report hash is
+  `f4373cc8e3a9c84852dc8c327f8e407d3e4039c806118dae12ac944195bd4d20`.
+- [ ] Deploy the reviewed source and generated role-4/deployment-5 bundle.
+- [ ] Apply the guarded Boomtown recovery and verify the actual effect.
+- [ ] Preview and apply the authorized Softball retry after Boomtown
+  completion. Keep both legacy holds and admission controls until those
+  operations are separately verified.
+
+The source prerequisite is verified; deployment, actual recovery, and retry
+remain pending. No production write, token revival, claim creation, or
+automatic-scrape/publication action was performed by this verification.

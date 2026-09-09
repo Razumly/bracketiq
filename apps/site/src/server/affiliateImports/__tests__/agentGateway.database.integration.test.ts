@@ -4,9 +4,13 @@ import { createHash, randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
 import { Client } from "pg";
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@/generated/prisma/client";
 import {
   AFFILIATE_AGENT_PROMPT_TEMPLATES,
   AFFILIATE_AGENT_ROLE_CONTRACTS,
+  affiliateAgentClaimEnvelopeSchema,
+  affiliateAgentTerminalResultEnvelopeSchema,
+  canonicalizeAffiliateAgentValue,
   hashAffiliateAgentValue,
   type AffiliateAgentEvidenceManifest,
   type AffiliateAgentRole,
@@ -18,7 +22,18 @@ import type {
   AffiliateAgentClaimRequest,
   AffiliateAgentGateway,
   AffiliateAgentInvocationFailureCode,
+  AffiliateAgentReviewerEffectRecoveryRequest,
+  AffiliateAgentReviewerEffectRecoveryReport,
 } from "../agentGateway";
+import {
+  buildAffiliateSupplyContractManifest,
+  type AffiliateSupplyContractPolicy,
+} from "../affiliateSupplyLifecycle";
+import {
+  buildAffiliateSportsCatalogSnapshot,
+  loadAffiliateSportsCatalogSnapshot,
+  type AffiliateSportsCatalogSnapshot,
+} from "../affiliateSportsCatalog";
 import {
   createProductionAffiliateAgentGatewayAdapters,
   createProductionAffiliateAgentGatewayDependencies,
@@ -38,6 +53,7 @@ import {
 import {
   createPrismaAffiliateAgentGateway,
   createPrismaAffiliateAgentInvocationReconciler,
+  recoverAffiliateAgentReviewerEffect,
 } from "../prismaAgentGateway";
 const describeDatabase =
   process.env.RUN_DATABASE_INTEGRATION === "1" ? describe : describe.skip;
@@ -328,6 +344,1023 @@ const unsupportedDeploymentBundleFixture = (() => {
     },
   };
 })();
+type RecoveryDeploymentContract = Omit<
+  typeof contractBundleFixture.deploymentContract,
+  "version" | "activeSupplyContract" | "hash"
+> & {
+  version: number;
+  activeSupplyContract: Readonly<{ version: number; hash: string }>;
+  hash: string;
+};
+
+type RecoveryContractBundle = Readonly<{
+  schemaVersion: 1;
+  supplyContract: AffiliateSupplyContractPolicy;
+  roleContracts: typeof contractBundleFixture.roleContracts;
+  promptTemplates: typeof contractBundleFixture.promptTemplates;
+  deploymentContract: RecoveryDeploymentContract;
+}>;
+
+type RecoveryGatewayHarness = Readonly<{
+  dependencies: AffiliateAgentGatewayDependencies;
+  gateway: AffiliateAgentGateway;
+  setNow: (value: string) => void;
+  setActiveBundle: (value: unknown) => void;
+}>;
+const recoverySupplyContractPreimageFor = (
+  rolloutCohort: string,
+): Omit<AffiliateSupplyContractPolicy, "hash"> => ({
+  schemaVersion: 1,
+  version: 1,
+  rolloutCohort,
+  freshnessWindows: [{ sourceProfile: "EVENT", maximumAgeHours: 24 }],
+  targets: [{
+    marketKey: null,
+    sportId: null,
+    sourceProfile: "EVENT",
+    minimumFreshPublishedSupply: 1,
+  }],
+  requiredMappingEvidenceKinds: ["PAGE_HTML"],
+  requiredLifecycleEvidenceKinds: [
+    "VALIDATION_OUTPUT",
+    "DURABLE_SOURCE_EVIDENCE",
+  ],
+});
+const recoverySupplyManifestFor = (
+  rolloutCohort: string,
+): AffiliateSupplyContractManifest => buildAffiliateSupplyContractManifest({
+  version: 1,
+  rolloutCohort,
+  status: "ACTIVE",
+  supplyContract: recoverySupplyContractPreimageFor(rolloutCohort),
+});
+
+const recoveryContractBundleFor = (
+  manifest: AffiliateSupplyContractManifest,
+): RecoveryContractBundle => {
+  const deploymentPreimage = {
+    schemaVersion: 1 as const,
+    version: 5,
+    gatewayVersion: 1,
+    activeSupplyContract: {
+      version: manifest.supplyContract.version,
+      hash: manifest.supplyContract.hash,
+    },
+    roleContracts: Object.values(AFFILIATE_AGENT_ROLE_CONTRACTS).map(
+      ({ role, version, hash }) => ({ role, version, hash }),
+    ),
+    promptTemplates: Object.values(AFFILIATE_AGENT_PROMPT_TEMPLATES).map(
+      ({ role, version, hash }) => ({ role, version, hash }),
+    ),
+    expectedTopology: contractBundleFixture.deploymentContract.expectedTopology,
+  };
+  return {
+    schemaVersion: 1 as const,
+    supplyContract: manifest.supplyContract,
+    roleContracts: Object.values(AFFILIATE_AGENT_ROLE_CONTRACTS),
+    promptTemplates: Object.values(AFFILIATE_AGENT_PROMPT_TEMPLATES),
+    deploymentContract: {
+      ...deploymentPreimage,
+      hash: hashAffiliateAgentValue(deploymentPreimage),
+    },
+  };
+};
+
+type RecoveryManifestEntry = AffiliateAgentEvidenceManifest["entries"][number];
+
+const recoveryEvidenceManifestFor = (
+  entries: readonly RecoveryManifestEntry[],
+): AffiliateAgentEvidenceManifest => {
+  const preimage = {
+    schemaVersion: 1 as const,
+    entries: [...entries].sort((left, right) =>
+      left.evidenceRef.localeCompare(right.evidenceRef)),
+  };
+  return {
+    ...preimage,
+    hash: hashAffiliateAgentValue(preimage),
+  };
+};
+
+type ReviewerEffectRecoveryFixture = Readonly<{
+  label: string;
+  supplySourceId: string;
+  sourceId: string;
+  mappingId: string;
+  mappingJobId: string;
+  runId: string;
+  intakeId: string;
+  producerClaimId: string;
+  producerJobId: string;
+  reviewerClaimId: string;
+  reviewerJobId: string;
+  receiptId: string;
+  producerCommitReceiptId: string;
+  producerTerminalReceiptId: string;
+  packageHash: string;
+  bundle: RecoveryContractBundle;
+  request: AffiliateAgentReviewerEffectRecoveryRequest;
+  catalog: AffiliateSportsCatalogSnapshot;
+  sourcePageBytes: Buffer;
+  packageBytes: Buffer;
+  durableBytes: Buffer;
+  harness: RecoveryGatewayHarness;
+}>;
+
+const seedReviewerEffectRecoveryFixture = async (
+  label: string,
+): Promise<ReviewerEffectRecoveryFixture> => {
+  const supplySourceId = `${RUN_PREFIX}-${label}-supply-source`;
+  const sourceId = `${RUN_PREFIX}-${label}-scrape-source`;
+  const mappingId = `${RUN_PREFIX}-${label}-mapping-v2`;
+  const mappingJobId = `${RUN_PREFIX}-${label}-mapping-job`;
+  const runId = `${RUN_PREFIX}-${label}-scrape-run`;
+  const intakeId = `${RUN_PREFIX}-${label}-intake`;
+  const producerClaimId = `${RUN_PREFIX}-${label}-producer-claim`;
+  const producerJobId = `${RUN_PREFIX}-${label}-producer-job`;
+  const reviewerClaimId = `${RUN_PREFIX}-${label}-reviewer-claim`;
+  const reviewerJobId = `${RUN_PREFIX}-${label}-reviewer-job`;
+  const receiptId = `${RUN_PREFIX}-${label}-reviewer-effect-receipt`;
+  const producerCommitReceiptId = `${RUN_PREFIX}-${label}-producer-commit-receipt`;
+  const producerTerminalReceiptId = `${RUN_PREFIX}-${label}-producer-terminal-receipt`;
+  const workerId = `${RUN_PREFIX}-${label}-reviewer-worker`;
+  const invocationId = `${RUN_PREFIX}-${label}-reviewer-invocation`;
+  const workspaceId = `${RUN_PREFIX}-${label}-reviewer-workspace`;
+  const producerWorkerId = `${RUN_PREFIX}-${label}-producer-worker`;
+  const producerInvocationId = `${RUN_PREFIX}-${label}-producer-invocation`;
+  const producerWorkspaceId = `${RUN_PREFIX}-${label}-producer-workspace`;
+  const rolloutCohort = `${RUN_PREFIX}-${label}-cohort`;
+  const activeManifest = recoverySupplyManifestFor(rolloutCohort);
+  const bundle = recoveryContractBundleFor(activeManifest);
+  const catalog = await loadAffiliateSportsCatalogSnapshot(
+    prisma,
+    INITIAL_TIME.toISOString(),
+  );
+  const sportName = catalog.sports[0]?.name;
+  if (!sportName) throw new Error("The local sports catalog is empty.");
+  const sourcePageBytes = Buffer.from(
+    `<html><body><article class="event"><a href="/events/${label}">Register</a><h1 class="title">${label} legacy event</h1><span class="sport">${sportName}</span></article></body></html>`,
+    "utf8",
+  );
+  const sourcePageHash = createHash("sha256").update(sourcePageBytes).digest("hex");
+  const sourcePageArtifactId = `${RUN_PREFIX}-${label}-source-page`;
+  const durableBytes = Buffer.from(`durable proof for ${label}`, "utf8");
+  const durableHash = createHash("sha256").update(durableBytes).digest("hex");
+  const durableArtifactId = `${RUN_PREFIX}-${label}-durable-evidence`;
+  const repairContext = {
+    kind: "LEGACY_SPORT_REPAIR" as const,
+    intakeId,
+    evidenceRunId: runId,
+    sportsCatalog: catalog,
+  };
+  const packagePreimage = {
+    schemaVersion: 1 as const,
+    supplySourceId,
+    listingKind: "EVENT" as const,
+    listUrlRef: "source-page",
+    itemSelector: ".event",
+    fields: [
+      {
+        field: "officialActionUrl" as const,
+        selector: "a",
+        mode: "ATTRIBUTE" as const,
+        attribute: "href",
+        transform: "ABSOLUTE_URL" as const,
+      },
+      {
+        field: "sportName" as const,
+        selector: ".sport",
+        mode: "TEXT" as const,
+        attribute: null,
+        transform: "TRIM" as const,
+      },
+      {
+        field: "title" as const,
+        selector: ".title",
+        mode: "TEXT" as const,
+        attribute: null,
+        transform: "TRIM" as const,
+      },
+    ],
+    evidenceRefs: ["source-page"],
+    sportEvidence: {
+      evidenceRunId: runId,
+      sportsCatalogSha256: catalog.sha256,
+      sportDeterminations: [{
+        sourceLabels: [sportName],
+        status: "RESOLVED" as const,
+        resolutionBasis: "SOURCE_EVIDENCE" as const,
+        canonicalSportNames: [sportName],
+        rationale: "The retained source page identifies the catalog sport.",
+        evidence: [{
+          artifactId: sourcePageArtifactId,
+          artifactSha256: sourcePageHash,
+          artifactKind: "PAGE_HTML" as const,
+          pageUrl: `https://source.example.test/${label}/events`,
+          excerpt: sportName,
+        }],
+      }],
+    },
+  };
+  const packageHash = hashAffiliateAgentValue(packagePreimage);
+  const packageBytes = Buffer.from(
+    canonicalizeAffiliateAgentValue(packagePreimage),
+    "utf8",
+  );
+  const validationOutput = {
+    schemaVersion: 1 as const,
+    isValid: true as const,
+    validatedPackageHash: packageHash,
+    evidenceRefs: ["source-page"],
+    evidenceKinds: ["PAGE_HTML"],
+    validationReceiptId: `${RUN_PREFIX}-${label}-validation-receipt`,
+    claimId: producerClaimId,
+    claimGeneration: 1,
+    invocationId: producerInvocationId,
+    supplyContractHash: activeManifest.supplyContract.hash,
+  };
+  const validationHash = hashAffiliateAgentValue(validationOutput);
+  const producerManifest = recoveryEvidenceManifestFor([
+    {
+      evidenceRef: "gateway-deterministic-validation",
+      kind: "DETERMINISTIC_VALIDATION",
+      artifactId: `${producerClaimId}:gateway-deterministic-validation`,
+      sha256: validationHash,
+      mimeType: "application/json",
+      byteSize: Buffer.byteLength(canonicalizeAffiliateAgentValue(validationOutput)),
+      retention: "INDEFINITE",
+    },
+    {
+      evidenceRef: "gateway-durable-evidence",
+      kind: "DURABLE_EVIDENCE",
+      artifactId: durableArtifactId,
+      sha256: durableHash,
+      mimeType: "application/json",
+      byteSize: durableBytes.byteLength,
+      retention: "INDEFINITE",
+    },
+    {
+      evidenceRef: "gateway-committed-package",
+      kind: "COMMITTED_PACKAGE",
+      artifactId: `${producerClaimId}:gateway-committed-package`,
+      sha256: packageHash,
+      mimeType: "application/json",
+      byteSize: packageBytes.byteLength,
+      retention: "INDEFINITE",
+    },
+    {
+      evidenceRef: "source-page",
+      kind: "PAGE_HTML",
+      artifactId: sourcePageArtifactId,
+      sha256: sourcePageHash,
+      mimeType: "text/html",
+      byteSize: sourcePageBytes.byteLength,
+      retention: "INDEFINITE",
+    },
+  ]);
+  const reviewerManifest = recoveryEvidenceManifestFor([
+    {
+      evidenceRef: "gateway-deterministic-validation",
+      kind: "DETERMINISTIC_VALIDATION",
+      artifactId: `${producerClaimId}:gateway-deterministic-validation`,
+      sha256: validationHash,
+      mimeType: "application/json",
+      byteSize: Buffer.byteLength(canonicalizeAffiliateAgentValue(validationOutput)),
+      retention: "INDEFINITE",
+    },
+    {
+      evidenceRef: "gateway-durable-evidence",
+      kind: "DURABLE_EVIDENCE",
+      artifactId: durableArtifactId,
+      sha256: durableHash,
+      mimeType: "application/json",
+      byteSize: durableBytes.byteLength,
+      retention: "INDEFINITE",
+    },
+    {
+      evidenceRef: "gateway-committed-package",
+      kind: "COMMITTED_PACKAGE",
+      artifactId: `${producerClaimId}:gateway-committed-package`,
+      sha256: packageHash,
+      mimeType: "application/json",
+      byteSize: packageBytes.byteLength,
+      retention: "INDEFINITE",
+    },
+    {
+      evidenceRef: "active-contract",
+      kind: "ACTIVE_SUPPLY_CONTRACT",
+      artifactId: `supply-contract:${activeManifest.supplyContract.hash}`,
+      sha256: activeManifest.supplyContract.hash,
+      mimeType: "application/json",
+      byteSize: Buffer.byteLength(canonicalizeAffiliateAgentValue(
+        Object.fromEntries(
+          Object.entries(activeManifest.supplyContract)
+            .filter(([key]) => key !== "hash"),
+        ),
+      )),
+      retention: "INDEFINITE",
+    },
+  ]);
+  const producerSubject = {
+    type: "MAPPING_PRODUCER" as const,
+    supplySourceId,
+    mappingJobId,
+    listingKind: "EVENT" as const,
+    pass: 1,
+    repairContext,
+  };
+  const reviewerSubject = {
+    type: "SUPPLY_REVIEWER" as const,
+    supplySourceId,
+    producerClaimId,
+    producerWorkerId,
+    producerInvocationId,
+    producerWorkspaceId,
+    committedPackageHash: packageHash,
+    targetId: `${RUN_PREFIX}-${label}-target`,
+    targetType: "EVENT" as const,
+    reviewPass: 1,
+    repairContext,
+  };
+  const oldDeploymentContractHash = "4".repeat(64);
+  const oldRoleContractHash = "3".repeat(64);
+  const oldPromptTemplateHash = "3".repeat(64);
+  const producerEnvelope = {
+    schemaVersion: 1 as const,
+    queue: "AFFILIATE_MAPPING" as const,
+    lane: "MAPPING_PRODUCTION" as const,
+    jobId: producerJobId,
+    claimId: producerClaimId,
+    supplySourceId,
+    claimGeneration: 1,
+    lifecycleGeneration: 2,
+    role: "MAPPING_PRODUCER" as const,
+    deploymentContractVersion: 4,
+    deploymentContractHash: oldDeploymentContractHash,
+    supplyContractVersion: activeManifest.supplyContract.version,
+    supplyContractHash: activeManifest.supplyContract.hash,
+    roleContractVersion: 3,
+    roleContractHash: oldRoleContractHash,
+    promptTemplateVersion: 3,
+    promptTemplateHash: oldPromptTemplateHash,
+    executionClass: "PRODUCTION_OMP" as const,
+    workerId: producerWorkerId,
+    invocationId: producerInvocationId,
+    workspaceId: producerWorkspaceId,
+    claimedAt: "2026-08-20T17:50:00.000Z",
+    expiresAt: "2026-08-20T18:10:00.000Z",
+    evidenceManifest: producerManifest,
+    subject: producerSubject,
+    permittedCommands: [...AFFILIATE_AGENT_ROLE_CONTRACTS.MAPPING_PRODUCER.permittedCommands],
+  };
+  const reviewerEnvelope = {
+    schemaVersion: 1 as const,
+    queue: "AFFILIATE_REVIEW" as const,
+    lane: "SUPPLY_REVIEW" as const,
+    jobId: reviewerJobId,
+    claimId: reviewerClaimId,
+    supplySourceId,
+    claimGeneration: 1,
+    lifecycleGeneration: 2,
+    role: "SUPPLY_REVIEWER" as const,
+    deploymentContractVersion: 4,
+    deploymentContractHash: oldDeploymentContractHash,
+    supplyContractVersion: activeManifest.supplyContract.version,
+    supplyContractHash: activeManifest.supplyContract.hash,
+    roleContractVersion: 3,
+    roleContractHash: oldRoleContractHash,
+    promptTemplateVersion: 3,
+    promptTemplateHash: oldPromptTemplateHash,
+    executionClass: "PRODUCTION_OMP" as const,
+    workerId,
+    invocationId,
+    workspaceId,
+    claimedAt: "2026-08-20T17:50:00.000Z",
+    expiresAt: "2026-08-20T18:10:00.000Z",
+    evidenceManifest: reviewerManifest,
+    subject: reviewerSubject,
+    permittedCommands: [...AFFILIATE_AGENT_ROLE_CONTRACTS.SUPPLY_REVIEWER.permittedCommands],
+  };
+  const producerTerminalResult = {
+    schemaVersion: 1 as const,
+    jobId: producerJobId,
+    claimId: producerClaimId,
+    claimGeneration: 1,
+    lifecycleGeneration: 2,
+    deploymentContractVersion: 4,
+    deploymentContractHash: oldDeploymentContractHash,
+    supplyContractVersion: activeManifest.supplyContract.version,
+    supplyContractHash: activeManifest.supplyContract.hash,
+    roleContractVersion: 3,
+    roleContractHash: oldRoleContractHash,
+    promptTemplateVersion: 3,
+    promptTemplateHash: oldPromptTemplateHash,
+    workerId: producerWorkerId,
+    invocationId: producerInvocationId,
+    role: "MAPPING_PRODUCER" as const,
+    disposition: "PACKAGE_COMMITTED" as const,
+    reasonCodes: [] as const,
+    evidenceRefs: [
+      "gateway-committed-package",
+      "gateway-deterministic-validation",
+      "gateway-durable-evidence",
+      "source-page",
+    ] as const,
+    summary: "The retained package was committed by the historical producer.",
+    payload: {
+      packageHash,
+      commitReceiptId: producerCommitReceiptId,
+    },
+  };
+  const reviewerResult = {
+    schemaVersion: 1 as const,
+    jobId: reviewerJobId,
+    claimId: reviewerClaimId,
+    claimGeneration: 1,
+    lifecycleGeneration: 2,
+    deploymentContractVersion: 4,
+    deploymentContractHash: oldDeploymentContractHash,
+    supplyContractVersion: activeManifest.supplyContract.version,
+    supplyContractHash: activeManifest.supplyContract.hash,
+    roleContractVersion: 3,
+    roleContractHash: oldRoleContractHash,
+    promptTemplateVersion: 3,
+    promptTemplateHash: oldPromptTemplateHash,
+    workerId,
+    invocationId,
+    role: "SUPPLY_REVIEWER" as const,
+    disposition: "APPROVED" as const,
+    reasonCodes: ["EVIDENCE_VERIFIED"] as const,
+    evidenceRefs: [
+      "gateway-committed-package",
+      "gateway-deterministic-validation",
+      "gateway-durable-evidence",
+    ] as const,
+    summary: "The retained historical reviewer approved the package.",
+    payload: {
+      committedPackageHash: packageHash,
+    },
+  };
+  const terminalRequestHash = hashAffiliateAgentValue({
+    commandName: "SUPPLY_REVIEWER_TERMINAL_EFFECT",
+    claimId: reviewerClaimId,
+    claimGeneration: 1,
+    result: reviewerResult,
+  });
+  const pendingEffectState = {
+    kind: "PENDING" as const,
+    result: reviewerResult,
+    terminalIdempotencyKey: `${RUN_PREFIX}-${label}-terminal-result`,
+    terminalRequestHash,
+    failureDiagnostics: [{
+      code: "REVIEWER_TERMINAL_EFFECT_FAILED" as const,
+      stage: "EXECUTE" as const,
+      reasonCodes: ["UNCLASSIFIED"] as const,
+    }],
+  };
+  const now = new Date(INITIAL_TIME);
+  await prisma.$transaction(async (transaction) => {
+    await transaction.affiliateSupplyContractManifests.create({
+      data: {
+        id: `${RUN_PREFIX}-${label}-supply-contract`,
+        rolloutCohort,
+        version: activeManifest.version,
+        status: "ACTIVE",
+        contractHash: activeManifest.hash,
+        contractJson: activeManifest.supplyContract,
+      },
+    });
+    await transaction.affiliateSupplySources.create({
+      data: {
+        id: supplySourceId,
+        identityKey: `${RUN_PREFIX}-${label}-identity`,
+        canonicalUrl: `https://source.example.test/${label}/events`,
+        origin: `https://source.example.test`,
+        pathKey: `/${label}/events`,
+        targetKind: "EVENT",
+        rolloutCohort,
+        liveSourceId: sourceId,
+        lifecycleGeneration: 2,
+        activeSupplyContractVersion: activeManifest.supplyContract.version,
+        activeSupplyContractHash: activeManifest.supplyContract.hash,
+        derivedStage: "MAPPED",
+        isAutomationEnabled: false,
+        isExcluded: false,
+        automationHoldReason: "LEGACY_SPORT_REPAIR",
+        metadata: {
+          automationReviewRequired: {
+            hold: true,
+            reason: "LEGACY_SPORT_REPAIR",
+            evidenceRefs: ["source-page"],
+          },
+        },
+      },
+    });
+    await transaction.affiliateScrapeSources.create({
+      data: {
+        id: sourceId,
+        name: `Gateway ${label} source`,
+        sourceKey: `${RUN_PREFIX}-${label}-source-key`,
+        baseUrl: `https://source.example.test/${label}`,
+        listUrl: `https://source.example.test/${label}/events`,
+        targetKind: "EVENT",
+        status: "ACTIVE",
+        activeMappingId: mappingId,
+        supplySourceId,
+        lifecycleGeneration: 2,
+        activeSupplyContractVersion: activeManifest.supplyContract.version,
+        activeSupplyContractHash: activeManifest.supplyContract.hash,
+        autoScrapeEnabled: false,
+        metadata: {
+          automationReviewRequired: {
+            hold: true,
+            reason: "LEGACY_SPORT_REPAIR",
+            evidenceRefs: ["source-page"],
+          },
+        },
+      },
+    });
+    await transaction.affiliateScrapeMappings.create({
+      data: {
+        id: mappingId,
+        sourceId,
+        supplySourceId,
+        version: 2,
+        isActive: false,
+        validatedAt: null,
+        mapping: {
+          kind: "EVENT",
+          listUrl: `https://source.example.test/${label}/events`,
+          itemSelector: ".event",
+          fields: {
+            title: {
+              selector: ".title",
+              mode: "text",
+              transform: "trim",
+            },
+            officialActionUrl: {
+              selector: "a",
+              mode: "attribute",
+              attribute: "href",
+              transform: "absoluteUrl",
+            },
+            sportName: {
+              selector: ".sport",
+              mode: "text",
+              transform: "trim",
+            },
+          },
+          metadata: {
+            packageHash,
+            evidenceRefs: ["source-page"],
+            evidenceKinds: ["PAGE_HTML"],
+            validationOutput,
+          },
+        },
+      },
+    });
+    await transaction.affiliateSourceMappingJobs.create({
+      data: {
+        id: mappingJobId,
+        intakeId,
+        supplySourceId,
+        sourceId,
+        mappingId,
+        status: "REVIEW_REQUIRED",
+        resultSummary: {
+          packageHash,
+          evidenceRefs: ["source-page"],
+          gatewayCandidatePackage: {
+            candidatePackage: packagePreimage,
+            packageHash,
+            validatedPackageHash: packageHash,
+            claimId: producerClaimId,
+            claimGeneration: 1,
+            invocationId: producerInvocationId,
+            validationMetadata: {
+              ...validationOutput,
+              validationOutput,
+              deterministicValidationArtifact: {
+                sourceArtifactId: `${producerClaimId}:gateway-deterministic-validation`,
+                contentHash: validationHash,
+              },
+              durableEvidenceArtifact: {
+                sourceArtifactId: durableArtifactId,
+                contentHash: durableHash,
+              },
+            },
+            validationOutput,
+            deterministicValidationArtifact: {
+              sourceArtifactId: `${producerClaimId}:gateway-deterministic-validation`,
+              contentHash: validationHash,
+            },
+            durableEvidenceArtifact: {
+              sourceArtifactId: durableArtifactId,
+              contentHash: durableHash,
+            },
+          },
+        },
+        finishedAt: now,
+      },
+    });
+    await transaction.affiliateScrapeRuns.create({
+      data: {
+        id: runId,
+        sourceId,
+        supplySourceId,
+        mappingId,
+        status: "SUCCEEDED",
+        startedAt: new Date(now.getTime() - 60_000),
+        finishedAt: now,
+        fetchedUrl: `https://source.example.test/${label}/events`,
+        finalUrl: `https://source.example.test/${label}/events`,
+        httpStatus: 200,
+        itemCount: 1,
+        candidateCount: 1,
+        logs: { evidenceRefs: ["source-page"] },
+      },
+    });
+    await transaction.affiliateImportCandidates.create({
+      data: {
+        id: `${RUN_PREFIX}-${label}-candidate`,
+        sourceId,
+        supplySourceId,
+        runId,
+        mappingId,
+        listingKind: "EVENT",
+        status: "DISCOVERED",
+        dedupeKey: `${RUN_PREFIX}-${label}-candidate`,
+        title: `${label} legacy event`,
+        officialActionUrl: `https://source.example.test/${label}/register`,
+        sourceUrl: `https://source.example.test/${label}/events`,
+        sportName,
+        rawPayload: { evidenceRefs: ["source-page"] },
+      },
+    });
+    await transaction.affiliateAgentGatewayJobs.create({
+      data: {
+        id: producerJobId,
+        dedupeKey: `${RUN_PREFIX}-${label}-producer-dedupe`,
+        queue: "AFFILIATE_MAPPING",
+        lane: "MAPPING_PRODUCTION",
+        role: "MAPPING_PRODUCER",
+        subjectType: "MAPPING_PRODUCER",
+        subjectId: mappingJobId,
+        subjectJson: producerSubject,
+        evidenceManifestJson: producerManifest,
+        supplySourceId,
+        expectedLifecycleGeneration: 2,
+        status: "COMPLETED",
+        claimGeneration: 1,
+        activeClaimId: null,
+        terminalDisposition: "PACKAGE_COMMITTED",
+        resultHash: hashAffiliateAgentValue(producerTerminalResult),
+        resultJson: producerTerminalResult,
+        terminalReceiptId: producerTerminalReceiptId,
+        finishedAt: now,
+      },
+    });
+    await transaction.affiliateAgentGatewayClaims.create({
+      data: {
+        id: producerClaimId,
+        jobId: producerJobId,
+        claimGeneration: 1,
+        lifecycleGeneration: 2,
+        queue: "AFFILIATE_MAPPING",
+        lane: "MAPPING_PRODUCTION",
+        role: "MAPPING_PRODUCER",
+        workerId: producerWorkerId,
+        invocationId: producerInvocationId,
+        workspaceId: producerWorkspaceId,
+        workspaceMode: "READ_WRITE",
+        workspaceAttestationHash: hashAffiliateAgentValue({
+          workerId: producerWorkerId,
+          invocationId: producerInvocationId,
+          workspaceId: producerWorkspaceId,
+        }),
+        status: "COMPLETED",
+        claimRequestId: `${RUN_PREFIX}-${label}-producer-request`,
+        claimRequestHash: hashAffiliateAgentValue({ producerClaimId }),
+        claimedAt: new Date(now.getTime() - 10 * 60_000),
+        lastHeartbeatAt: new Date(now.getTime() - 10 * 60_000),
+        leaseExpiresAt: new Date(now.getTime() - 5 * 60_000),
+        hardDeadlineAt: new Date(now.getTime() - 1 * 60_000),
+        endedAt: now,
+        tokenNonce: `${RUN_PREFIX}-${label}-producer-token-nonce`,
+        tokenHash: `${RUN_PREFIX}-${label}-producer-token-hash`,
+        tokenKeyVersion: "database-key-v1",
+        tokenExpiresAt: new Date(now.getTime() - 1 * 60_000),
+        tokenInvalidatedAt: now,
+        deploymentContractVersion: producerEnvelope.deploymentContractVersion,
+        deploymentContractHash: producerEnvelope.deploymentContractHash,
+        roleContractVersion: producerEnvelope.roleContractVersion,
+        roleContractHash: producerEnvelope.roleContractHash,
+        promptTemplateVersion: producerEnvelope.promptTemplateVersion,
+        promptTemplateHash: producerEnvelope.promptTemplateHash,
+        supplyContractVersion: producerEnvelope.supplyContractVersion,
+        supplyContractHash: producerEnvelope.supplyContractHash,
+        claimEnvelopeHash: hashAffiliateAgentValue(producerEnvelope),
+        claimEnvelopeJson: producerEnvelope,
+        evidenceManifestHash: producerManifest.hash,
+        permittedCommandHash: hashAffiliateAgentValue(producerEnvelope.permittedCommands),
+        permittedCommands: [...producerEnvelope.permittedCommands],
+        terminalReceiptId: producerTerminalReceiptId,
+      },
+    });
+    await transaction.affiliateAgentGatewayOperationReceipts.create({
+      data: {
+        id: producerCommitReceiptId,
+        claimId: producerClaimId,
+        jobId: producerJobId,
+        claimGeneration: 1,
+        idempotencyKey: `${RUN_PREFIX}-${label}-producer-commit`,
+        operationKind: "EXECUTE_COMMAND",
+        commandName: "COMMIT_DECLARATIVE_PACKAGE",
+        requestHash: hashAffiliateAgentValue({ producerCommitReceiptId }),
+        status: "SUCCEEDED",
+        responseHash: hashAffiliateAgentValue({
+          commandType: "COMMIT_DECLARATIVE_PACKAGE",
+          safeOutput: { packageHash },
+        }),
+        responseJson: {
+          kind: "COMMAND_SUCCEEDED",
+          receiptId: producerCommitReceiptId,
+          commandType: "COMMIT_DECLARATIVE_PACKAGE",
+          safeOutput: { packageHash },
+        },
+        startedAt: new Date(now.getTime() - 10 * 60_000),
+        completedAt: new Date(now.getTime() - 9 * 60_000),
+      },
+    });
+    await transaction.affiliateAgentGatewayOperationReceipts.create({
+      data: {
+        id: producerTerminalReceiptId,
+        claimId: producerClaimId,
+        jobId: producerJobId,
+        claimGeneration: 1,
+        idempotencyKey: `${RUN_PREFIX}-${label}-producer-terminal`,
+        operationKind: "SUBMIT_RESULT",
+        requestHash: hashAffiliateAgentValue({ producerTerminalResult }),
+        status: "SUCCEEDED",
+        responseHash: hashAffiliateAgentValue({
+          kind: "COMMAND_SUCCEEDED",
+          receiptId: producerTerminalReceiptId,
+          commandType: "SUBMIT_TERMINAL_RESULT",
+        }),
+        responseJson: {
+          kind: "COMMAND_SUCCEEDED",
+          receiptId: producerTerminalReceiptId,
+          commandType: "SUBMIT_TERMINAL_RESULT",
+        },
+        startedAt: new Date(now.getTime() - 8 * 60_000),
+        completedAt: new Date(now.getTime() - 7 * 60_000),
+      },
+    });
+    await transaction.affiliateAgentGatewayJobs.create({
+      data: {
+        id: reviewerJobId,
+        dedupeKey: `${RUN_PREFIX}-${label}-reviewer-dedupe`,
+        queue: "AFFILIATE_REVIEW",
+        lane: "SUPPLY_REVIEW",
+        role: "SUPPLY_REVIEWER",
+        subjectType: "SUPPLY_REVIEWER",
+        subjectId: supplySourceId,
+        subjectJson: reviewerSubject,
+        evidenceManifestJson: reviewerManifest,
+        supplySourceId,
+        expectedLifecycleGeneration: 2,
+        status: "RECONCILIATION_REQUIRED",
+        claimGeneration: 1,
+        activeClaimId: reviewerClaimId,
+        parentClaimId: producerClaimId,
+        nextAttemptAt: null,
+      },
+    });
+    await transaction.affiliateAgentGatewayClaims.create({
+      data: {
+        id: reviewerClaimId,
+        jobId: reviewerJobId,
+        parentClaimId: producerClaimId,
+        claimGeneration: 1,
+        lifecycleGeneration: 2,
+        queue: "AFFILIATE_REVIEW",
+        lane: "SUPPLY_REVIEW",
+        role: "SUPPLY_REVIEWER",
+        workerId,
+        invocationId,
+        workspaceId,
+        workspaceMode: "READ_ONLY",
+        workspaceAttestationHash: hashAffiliateAgentValue({
+          workerId,
+          invocationId,
+          workspaceId,
+        }),
+        status: "RECONCILIATION_REQUIRED",
+        claimRequestId: `${RUN_PREFIX}-${label}-reviewer-request`,
+        claimRequestHash: hashAffiliateAgentValue({ reviewerClaimId }),
+        claimedAt: new Date(now.getTime() - 5 * 60_000),
+        lastHeartbeatAt: new Date(now.getTime() - 5 * 60_000),
+        leaseExpiresAt: new Date(now.getTime() - 4 * 60_000),
+        hardDeadlineAt: new Date(now.getTime() - 3 * 60_000),
+        endedAt: now,
+        tokenNonce: `${RUN_PREFIX}-${label}-reviewer-token-nonce`,
+        tokenHash: `${RUN_PREFIX}-${label}-reviewer-token-hash`,
+        tokenKeyVersion: "database-key-v1",
+        tokenExpiresAt: new Date(now.getTime() - 3 * 60_000),
+        tokenInvalidatedAt: now,
+        deploymentContractVersion: reviewerEnvelope.deploymentContractVersion,
+        deploymentContractHash: reviewerEnvelope.deploymentContractHash,
+        roleContractVersion: reviewerEnvelope.roleContractVersion,
+        roleContractHash: reviewerEnvelope.roleContractHash,
+        promptTemplateVersion: reviewerEnvelope.promptTemplateVersion,
+        promptTemplateHash: reviewerEnvelope.promptTemplateHash,
+        supplyContractVersion: reviewerEnvelope.supplyContractVersion,
+        supplyContractHash: reviewerEnvelope.supplyContractHash,
+        claimEnvelopeHash: hashAffiliateAgentValue(reviewerEnvelope),
+        claimEnvelopeJson: reviewerEnvelope,
+        evidenceManifestHash: reviewerManifest.hash,
+        permittedCommandHash: hashAffiliateAgentValue(reviewerEnvelope.permittedCommands),
+        permittedCommands: [...reviewerEnvelope.permittedCommands],
+        safeFailureCode: "PARTIAL_COMMAND_UNRESOLVED",
+        safeFailureSummary: "The original reviewer effect outcome was not observed.",
+        diagnosticRetainUntil: new Date(now.getTime() + 86_400_000),
+      },
+    });
+    await transaction.affiliateAgentGatewayOperationReceipts.create({
+      data: {
+        id: receiptId,
+        claimId: reviewerClaimId,
+        jobId: reviewerJobId,
+        claimGeneration: 1,
+        idempotencyKey: "reviewer-terminal-effect",
+        operationKind: "TERMINAL_EFFECT",
+        commandName: "SUPPLY_REVIEWER_TERMINAL_EFFECT",
+        requestHash: terminalRequestHash,
+        status: "UNKNOWN",
+        responseHash: null,
+        responseJson: pendingEffectState,
+        safeErrorCode: "PARTIAL_COMMAND_UNRESOLVED",
+        startedAt: new Date(now.getTime() - 4 * 60_000),
+        reconcileAfter: now,
+      },
+    });
+    await transaction.affiliateAgentGatewayArtifacts.createMany({
+      data: [
+        {
+          id: `${RUN_PREFIX}-${label}-producer-validation-artifact`,
+          claimId: producerClaimId,
+          claimGeneration: 1,
+          evidenceRef: "gateway-deterministic-validation",
+          evidenceKind: "DETERMINISTIC_VALIDATION",
+          sourceArtifactId: `${producerClaimId}:gateway-deterministic-validation`,
+          fileId: `${producerClaimId}:gateway-deterministic-validation`,
+          contentHash: validationHash,
+          mimeType: "application/json",
+          byteSize: Buffer.byteLength(canonicalizeAffiliateAgentValue(validationOutput)),
+          creatingClaimId: producerClaimId,
+          accessMode: "READ_ONLY",
+          retentionClass: "INDEFINITE",
+          isPinned: true,
+        },
+        {
+          id: `${RUN_PREFIX}-${label}-producer-package-artifact`,
+          claimId: producerClaimId,
+          claimGeneration: 1,
+          evidenceRef: "gateway-committed-package",
+          evidenceKind: "COMMITTED_PACKAGE",
+          sourceArtifactId: `${producerClaimId}:gateway-committed-package`,
+          fileId: `${producerClaimId}:gateway-committed-package`,
+          contentHash: packageHash,
+          mimeType: "application/json",
+          byteSize: packageBytes.byteLength,
+          creatingClaimId: producerClaimId,
+          accessMode: "READ_ONLY",
+          retentionClass: "INDEFINITE",
+          isPinned: true,
+        },
+        {
+          id: `${RUN_PREFIX}-${label}-producer-durable-artifact`,
+          claimId: producerClaimId,
+          claimGeneration: 1,
+          evidenceRef: "gateway-durable-evidence",
+          evidenceKind: "DURABLE_EVIDENCE",
+          sourceArtifactId: durableArtifactId,
+          fileId: durableArtifactId,
+          contentHash: durableHash,
+          mimeType: "application/json",
+          byteSize: durableBytes.byteLength,
+          creatingClaimId: producerClaimId,
+          accessMode: "READ_ONLY",
+          retentionClass: "INDEFINITE",
+          isPinned: true,
+        },
+        ...[
+          ["gateway-deterministic-validation", "DETERMINISTIC_VALIDATION", `${producerClaimId}:gateway-deterministic-validation`, validationHash, Buffer.byteLength(canonicalizeAffiliateAgentValue(validationOutput))],
+          ["gateway-committed-package", "COMMITTED_PACKAGE", `${producerClaimId}:gateway-committed-package`, packageHash, packageBytes.byteLength],
+          ["gateway-durable-evidence", "DURABLE_EVIDENCE", durableArtifactId, durableHash, durableBytes.byteLength],
+        ].map(([evidenceRef, evidenceKind, artifactId, contentHash, byteSize], index) => ({
+          id: `${RUN_PREFIX}-${label}-reviewer-artifact-${index + 1}`,
+          claimId: reviewerClaimId,
+          claimGeneration: 1,
+          evidenceRef: evidenceRef as string,
+          evidenceKind: evidenceKind as string,
+          sourceArtifactId: artifactId as string,
+          fileId: artifactId as string,
+          contentHash: contentHash as string,
+          mimeType: evidenceKind === "COMMITTED_PACKAGE" ? "application/json" : "application/json",
+          byteSize: byteSize as number,
+          creatingClaimId: producerClaimId,
+          accessMode: "READ_ONLY",
+          retentionClass: "INDEFINITE",
+          isPinned: true,
+        })),
+      ],
+    });
+  });
+  const harness = createGatewayHarness(label, {
+    readImmutable: async ({ fileId }) => {
+      if (fileId === `supply-contract:${activeManifest.supplyContract.hash}`) {
+        const { hash: _hash, ...contractPreimage } = activeManifest.supplyContract;
+        const bytes = Buffer.from(
+          canonicalizeAffiliateAgentValue(contractPreimage),
+          "utf8",
+        );
+        return {
+          bytes,
+          mimeType: "application/json",
+          byteSize: bytes.byteLength,
+          sourceUrl: null,
+          finalUrl: null,
+        };
+      }
+      if (
+        fileId === sourcePageArtifactId
+        || fileId === "source-page"
+      ) {
+        return {
+          bytes: sourcePageBytes,
+          mimeType: "text/html",
+          byteSize: sourcePageBytes.byteLength,
+          sourceUrl: `https://source.example.test/${label}/events`,
+          finalUrl: `https://source.example.test/${label}/events`,
+          runId,
+          intakeId,
+        };
+      }
+      if (fileId === `${producerClaimId}:gateway-committed-package`) {
+        return {
+          bytes: packageBytes,
+          mimeType: "application/json",
+          byteSize: packageBytes.byteLength,
+          sourceUrl: null,
+          finalUrl: null,
+        };
+      }
+      if (fileId === durableArtifactId) {
+        return {
+          bytes: durableBytes,
+          mimeType: "application/json",
+          byteSize: durableBytes.byteLength,
+          sourceUrl: null,
+          finalUrl: null,
+        };
+      }
+      throw new Error(`Unknown recovery artifact ${fileId}.`);
+    },
+  });
+  harness.setActiveBundle(bundle);
+  return {
+    label,
+    supplySourceId,
+    sourceId,
+    mappingId,
+    mappingJobId,
+    runId,
+    intakeId,
+    producerClaimId,
+    producerJobId,
+    reviewerClaimId,
+    reviewerJobId,
+    receiptId,
+    producerCommitReceiptId,
+    producerTerminalReceiptId,
+    packageHash,
+    bundle,
+    request: {
+      mode: "PREVIEW",
+      receiptId,
+      jobId: reviewerJobId,
+      claimId: reviewerClaimId,
+      supplySourceId,
+      reason: "authorized reviewer effect recovery",
+    },
+    catalog,
+    sourcePageBytes,
+    packageBytes,
+    durableBytes,
+    harness,
+  };
+};
 
 const manifestFor = (
   label: string,
@@ -1196,8 +2229,8 @@ const cleanupGatewayRows = async (): Promise<void> => {
       select: { id: true },
     })
   ).map(({ id }) => id);
-  const waveIds = (
-    await prisma.affiliateReplenishmentWaves.findMany({
+  const contractManifestIds = (
+    await prisma.affiliateSupplyContractManifests.findMany({
       where: { id: { startsWith: RUN_PREFIX } },
       select: { id: true },
     })
@@ -1208,12 +2241,19 @@ const cleanupGatewayRows = async (): Promise<void> => {
       select: { id: true },
     })
   ).map(({ id }) => id);
+  const waveIds = (
+    await prisma.affiliateReplenishmentWaves.findMany({
+      where: { id: { startsWith: RUN_PREFIX } },
+      select: { id: true },
+    })
+  ).map(({ id }) => id);
   if (
     jobIds.length === 0
     && supplySourceIds.length === 0
     && mappingJobIds.length === 0
     && scrapeSourceIds.length === 0
     && scrapeMappingIds.length === 0
+    && contractManifestIds.length === 0
     && waveIds.length === 0
     && demandIds.length === 0
   ) return;
@@ -1241,6 +2281,16 @@ const cleanupGatewayRows = async (): Promise<void> => {
     await transaction.affiliateAgentGatewayJobs.deleteMany({
       where: { id: { in: jobIds } },
     });
+    if (supplySourceIds.length > 0) {
+      await transaction.affiliateSupplyLifecycleTransitions.deleteMany({
+        where: { supplySourceId: { in: supplySourceIds } },
+      });
+    }
+    if (contractManifestIds.length > 0) {
+      await transaction.affiliateSupplyContractManifests.deleteMany({
+        where: { id: { in: contractManifestIds } },
+      });
+    }
     if (scrapeMappingIds.length > 0) {
       await transaction.affiliateScrapeMappings.deleteMany({
         where: { id: { in: scrapeMappingIds } },
@@ -1283,6 +2333,86 @@ const zeroTransitionReport = {
   unresolvedReceipts: 0,
   isAdmissionHalted: false,
 } as const;
+const recordValueForTest = (value: unknown): Record<string, unknown> => {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Expected a JSON object in the recovery fixture.");
+  }
+  // The runtime guard above proves the persisted JSON object shape.
+  return value as Record<string, unknown>;
+};
+const recoveryDurableStateFor = async (
+  fixture: ReviewerEffectRecoveryFixture,
+) => {
+  const [
+    root,
+    source,
+    mapping,
+    mappingJob,
+    reviewerJob,
+    reviewerClaim,
+    effectReceipt,
+    contractManifest,
+    approvals,
+    events,
+    transitions,
+    targets,
+  ] = await Promise.all([
+    prisma.affiliateSupplySources.findUniqueOrThrow({
+      where: { id: fixture.supplySourceId },
+    }),
+    prisma.affiliateScrapeSources.findUniqueOrThrow({
+      where: { id: fixture.sourceId },
+    }),
+    prisma.affiliateScrapeMappings.findUniqueOrThrow({
+      where: { id: fixture.mappingId },
+    }),
+    prisma.affiliateSourceMappingJobs.findUniqueOrThrow({
+      where: { id: fixture.mappingJobId },
+    }),
+    prisma.affiliateAgentGatewayJobs.findUniqueOrThrow({
+      where: { id: fixture.reviewerJobId },
+    }),
+    prisma.affiliateAgentGatewayClaims.findUniqueOrThrow({
+      where: { id: fixture.reviewerClaimId },
+    }),
+    prisma.affiliateAgentGatewayOperationReceipts.findUniqueOrThrow({
+      where: { id: fixture.receiptId },
+    }),
+    prisma.affiliateSupplyContractManifests.findUniqueOrThrow({
+      where: { id: `${RUN_PREFIX}-${fixture.label}-supply-contract` },
+    }),
+    prisma.affiliateApprovalJobs.findMany({
+      where: { supplySourceId: fixture.supplySourceId },
+      orderBy: [{ id: "asc" }],
+    }),
+    prisma.affiliateAgentGatewayEvents.findMany({
+      where: { jobId: fixture.reviewerJobId },
+      orderBy: [{ sequence: "asc" }, { id: "asc" }],
+    }),
+    prisma.affiliateSupplyLifecycleTransitions.findMany({
+      where: { supplySourceId: fixture.supplySourceId },
+      orderBy: [{ sequence: "asc" }, { id: "asc" }],
+    }),
+    prisma.affiliateSupplyTargets.findMany({
+      where: { supplySourceId: fixture.supplySourceId },
+      orderBy: [{ id: "asc" }],
+    }),
+  ]);
+  return {
+    root,
+    source,
+    mapping,
+    mappingJob,
+    reviewerJob,
+    reviewerClaim,
+    effectReceipt,
+    contractManifest,
+    approvals,
+    events,
+    transitions,
+    targets,
+  };
+};
 
 describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
   beforeAll(async () => {
@@ -1303,6 +2433,499 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
     await prisma.$disconnect();
   });
 
+  it("previews a held legacy repair without writes and keeps its report stable across time", async () => {
+    const fixture = await seedReviewerEffectRecoveryFixture("recovery-preview");
+    const before = await recoveryDurableStateFor(fixture);
+
+    const preview: AffiliateAgentReviewerEffectRecoveryReport =
+      await recoverAffiliateAgentReviewerEffect(
+        fixture.harness.dependencies,
+        fixture.request,
+        { operatorId: "affiliate-gateway-operator" },
+      );
+
+    expect(preview).toEqual({
+      schemaVersion: 1,
+      mode: "PREVIEW",
+      eligible: true,
+      reasonCodes: ["ELIGIBLE"],
+      reportHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      receiptId: fixture.receiptId,
+      jobId: fixture.reviewerJobId,
+      claimId: fixture.reviewerClaimId,
+      supplySourceId: fixture.supplySourceId,
+      currentState: {
+        receipt: "UNKNOWN",
+        claim: "RECONCILIATION_REQUIRED",
+        job: "RECONCILIATION_REQUIRED",
+        sourceStage: "MAPPED",
+        sourceLifecycleGeneration: 2,
+      },
+      outcome: "PREVIEW",
+      replayed: false,
+      writeCount: 0,
+    });
+    expect(await recoveryDurableStateFor(fixture)).toEqual(before);
+
+    fixture.harness.setNow("2026-08-20T18:47:00.000Z");
+    const laterPreview = await recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      fixture.request,
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    expect(laterPreview).toEqual(preview);
+    expect(await recoveryDurableStateFor(fixture)).toEqual(before);
+  }, 40_000);
+  it("applies the retained approval once, keeps automation held, and replays without a second effect", async () => {
+    const fixture = await seedReviewerEffectRecoveryFixture("recovery-apply");
+    const preview = await recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      fixture.request,
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    const terminalEffects = fixture.harness.dependencies.terminalEffects;
+    if (!terminalEffects) throw new Error("Expected production terminal effects.");
+    const originalRecover = terminalEffects.APPROVED.recover;
+    let recoverCalls = 0;
+    const wrappedEffects: AffiliateAgentTerminalEffectAdapter = {
+      ...terminalEffects,
+      APPROVED: {
+        ...terminalEffects.APPROVED,
+        recover: async (input: Parameters<typeof originalRecover>[0]) => {
+          recoverCalls += 1;
+          return originalRecover(input);
+        },
+      },
+    };
+    // The harness intentionally replaces the immutable dependency adapter to inject call counting.
+    const mutableDependencies = fixture.harness.dependencies as unknown as {
+      terminalEffects: AffiliateAgentTerminalEffectAdapter;
+    };
+    mutableDependencies.terminalEffects = wrappedEffects;
+
+    const completed = await recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      {
+        ...fixture.request,
+        mode: "APPLY",
+        expectedReportHash: preview.reportHash,
+      },
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    expect(completed).toEqual(expect.objectContaining({
+      schemaVersion: 1,
+      mode: "APPLY",
+      eligible: true,
+      reasonCodes: ["ELIGIBLE"],
+      reportHash: preview.reportHash,
+      receiptId: fixture.receiptId,
+      jobId: fixture.reviewerJobId,
+      claimId: fixture.reviewerClaimId,
+      supplySourceId: fixture.supplySourceId,
+      currentState: {
+        receipt: "SUCCEEDED",
+        claim: "COMPLETED",
+        job: "COMPLETED",
+        sourceStage: "APPROVED",
+        sourceLifecycleGeneration: 3,
+      },
+      outcome: "COMPLETED",
+      replayed: false,
+      writeCount: expect.any(Number),
+    }));
+    expect(recoverCalls).toBe(1);
+
+    const afterCompletion = await recoveryDurableStateFor(fixture);
+    expect(afterCompletion.effectReceipt).toMatchObject({
+      status: "SUCCEEDED",
+      responseHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    expect(afterCompletion.reviewerClaim).toMatchObject({
+      status: "COMPLETED",
+      tokenInvalidatedAt: expect.any(Date),
+      terminalReceiptId: expect.any(String),
+    });
+    expect(afterCompletion.reviewerJob).toMatchObject({
+      status: "COMPLETED",
+      activeClaimId: null,
+      terminalDisposition: "APPROVED",
+      terminalReceiptId: afterCompletion.reviewerClaim.terminalReceiptId,
+    });
+    expect(afterCompletion.root).toMatchObject({
+      lifecycleGeneration: 3,
+      derivedStage: "APPROVED",
+      isAutomationEnabled: false,
+      automationHoldReason: "LEGACY_SPORT_REPAIR",
+    });
+    expect(afterCompletion.source).toMatchObject({
+      lifecycleGeneration: 3,
+      activeMappingId: fixture.mappingId,
+      autoScrapeEnabled: false,
+    });
+    expect(afterCompletion.mapping).toMatchObject({
+      version: 2,
+      isActive: false,
+      validatedAt: expect.any(Date),
+    });
+    expect(afterCompletion.approvals).toEqual([
+      expect.objectContaining({
+        status: "APPROVED",
+        decision: expect.objectContaining({
+          decision: "APPROVE",
+        }),
+        supplySourceId: fixture.supplySourceId,
+      }),
+    ]);
+    expect(afterCompletion.transitions).toEqual([
+      expect.objectContaining({
+        command: "APPROVE",
+        fromStage: "MAPPED",
+        toStage: "APPROVED",
+        generation: 3,
+        idempotencyKey: fixture.receiptId,
+        commandRef: fixture.receiptId,
+        actorKind: "SUPPLY_REVIEWER",
+        actorId: `${RUN_PREFIX}-${fixture.label}-reviewer-worker`,
+        executingAgentId: `${RUN_PREFIX}-${fixture.label}-reviewer-invocation`,
+      }),
+    ]);
+    expect(afterCompletion.targets).toEqual([]);
+
+    const stateBeforeReplay = await recoveryDurableStateFor(fixture);
+    const replayed = await recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      {
+        ...fixture.request,
+        mode: "APPLY",
+        expectedReportHash: preview.reportHash,
+      },
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    expect(replayed).toEqual(expect.objectContaining({
+      outcome: "REPLAYED",
+      replayed: true,
+      writeCount: 0,
+      reportHash: preview.reportHash,
+    }));
+    expect(recoverCalls).toBe(1);
+    expect(await recoveryDurableStateFor(fixture)).toEqual(stateBeforeReplay);
+  }, 60_000);
+
+
+  it("records a failed recovery audit and keeps the quarantined effect unresolved", async () => {
+    const fixture = await seedReviewerEffectRecoveryFixture("recovery-failure");
+    const preview = await recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      fixture.request,
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    const terminalEffects = fixture.harness.dependencies.terminalEffects;
+    if (!terminalEffects) throw new Error("Expected production terminal effects.");
+    const originalRecover = terminalEffects.APPROVED.recover;
+    const failingEffects: AffiliateAgentTerminalEffectAdapter = {
+      ...terminalEffects,
+      APPROVED: {
+        ...terminalEffects.APPROVED,
+        recover: async (input: Parameters<typeof originalRecover>[0]) => {
+          void input;
+          throw new Error("simulated recovery failure");
+        },
+      },
+    };
+    // The harness intentionally replaces the immutable dependency adapter for failure injection.
+    const mutableDependencies = fixture.harness.dependencies as unknown as {
+      terminalEffects: AffiliateAgentTerminalEffectAdapter;
+    };
+    mutableDependencies.terminalEffects = failingEffects;
+
+    const failed = await recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      {
+        ...fixture.request,
+        mode: "APPLY",
+        expectedReportHash: preview.reportHash,
+      },
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    expect(failed).toEqual(expect.objectContaining({
+      schemaVersion: 1,
+      mode: "APPLY",
+      eligible: false,
+      reasonCodes: ["RECOVERY_FAILED", "RECONCILIATION_REQUIRED"],
+      reportHash: preview.reportHash,
+      receiptId: fixture.receiptId,
+      outcome: "RECONCILIATION_REQUIRED",
+      replayed: false,
+      writeCount: expect.any(Number),
+      currentState: {
+        receipt: "UNKNOWN",
+        claim: "RECONCILIATION_REQUIRED",
+        job: "RECONCILIATION_REQUIRED",
+        sourceStage: "MAPPED",
+        sourceLifecycleGeneration: 2,
+      },
+    }));
+    expect(failed.writeCount).toBeGreaterThan(0);
+
+    const afterFailure = await recoveryDurableStateFor(fixture);
+    expect(afterFailure.effectReceipt).toMatchObject({
+      status: "UNKNOWN",
+      responseHash: null,
+      safeErrorCode: "PARTIAL_COMMAND_UNRESOLVED",
+    });
+    expect(afterFailure.reviewerClaim).toMatchObject({
+      status: "RECONCILIATION_REQUIRED",
+      tokenHash: `${RUN_PREFIX}-${fixture.label}-reviewer-token-hash`,
+      tokenInvalidatedAt: expect.any(Date),
+      terminalReceiptId: null,
+    });
+    expect(afterFailure.reviewerJob).toMatchObject({
+      status: "RECONCILIATION_REQUIRED",
+      activeClaimId: fixture.reviewerClaimId,
+      terminalReceiptId: null,
+    });
+    expect(afterFailure.approvals).toEqual([]);
+    expect(afterFailure.transitions).toEqual([]);
+    expect(afterFailure.targets).toEqual([]);
+    expect(afterFailure.events.length).toBeGreaterThanOrEqual(2);
+    expect(afterFailure.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        actorKind: "OPERATOR_RECOVERY",
+        actorId: "affiliate-gateway-operator",
+        receiptId: fixture.receiptId,
+        payload: expect.objectContaining({
+          phase: "AUTHORIZED",
+          priorStatusEvidence: expect.objectContaining({
+            receiptStatus: "UNKNOWN",
+            claimStatus: "RECONCILIATION_REQUIRED",
+            jobStatus: "RECONCILIATION_REQUIRED",
+          }),
+        }),
+      }),
+      expect.objectContaining({
+        actorKind: "OPERATOR_RECOVERY",
+        actorId: "affiliate-gateway-operator",
+        receiptId: fixture.receiptId,
+        payload: expect.objectContaining({
+          phase: "FAILED",
+          failureReasonCodes: ["RECOVERY_FAILED"],
+          priorStatusEvidence: expect.objectContaining({
+            receiptStatus: "UNKNOWN",
+            claimStatus: "RECONCILIATION_REQUIRED",
+            jobStatus: "RECONCILIATION_REQUIRED",
+          }),
+        }),
+      }),
+    ]));
+  }, 60_000);
+  it("resumes a post-effect crash from the recorded lifecycle transition without duplicating it", async () => {
+    const fixture = await seedReviewerEffectRecoveryFixture("recovery-resume");
+    const preview = await recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      fixture.request,
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    const terminalEffects = fixture.harness.dependencies.terminalEffects;
+    if (!terminalEffects) throw new Error("Expected production terminal effects.");
+    const originalRecover = terminalEffects.APPROVED.recover;
+    let recoverCalls = 0;
+    const crashAfterEffect: AffiliateAgentTerminalEffectAdapter = {
+      ...terminalEffects,
+      APPROVED: {
+        ...terminalEffects.APPROVED,
+        recover: async (input: Parameters<typeof originalRecover>[0]) => {
+          recoverCalls += 1;
+          const output = await originalRecover(input);
+          if (recoverCalls === 1) throw new Error("simulated post-effect crash");
+          return output;
+        },
+      },
+    };
+    // The harness intentionally replaces the immutable dependency adapter to model a crash after the effect.
+    const mutableDependencies = fixture.harness.dependencies as unknown as {
+      terminalEffects: AffiliateAgentTerminalEffectAdapter;
+    };
+    mutableDependencies.terminalEffects = crashAfterEffect;
+
+    const firstAttempt = await recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      {
+        ...fixture.request,
+        mode: "APPLY",
+        expectedReportHash: preview.reportHash,
+      },
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    expect(firstAttempt).toEqual(expect.objectContaining({
+      outcome: "RECONCILIATION_REQUIRED",
+      eligible: false,
+      writeCount: expect.any(Number),
+      currentState: {
+        receipt: "UNKNOWN",
+        claim: "RECONCILIATION_REQUIRED",
+        job: "RECONCILIATION_REQUIRED",
+        sourceStage: "APPROVED",
+        sourceLifecycleGeneration: 3,
+      },
+    }));
+    expect(recoverCalls).toBe(1);
+    const afterCrash = await recoveryDurableStateFor(fixture);
+    expect(afterCrash.transitions).toHaveLength(1);
+
+    fixture.harness.setNow("2026-08-20T18:47:00.000Z");
+    const resumePreview = await recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      fixture.request,
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    expect(resumePreview).toEqual(expect.objectContaining({
+      mode: "PREVIEW",
+      eligible: true,
+      reasonCodes: ["ELIGIBLE", "LIFECYCLE_ALREADY_RECORDED"],
+      currentState: {
+        receipt: "UNKNOWN",
+        claim: "RECONCILIATION_REQUIRED",
+        job: "RECONCILIATION_REQUIRED",
+        sourceStage: "APPROVED",
+        sourceLifecycleGeneration: 3,
+      },
+      outcome: "PREVIEW",
+      replayed: false,
+      writeCount: 0,
+    }));
+
+    const resumed = await recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      {
+        ...fixture.request,
+        mode: "APPLY",
+        expectedReportHash: resumePreview.reportHash,
+      },
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    expect(resumed).toEqual(expect.objectContaining({
+      outcome: "COMPLETED",
+      eligible: true,
+      reportHash: resumePreview.reportHash,
+      replayed: false,
+      writeCount: expect.any(Number),
+      currentState: {
+        receipt: "SUCCEEDED",
+        claim: "COMPLETED",
+        job: "COMPLETED",
+        sourceStage: "APPROVED",
+        sourceLifecycleGeneration: 3,
+      },
+    }));
+    expect(recoverCalls).toBe(2);
+    const afterResume = await recoveryDurableStateFor(fixture);
+    expect(afterResume.transitions).toHaveLength(1);
+    expect(afterResume.transitions[0]).toEqual(expect.objectContaining({
+      command: "APPROVE",
+      idempotencyKey: fixture.receiptId,
+      commandRef: fixture.receiptId,
+    }));
+
+    const replayed = await recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      {
+        ...fixture.request,
+        mode: "APPLY",
+        expectedReportHash: resumePreview.reportHash,
+      },
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    expect(replayed).toEqual(expect.objectContaining({
+      outcome: "REPLAYED",
+      replayed: true,
+      writeCount: 0,
+    }));
+    expect(recoverCalls).toBe(2);
+    expect(await recoveryDurableStateFor(fixture)).toEqual(afterResume);
+  }, 60_000);
+
+  it("serializes concurrent APPLY calls and permits only one recovered effect", async () => {
+    const fixture = await seedReviewerEffectRecoveryFixture("recovery-concurrent");
+    const preview = await recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      fixture.request,
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    const terminalEffects = fixture.harness.dependencies.terminalEffects;
+    if (!terminalEffects) throw new Error("Expected production terminal effects.");
+    const originalRecover = terminalEffects.APPROVED.recover;
+    let recoverCalls = 0;
+    let releaseFirstEffect = (): void => undefined;
+    let startFirstEffect = (): void => undefined;
+    const firstEffectStarted = new Promise<void>((resolve) => {
+      startFirstEffect = resolve;
+    });
+    const wrappedEffects: AffiliateAgentTerminalEffectAdapter = {
+      ...terminalEffects,
+      APPROVED: {
+        ...terminalEffects.APPROVED,
+        recover: async (input: Parameters<typeof originalRecover>[0]) => {
+          const callNumber = ++recoverCalls;
+          if (callNumber === 1) {
+            startFirstEffect();
+            await new Promise<void>((release) => {
+              releaseFirstEffect = release;
+            });
+          }
+          return originalRecover(input);
+        },
+      },
+    };
+    // The harness intentionally replaces the immutable dependency adapter for the concurrency barrier.
+    const mutableDependencies = fixture.harness.dependencies as unknown as {
+      terminalEffects: AffiliateAgentTerminalEffectAdapter;
+    };
+    mutableDependencies.terminalEffects = wrappedEffects;
+
+    const applyRequest = {
+      ...fixture.request,
+      mode: "APPLY" as const,
+      expectedReportHash: preview.reportHash,
+    };
+    const firstApply = recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      applyRequest,
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    await firstEffectStarted;
+    const secondApply = recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      applyRequest,
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    const secondOutcome = await secondApply.catch((error: unknown) => error);
+    expect(secondOutcome).toMatchObject({
+      code: "REVIEWER_EFFECT_RECOVERY_IN_PROGRESS",
+    });
+    releaseFirstEffect();
+    await expect(firstApply).resolves.toEqual(expect.objectContaining({
+      outcome: "COMPLETED",
+      replayed: false,
+      writeCount: expect.any(Number),
+    }));
+    expect(recoverCalls).toBe(1);
+
+    await expect(
+      recoverAffiliateAgentReviewerEffect(
+        fixture.harness.dependencies,
+        applyRequest,
+        { operatorId: "affiliate-gateway-operator" },
+      ),
+    ).resolves.toEqual(expect.objectContaining({
+      outcome: "REPLAYED",
+      replayed: true,
+      writeCount: 0,
+    }));
+    expect(recoverCalls).toBe(1);
+    expect((await recoveryDurableStateFor(fixture)).transitions).toHaveLength(1);
+  }, 60_000);
+
+
   it("admits one concurrent claim winner and never stores a duplicate live claim", async () => {
     const jobId = await seedCoverageJob("claim-race");
     let selectedCount = 0;
@@ -1319,6 +2942,7 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
         affiliateAgentGatewayJobs: {
           async findFirst({ args, query }) {
             const selected = await query(args);
+
             if (selected?.id === jobId) {
               selectedCount += 1;
               if (selectedCount === 2) markBothSelected();
@@ -1358,6 +2982,594 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
       await prisma.affiliateAgentGatewayClaims.count({ where: { jobId } }),
     ).toBe(1);
   }, 20_000);
+  it("rejects a stale PREVIEW hash after lifecycle evidence changes without writing", async () => {
+    const fixture = await seedReviewerEffectRecoveryFixture("recovery-stale");
+    const preview = await recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      fixture.request,
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    await prisma.affiliateSupplySources.update({
+      where: { id: fixture.supplySourceId },
+      data: { lifecycleGeneration: 3 },
+    });
+    await prisma.affiliateScrapeSources.update({
+      where: { id: fixture.sourceId },
+      data: { lifecycleGeneration: 3 },
+    });
+    const beforeApply = await recoveryDurableStateFor(fixture);
+    await expect(
+      recoverAffiliateAgentReviewerEffect(
+        fixture.harness.dependencies,
+        {
+          ...fixture.request,
+          mode: "APPLY",
+          expectedReportHash: preview.reportHash,
+        },
+        { operatorId: "affiliate-gateway-operator" },
+      ),
+    ).rejects.toMatchObject({
+      code: expect.stringMatching(
+        /^REVIEWER_EFFECT_RECOVERY_(STALE|NOT_ELIGIBLE)$/,
+      ),
+    });
+    expect(await recoveryDurableStateFor(fixture)).toEqual(beforeApply);
+  }, 60_000);
+
+  it("rejects a foreign recovery scope without touching the retained quarantine", async () => {
+    const fixture = await seedReviewerEffectRecoveryFixture("recovery-foreign-scope");
+    const before = await recoveryDurableStateFor(fixture);
+    const foreignPreview = await recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      {
+        ...fixture.request,
+        supplySourceId: `${fixture.supplySourceId}-foreign`,
+      },
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    expect(foreignPreview).toEqual(expect.objectContaining({
+      mode: "PREVIEW",
+      eligible: false,
+      reasonCodes: expect.arrayContaining(["LEGACY_APPROVAL_SCOPE_INVALID"]),
+      outcome: "PREVIEW",
+      replayed: false,
+      writeCount: 0,
+    }));
+    expect(await recoveryDurableStateFor(fixture)).toEqual(before);
+  }, 60_000);
+  it("rejects a tampered retained approval result before any recovery write", async () => {
+    const fixture = await seedReviewerEffectRecoveryFixture("recovery-tampered-result");
+    const receipt = await prisma.affiliateAgentGatewayOperationReceipts.findUniqueOrThrow({
+      where: { id: fixture.receiptId },
+    });
+    const pendingState = recordValueForTest(receipt.responseJson);
+    const retainedResult = recordValueForTest(pendingState.result);
+    const retainedPayload = recordValueForTest(retainedResult.payload);
+    const tamperedResponseJson = {
+      ...pendingState,
+      result: {
+        ...retainedResult,
+        payload: {
+          ...retainedPayload,
+          committedPackageHash: "f".repeat(64),
+        },
+      },
+    } as unknown as Prisma.InputJsonValue;
+    await prisma.affiliateAgentGatewayOperationReceipts.update({
+      where: { id: fixture.receiptId },
+      data: { responseJson: tamperedResponseJson },
+    });
+    const before = await recoveryDurableStateFor(fixture);
+    const tamperedPreview = await recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      fixture.request,
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    expect(tamperedPreview).toEqual(expect.objectContaining({
+      mode: "PREVIEW",
+      eligible: false,
+      reasonCodes: expect.arrayContaining(["EFFECT_REQUEST_HASH_INVALID"]),
+      outcome: "PREVIEW",
+      replayed: false,
+      writeCount: 0,
+    }));
+    expect(await recoveryDurableStateFor(fixture)).toEqual(before);
+  }, 60_000);
+  it("rejects an active contract bundle drift before recovery writes", async () => {
+    const fixture = await seedReviewerEffectRecoveryFixture("recovery-contract-drift");
+    const driftManifest = recoverySupplyManifestFor(
+      `${RUN_PREFIX}-${fixture.label}-different-cohort`,
+    );
+    fixture.harness.setActiveBundle(recoveryContractBundleFor(driftManifest));
+    const before = await recoveryDurableStateFor(fixture);
+    const driftPreview = await recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      fixture.request,
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    expect(driftPreview).toEqual(expect.objectContaining({
+      mode: "PREVIEW",
+      eligible: false,
+      reasonCodes: expect.arrayContaining(["SUPPLY_CONTRACT_STALE"]),
+      outcome: "PREVIEW",
+      replayed: false,
+      writeCount: 0,
+    }));
+    expect(await recoveryDurableStateFor(fixture)).toEqual(before);
+  }, 60_000);
+
+  it("rejects a reviewer claim tied to a stale sports catalog", async () => {
+    const fixture = await seedReviewerEffectRecoveryFixture("recovery-catalog-drift");
+    const claim = await prisma.affiliateAgentGatewayClaims.findUniqueOrThrow({
+      where: { id: fixture.reviewerClaimId },
+    });
+    const envelope = recordValueForTest(claim.claimEnvelopeJson);
+    const subject = recordValueForTest(envelope.subject);
+    const repairContext = recordValueForTest(subject.repairContext);
+    const driftCatalog = buildAffiliateSportsCatalogSnapshot(
+      [
+        ...fixture.catalog.sports,
+        {
+          id: `${RUN_PREFIX}-${fixture.label}-catalog-drift`,
+          name: `${fixture.label} Drift Sport`,
+        },
+      ],
+      "2026-08-20T18:47:00.000Z",
+    );
+    const driftEnvelope = {
+      ...envelope,
+      subject: {
+        ...subject,
+        repairContext: {
+          ...repairContext,
+          sportsCatalog: driftCatalog,
+        },
+      },
+    } as unknown as Prisma.InputJsonValue;
+    await prisma.affiliateAgentGatewayClaims.update({
+      where: { id: fixture.reviewerClaimId },
+      data: {
+        claimEnvelopeJson: driftEnvelope,
+        claimEnvelopeHash: hashAffiliateAgentValue(driftEnvelope),
+      },
+    });
+    const before = await recoveryDurableStateFor(fixture);
+    const catalogPreview = await recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      fixture.request,
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    expect(catalogPreview).toEqual(expect.objectContaining({
+      mode: "PREVIEW",
+      eligible: false,
+      reasonCodes: expect.arrayContaining(["SPORTS_CATALOG_STALE"]),
+      outcome: "PREVIEW",
+      replayed: false,
+      writeCount: 0,
+    }));
+    expect(await recoveryDurableStateFor(fixture)).toEqual(before);
+  }, 60_000);
+
+  it("rejects any non-legacy automation hold", async () => {
+    const fixture = await seedReviewerEffectRecoveryFixture("recovery-other-hold");
+    const [root, source] = await Promise.all([
+      prisma.affiliateSupplySources.findUniqueOrThrow({
+        where: { id: fixture.supplySourceId },
+      }),
+      prisma.affiliateScrapeSources.findUniqueOrThrow({
+        where: { id: fixture.sourceId },
+      }),
+    ]);
+    const rootMetadata = recordValueForTest(root.metadata);
+    const sourceMetadata = recordValueForTest(source.metadata);
+    const policyHold = {
+      hold: true,
+      reason: "POLICY_HOLD",
+      evidenceRefs: ["policy-review"],
+    };
+    await prisma.affiliateSupplySources.update({
+      where: { id: fixture.supplySourceId },
+      data: {
+        metadata: {
+          ...rootMetadata,
+          automationReviewRequired: policyHold,
+        } as unknown as Prisma.InputJsonValue,
+      },
+    });
+    await prisma.affiliateScrapeSources.update({
+      where: { id: fixture.sourceId },
+      data: {
+        metadata: {
+          ...sourceMetadata,
+          automationReviewRequired: policyHold,
+        } as unknown as Prisma.InputJsonValue,
+      },
+    });
+    const before = await recoveryDurableStateFor(fixture);
+    const holdPreview = await recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      fixture.request,
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    expect(holdPreview).toEqual(expect.objectContaining({
+      mode: "PREVIEW",
+      eligible: false,
+      reasonCodes: expect.arrayContaining(["SOURCE_EVIDENCE_STALE"]),
+      outcome: "PREVIEW",
+      replayed: false,
+      writeCount: 0,
+    }));
+    expect(await recoveryDurableStateFor(fixture)).toEqual(before);
+  }, 60_000);
+  it("rejects a root automation-enabled source even when legacy hold remains", async () => {
+    const fixture = await seedReviewerEffectRecoveryFixture("recovery-root-automation-enabled");
+    await prisma.affiliateSupplySources.update({
+      where: { id: fixture.supplySourceId },
+      data: { isAutomationEnabled: true },
+    });
+    const before = await recoveryDurableStateFor(fixture);
+    const preview = await recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      fixture.request,
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    expect(preview).toEqual(expect.objectContaining({
+      mode: "PREVIEW",
+      eligible: false,
+      reasonCodes: expect.arrayContaining(["SOURCE_EVIDENCE_STALE"]),
+      outcome: "PREVIEW",
+      replayed: false,
+      writeCount: 0,
+    }));
+    expect(await recoveryDurableStateFor(fixture)).toEqual(before);
+  }, 60_000);
+  it("rejects a live source auto-scrape flag even when legacy hold remains", async () => {
+    const fixture = await seedReviewerEffectRecoveryFixture("recovery-live-auto-scrape-enabled");
+    await prisma.affiliateScrapeSources.update({
+      where: { id: fixture.sourceId },
+      data: { autoScrapeEnabled: true },
+    });
+    const before = await recoveryDurableStateFor(fixture);
+    const preview = await recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      fixture.request,
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    expect(preview).toEqual(expect.objectContaining({
+      mode: "PREVIEW",
+      eligible: false,
+      reasonCodes: expect.arrayContaining(["SOURCE_EVIDENCE_STALE"]),
+      outcome: "PREVIEW",
+      replayed: false,
+      writeCount: 0,
+    }));
+    expect(await recoveryDurableStateFor(fixture)).toEqual(before);
+  }, 60_000);
+
+  it("rejects an unrelated active claim pointer on the same source", async () => {
+    const fixture = await seedReviewerEffectRecoveryFixture("recovery-competing-pointer");
+    await prisma.affiliateAgentGatewayJobs.update({
+      where: { id: fixture.producerJobId },
+      data: { activeClaimId: `${RUN_PREFIX}-${fixture.label}-competing-claim` },
+    });
+    const before = await recoveryDurableStateFor(fixture);
+    const pointerPreview = await recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      fixture.request,
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    expect(pointerPreview).toEqual(expect.objectContaining({
+      mode: "PREVIEW",
+      eligible: false,
+      reasonCodes: expect.arrayContaining(["OTHER_ACTIVE_CLAIM"]),
+      outcome: "PREVIEW",
+      replayed: false,
+      writeCount: 0,
+    }));
+    expect(await recoveryDurableStateFor(fixture)).toEqual(before);
+  }, 60_000);
+  it("reports a missing legacy automation hold without writing", async () => {
+    const fixture = await seedReviewerEffectRecoveryFixture("recovery-missing-hold");
+    const [root, source] = await Promise.all([
+      prisma.affiliateSupplySources.findUniqueOrThrow({
+        where: { id: fixture.supplySourceId },
+      }),
+      prisma.affiliateScrapeSources.findUniqueOrThrow({
+        where: { id: fixture.sourceId },
+      }),
+    ]);
+    const rootMetadata = recordValueForTest(root.metadata);
+    const sourceMetadata = recordValueForTest(source.metadata);
+    const rootWithoutHold = Object.fromEntries(
+      Object.entries(rootMetadata).filter(([key]) => key !== "automationReviewRequired"),
+    );
+    const sourceWithoutHold = Object.fromEntries(
+      Object.entries(sourceMetadata).filter(([key]) => key !== "automationReviewRequired"),
+    );
+    await prisma.affiliateSupplySources.update({
+      where: { id: fixture.supplySourceId },
+      data: {
+        automationHoldReason: null,
+        metadata: rootWithoutHold as unknown as Prisma.InputJsonValue,
+      },
+    });
+    await prisma.affiliateScrapeSources.update({
+      where: { id: fixture.sourceId },
+      data: { metadata: sourceWithoutHold as unknown as Prisma.InputJsonValue },
+    });
+    const before = await recoveryDurableStateFor(fixture);
+    const preview = await recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      fixture.request,
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    expect(preview).toEqual(expect.objectContaining({
+      mode: "PREVIEW",
+      eligible: false,
+      reasonCodes: expect.arrayContaining(["SOURCE_EVIDENCE_STALE"]),
+      outcome: "PREVIEW",
+      replayed: false,
+      writeCount: 0,
+    }));
+    expect(await recoveryDurableStateFor(fixture)).toEqual(before);
+  }, 60_000);
+  it("rejects a scalar root hold change after preview without writing", async () => {
+    const fixture = await seedReviewerEffectRecoveryFixture("recovery-root-scalar-drift");
+    const preview = await recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      fixture.request,
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    await prisma.affiliateSupplySources.update({
+      where: { id: fixture.supplySourceId },
+      data: { automationHoldReason: "POLICY_HOLD" },
+    });
+    const before = await recoveryDurableStateFor(fixture);
+    const changedPreview = await recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      fixture.request,
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    expect(changedPreview).toEqual(expect.objectContaining({
+      mode: "PREVIEW",
+      eligible: false,
+      reasonCodes: expect.arrayContaining(["SOURCE_EVIDENCE_STALE"]),
+      outcome: "PREVIEW",
+      replayed: false,
+      writeCount: 0,
+    }));
+    await expect(
+      recoverAffiliateAgentReviewerEffect(
+        fixture.harness.dependencies,
+        {
+          ...fixture.request,
+          mode: "APPLY",
+          expectedReportHash: preview.reportHash,
+        },
+        { operatorId: "affiliate-gateway-operator" },
+      ),
+    ).rejects.toMatchObject({
+      code: expect.stringMatching(
+        /^REVIEWER_EFFECT_RECOVERY_(STALE|NOT_ELIGIBLE)$/,
+      ),
+    });
+    expect(await recoveryDurableStateFor(fixture)).toEqual(before);
+  }, 60_000);
+
+  it("reports a missing persisted live source without writing", async () => {
+    const fixture = await seedReviewerEffectRecoveryFixture("recovery-missing-live-source");
+    await prisma.affiliateSupplySources.update({
+      where: { id: fixture.supplySourceId },
+      data: { liveSourceId: `${fixture.sourceId}-missing` },
+    });
+    const before = await recoveryDurableStateFor(fixture);
+    const preview = await recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      fixture.request,
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    expect(preview).toEqual(expect.objectContaining({
+      mode: "PREVIEW",
+      eligible: false,
+      reasonCodes: expect.arrayContaining(["PACKAGE_OR_SOURCE_DRIFT"]),
+      outcome: "PREVIEW",
+      replayed: false,
+      writeCount: 0,
+    }));
+    expect(await recoveryDurableStateFor(fixture)).toEqual(before);
+  }, 60_000);
+
+  it("reports a persisted live-source backlink mismatch without writing", async () => {
+    const fixture = await seedReviewerEffectRecoveryFixture("recovery-live-source-backlink");
+    await prisma.affiliateScrapeSources.update({
+      where: { id: fixture.sourceId },
+      data: { supplySourceId: `${fixture.supplySourceId}-wrong` },
+    });
+    const before = await recoveryDurableStateFor(fixture);
+    const preview = await recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      fixture.request,
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    expect(preview).toEqual(expect.objectContaining({
+      mode: "PREVIEW",
+      eligible: false,
+      reasonCodes: expect.arrayContaining(["PACKAGE_OR_SOURCE_DRIFT"]),
+      outcome: "PREVIEW",
+      replayed: false,
+      writeCount: 0,
+    }));
+    expect(await recoveryDurableStateFor(fixture)).toEqual(before);
+  }, 60_000);
+  it("reports a root legacy hold plus source policy hold as ineligible", async () => {
+    const fixture = await seedReviewerEffectRecoveryFixture("recovery-root-legacy-source-policy");
+    const source = await prisma.affiliateScrapeSources.findUniqueOrThrow({
+      where: { id: fixture.sourceId },
+    });
+    const sourceMetadata = recordValueForTest(source.metadata);
+    const beforeSource = {
+      ...sourceMetadata,
+      automationReviewRequired: {
+        hold: true,
+        reason: "POLICY_HOLD",
+        evidenceRefs: ["policy-review"],
+      },
+    } as unknown as Prisma.InputJsonValue;
+    await prisma.affiliateScrapeSources.update({
+      where: { id: fixture.sourceId },
+      data: { metadata: beforeSource },
+    });
+    const before = await recoveryDurableStateFor(fixture);
+    const preview = await recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      fixture.request,
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    expect(preview).toEqual(expect.objectContaining({
+      mode: "PREVIEW",
+      eligible: false,
+      reasonCodes: expect.arrayContaining(["SOURCE_EVIDENCE_STALE"]),
+      outcome: "PREVIEW",
+      replayed: false,
+      writeCount: 0,
+    }));
+    expect(await recoveryDurableStateFor(fixture)).toEqual(before);
+  }, 60_000);
+
+  it("reports a root policy hold plus source legacy hold as ineligible", async () => {
+    const fixture = await seedReviewerEffectRecoveryFixture("recovery-root-policy-source-legacy");
+    const root = await prisma.affiliateSupplySources.findUniqueOrThrow({
+      where: { id: fixture.supplySourceId },
+    });
+    const rootMetadata = recordValueForTest(root.metadata);
+    const beforeRoot = {
+      ...rootMetadata,
+      automationReviewRequired: {
+        hold: true,
+        reason: "POLICY_HOLD",
+        evidenceRefs: ["policy-review"],
+      },
+    } as unknown as Prisma.InputJsonValue;
+    await prisma.affiliateSupplySources.update({
+      where: { id: fixture.supplySourceId },
+      data: { metadata: beforeRoot },
+    });
+    const before = await recoveryDurableStateFor(fixture);
+    const preview = await recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      fixture.request,
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    expect(preview).toEqual(expect.objectContaining({
+      mode: "PREVIEW",
+      eligible: false,
+      reasonCodes: expect.arrayContaining(["SOURCE_EVIDENCE_STALE"]),
+      outcome: "PREVIEW",
+      replayed: false,
+      writeCount: 0,
+    }));
+    expect(await recoveryDurableStateFor(fixture)).toEqual(before);
+  }, 60_000);
+
+  it("reports a reviewer row and envelope identity mismatch without writing", async () => {
+    const fixture = await seedReviewerEffectRecoveryFixture("recovery-reviewer-row-mismatch");
+    await prisma.affiliateAgentGatewayClaims.update({
+      where: { id: fixture.reviewerClaimId },
+      data: {
+        workerId: `${RUN_PREFIX}-${fixture.label}-row-mismatch-worker`,
+      },
+    });
+    const before = await recoveryDurableStateFor(fixture);
+    const preview = await recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      fixture.request,
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    expect(preview).toEqual(expect.objectContaining({
+      mode: "PREVIEW",
+      eligible: false,
+      reasonCodes: expect.arrayContaining(["REVIEWER_RESULT_IDENTITY_INVALID"]),
+      outcome: "PREVIEW",
+      replayed: false,
+      writeCount: 0,
+    }));
+    expect(await recoveryDurableStateFor(fixture)).toEqual(before);
+  }, 60_000);
+
+  it("reports a hash-consistent reviewer identity reused from the producer without writing", async () => {
+    const fixture = await seedReviewerEffectRecoveryFixture("recovery-reviewer-identity-reuse");
+    const [producerClaim, reviewerClaim, receipt] = await Promise.all([
+      prisma.affiliateAgentGatewayClaims.findUniqueOrThrow({
+        where: { id: fixture.producerClaimId },
+      }),
+      prisma.affiliateAgentGatewayClaims.findUniqueOrThrow({
+        where: { id: fixture.reviewerClaimId },
+      }),
+      prisma.affiliateAgentGatewayOperationReceipts.findUniqueOrThrow({
+        where: { id: fixture.receiptId },
+      }),
+    ]);
+    const envelope = recordValueForTest(reviewerClaim.claimEnvelopeJson);
+    const retainedState = recordValueForTest(receipt.responseJson);
+    const retainedResult = recordValueForTest(retainedState.result);
+    const reboundResult = {
+      ...retainedResult,
+      workerId: producerClaim.workerId,
+    };
+    const reboundTerminalRequestHash = hashAffiliateAgentValue({
+      commandName: "SUPPLY_REVIEWER_TERMINAL_EFFECT",
+      claimId: fixture.reviewerClaimId,
+      claimGeneration: reviewerClaim.claimGeneration,
+      result: reboundResult,
+    });
+    const reboundState = {
+      ...retainedState,
+      result: reboundResult,
+      terminalRequestHash: reboundTerminalRequestHash,
+    };
+    const reboundRequestHash = hashAffiliateAgentValue({
+      commandName: "SUPPLY_REVIEWER_TERMINAL_EFFECT",
+      claimId: fixture.reviewerClaimId,
+      claimGeneration: reviewerClaim.claimGeneration,
+      result: reboundResult,
+    });
+    expect(affiliateAgentClaimEnvelopeSchema.safeParse(envelope).success).toBe(true);
+    expect(affiliateAgentTerminalResultEnvelopeSchema.safeParse(reboundResult).success).toBe(true);
+    expect(hashAffiliateAgentValue(envelope)).toBe(reviewerClaim.claimEnvelopeHash);
+    expect(reboundState.terminalRequestHash).toBe(reboundRequestHash);
+    await prisma.$transaction(async (transaction) => {
+      await transaction.affiliateAgentGatewayClaims.update({
+        where: { id: fixture.reviewerClaimId },
+        data: {
+          workerId: producerClaim.workerId,
+        },
+      });
+      await transaction.affiliateAgentGatewayOperationReceipts.update({
+        where: { id: fixture.receiptId },
+        data: {
+          requestHash: reboundRequestHash,
+          responseJson: reboundState as unknown as Prisma.InputJsonValue,
+        },
+      });
+    });
+    const before = await recoveryDurableStateFor(fixture);
+    const preview = await recoverAffiliateAgentReviewerEffect(
+      fixture.harness.dependencies,
+      fixture.request,
+      { operatorId: "affiliate-gateway-operator" },
+    );
+    expect(preview).toEqual(expect.objectContaining({
+      mode: "PREVIEW",
+      eligible: false,
+      reasonCodes: expect.arrayContaining(["PRODUCER_REVIEWER_IDENTITY_REUSED"]),
+      outcome: "PREVIEW",
+      replayed: false,
+      writeCount: 0,
+    }));
+    expect(await recoveryDurableStateFor(fixture)).toEqual(before);
+  }, 60_000);
+
+
   it("rejects claim admission after an intervening lifecycle advance", async () => {
     const label = "lifecycle-admission-race";
     const jobId = await seedMappingJob(label);
@@ -1491,54 +3703,22 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
   it("handles one concurrent artifact read receipt without duplicate writes", async () => {
     const jobId = await seedCoverageJob("artifact-read-race");
     const idempotencyKey = `${RUN_PREFIX}-artifact-read-race-operation`;
-    let selectedCount = 0;
-    let releaseSelection = (): void => undefined;
-    let markBothSelected = (): void => undefined;
-    let markPendingReceipt = (): void => undefined;
-    const selectionBarrier = new Promise<void>((resolve) => {
-      releaseSelection = resolve;
-    });
-    const bothSelected = new Promise<void>((resolve) => {
-      markBothSelected = resolve;
-    });
-    const pendingReceiptObserved = new Promise<void>((resolve) => {
-      markPendingReceipt = resolve;
-    });
-    const racingPrisma = prisma.$extends({
-      query: {
-        affiliateAgentGatewayOperationReceipts: {
-          async findUnique({ args, query }) {
-            const selected = await query(args);
-            const compound = args.where.claimId_idempotencyKey;
-            if (
-              selected === null
-              && compound?.idempotencyKey === idempotencyKey
-            ) {
-              selectedCount += 1;
-              if (selectedCount === 2) markBothSelected();
-              await selectionBarrier;
-            }
-            if (
-              selected?.status === "PENDING"
-              && compound?.idempotencyKey === idempotencyKey
-            ) {
-              markPendingReceipt();
-            }
-            return selected;
-          },
-        },
-      },
-    });
     let artifactReadCount = 0;
+    let markFirstArtifactReadStarted = (): void => undefined;
     let releaseFirstArtifactRead = (): void => undefined;
+    const firstArtifactReadStarted = new Promise<void>((resolve) => {
+      markFirstArtifactReadStarted = resolve;
+    });
     const firstArtifactReadReleased = new Promise<void>((resolve) => {
       releaseFirstArtifactRead = resolve;
     });
     const harness = createGatewayHarness("artifact-read-race", {
-      database: racingPrisma,
       readImmutable: async () => {
         artifactReadCount += 1;
-        if (artifactReadCount === 1) await firstArtifactReadReleased;
+        if (artifactReadCount === 1) {
+          markFirstArtifactReadStarted();
+          await firstArtifactReadReleased;
+        }
         return {
           bytes: new Uint8Array(INPUT_BYTES),
           mimeType: "text/markdown",
@@ -1558,36 +3738,17 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
       authorization: authorizationFor(grant),
       evidenceRef: "input-evidence",
     };
-    const reads = [
-      harness.gateway.perform(operation),
-      harness.gateway.perform(operation),
-    ];
-    await bothSelected;
-    releaseSelection();
-    await pendingReceiptObserved;
-    releaseFirstArtifactRead();
-    const results = await Promise.allSettled(reads);
-
-    expect(selectedCount).toBe(2);
-    expect(results.map(({ status }) => status).sort()).toEqual([
-      "fulfilled",
-      "rejected",
-    ]);
-    const fulfilled = results.find(
-      (result): result is PromiseFulfilledResult<unknown> =>
-        result.status === "fulfilled",
-    );
-    const rejected = results.find((result) => result.status === "rejected");
-    expect(fulfilled?.value).toMatchObject({
-      kind: "ARTIFACT_READ",
-      evidenceRef: "input-evidence",
-      byteSize: INPUT_BYTES.byteLength,
-      sourceUrl: "https://evidence.example.test/database",
-      finalUrl: "https://evidence.example.test/database",
-    });
-    expect(rejected?.reason).toMatchObject({
+    const firstRead = harness.gateway.perform(operation);
+    await firstArtifactReadStarted;
+    const pendingDuplicate = harness.gateway.perform(operation);
+    await expect(pendingDuplicate).rejects.toMatchObject({
       code: "OPERATION_IN_PROGRESS",
     });
+    releaseFirstArtifactRead();
+    const firstResult = await firstRead;
+    const replay = await harness.gateway.perform(operation);
+    expect(replay).toEqual(firstResult);
+    expect(artifactReadCount).toBe(2);
     expect(
       await prisma.affiliateAgentGatewayOperationReceipts.count({
         where: { jobId, operationKind: "READ_ARTIFACT" },

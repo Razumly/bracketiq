@@ -539,6 +539,19 @@ const legacySportRepairHoldFor = (
     ? review
     : null;
 };
+type AffiliateSupplyAutomationReviewEvidence = Readonly<{
+  hold: boolean;
+  reason: string | null;
+}>;
+const automationReviewEvidenceFor = (
+  metadata: unknown,
+): AffiliateSupplyAutomationReviewEvidence => {
+  const review = recordValue(recordValue(metadata).automationReviewRequired);
+  return {
+    hold: review.hold === true,
+    reason: stringValue(review.reason),
+  };
+};
 
 const preserveLegacySportRepairHold = (
   metadata: unknown,
@@ -1882,10 +1895,14 @@ const buildAffiliateSnapshotMapping = (
 const buildAffiliateSnapshotSourceIdentity = (
   input: AffiliateSupplySnapshotRows,
   supplySourceId: string,
-): Pick<AffiliateSupplyEvidenceSnapshot['source'], 'id' | 'canonicalUrl' | 'targetKind' | 'status'> => {
+): Pick<
+  AffiliateSupplyEvidenceSnapshot['source'],
+  'id' | 'identityKey' | 'canonicalUrl' | 'targetKind' | 'status'
+> => {
   const { root, source } = input;
   return {
     id: source?.id ?? root.liveSourceId ?? `supply-source:${supplySourceId}`,
+    identityKey: root.identityKey,
     canonicalUrl: root.canonicalUrl,
     targetKind: source?.targetKind ?? root.targetKind,
     status: source?.status ?? (root.isExcluded ? 'EXCLUDED' : 'ACTIVE'),
@@ -3064,6 +3081,75 @@ const loadSnapshot = async (
     contract,
     now,
   });
+};
+export type AffiliateSupplySourceReadAssessment = Readonly<{
+  rootId: string;
+  rootAutomationHoldReason: string | null;
+  rootLiveSourceId: string | null;
+  rootAutomationReviewRequired: AffiliateSupplyAutomationReviewEvidence;
+  sourceAutomationReviewRequired: AffiliateSupplyAutomationReviewEvidence | null;
+  persistedLiveSource: Readonly<Pick<
+    AffiliateScrapeSources,
+    'id' | 'supplySourceId' | 'activeMappingId' | 'metadata'
+  >> | null;
+  snapshot: AffiliateSupplyEvidenceSnapshot;
+  assessment: AffiliateSupplyAssessment;
+  contract: AffiliateSupplyContractPolicy;
+}>;
+
+/**
+ * Read current Supply Source evidence without persisting an assessment.
+ *
+ * Recovery uses this seam so PREVIEW cannot change lifecycle projection,
+ * alerts, or automation state.
+ */
+export const readAffiliateSupplySourceAssessment = async (input: Readonly<{
+  supplySourceId: string;
+  db?: AffiliateSupplyDatabase;
+  now?: Date;
+}>): Promise<AffiliateSupplySourceReadAssessment> => {
+  const database = input.db ?? affiliateSupplyDatabase();
+  const root = await database.supplySources.findUnique({
+    where: { id: input.supplySourceId },
+  });
+  if (!root) throw new Error("Affiliate Supply Source not found.");
+  const persistedLiveSource = root.liveSourceId
+    ? await database.sources.findUnique({
+      where: { id: root.liveSourceId },
+      select: {
+        id: true,
+        supplySourceId: true,
+        activeMappingId: true,
+        metadata: true,
+      },
+    })
+    : null;
+  const rootAutomationReviewRequired = automationReviewEvidenceFor(root.metadata);
+  const sourceAutomationReviewRequired = persistedLiveSource
+    ? automationReviewEvidenceFor(persistedLiveSource.metadata)
+    : null;
+  const activeContract = await loadActiveAffiliateSupplyContract({
+    db: database,
+    rolloutCohort: root.rolloutCohort,
+  });
+  const now = input.now ?? new Date();
+  const snapshot = await loadSnapshot(
+    database,
+    input.supplySourceId,
+    activeContract.policy,
+    now,
+  );
+  return {
+    rootId: root.id,
+    rootAutomationHoldReason: root.automationHoldReason,
+    rootAutomationReviewRequired,
+    sourceAutomationReviewRequired,
+    rootLiveSourceId: root.liveSourceId,
+    persistedLiveSource,
+    snapshot,
+    assessment: deriveAffiliateSupplyAssessment(snapshot),
+    contract: activeContract.policy,
+  };
 };
 type AffiliateSnapshotBatchRows = Readonly<{
   sources: AffiliateScrapeSources[];

@@ -23,6 +23,7 @@ import {
   AFFILIATE_AGENT_WORKSPACE_ATTESTATION_ADMISSION_MARGIN_SECONDS,
   AFFILIATE_AGENT_WORKSPACE_ATTESTATION_LIFETIME_SECONDS,
   AffiliateAgentGatewayError,
+  affiliateAgentReviewerEffectRecoveryRequestSchema,
 } from '../src/server/affiliateImports/agentGateway';
 import type {
   AffiliateAgentClaimOperation,
@@ -30,6 +31,8 @@ import type {
   AffiliateAgentGateway,
   AffiliateAgentReconcileReport,
   AffiliateAgentReconcileRequest,
+  AffiliateAgentReviewerEffectRecoveryReport,
+  AffiliateAgentReviewerEffectRecoveryRequest,
   AffiliateAgentWorkspaceAttestation,
 } from '../src/server/affiliateImports/agentGateway';
 import {
@@ -47,6 +50,7 @@ import {
   createAffiliateAgentClaimAdmission,
   createPrismaAffiliateAgentGateway,
   createPrismaAffiliateAgentInvocationReconciler,
+  recoverAffiliateAgentReviewerEffect,
   validateAffiliateAgentClaimForAdmission,
 } from '../src/server/affiliateImports/prismaAgentGateway';
 import {
@@ -86,6 +90,7 @@ export const AFFILIATE_AGENT_GATEWAY_RECONCILE_INTERVAL_MS = Math.max(
 );
 const MAX_ATTESTATION_LIFETIME_MS =
   AFFILIATE_AGENT_WORKSPACE_ATTESTATION_LIFETIME_SECONDS * 1_000;
+const AFFILIATE_AGENT_GATEWAY_OPERATOR_ID = 'affiliate-gateway-operator';
 const DEFAULT_PORT = 8080;
 const DEFAULT_GATEWAY_PATH_PREFIX = '/v1/affiliate-agent';
 const readBoundedArtifactStream = async (
@@ -644,6 +649,9 @@ const workerRequestAuthorized = async (
 export type AffiliateAgentGatewayHttpDependencies = Readonly<{
   legacyRepairAdmission?: (request: LegacyRepairAdmissionRequest) => Promise<unknown>;
   legacyRepairRetry?: (request: LegacyRepairRetryRequest) => Promise<unknown>;
+  reviewerEffectRecovery: (
+    request: AffiliateAgentReviewerEffectRecoveryRequest,
+  ) => Promise<AffiliateAgentReviewerEffectRecoveryReport>;
   gateway: AffiliateAgentGateway;
   replenishment: () => Promise<AffiliateGovernedReplenishmentControllerResult>;
   invocationReconciler: AffiliateAgentInvocationReconciler;
@@ -1109,6 +1117,35 @@ const handleReplenishmentRequest = async (
   return true;
 };
 
+
+const handleReviewerEffectRecoveryRequest = async (
+  request: IncomingMessage,
+  httpRequest: AffiliateAgentGatewayHttpRequest,
+  response: ServerResponse,
+  input: AffiliateAgentGatewayHttpDependencies,
+  body: unknown,
+): Promise<boolean> => {
+  if (!matchesGatewayRequest(httpRequest, 'POST', '/reviewer-effects/recover')) return false;
+  if (!authorizeOperatorRequest(request, response, input.operatorToken)) return true;
+  const parsed = affiliateAgentReviewerEffectRecoveryRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    sendJson(response, 400, { error: 'Invalid reviewer effect recovery request.' });
+    return true;
+  }
+  if (input.admission.isOpen()) {
+    sendJson(response, 409, {
+      error: {
+        code: 'REVIEWER_EFFECT_RECOVERY_NOT_ELIGIBLE',
+        safeMessage: 'Gateway admission must be closed before reviewer effect recovery.',
+        isRetryable: false,
+      },
+    });
+    return true;
+  }
+  sendGatewayResult(response, await input.reviewerEffectRecovery(parsed.data));
+  return true;
+};
+
 const legacyRepairAdmissionRequestSchema = z.object({
   mode: z.enum(['PREVIEW', 'APPLY']),
   limit: z.number().int().min(1).max(20).default(1),
@@ -1268,6 +1305,7 @@ const handlePostRequest = async (
   }
   const body = await readJson(request);
   if (await handleWorkerReconcileRequest(httpRequest, response, input, body)) return;
+  if (await handleReviewerEffectRecoveryRequest(request, httpRequest, response, input, body)) return;
   if (await handleWorkerAdmissionStatusRequest(httpRequest, response, input, body)) return;
   if (await handleReplenishmentRequest(request, httpRequest, response, input)) return;
   if (await handleLegacyRepairAdmissionRequest(request, httpRequest, response, input, body)) return;
@@ -1409,6 +1447,9 @@ export const createAffiliateAgentGatewayRequestHandler = (
 type AffiliateAgentGatewayRuntime = Readonly<{
   legacyRepairAdmission: (request: LegacyRepairAdmissionRequest) => Promise<unknown>;
   legacyRepairRetry: (request: LegacyRepairRetryRequest) => Promise<unknown>;
+  reviewerEffectRecovery: (
+    request: AffiliateAgentReviewerEffectRecoveryRequest,
+  ) => Promise<AffiliateAgentReviewerEffectRecoveryReport>;
   gateway: AffiliateAgentGateway;
   replenishment: () => Promise<AffiliateGovernedReplenishmentControllerResult>;
   invocationReconciler: AffiliateAgentInvocationReconciler;
@@ -1626,6 +1667,20 @@ const createGateway = async (): Promise<AffiliateAgentGatewayRuntime> => {
         expectedReportHash: request.expectedReportHash,
         operatorId: 'affiliate-gateway-operator',
       });
+    }),
+    reviewerEffectRecovery: (request) => admission.withClaim(async () => {
+      if (admission.isOpen()) {
+        throw new AffiliateAgentGatewayError({
+          code: 'REVIEWER_EFFECT_RECOVERY_NOT_ELIGIBLE',
+          safeMessage: 'Gateway admission must be closed before reviewer effect recovery.',
+          isRetryable: false,
+        });
+      }
+      return recoverAffiliateAgentReviewerEffect(
+        dependencies,
+        request,
+        { operatorId: AFFILIATE_AGENT_GATEWAY_OPERATOR_ID },
+      );
     }),
     replenishment: () => runAffiliateGovernedReplenishment({
       db: database,

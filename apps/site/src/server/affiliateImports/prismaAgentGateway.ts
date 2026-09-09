@@ -15,6 +15,7 @@ import {
   AFFILIATE_AGENT_MAX_SCHEMA_CORRECTIONS,
   AFFILIATE_AGENT_WORKSPACE_ATTESTATION_ADMISSION_MARGIN_SECONDS,
   AffiliateAgentGatewayError,
+  affiliateAgentReviewerEffectRecoveryRequestSchema,
   type AffiliateAgentClaimGrant,
   type AffiliateAgentArtifactReadResult,
   type AffiliateAgentCommandResult,
@@ -28,6 +29,11 @@ import {
   type AffiliateAgentInvocationFailureCode,
   type AffiliateAgentReconcileReport,
   type AffiliateAgentReconcileRequest,
+  type AffiliateAgentReviewerEffectRecoveryCurrentState,
+  type AffiliateAgentReviewerEffectRecoveryOperator,
+  type AffiliateAgentReviewerEffectRecoveryOutcome,
+  type AffiliateAgentReviewerEffectRecoveryReport,
+  type AffiliateAgentReviewerEffectRecoveryRequest,
   type AffiliateAgentSchemaCorrectionResult,
   type AffiliateAgentSubmitResultOutcome,
   type AffiliateAgentTerminalAcceptedResult,
@@ -85,13 +91,20 @@ import type {
   AffiliateOperationalAlertInput,
   AffiliateOperationalAlertWriter,
 } from "./affiliateOperationalAlerts";
-
 import { reconcileExpiredClaims } from "./prismaAgentGatewayExpiry";
 import {
   affiliateSupplyDatabase,
   emitAffiliateSupplyLifecycleTransitionAlerts,
   materializeAffiliateCoverageDiscoveryResult,
+  readAffiliateSupplySourceAssessment,
+  type AffiliateSupplySourceReadAssessment,
 } from "./affiliateSupplyPersistence";
+import {
+  validateAffiliateSupplyCommand,
+  type AffiliateSupplyAssessment,
+  type AffiliateSupplyContractPolicy,
+} from "./affiliateSupplyLifecycle";
+import { loadAffiliateSportsCatalogSnapshot } from "./affiliateSportsCatalog";
 import {
   AffiliateAgentClaimRaceError,
   recordInvocationFailureTransition,
@@ -7958,6 +7971,10 @@ const validateTerminalResultScope = (
 const AFFILIATE_AGENT_TERMINAL_EFFECT_COMMAND =
   "SUPPLY_REVIEWER_TERMINAL_EFFECT";
 const AFFILIATE_AGENT_TERMINAL_EFFECT_OPERATION = "TERMINAL_EFFECT";
+const REVIEWER_EFFECT_RECOVERY_AUDIT_EVENT = "REVIEWER_EFFECT_RECOVERY_AUTHORIZED";
+const REVIEWER_EFFECT_RECOVERY_FAILED_EVENT = "REVIEWER_EFFECT_RECOVERY_FAILED";
+const REVIEWER_EFFECT_RECOVERY_COMPLETED_EVENT = "REVIEWER_EFFECT_RECOVERY_COMPLETED";
+const REVIEWER_EFFECT_RECOVERY_LEASE_SECONDS = 30;
 const matchesPostEffectReceiptBase = (
   receipt: AffiliateAgentGatewayOperationReceipts | null,
   claim: AffiliateAgentGatewayClaims,
@@ -15005,6 +15022,2250 @@ const reconcileAffiliateAgentGateway = async (
   };
 };
 
+
+const reviewerEffectRecoveryOperatorSchema = z.object({
+  operatorId: gatewayIdentifierSchema,
+}).strict();
+
+type ReviewerEffectRecoveryTransition = Readonly<{
+  id: string;
+  supplySourceId: string;
+  generation: number;
+  command: string;
+  commandRef: string | null;
+  idempotencyKey: string;
+  requestHash: string;
+  resultHash: string;
+  contractVersion: number;
+  contractHash: string;
+  actorKind: string;
+  actorId: string;
+  executingAgentId: string | null;
+  toStage: string;
+  requestJson: Prisma.JsonValue;
+  resultJson: Prisma.JsonValue;
+}>;
+
+type ReviewerEffectRecoveryRows = Readonly<{
+  receipt: AffiliateAgentGatewayOperationReceipts | null;
+  claim: AffiliateAgentGatewayClaims | null;
+  job: AffiliateAgentGatewayJobs | null;
+  envelope: AffiliateAgentClaimEnvelope | null;
+  effectState: ReviewerTerminalEffectReceiptState | null;
+  reviewerResult: AffiliateAgentReviewerTerminalResult | null;
+  producerContext: ProducerReviewContext | null;
+  sourceRead: AffiliateSupplySourceReadAssessment | null;
+  activeBundle: AffiliateAgentContractBundle | null;
+  currentCatalogHash: string | null;
+  priorApprovalTransition: ReviewerEffectRecoveryTransition | null;
+  otherActiveClaimIds: readonly string[];
+  approvedAdapterAvailable: boolean;
+}>;
+
+type ReviewerEffectRecoveryEvaluation = Readonly<{
+  eligible: boolean;
+  reasonCodes: readonly string[];
+  reportHash: string;
+  transitionAlreadyRecorded: boolean;
+}>;
+
+const reviewerEffectRecoveryCurrentState = (
+  rows: ReviewerEffectRecoveryRows,
+): AffiliateAgentReviewerEffectRecoveryCurrentState => ({
+  receipt: rows.receipt?.status ?? null,
+  claim: rows.claim?.status ?? null,
+  job: rows.job?.status ?? null,
+  sourceStage: rows.sourceRead?.assessment.stage ?? null,
+  sourceLifecycleGeneration:
+    rows.sourceRead?.assessment.lifecycleGeneration ?? null,
+});
+
+const recoveryError = (
+  code:
+    | "REVIEWER_EFFECT_RECOVERY_NOT_ELIGIBLE"
+    | "REVIEWER_EFFECT_RECOVERY_STALE"
+    | "REVIEWER_EFFECT_RECOVERY_IN_PROGRESS"
+    | "REVIEWER_EFFECT_RECOVERY_HASH_MISMATCH"
+    | "INTERNAL_ERROR",
+  safeMessage: string,
+  receiptId?: string,
+): AffiliateAgentGatewayError => gatewayError(code, safeMessage, false, receiptId);
+
+const isRecoverySha256 = (value: unknown): value is string =>
+  typeof value === "string" && /^[a-f0-9]{64}$/i.test(value);
+
+const parseRecoveryEnvelope = (
+  claim: AffiliateAgentGatewayClaims | null,
+): AffiliateAgentClaimEnvelope | null => {
+  if (!claim) return null;
+  const parsed = affiliateAgentClaimEnvelopeSchema.safeParse(
+    claim.claimEnvelopeJson,
+  );
+  return parsed.success ? parsed.data : null;
+};
+
+const parseRecoveryEffectState = (
+  receipt: AffiliateAgentGatewayOperationReceipts | null,
+): ReviewerTerminalEffectReceiptState | null => {
+  if (
+    !receipt
+    || receipt.operationKind !== AFFILIATE_AGENT_TERMINAL_EFFECT_OPERATION
+    || receipt.commandName !== AFFILIATE_AGENT_TERMINAL_EFFECT_COMMAND
+  ) {
+    return null;
+  }
+  try {
+    return parseReviewerTerminalEffectState(receipt.responseJson, receipt.id);
+  } catch {
+    return null;
+  }
+};
+
+const recoveryTransitionRequestHash = (
+  value: ReviewerEffectRecoveryTransition,
+): string | null => {
+  if (!isGatewayRecord(value.requestJson)) return null;
+  const {
+    __affiliateInvariantAlertContract: _alertIntent,
+    ...request
+  } = value.requestJson;
+  return hashAffiliateAgentValue({
+    supplySourceId: value.supplySourceId,
+    command: value.command,
+    contractVersion: value.contractVersion,
+    contractHash: value.contractHash,
+    request,
+  });
+};
+
+const recoveryTransitionFor = (
+  value: ReviewerEffectRecoveryTransition | null,
+  receiptId: string,
+  claim: AffiliateAgentGatewayClaims | null,
+  result: AffiliateAgentReviewerTerminalResult | null,
+  sourceRead: AffiliateSupplySourceReadAssessment | null,
+): boolean => {
+  if (!value || !claim || !result || !sourceRead || !value.id) return false;
+  const request = isGatewayRecord(value.requestJson)
+    ? value.requestJson
+    : null;
+  const transitionResult = isGatewayRecord(value.resultJson)
+    ? value.resultJson
+    : null;
+  const committedPackageHash = recoveryCommittedPackageHash(result);
+  return (
+    value.supplySourceId === sourceRead.snapshot.supplySourceId
+    && value.commandRef === receiptId
+    && value.idempotencyKey === receiptId
+    && value.command === "APPROVE"
+    && value.toStage === "APPROVED"
+    && value.generation === sourceRead.assessment.lifecycleGeneration
+    && value.actorKind === "SUPPLY_REVIEWER"
+    && value.actorId === claim.workerId
+    && value.executingAgentId === result.invocationId
+    && value.contractVersion === result.supplyContractVersion
+    && value.contractHash === result.supplyContractHash
+    && value.requestHash === recoveryTransitionRequestHash(value)
+    && value.resultHash === hashAffiliateAgentValue(value.resultJson)
+    && transitionResult?.supplySourceId === sourceRead.snapshot.supplySourceId
+    && transitionResult?.lifecycleGeneration === value.generation
+    && transitionResult?.stage === value.toStage
+    && request?.commandRef === receiptId
+    && request.sourceId === sourceRead.rootId
+    && (request.mappingId === undefined
+      || request.mappingId === sourceRead.snapshot.source.activeMappingId)
+    && request.packageHash === committedPackageHash
+    && request.reviewerClaimId === claim.id
+    && request.reviewerClaimGeneration === result.claimGeneration
+    && request.reviewerInvocationId === result.invocationId
+    && claim.lifecycleGeneration !== null
+    && value.generation === claim.lifecycleGeneration + 1
+    && request.reviewerWorkerId === claim.workerId
+  );
+};
+const recoveryCommittedPackageHash = (
+  result: AffiliateAgentReviewerTerminalResult | null,
+): string | null => (
+  result?.disposition === "APPROVED"
+    ? result.payload.committedPackageHash
+    : null
+);
+
+const recoveryAssessmentFingerprint = (
+  assessment: AffiliateSupplyAssessment | null,
+): Readonly<Record<string, unknown>> | null => {
+  if (!assessment) return null;
+  const { assessedAt: _assessedAt, ...stable } = assessment;
+  return stable;
+};
+
+const recoveryEffectStateFingerprint = (
+  state: ReviewerTerminalEffectReceiptState | null,
+): Readonly<Record<string, unknown>> | null => {
+  if (!state) return null;
+  return state.kind === "PENDING"
+    ? {
+      kind: state.kind,
+      result: state.result,
+      terminalIdempotencyKey: state.terminalIdempotencyKey,
+      terminalRequestHash: state.terminalRequestHash,
+    }
+    : {
+      kind: state.kind,
+      result: state.result,
+      resultHash: state.resultHash,
+      safeOutput: state.safeOutput,
+      terminalIdempotencyKey: state.terminalIdempotencyKey,
+      terminalRequestHash: state.terminalRequestHash,
+    };
+};
+const recoveryProducerContextFingerprint = (
+  context: ProducerReviewContext | null,
+): Readonly<Record<string, unknown>> | null => {
+  if (!context) return null;
+  const producerClaim = context.producerClaim
+    ? {
+      id: context.producerClaim.id,
+      jobId: context.producerClaim.jobId,
+      parentClaimId: context.producerClaim.parentClaimId,
+      claimGeneration: context.producerClaim.claimGeneration,
+      lifecycleGeneration: context.producerClaim.lifecycleGeneration,
+      queue: context.producerClaim.queue,
+      lane: context.producerClaim.lane,
+      role: context.producerClaim.role,
+      workerId: context.producerClaim.workerId,
+      invocationId: context.producerClaim.invocationId,
+      workspaceId: context.producerClaim.workspaceId,
+      status: context.producerClaim.status,
+      claimRequestId: context.producerClaim.claimRequestId,
+      claimRequestHash: context.producerClaim.claimRequestHash,
+      claimEnvelopeHash: context.producerClaim.claimEnvelopeHash,
+      evidenceManifestHash: context.producerClaim.evidenceManifestHash,
+      permittedCommandHash: context.producerClaim.permittedCommandHash,
+      permittedCommands: context.producerClaim.permittedCommands,
+      deploymentContractVersion: context.producerClaim.deploymentContractVersion,
+      deploymentContractHash: context.producerClaim.deploymentContractHash,
+      roleContractVersion: context.producerClaim.roleContractVersion,
+      roleContractHash: context.producerClaim.roleContractHash,
+      promptTemplateVersion: context.producerClaim.promptTemplateVersion,
+      promptTemplateHash: context.producerClaim.promptTemplateHash,
+      supplyContractVersion: context.producerClaim.supplyContractVersion,
+      supplyContractHash: context.producerClaim.supplyContractHash,
+      terminalReceiptId: context.producerClaim.terminalReceiptId,
+      safeFailureCode: context.producerClaim.safeFailureCode,
+      safeFailureSummary: context.producerClaim.safeFailureSummary,
+      tokenInvalidatedAt: context.producerClaim.tokenInvalidatedAt?.toISOString() ?? null,
+    }
+    : null;
+  const producerJob = context.producerJob
+    ? {
+      id: context.producerJob.id,
+      dedupeKey: context.producerJob.dedupeKey,
+      queue: context.producerJob.queue,
+      lane: context.producerJob.lane,
+      role: context.producerJob.role,
+      subjectType: context.producerJob.subjectType,
+      subjectId: context.producerJob.subjectId,
+      subjectJsonHash: hashAffiliateAgentValue(context.producerJob.subjectJson),
+      evidenceManifestHash: hashAffiliateAgentValue(
+        context.producerJob.evidenceManifestJson,
+      ),
+      supplySourceId: context.producerJob.supplySourceId,
+      expectedLifecycleGeneration: context.producerJob.expectedLifecycleGeneration,
+      status: context.producerJob.status,
+      priority: context.producerJob.priority,
+      nextAttemptAt: context.producerJob.nextAttemptAt?.toISOString() ?? null,
+      claimGeneration: context.producerJob.claimGeneration,
+      activeClaimId: context.producerJob.activeClaimId,
+      parentClaimId: context.producerJob.parentClaimId,
+      invocationFailureCount: context.producerJob.invocationFailureCount,
+      pipelineBlockedAt: context.producerJob.pipelineBlockedAt?.toISOString() ?? null,
+      terminalDisposition: context.producerJob.terminalDisposition,
+      resultHash: context.producerJob.resultHash,
+      resultJsonHash: hashAffiliateAgentValue(
+        context.producerJob.resultJson ?? null,
+      ),
+      terminalReceiptId: context.producerJob.terminalReceiptId,
+      finishedAt: context.producerJob.finishedAt?.toISOString() ?? null,
+    }
+    : null;
+  const producerEnvelopeHash = context.producerEnvelope
+    ? hashAffiliateAgentValue(context.producerEnvelope)
+    : null;
+  const producerResultHash = context.producerResult
+    ? hashAffiliateAgentValue(context.producerResult)
+    : null;
+  const producerClaimRowHash = hashAffiliateAgentValue(producerClaim);
+  const producerJobRowHash = hashAffiliateAgentValue(producerJob);
+  return {
+    producerClaimRowHash,
+    producerJobRowHash,
+    producerEnvelopeHash,
+    producerResultHash,
+    producerProofHash: hashAffiliateAgentValue({
+      producerClaimRowHash,
+      producerJobRowHash,
+      producerEnvelopeHash,
+      producerResultHash,
+    }),
+  };
+};
+const recoveryFingerprint = (
+  request: AffiliateAgentReviewerEffectRecoveryRequest,
+  rows: ReviewerEffectRecoveryRows,
+  eligible: boolean,
+  reasonCodes: readonly string[],
+  transitionAlreadyRecorded: boolean,
+): Readonly<Record<string, unknown>> => ({
+  schemaVersion: 1,
+  receiptId: request.receiptId,
+  jobId: request.jobId,
+  claimId: request.claimId,
+  supplySourceId: request.supplySourceId,
+  reason: request.reason,
+  eligible,
+  reasonCodes: [...reasonCodes],
+  transitionAlreadyRecorded,
+  currentState: reviewerEffectRecoveryCurrentState(rows),
+  receipt: rows.receipt
+    ? {
+      claimId: rows.receipt.claimId,
+      jobId: rows.receipt.jobId,
+      claimGeneration: rows.receipt.claimGeneration,
+      operationKind: rows.receipt.operationKind,
+      commandName: rows.receipt.commandName,
+      idempotencyKey: rows.receipt.idempotencyKey,
+      requestHash: rows.receipt.requestHash,
+      responseHash: rows.receipt.responseHash,
+      responseStateHash: hashAffiliateAgentValue(
+        recoveryEffectStateFingerprint(rows.effectState),
+      ),
+      status: rows.receipt.status,
+      safeErrorCode: rows.receipt.safeErrorCode,
+      startedAt: rows.receipt.startedAt.toISOString(),
+      completedAt: rows.receipt.completedAt?.toISOString() ?? null,
+      reconcileAfter: rows.receipt.reconcileAfter?.toISOString() ?? null,
+    }
+    : null,
+  claim: rows.claim
+    ? {
+      id: rows.claim.id,
+      jobId: rows.claim.jobId,
+      parentClaimId: rows.claim.parentClaimId,
+      claimGeneration: rows.claim.claimGeneration,
+      lifecycleGeneration: rows.claim.lifecycleGeneration,
+      queue: rows.claim.queue,
+      lane: rows.claim.lane,
+      role: rows.claim.role,
+      workerId: rows.claim.workerId,
+      invocationId: rows.claim.invocationId,
+      workspaceId: rows.claim.workspaceId,
+      status: rows.claim.status,
+      claimRequestId: rows.claim.claimRequestId,
+      claimRequestHash: rows.claim.claimRequestHash,
+      claimEnvelopeHash: rows.claim.claimEnvelopeHash,
+      evidenceManifestHash: rows.claim.evidenceManifestHash,
+      permittedCommandHash: rows.claim.permittedCommandHash,
+      permittedCommands: rows.claim.permittedCommands,
+      deploymentContractVersion: rows.claim.deploymentContractVersion,
+      deploymentContractHash: rows.claim.deploymentContractHash,
+      roleContractVersion: rows.claim.roleContractVersion,
+      roleContractHash: rows.claim.roleContractHash,
+      promptTemplateVersion: rows.claim.promptTemplateVersion,
+      promptTemplateHash: rows.claim.promptTemplateHash,
+      supplyContractVersion: rows.claim.supplyContractVersion,
+      supplyContractHash: rows.claim.supplyContractHash,
+      leaseExpiresAt: rows.claim.leaseExpiresAt.toISOString(),
+      hardDeadlineAt: rows.claim.hardDeadlineAt.toISOString(),
+      tokenExpiresAt: rows.claim.tokenExpiresAt.toISOString(),
+      tokenInvalidatedAt: rows.claim.tokenInvalidatedAt?.toISOString() ?? null,
+      terminalReceiptId: rows.claim.terminalReceiptId,
+      safeFailureCode: rows.claim.safeFailureCode,
+      safeFailureSummary: rows.claim.safeFailureSummary,
+    }
+    : null,
+  job: rows.job
+    ? {
+      id: rows.job.id,
+      dedupeKey: rows.job.dedupeKey,
+      queue: rows.job.queue,
+      lane: rows.job.lane,
+      role: rows.job.role,
+      subjectType: rows.job.subjectType,
+      subjectId: rows.job.subjectId,
+      subjectJsonHash: hashAffiliateAgentValue(rows.job.subjectJson),
+      evidenceManifestHash: hashAffiliateAgentValue(rows.job.evidenceManifestJson),
+      supplySourceId: rows.job.supplySourceId,
+      expectedLifecycleGeneration: rows.job.expectedLifecycleGeneration,
+      status: rows.job.status,
+      priority: rows.job.priority,
+      nextAttemptAt: rows.job.nextAttemptAt?.toISOString() ?? null,
+      claimGeneration: rows.job.claimGeneration,
+      activeClaimId: rows.job.activeClaimId,
+      parentClaimId: rows.job.parentClaimId,
+      invocationFailureCount: rows.job.invocationFailureCount,
+      lastInvocationFailedAt: rows.job.lastInvocationFailedAt?.toISOString() ?? null,
+      pipelineBlockedAt: rows.job.pipelineBlockedAt?.toISOString() ?? null,
+      terminalDisposition: rows.job.terminalDisposition,
+      resultHash: rows.job.resultHash,
+      resultJsonHash: hashAffiliateAgentValue(rows.job.resultJson ?? null),
+      terminalReceiptId: rows.job.terminalReceiptId,
+      finishedAt: rows.job.finishedAt?.toISOString() ?? null,
+    }
+    : null,
+  envelopeHash: rows.envelope
+    ? hashAffiliateAgentValue(rows.envelope)
+    : null,
+  reviewerResultHash: rows.reviewerResult
+    ? hashAffiliateAgentValue(rows.reviewerResult)
+    : null,
+  effectStateHash: hashAffiliateAgentValue(
+    recoveryEffectStateFingerprint(rows.effectState),
+  ),
+  sourceAssessment: recoveryAssessmentFingerprint(
+    rows.sourceRead?.assessment ?? null,
+  ),
+  source: rows.sourceRead
+    ? {
+      sourceId: rows.sourceRead.snapshot.source.id,
+      rootId: rows.sourceRead.rootId,
+      rootAutomationHoldReason: rows.sourceRead.rootAutomationHoldReason,
+      rootLiveSourceId: rows.sourceRead.rootLiveSourceId,
+      persistedLiveSource: rows.sourceRead.persistedLiveSource
+        ? {
+          id: rows.sourceRead.persistedLiveSource.id,
+          supplySourceId: rows.sourceRead.persistedLiveSource.supplySourceId,
+          activeMappingId: rows.sourceRead.persistedLiveSource.activeMappingId,
+        }
+        : null,
+      rootAutomationReviewRequired: rows.sourceRead.rootAutomationReviewRequired,
+      sourceAutomationReviewRequired: rows.sourceRead.sourceAutomationReviewRequired,
+      identityKey: rows.sourceRead.snapshot.source.identityKey ?? null,
+      canonicalUrl: rows.sourceRead.snapshot.source.canonicalUrl ?? null,
+      targetKind: rows.sourceRead.snapshot.source.targetKind ?? null,
+      status: rows.sourceRead.snapshot.source.status ?? null,
+      activeMappingId: rows.sourceRead.snapshot.source.activeMappingId ?? null,
+      activeSupplyContractVersion:
+        rows.sourceRead.snapshot.source.activeSupplyContractVersion ?? null,
+      activeSupplyContractHash:
+        rows.sourceRead.snapshot.source.activeSupplyContractHash ?? null,
+      lifecycleGeneration: rows.sourceRead.snapshot.source.lifecycleGeneration,
+      isAutomationEnabled: rows.sourceRead.snapshot.source.isAutomationEnabled ?? null,
+      autoScrapeEnabled: rows.sourceRead.snapshot.source.autoScrapeEnabled,
+      isAutomationOnHold: rows.sourceRead.snapshot.source.isAutomationOnHold ?? null,
+      automationHoldReason:
+        rows.sourceRead.snapshot.source.automationHoldReason ?? null,
+      isExcluded: rows.sourceRead.snapshot.source.isExcluded ?? null,
+      operatorDomain: rows.sourceRead.snapshot.source.operatorDomain ?? null,
+      metadataHash: hashAffiliateAgentValue(
+        rows.sourceRead.snapshot.source.metadata ?? null,
+      ),
+      mapping: rows.sourceRead.snapshot.mapping
+        ? {
+          id: rows.sourceRead.snapshot.mapping.id,
+          version: rows.sourceRead.snapshot.mapping.version,
+          isActive: rows.sourceRead.snapshot.mapping.isActive,
+          validatedAt: rows.sourceRead.snapshot.mapping.validatedAt instanceof Date
+            ? rows.sourceRead.snapshot.mapping.validatedAt.toISOString()
+            : rows.sourceRead.snapshot.mapping.validatedAt ?? null,
+          isSchemaValid: rows.sourceRead.snapshot.mapping.isSchemaValid,
+          packageHash: rows.sourceRead.snapshot.mapping.packageHash ?? null,
+          evidenceRefs: rows.sourceRead.snapshot.mapping.evidenceRefs ?? [],
+          evidenceKinds: rows.sourceRead.snapshot.mapping.evidenceKinds ?? [],
+          mappingHash: hashAffiliateAgentValue(
+            rows.sourceRead.snapshot.mapping.mapping ?? null,
+          ),
+          validationOutputHash: hashAffiliateAgentValue(
+            rows.sourceRead.snapshot.mapping.validationOutput ?? null,
+          ),
+        }
+        : null,
+      mappingJob: rows.sourceRead.snapshot.mappingJob
+        ? {
+          id: rows.sourceRead.snapshot.mappingJob.id,
+          status: rows.sourceRead.snapshot.mappingJob.status,
+          sourceId: rows.sourceRead.snapshot.mappingJob.sourceId ?? null,
+          mappingId: rows.sourceRead.snapshot.mappingJob.mappingId ?? null,
+          resultSummaryHash: hashAffiliateAgentValue(
+            rows.sourceRead.snapshot.mappingJob.resultSummary ?? null,
+          ),
+          evidenceRefs: rows.sourceRead.snapshot.mappingJob.evidenceRefs ?? [],
+        }
+        : null,
+      catalogHash: rows.currentCatalogHash,
+    }
+    : null,
+  contract: rows.sourceRead
+    ? {
+      version: rows.sourceRead.contract.version,
+      hash: rows.sourceRead.contract.hash,
+    }
+    : null,
+  activeGatewayContract: rows.activeBundle
+    ? {
+      version: rows.activeBundle.supplyContract.version,
+      hash: rows.activeBundle.supplyContract.hash,
+    }
+    : null,
+  producerContext: recoveryProducerContextFingerprint(rows.producerContext),
+  priorApprovalTransition: rows.priorApprovalTransition
+    ? {
+      id: rows.priorApprovalTransition.id,
+      supplySourceId: rows.priorApprovalTransition.supplySourceId,
+      generation: rows.priorApprovalTransition.generation,
+      command: rows.priorApprovalTransition.command,
+      commandRef: rows.priorApprovalTransition.commandRef,
+      idempotencyKey: rows.priorApprovalTransition.idempotencyKey,
+      requestHash: rows.priorApprovalTransition.requestHash,
+      resultHash: rows.priorApprovalTransition.resultHash,
+      requestJsonHash: hashAffiliateAgentValue(
+        rows.priorApprovalTransition.requestJson,
+      ),
+      resultJsonHash: hashAffiliateAgentValue(
+        rows.priorApprovalTransition.resultJson,
+      ),
+      contractVersion: rows.priorApprovalTransition.contractVersion,
+      contractHash: rows.priorApprovalTransition.contractHash,
+      actorKind: rows.priorApprovalTransition.actorKind,
+      actorId: rows.priorApprovalTransition.actorId,
+      executingAgentId: rows.priorApprovalTransition.executingAgentId,
+      toStage: rows.priorApprovalTransition.toStage,
+    }
+    : null,
+  otherActiveClaimIds: [...rows.otherActiveClaimIds].sort(),
+});
+
+const reviewerEffectRecoveryReportHash = (
+  request: AffiliateAgentReviewerEffectRecoveryRequest,
+  rows: ReviewerEffectRecoveryRows,
+  eligible: boolean,
+  reasonCodes: readonly string[],
+  transitionAlreadyRecorded: boolean,
+): string => hashAffiliateAgentValue(
+  recoveryFingerprint(
+    request,
+    rows,
+    eligible,
+    reasonCodes,
+    transitionAlreadyRecorded,
+  ),
+);
+
+const parseRecoveryTransition = (
+  value: ReviewerEffectRecoveryTransition | null,
+): ReviewerEffectRecoveryTransition | null => (
+  value && typeof value.id === "string" ? value : null
+);
+
+const loadReviewerEffectRecoveryRows = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  transaction: Prisma.TransactionClient,
+  request: AffiliateAgentReviewerEffectRecoveryRequest,
+): Promise<ReviewerEffectRecoveryRows> => {
+  const receipt =
+    await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
+      where: { id: request.receiptId },
+    });
+  const [claim, job] = await Promise.all([
+    transaction.affiliateAgentGatewayClaims.findUnique({
+      where: { id: request.claimId },
+    }),
+    transaction.affiliateAgentGatewayJobs.findUnique({
+      where: { id: request.jobId },
+    }),
+  ]);
+  const envelope = parseRecoveryEnvelope(claim);
+  const effectState = parseRecoveryEffectState(receipt);
+  const reviewerResult =
+    effectState?.kind === "PENDING" || effectState?.kind === "SUCCEEDED"
+      ? effectState.result
+      : null;
+  const producerContext =
+    envelope?.subject.type === "SUPPLY_REVIEWER"
+      ? await loadProducerReviewContext(
+        transaction,
+        envelope.subject.producerClaimId,
+      )
+      : null;
+  let sourceRead: AffiliateSupplySourceReadAssessment | null = null;
+  try {
+    sourceRead = await readAffiliateSupplySourceAssessment({
+      supplySourceId: request.supplySourceId,
+      db: affiliateSupplyDatabase(transaction),
+      now: dependencies.clock.now(),
+    });
+  } catch {
+    sourceRead = null;
+  }
+  let activeBundle: AffiliateAgentContractBundle | null = null;
+  try {
+    activeBundle = parseSupportedContractBundle(
+      await dependencies.contracts.loadActiveBundle(),
+    );
+  } catch {
+    activeBundle = null;
+  }
+  let currentCatalogHash: string | null = null;
+  try {
+    currentCatalogHash = (
+      await loadAffiliateSportsCatalogSnapshot(transaction)
+    ).sha256;
+  } catch {
+    currentCatalogHash = null;
+  }
+  const priorApprovalTransitionRaw = await transaction
+    .affiliateSupplyLifecycleTransitions.findFirst({
+      where: {
+        supplySourceId: request.supplySourceId,
+        commandRef: request.receiptId,
+      },
+      orderBy: { generation: "desc" },
+    });
+  const priorApprovalTransition = parseRecoveryTransition(
+    priorApprovalTransitionRaw as ReviewerEffectRecoveryTransition | null,
+  );
+  const sourceJobs = await transaction.affiliateAgentGatewayJobs.findMany({
+    where: { supplySourceId: request.supplySourceId },
+    select: { id: true, status: true, activeClaimId: true },
+  });
+  const sourceJobIds = sourceJobs.map((sourceJob) => sourceJob.id);
+  const activeClaims = sourceJobIds.length === 0
+    ? []
+    : await transaction.affiliateAgentGatewayClaims.findMany({
+      where: {
+        jobId: { in: sourceJobIds },
+        status: "ACTIVE",
+      },
+      select: { id: true },
+    });
+  const otherActiveClaimIds = activeClaims
+    .map((activeClaim) => activeClaim.id)
+    .filter((id) => id !== request.claimId);
+  const activeSourceJobIds = sourceJobs
+    .filter((sourceJob) => (
+      sourceJob.activeClaimId !== null
+      && (
+        sourceJob.id !== request.jobId
+        || sourceJob.activeClaimId !== request.claimId
+      )
+    ))
+    .map((sourceJob) => sourceJob.id);
+  return {
+    receipt,
+    claim,
+    job,
+    envelope,
+    effectState,
+    reviewerResult,
+    producerContext,
+    sourceRead,
+    activeBundle,
+    currentCatalogHash,
+    priorApprovalTransition,
+    otherActiveClaimIds: [
+      ...otherActiveClaimIds,
+      ...activeSourceJobIds.map((id) => `job:${id}`),
+    ],
+    approvedAdapterAvailable: Boolean(
+      dependencies.terminalEffects?.APPROVED
+      && typeof dependencies.terminalEffects.APPROVED.recover === "function",
+    ),
+  };
+};
+
+const evaluateReviewerEffectRecovery = (
+  request: AffiliateAgentReviewerEffectRecoveryRequest,
+  rows: ReviewerEffectRecoveryRows,
+): ReviewerEffectRecoveryEvaluation => {
+  const reasonCodes: string[] = [];
+  const { receipt, claim, job, envelope, effectState, reviewerResult } = rows;
+  const source = rows.sourceRead?.snapshot.source ?? null;
+  const mapping = rows.sourceRead?.snapshot.mapping ?? null;
+  const rootAutomationReview = rows.sourceRead?.rootAutomationReviewRequired ?? null;
+  const sourceAutomationReview = rows.sourceRead?.sourceAutomationReviewRequired ?? null;
+  const rootHasLegacyRepairHold =
+    rootAutomationReview?.hold === true
+    && rootAutomationReview.reason === "LEGACY_SPORT_REPAIR";
+  const sourceMetadataHasLegacyRepairHold =
+    sourceAutomationReview?.hold === true
+    && sourceAutomationReview.reason === "LEGACY_SPORT_REPAIR";
+  const sourceHasLegacyRepairHold =
+    rootHasLegacyRepairHold || sourceMetadataHasLegacyRepairHold;
+  const hasNonLegacyAutomationHold = Boolean(
+    (rootAutomationReview?.hold === true && !rootHasLegacyRepairHold)
+    || (sourceAutomationReview?.hold === true && !sourceMetadataHasLegacyRepairHold)
+  );
+  const reviewerProducerIdentityReused = Boolean(
+    claim
+    && rows.producerContext?.producerClaim
+    && (
+      claim.workerId === rows.producerContext.producerClaim.workerId
+      || claim.invocationId === rows.producerContext.producerClaim.invocationId
+      || claim.workspaceId === rows.producerContext.producerClaim.workspaceId
+    )
+  );
+  const sourceMappingBound = Boolean(
+    source
+    && mapping
+    && rows.sourceRead
+    && rows.sourceRead.rootId === request.supplySourceId
+    && rows.sourceRead.rootLiveSourceId !== null
+    && rows.sourceRead.persistedLiveSource !== null
+    && rows.sourceRead.rootLiveSourceId === rows.sourceRead.persistedLiveSource.id
+    && rows.sourceRead.persistedLiveSource.id === source.id
+    && rows.sourceRead.persistedLiveSource.supplySourceId === rows.sourceRead.rootId
+    && rows.sourceRead.persistedLiveSource.activeMappingId === mapping.id
+    && source.activeMappingId === mapping.id
+    && mapping.isSchemaValid === true
+    && mapping.isActive === false,
+  );
+  const transitionAlreadyRecorded = recoveryTransitionFor(
+    rows.priorApprovalTransition,
+    request.receiptId,
+    claim,
+    reviewerResult,
+    rows.sourceRead,
+  );
+  const sourceStageAllowsRecovery = Boolean(
+    rows.sourceRead
+    && (
+      rows.sourceRead.assessment.stage === "MAPPED"
+      || (
+        rows.sourceRead.assessment.stage === "APPROVED"
+        && transitionAlreadyRecorded
+      )
+    ),
+  );
+  const sourceLifecycleGenerationAllowsRecovery = Boolean(
+    rows.sourceRead
+    && claim
+    && (
+      rows.sourceRead.assessment.lifecycleGeneration === claim.lifecycleGeneration
+      || (
+        transitionAlreadyRecorded
+        && rows.sourceRead.assessment.stage === "APPROVED"
+        && rows.priorApprovalTransition !== null
+        && rows.sourceRead.assessment.lifecycleGeneration
+          === rows.priorApprovalTransition.generation
+      )
+    )
+  );
+  if (
+    !receipt
+    || receipt.claimId !== request.claimId
+    || receipt.jobId !== request.jobId
+    || receipt.claimGeneration !== claim?.claimGeneration
+  ) {
+    reasonCodes.push("RECEIPT_IDENTITY_MISMATCH");
+  }
+  if (
+    !claim
+    || claim.id !== request.claimId
+    || claim.jobId !== request.jobId
+    || !envelope
+    || envelope.claimId !== request.claimId
+    || envelope.jobId !== request.jobId
+    || envelope.supplySourceId !== request.supplySourceId
+    || claim.role !== "SUPPLY_REVIEWER"
+    || claim.status !== "RECONCILIATION_REQUIRED"
+    || claim.tokenInvalidatedAt === null
+  ) {
+    reasonCodes.push("CLAIM_NOT_QUARANTINED");
+  }
+  if (
+    !job
+    || job.id !== request.jobId
+    || job.supplySourceId !== request.supplySourceId
+    || job.status !== "RECONCILIATION_REQUIRED"
+    || job.activeClaimId !== request.claimId
+    || job.claimGeneration !== claim?.claimGeneration
+  ) {
+    reasonCodes.push("JOB_NOT_QUARANTINED");
+  }
+  if (
+    !receipt
+    || receipt.status !== "UNKNOWN"
+    || receipt.safeErrorCode !== "PARTIAL_COMMAND_UNRESOLVED"
+    || receipt.responseHash !== null
+  ) {
+    reasonCodes.push("RECEIPT_NOT_UNKNOWN_PARTIAL");
+  }
+  if (
+    !receipt
+    || receipt.operationKind !== AFFILIATE_AGENT_TERMINAL_EFFECT_OPERATION
+    || receipt.commandName !== AFFILIATE_AGENT_TERMINAL_EFFECT_COMMAND
+    || receipt.idempotencyKey !== reviewerTerminalEffectIdempotencyKey()
+  ) {
+    reasonCodes.push("NOT_REVIEWER_TERMINAL_EFFECT");
+  }
+  if (!envelope || !claim || hashAffiliateAgentValue(envelope) !== claim.claimEnvelopeHash) {
+    reasonCodes.push("CLAIM_ENVELOPE_INVALID");
+  }
+  if (
+    !effectState
+    || effectState.kind !== "PENDING"
+    || !reviewerResult
+    || !isRecoverySha256(effectState.terminalRequestHash)
+    || effectState.terminalIdempotencyKey.trim().length === 0
+  ) {
+    reasonCodes.push("RETAINED_RESULT_INVALID");
+  }
+  if (
+    !receipt
+    || !claim
+    || !reviewerResult
+    || receipt.requestHash !== reviewerTerminalEffectRequestHash(claim, reviewerResult)
+  ) {
+    reasonCodes.push("EFFECT_REQUEST_HASH_INVALID");
+  }
+  if (
+    !claim
+    || !envelope
+    || !job
+    || !matchesReviewerClaimEnvelopeIdentity(claim, envelope, job)
+    || !reviewerResult
+    || reviewerResult.jobId !== claim.jobId
+    || reviewerResult.claimId !== claim.id
+    || reviewerResult.claimGeneration !== claim.claimGeneration
+    || reviewerResult.lifecycleGeneration !== claim.lifecycleGeneration
+    || reviewerResult.workerId !== claim.workerId
+    || reviewerResult.invocationId !== claim.invocationId
+    || reviewerResult.deploymentContractVersion !== claim.deploymentContractVersion
+    || reviewerResult.deploymentContractHash !== claim.deploymentContractHash
+    || reviewerResult.roleContractVersion !== claim.roleContractVersion
+    || reviewerResult.roleContractHash !== claim.roleContractHash
+    || reviewerResult.promptTemplateVersion !== claim.promptTemplateVersion
+    || reviewerResult.promptTemplateHash !== claim.promptTemplateHash
+    || reviewerResult.supplyContractVersion !== claim.supplyContractVersion
+    || reviewerResult.supplyContractHash !== claim.supplyContractHash
+    || reviewerResult.disposition !== "APPROVED"
+  ) {
+    reasonCodes.push("REVIEWER_RESULT_IDENTITY_INVALID");
+  }
+  if (
+    !envelope
+    || !reviewerResult
+    || !reviewerResultTargetsEnvelope(envelope, reviewerResult)
+  ) {
+    reasonCodes.push("EVIDENCE_REFERENCE_INVALID");
+  }
+  if (
+    !envelope
+    || envelope.supplySourceId !== request.supplySourceId
+    || envelope.subject.type !== "SUPPLY_REVIEWER"
+    || envelope.subject.supplySourceId !== request.supplySourceId
+    || envelope.subject.repairContext?.kind !== "LEGACY_SPORT_REPAIR"
+    || !reviewerResult
+    || recoveryCommittedPackageHash(reviewerResult)
+      !== envelope.subject.committedPackageHash
+  ) {
+    reasonCodes.push("LEGACY_APPROVAL_SCOPE_INVALID");
+  }
+  if (
+    rows.producerContext === null
+    || !envelope
+    || envelope.subject.type !== "SUPPLY_REVIEWER"
+    || !job
+    || !isProducerClaimValid(
+      rows.producerContext,
+      envelope.subject,
+      job,
+    )
+  ) {
+    reasonCodes.push("PRODUCER_PROOF_INVALID");
+  }
+  if (reviewerProducerIdentityReused) {
+    reasonCodes.push("PRODUCER_REVIEWER_IDENTITY_REUSED");
+  }
+  if (
+    !rows.sourceRead
+    || rows.sourceRead.snapshot.supplySourceId !== request.supplySourceId
+    || !reviewerResult
+    || recoveryCommittedPackageHash(reviewerResult) !== mapping?.packageHash
+    || !sourceMappingBound
+  ) {
+    reasonCodes.push("PACKAGE_OR_SOURCE_DRIFT");
+  }
+  if (
+    !rows.sourceRead
+    || !claim
+    || !sourceLifecycleGenerationAllowsRecovery
+    || rows.sourceRead.snapshot.source.activeSupplyContractVersion
+      !== rows.sourceRead.contract.version
+    || rows.sourceRead.snapshot.source.activeSupplyContractHash
+      !== rows.sourceRead.contract.hash
+    || rows.sourceRead.assessment.invariantViolations.length > 0
+    || !sourceHasLegacyRepairHold
+    || rows.sourceRead.rootAutomationHoldReason !== "LEGACY_SPORT_REPAIR"
+    || hasNonLegacyAutomationHold
+    || source?.isAutomationEnabled === true
+    || source?.autoScrapeEnabled === true
+    || source?.isExcluded === true
+    || source?.status?.toUpperCase() === "HUMAN_REVIEW_REQUIRED"
+    || source?.status?.toUpperCase() === "EXCLUDED"
+  ) {
+    reasonCodes.push("SOURCE_EVIDENCE_STALE");
+  }
+  if (
+    !rows.sourceRead
+    || !rows.activeBundle
+    || !claim
+    || rows.activeBundle.supplyContract.version !== claim.supplyContractVersion
+    || rows.activeBundle.supplyContract.hash !== claim.supplyContractHash
+    || rows.sourceRead.contract.version !== claim.supplyContractVersion
+    || rows.sourceRead.contract.hash !== claim.supplyContractHash
+  ) {
+    reasonCodes.push("SUPPLY_CONTRACT_STALE");
+  }
+  if (
+    !rows.currentCatalogHash
+    || !envelope
+    || envelope.subject.type !== "SUPPLY_REVIEWER"
+    || envelope.subject.repairContext?.kind !== "LEGACY_SPORT_REPAIR"
+    || rows.currentCatalogHash !== envelope.subject.repairContext.sportsCatalog.sha256
+  ) {
+    reasonCodes.push("SPORTS_CATALOG_STALE");
+  }
+  if (!sourceStageAllowsRecovery || !reviewerResult) {
+    reasonCodes.push("APPROVAL_PRECONDITION_FAILED");
+  }
+  if (
+    rows.sourceRead
+    && reviewerResult
+    && claim
+    && rows.sourceRead.assessment.stage === "MAPPED"
+    && claim.lifecycleGeneration !== null
+    && claim.lifecycleGeneration !== undefined
+  ) {
+    const decision = validateAffiliateSupplyCommand({
+      command: "APPROVE",
+      authority: "SUPPLY_REVIEWER",
+      expectedLifecycleGeneration: claim.lifecycleGeneration ?? -1,
+      currentLifecycleGeneration: rows.sourceRead.assessment.lifecycleGeneration,
+      activeContractVersion: rows.sourceRead.contract.version,
+      activeContractHash: rows.sourceRead.contract.hash,
+      commandContractVersion: reviewerResult.supplyContractVersion,
+      commandContractHash: reviewerResult.supplyContractHash,
+      evidenceRefs: reviewerResult.evidenceRefs,
+      reviewerOutcome: "APPROVED",
+      assessment: rows.sourceRead.assessment,
+    });
+    if (!decision.isAccepted) reasonCodes.push(...decision.reasonCodes);
+  }
+  if (rows.priorApprovalTransition && !transitionAlreadyRecorded) {
+    reasonCodes.push("AMBIGUOUS_PRIOR_EFFECT");
+  }
+  if (rows.otherActiveClaimIds.length > 0) {
+    reasonCodes.push("OTHER_ACTIVE_CLAIM");
+  }
+  if (!rows.activeBundle) reasonCodes.push("ACTIVE_CONTRACT_UNAVAILABLE");
+  if (!rows.approvedAdapterAvailable) {
+    reasonCodes.push("APPROVED_ADAPTER_UNAVAILABLE");
+  }
+  const uniqueReasonCodes = Array.from(new Set(reasonCodes)).sort();
+  const eligible = uniqueReasonCodes.length === 0;
+  return {
+    eligible,
+    reasonCodes: eligible
+      ? transitionAlreadyRecorded
+        ? ["ELIGIBLE", "LIFECYCLE_ALREADY_RECORDED"]
+        : ["ELIGIBLE"]
+      : uniqueReasonCodes,
+    reportHash: reviewerEffectRecoveryReportHash(
+      request,
+      rows,
+      eligible,
+      eligible
+        ? transitionAlreadyRecorded
+          ? ["ELIGIBLE", "LIFECYCLE_ALREADY_RECORDED"]
+          : ["ELIGIBLE"]
+        : uniqueReasonCodes,
+      transitionAlreadyRecorded,
+    ),
+    transitionAlreadyRecorded,
+  };
+};
+
+
+const recoveryEventPayload = (
+  rows: ReviewerEffectRecoveryRows,
+  request: AffiliateAgentReviewerEffectRecoveryRequest,
+  operator: AffiliateAgentReviewerEffectRecoveryOperator,
+  reportHash: string,
+  attempt: number,
+  phase: "AUTHORIZED" | "FAILED" | "COMPLETED",
+  failureReasonCodes: readonly string[] = [],
+): Record<string, unknown> => ({
+  schemaVersion: 1,
+  phase,
+  attempt,
+  operatorId: operator.operatorId,
+  reason: request.reason,
+  reportHash,
+  receiptId: request.receiptId,
+  jobId: request.jobId,
+  claimId: request.claimId,
+  supplySourceId: request.supplySourceId,
+  failureReasonCodes: [...failureReasonCodes],
+  priorStatusEvidence: {
+    receiptStatus: rows.receipt?.status ?? null,
+    receiptSafeErrorCode: rows.receipt?.safeErrorCode ?? null,
+    receiptRequestHash: rows.receipt?.requestHash ?? null,
+    receiptResponseHash: rows.receipt?.responseHash ?? null,
+    receiptResponseSnapshot: rows.receipt?.responseJson ?? null,
+    receiptResponseSnapshotHash: hashAffiliateAgentValue(
+      rows.receipt?.responseJson ?? null,
+    ),
+    receiptStartedAt: rows.receipt?.startedAt?.toISOString() ?? null,
+    receiptCompletedAt: rows.receipt?.completedAt?.toISOString() ?? null,
+    receiptReconcileAfter: rows.receipt?.reconcileAfter?.toISOString() ?? null,
+    claimStatus: rows.claim?.status ?? null,
+    claimLeaseExpiresAt: rows.claim?.leaseExpiresAt?.toISOString() ?? null,
+    claimHardDeadlineAt: rows.claim?.hardDeadlineAt?.toISOString() ?? null,
+    claimTokenExpiresAt: rows.claim?.tokenExpiresAt?.toISOString() ?? null,
+    claimTokenInvalidatedAt: rows.claim?.tokenInvalidatedAt?.toISOString() ?? null,
+    claimSafeFailureCode: rows.claim?.safeFailureCode ?? null,
+    claimSafeFailureSummary: rows.claim?.safeFailureSummary ?? null,
+    jobStatus: rows.job?.status ?? null,
+    jobActiveClaimId: rows.job?.activeClaimId ?? null,
+    jobClaimGeneration: rows.job?.claimGeneration ?? null,
+    envelopeHash: rows.claim?.claimEnvelopeHash ?? null,
+    retainedResultHash: rows.reviewerResult
+      ? hashAffiliateAgentValue(rows.reviewerResult)
+      : null,
+    retainedResultStateHash: hashAffiliateAgentValue(
+      recoveryEffectStateFingerprint(rows.effectState),
+    ),
+  },
+});
+
+type ReviewerEffectRecoveryAuditEvent = Readonly<{
+  id: string;
+  eventKey: string;
+  eventType: string;
+  inputHash: string | null;
+  payload: Prisma.JsonValue;
+  createdAt: Date;
+}>;
+
+const recoveryAuditPayloadRecord = (
+  event: ReviewerEffectRecoveryAuditEvent | null,
+): Record<string, unknown> | null => (
+  event && isGatewayRecord(event.payload) ? event.payload : null
+);
+
+const appendReviewerEffectRecoveryEvent = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  input: Readonly<{
+    eventType: string;
+    eventKey: string;
+    requestHash: string | null;
+    reportHash: string;
+    jobId: string;
+    claimId: string;
+    receiptId: string;
+    role: string;
+    actorId: string;
+    payload: Record<string, unknown>;
+    reasonCodes?: readonly string[];
+    outputHash?: string | null;
+  }>,
+): Promise<number> => {
+  const existing = await transaction.affiliateAgentGatewayEvents.findUnique({
+    where: { eventKey: input.eventKey },
+  });
+  if (existing) return 0;
+  const job = await transaction.affiliateAgentGatewayJobs.findUnique({
+    where: { id: input.jobId },
+  });
+  if (!job) {
+    throw recoveryError(
+      "REVIEWER_EFFECT_RECOVERY_STALE",
+      "The reviewer recovery job no longer exists.",
+      input.receiptId,
+    );
+  }
+  const jobUpdated = await transaction.affiliateAgentGatewayJobs.updateMany({
+    where: {
+      id: job.id,
+      eventSequence: job.eventSequence,
+    },
+    data: { eventSequence: { increment: 1 } },
+  });
+  if (jobUpdated.count !== 1) throw new AffiliateAgentClaimRaceError();
+  await transaction.affiliateAgentGatewayEvents.create({
+    data: {
+      id: dependencies.identifiers.create("event"),
+      eventKey: input.eventKey,
+      jobId: input.jobId,
+      claimId: input.claimId,
+      receiptId: input.receiptId,
+      sequence: job.eventSequence + 1,
+      eventType: input.eventType,
+      actorKind: "OPERATOR_RECOVERY",
+      actorId: input.actorId,
+      role: input.role,
+      requestHash: input.requestHash,
+      inputHash: input.reportHash,
+      outputHash: input.outputHash ?? null,
+      reasonCodes: [...(input.reasonCodes ?? [])],
+      payload: asPrismaJson(input.payload),
+      retentionClass: "INDEFINITE",
+    },
+  });
+  return 2;
+};
+
+const loadRecoveryAuditEvents = async (
+  transaction: Prisma.TransactionClient,
+  receiptId: string,
+  reportHash?: string,
+): Promise<{
+  events: readonly ReviewerEffectRecoveryAuditEvent[];
+  authorization: ReviewerEffectRecoveryAuditEvent | null;
+  failed: ReviewerEffectRecoveryAuditEvent | null;
+  completed: ReviewerEffectRecoveryAuditEvent | null;
+}> => {
+  const events = await transaction.affiliateAgentGatewayEvents.findMany({
+    where: {
+      receiptId,
+      inputHash: reportHash,
+      eventType: {
+        in: [
+          REVIEWER_EFFECT_RECOVERY_AUDIT_EVENT,
+          REVIEWER_EFFECT_RECOVERY_FAILED_EVENT,
+          REVIEWER_EFFECT_RECOVERY_COMPLETED_EVENT,
+        ],
+      },
+    },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+  }) as ReviewerEffectRecoveryAuditEvent[];
+  const authorization = events.find(
+    (event) => event.eventType === REVIEWER_EFFECT_RECOVERY_AUDIT_EVENT,
+  ) ?? null;
+  const failed = events.find(
+    (event) => event.eventType === REVIEWER_EFFECT_RECOVERY_FAILED_EVENT,
+  ) ?? null;
+  const completed = events.find(
+    (event) => event.eventType === REVIEWER_EFFECT_RECOVERY_COMPLETED_EVENT,
+  ) ?? null;
+  return {
+    events,
+    authorization,
+    failed,
+    completed,
+  };
+};
+const recoveryAuditSummaryFor = (
+  events: readonly ReviewerEffectRecoveryAuditEvent[],
+  reportHash?: string,
+): {
+  events: readonly ReviewerEffectRecoveryAuditEvent[];
+  authorization: ReviewerEffectRecoveryAuditEvent | null;
+  failed: ReviewerEffectRecoveryAuditEvent | null;
+  completed: ReviewerEffectRecoveryAuditEvent | null;
+} => {
+  const filtered = reportHash === undefined
+    ? events
+    : events.filter((event) => event.inputHash === reportHash);
+  return {
+    events: filtered,
+    authorization: filtered.find(
+      (event) => event.eventType === REVIEWER_EFFECT_RECOVERY_AUDIT_EVENT,
+    ) ?? null,
+    failed: filtered.find(
+      (event) => event.eventType === REVIEWER_EFFECT_RECOVERY_FAILED_EVENT,
+    ) ?? null,
+    completed: filtered.find(
+      (event) => event.eventType === REVIEWER_EFFECT_RECOVERY_COMPLETED_EVENT,
+    ) ?? null,
+  };
+};
+
+const recoveryReport = (
+  request: AffiliateAgentReviewerEffectRecoveryRequest,
+  rows: ReviewerEffectRecoveryRows,
+  reportHash: string,
+  outcome: AffiliateAgentReviewerEffectRecoveryOutcome,
+  replayed: boolean,
+  writeCount: number,
+  evaluation?: ReviewerEffectRecoveryEvaluation,
+): AffiliateAgentReviewerEffectRecoveryReport => ({
+  schemaVersion: 1,
+  mode: request.mode,
+  eligible: outcome === "PREVIEW"
+    ? evaluation?.eligible ?? true
+    : outcome === "COMPLETED" || outcome === "REPLAYED",
+  reasonCodes: outcome === "PREVIEW"
+    ? evaluation?.reasonCodes ?? ["ELIGIBLE"]
+    : outcome === "RECONCILIATION_REQUIRED"
+      ? ["RECOVERY_FAILED", "RECONCILIATION_REQUIRED"]
+      : ["ELIGIBLE"],
+  reportHash,
+  receiptId: request.receiptId,
+  jobId: request.jobId,
+  claimId: request.claimId,
+  supplySourceId: request.supplySourceId,
+  currentState: reviewerEffectRecoveryCurrentState(rows),
+  outcome,
+  replayed,
+  writeCount,
+});
+
+type ReviewerEffectRecoveryReservation =
+  | Readonly<{
+    kind: "RESERVED";
+    rows: ReviewerEffectRecoveryRows;
+    evaluation: ReviewerEffectRecoveryEvaluation;
+    reportHash: string;
+    attempt: number;
+    eventKey: string;
+    writeCount: number;
+  }>
+  | Readonly<{
+    kind: "RESUME";
+    rows: ReviewerEffectRecoveryRows;
+    reportHash: string;
+  }>
+  | Readonly<{
+    kind: "REPLAY";
+    rows: ReviewerEffectRecoveryRows;
+    reportHash: string;
+    outcome: "COMPLETED" | "RECONCILIATION_REQUIRED";
+  }>;
+
+const recoveryLeaseExpiresAt = (
+  dependencies: AffiliateAgentGatewayDependencies,
+): Date => addSeconds(
+  dependencies.clock.now(),
+  REVIEWER_EFFECT_RECOVERY_LEASE_SECONDS,
+);
+
+const recoveryAttemptFor = (
+  events: readonly ReviewerEffectRecoveryAuditEvent[],
+): number => events.reduce((highest, event) => {
+  const payload = recoveryAuditPayloadRecord(event);
+  const attempt = payload?.attempt;
+  return typeof attempt === "number" && Number.isInteger(attempt)
+    ? Math.max(highest, attempt)
+    : highest;
+}, 0);
+
+const reserveReviewerEffectRecovery = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  request: AffiliateAgentReviewerEffectRecoveryRequest,
+  operator: AffiliateAgentReviewerEffectRecoveryOperator,
+  expectedReportHash: string,
+): Promise<ReviewerEffectRecoveryReservation> => runSerializableEffectTransaction(
+  dependencies,
+  async (transaction) => {
+    const rows = await loadReviewerEffectRecoveryRows(
+      dependencies,
+      transaction,
+      request,
+    );
+    const auditHistory = await loadRecoveryAuditEvents(
+      transaction,
+      request.receiptId,
+    );
+    const audits = recoveryAuditSummaryFor(
+      auditHistory.events,
+      expectedReportHash,
+    );
+    if (audits.completed) {
+      const payload = recoveryAuditPayloadRecord(audits.completed);
+      const outcome = payload?.outcome === "RECONCILIATION_REQUIRED"
+        ? "RECONCILIATION_REQUIRED"
+        : "COMPLETED";
+      return {
+        kind: "REPLAY",
+        rows,
+        reportHash: expectedReportHash,
+        outcome,
+      };
+    }
+    if (
+      audits.authorization
+      && rows.receipt?.status === "SUCCEEDED"
+      && rows.effectState?.kind === "SUCCEEDED"
+      && rows.receipt.responseHash === hashAffiliateAgentValue(rows.effectState)
+    ) {
+      return {
+        kind: "RESUME",
+        rows,
+        reportHash: expectedReportHash,
+      };
+    }
+    const auditEvents = auditHistory.events;
+    const latestAudit = auditEvents[0] ?? null;
+    const latestPayload = recoveryAuditPayloadRecord(latestAudit);
+    if (
+      latestAudit?.eventType === REVIEWER_EFFECT_RECOVERY_AUDIT_EVENT
+      && typeof latestPayload?.leaseExpiresAt === "string"
+      && new Date(latestPayload.leaseExpiresAt) > dependencies.clock.now()
+    ) {
+      throw recoveryError(
+        "REVIEWER_EFFECT_RECOVERY_IN_PROGRESS",
+        "Another reviewer recovery is in progress.",
+        request.receiptId,
+      );
+    }
+    const evaluation = evaluateReviewerEffectRecovery(request, rows);
+    if (!evaluation.eligible) {
+      throw recoveryError(
+        "REVIEWER_EFFECT_RECOVERY_NOT_ELIGIBLE",
+        "The reviewer effect is not eligible for guarded recovery.",
+        request.receiptId,
+      );
+    }
+    if (evaluation.reportHash !== expectedReportHash) {
+      throw recoveryError(
+        "REVIEWER_EFFECT_RECOVERY_STALE",
+        "The reviewer recovery preview is stale.",
+        request.receiptId,
+      );
+    }
+    const attempt = recoveryAttemptFor(auditEvents) + 1;
+    const eventKey = [
+      "reviewer-effect-recovery:authorized",
+      request.receiptId,
+      expectedReportHash,
+      String(attempt),
+    ].join(":");
+    const payload = {
+      ...recoveryEventPayload(
+        rows,
+        request,
+        operator,
+        expectedReportHash,
+        attempt,
+        "AUTHORIZED",
+      ),
+      leaseExpiresAt: recoveryLeaseExpiresAt(dependencies).toISOString(),
+    };
+    const writeCount = await appendReviewerEffectRecoveryEvent(
+      transaction,
+      dependencies,
+      {
+        eventType: REVIEWER_EFFECT_RECOVERY_AUDIT_EVENT,
+        eventKey,
+        requestHash: rows.receipt?.requestHash ?? null,
+        reportHash: expectedReportHash,
+        jobId: request.jobId,
+        claimId: request.claimId,
+        receiptId: request.receiptId,
+        role: "SUPPLY_REVIEWER",
+        actorId: operator.operatorId,
+        payload,
+        reasonCodes: ["AUTHORIZED"],
+      },
+    );
+    return {
+      kind: "RESERVED",
+      rows,
+      evaluation,
+      reportHash: expectedReportHash,
+      attempt,
+      eventKey,
+      writeCount,
+    };
+  },
+  {
+    code: "REVIEWER_EFFECT_RECOVERY_STALE",
+    safeMessage: "The reviewer recovery state changed during reservation.",
+    receiptId: request.receiptId,
+  },
+);
+
+const finalizeOperatorReviewerEffectTransaction = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  result: AffiliateAgentReviewerTerminalResult,
+  safeOutput: Readonly<Record<string, unknown>>,
+  operatorId: string,
+): Promise<Readonly<{ outcome: "COMPLETED" | "REPLAYED"; writeCount: number }>> => {
+  const current =
+    await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
+      where: { id: receipt.id },
+    });
+  if (!current) {
+    throw recoveryError(
+      "REVIEWER_EFFECT_RECOVERY_STALE",
+      "The reviewer effect receipt no longer exists.",
+      receipt.id,
+    );
+  }
+  if (current.status === "SUCCEEDED") return { outcome: "REPLAYED", writeCount: 0 };
+  if (
+    current.status !== "UNKNOWN"
+    || current.requestHash !== receipt.requestHash
+    || current.responseHash !== null
+  ) {
+    throw recoveryError(
+      "REVIEWER_EFFECT_RECOVERY_STALE",
+      "The reviewer effect receipt changed during recovery.",
+      receipt.id,
+    );
+  }
+  const [claim, job] = await Promise.all([
+    transaction.affiliateAgentGatewayClaims.findUnique({
+      where: { id: current.claimId },
+    }),
+    transaction.affiliateAgentGatewayJobs.findUnique({
+      where: { id: current.jobId },
+    }),
+  ]);
+  if (
+    !claim
+    || !job
+    || claim.status !== "RECONCILIATION_REQUIRED"
+    || job.status !== "RECONCILIATION_REQUIRED"
+    || job.activeClaimId !== claim.id
+    || claim.tokenInvalidatedAt === null
+    || claim.claimGeneration !== current.claimGeneration
+  ) {
+    throw recoveryError(
+      "REVIEWER_EFFECT_RECOVERY_STALE",
+      "The reviewer quarantine changed during recovery.",
+      receipt.id,
+    );
+  }
+  const pendingState = parseReviewerTerminalEffectState(
+    current.responseJson,
+    current.id,
+  );
+  if (
+    pendingState.kind !== "PENDING"
+    || hashAffiliateAgentValue(pendingState.result) !== hashAffiliateAgentValue(result)
+  ) {
+    throw recoveryError(
+      "REVIEWER_EFFECT_RECOVERY_STALE",
+      "The retained reviewer result changed during recovery.",
+      receipt.id,
+    );
+  }
+  const finalState: SucceededReviewerTerminalEffectState = {
+    kind: "SUCCEEDED",
+    result,
+    resultHash: hashAffiliateAgentValue(result),
+    safeOutput,
+    terminalIdempotencyKey: pendingState.terminalIdempotencyKey,
+    terminalRequestHash: pendingState.terminalRequestHash,
+    ...(pendingState.failureDiagnostics === undefined
+      ? {}
+      : { failureDiagnostics: pendingState.failureDiagnostics }),
+  };
+  const responseHash = hashAffiliateAgentValue(finalState);
+  const completedAt = dependencies.clock.now();
+  const receiptUpdated =
+    await transaction.affiliateAgentGatewayOperationReceipts.updateMany({
+      where: {
+        id: current.id,
+        status: "UNKNOWN",
+        requestHash: current.requestHash,
+        responseHash: null,
+      },
+      data: {
+        status: "SUCCEEDED",
+        responseHash,
+        responseJson: asPrismaJson(finalState),
+        completedAt,
+        reconcileAfter: null,
+      },
+    });
+  const jobUpdated = await transaction.affiliateAgentGatewayJobs.updateMany({
+    where: {
+      id: job.id,
+      status: "RECONCILIATION_REQUIRED",
+      activeClaimId: claim.id,
+      claimGeneration: claim.claimGeneration,
+      eventSequence: job.eventSequence,
+    },
+    data: { eventSequence: { increment: 1 } },
+  });
+  if (receiptUpdated.count !== 1 || jobUpdated.count !== 1) {
+    throw new AffiliateAgentClaimRaceError();
+  }
+  await transaction.affiliateAgentGatewayEvents.create({
+    data: {
+      id: dependencies.identifiers.create("event"),
+      eventKey: `terminal-effect-succeeded:${current.id}`,
+      jobId: job.id,
+      claimId: claim.id,
+      receiptId: current.id,
+      sequence: job.eventSequence + 1,
+      eventType: "TERMINAL_EFFECT_SUCCEEDED",
+      actorKind: "OPERATOR_RECOVERY",
+      actorId: operatorId,
+      role: claim.role,
+      requestHash: current.requestHash,
+      inputHash: hashAffiliateAgentValue(result),
+      outputHash: responseHash,
+      payload: asPrismaJson({
+        disposition: result.disposition,
+        recovered: true,
+      }),
+      retentionClass: "INDEFINITE",
+    },
+  });
+  return { outcome: "COMPLETED", writeCount: 3 };
+};
+
+const finalizeOperatorReviewerEffect = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  result: AffiliateAgentReviewerTerminalResult,
+  safeOutput: Readonly<Record<string, unknown>>,
+  operatorId: string,
+): Promise<Readonly<{ outcome: "COMPLETED" | "REPLAYED"; writeCount: number }>> => runSerializableEffectTransaction(
+  dependencies,
+  (transaction) =>
+    finalizeOperatorReviewerEffectTransaction(
+      transaction,
+      dependencies,
+      receipt,
+      result,
+      safeOutput,
+      operatorId,
+    ),
+  {
+    code: "REVIEWER_EFFECT_RECOVERY_STALE",
+    safeMessage: "The reviewer effect could not be finalized.",
+    receiptId: receipt.id,
+  },
+);
+
+const completeOperatorReviewerResultTransaction = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  effectReceipt: AffiliateAgentGatewayOperationReceipts,
+  result: AffiliateAgentReviewerTerminalResult,
+  operatorId: string,
+): Promise<Readonly<{ outcome: "COMPLETED" | "REPLAYED"; writeCount: number }>> => {
+  const [claim, job, currentEffect] = await Promise.all([
+    transaction.affiliateAgentGatewayClaims.findUnique({
+      where: { id: effectReceipt.claimId },
+    }),
+    transaction.affiliateAgentGatewayJobs.findUnique({
+      where: { id: effectReceipt.jobId },
+    }),
+    transaction.affiliateAgentGatewayOperationReceipts.findUnique({
+      where: { id: effectReceipt.id },
+    }),
+  ]);
+  if (!claim || !job || !currentEffect) {
+    throw recoveryError(
+      "REVIEWER_EFFECT_RECOVERY_STALE",
+      "The reviewer recovery records no longer exist.",
+      effectReceipt.id,
+    );
+  }
+  const state = parseReviewerTerminalEffectState(
+    currentEffect.responseJson,
+    currentEffect.id,
+  );
+  if (
+    currentEffect.status !== "SUCCEEDED"
+    || state.kind !== "SUCCEEDED"
+    || state.resultHash !== hashAffiliateAgentValue(result)
+    || currentEffect.responseHash !== hashAffiliateAgentValue(state)
+  ) {
+    throw recoveryError(
+      "REVIEWER_EFFECT_RECOVERY_STALE",
+      "The recovered reviewer effect is not complete.",
+      effectReceipt.id,
+    );
+  }
+  if (
+    claim.status === "COMPLETED"
+    && job.status === "COMPLETED"
+    && claim.terminalReceiptId !== null
+  ) {
+    const terminalReceipt =
+      await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
+        where: { id: claim.terminalReceiptId },
+      });
+    if (!terminalReceipt) {
+      throw recoveryError(
+        "REVIEWER_EFFECT_RECOVERY_STALE",
+        "The recovered reviewer terminal receipt is missing.",
+        effectReceipt.id,
+      );
+    }
+    return { outcome: "REPLAYED", writeCount: 0 };
+  }
+  if (
+    claim.status !== "RECONCILIATION_REQUIRED"
+    || job.status !== "RECONCILIATION_REQUIRED"
+    || job.activeClaimId !== claim.id
+    || claim.tokenInvalidatedAt === null
+  ) {
+    throw recoveryError(
+      "REVIEWER_EFFECT_RECOVERY_STALE",
+      "The reviewer quarantine changed before completion.",
+      effectReceipt.id,
+    );
+  }
+  await assertClaimEvidenceRefs(
+    transaction,
+    claim.id,
+    result.evidenceRefs,
+    "EVIDENCE_REFERENCE_NOT_PERMITTED",
+    "The recovered reviewer result references unknown evidence.",
+  );
+  const resultHash = hashAffiliateAgentValue(result);
+  const requestHash = state.terminalRequestHash;
+  const idempotencyKey = state.terminalIdempotencyKey;
+  const now = dependencies.clock.now();
+  const existing =
+    await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
+      where: {
+        claimId_idempotencyKey: {
+          claimId: claim.id,
+          idempotencyKey,
+        },
+      },
+    });
+  if (
+    existing
+    && existing.status === "SUCCEEDED"
+    && existing.requestHash === requestHash
+  ) {
+    const completed = replayTerminalResult(existing.responseJson);
+    const claimUpdated =
+      await transaction.affiliateAgentGatewayClaims.updateMany({
+        where: {
+          id: claim.id,
+          status: "RECONCILIATION_REQUIRED",
+          claimGeneration: claim.claimGeneration,
+          tokenInvalidatedAt: { not: null },
+        },
+        data: {
+          status: "COMPLETED",
+          terminalReceiptId: existing.id,
+          endedAt: now,
+        },
+      });
+    const jobUpdated = await transaction.affiliateAgentGatewayJobs.updateMany({
+      where: {
+        id: job.id,
+        status: "RECONCILIATION_REQUIRED",
+        activeClaimId: claim.id,
+        claimGeneration: claim.claimGeneration,
+        eventSequence: job.eventSequence,
+      },
+      data: {
+        status: "COMPLETED",
+        activeClaimId: null,
+        terminalDisposition: result.disposition,
+        resultHash,
+        resultJson: asPrismaJson(result),
+        terminalReceiptId: existing.id,
+        finishedAt: now,
+        eventSequence: { increment: 1 },
+      },
+    });
+    if (claimUpdated.count !== 1 || jobUpdated.count !== 1) {
+      throw new AffiliateAgentClaimRaceError();
+    }
+    return {
+      outcome: completed.kind === "TERMINAL_ACCEPTED" ? "COMPLETED" : "REPLAYED",
+      writeCount: 2,
+    };
+  }
+  if (
+    existing
+    && (
+      existing.requestHash !== requestHash
+      || (existing.status !== "PENDING" && existing.status !== "UNKNOWN")
+    )
+  ) {
+    throw recoveryError(
+      "REVIEWER_EFFECT_RECOVERY_STALE",
+      "The retained terminal result receipt changed.",
+      effectReceipt.id,
+    );
+  }
+  const terminalReceiptId = existing?.id ?? dependencies.identifiers.create("receipt");
+  const terminalResult: AffiliateAgentTerminalAcceptedResult = {
+    kind: "TERMINAL_ACCEPTED",
+    receiptId: terminalReceiptId,
+    resultHash,
+    disposition: result.disposition,
+    completedAt: now.toISOString(),
+  };
+  const claimUpdated =
+    await transaction.affiliateAgentGatewayClaims.updateMany({
+      where: {
+        id: claim.id,
+        status: "RECONCILIATION_REQUIRED",
+        claimGeneration: claim.claimGeneration,
+        tokenInvalidatedAt: { not: null },
+      },
+      data: {
+        status: "COMPLETED",
+        terminalReceiptId: terminalReceiptId,
+        endedAt: now,
+      },
+    });
+  const jobUpdated = await transaction.affiliateAgentGatewayJobs.updateMany({
+    where: {
+      id: job.id,
+      status: "RECONCILIATION_REQUIRED",
+      activeClaimId: claim.id,
+      claimGeneration: claim.claimGeneration,
+      eventSequence: job.eventSequence,
+    },
+    data: {
+      status: "COMPLETED",
+      activeClaimId: null,
+      terminalDisposition: result.disposition,
+      resultHash,
+      resultJson: asPrismaJson(result),
+      terminalReceiptId,
+      finishedAt: now,
+      eventSequence: { increment: 1 },
+    },
+  });
+  if (claimUpdated.count !== 1 || jobUpdated.count !== 1) {
+    throw new AffiliateAgentClaimRaceError();
+  }
+  if (existing) {
+    const receiptUpdated =
+      await transaction.affiliateAgentGatewayOperationReceipts.updateMany({
+        where: {
+          id: existing.id,
+          status: existing.status,
+          requestHash,
+        },
+        data: {
+          status: "SUCCEEDED",
+          responseHash: hashAffiliateAgentValue(terminalResult),
+          responseJson: asPrismaJson(terminalResult),
+          startedAt: existing.startedAt,
+          completedAt: now,
+          reconcileAfter: null,
+        },
+      });
+    if (receiptUpdated.count !== 1) throw new AffiliateAgentClaimRaceError();
+  } else {
+    await transaction.affiliateAgentGatewayOperationReceipts.create({
+      data: {
+        id: terminalReceiptId,
+        claimId: claim.id,
+        jobId: job.id,
+        claimGeneration: claim.claimGeneration,
+        idempotencyKey,
+        operationKind: "SUBMIT_RESULT",
+        requestHash,
+        status: "SUCCEEDED",
+        responseHash: hashAffiliateAgentValue(terminalResult),
+        responseJson: asPrismaJson(terminalResult),
+        startedAt: now,
+        completedAt: now,
+        retentionClass: "INDEFINITE",
+      },
+    });
+  }
+  await transaction.affiliateAgentGatewayEvents.create({
+    data: {
+      id: dependencies.identifiers.create("event"),
+      eventKey: `terminal:recovered:${terminalReceiptId}`,
+      jobId: job.id,
+      claimId: claim.id,
+      receiptId: terminalReceiptId,
+      sequence: job.eventSequence + 1,
+      eventType: "CLAIM_TERMINAL_RESULT_ACCEPTED",
+      actorKind: "OPERATOR_RECOVERY",
+      actorId: operatorId,
+      role: claim.role,
+      requestHash,
+      inputHash: resultHash,
+      outputHash: hashAffiliateAgentValue(terminalResult),
+      reasonCodes: [...result.reasonCodes],
+      payload: asPrismaJson({
+        disposition: result.disposition,
+        resultHash,
+        recoveredFromReceiptId: effectReceipt.id,
+      }),
+      retentionClass: "INDEFINITE",
+    },
+  });
+  return { outcome: "COMPLETED", writeCount: 4 };
+};
+
+const completeOperatorReviewerResult = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  effectReceipt: AffiliateAgentGatewayOperationReceipts,
+  result: AffiliateAgentReviewerTerminalResult,
+  operatorId: string,
+): Promise<Readonly<{ outcome: "COMPLETED" | "REPLAYED"; writeCount: number }>> => runSerializableEffectTransaction(
+  dependencies,
+  (transaction) =>
+    completeOperatorReviewerResultTransaction(
+      transaction,
+      dependencies,
+      effectReceipt,
+      result,
+      operatorId,
+    ),
+  {
+    code: "REVIEWER_EFFECT_RECOVERY_STALE",
+    safeMessage: "The recovered reviewer result could not be completed.",
+    receiptId: effectReceipt.id,
+  },
+);
+const readReviewerEffectRecoveryState = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  request: AffiliateAgentReviewerEffectRecoveryRequest,
+): Promise<ReviewerEffectRecoveryRows> => dependencies.prisma.$transaction(
+  (transaction) =>
+    loadReviewerEffectRecoveryRows(dependencies, transaction, request),
+  { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+);
+
+const appendReviewerEffectRecoveryFailure = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  request: AffiliateAgentReviewerEffectRecoveryRequest,
+  operator: AffiliateAgentReviewerEffectRecoveryOperator,
+  rows: ReviewerEffectRecoveryRows,
+  reportHash: string,
+  attempt: number,
+  failureReasonCodes: readonly string[],
+): Promise<number> => runSerializableEffectTransaction(
+  dependencies,
+  async (transaction) => {
+    const currentRows = await loadReviewerEffectRecoveryRows(
+      dependencies,
+      transaction,
+      request,
+    );
+    return appendReviewerEffectRecoveryEvent(
+      transaction,
+      dependencies,
+      {
+        eventType: REVIEWER_EFFECT_RECOVERY_FAILED_EVENT,
+        eventKey: [
+          "reviewer-effect-recovery:failed",
+          request.receiptId,
+          reportHash,
+          String(attempt),
+        ].join(":"),
+        requestHash: currentRows.receipt?.requestHash ?? rows.receipt?.requestHash ?? null,
+        reportHash,
+        jobId: request.jobId,
+        claimId: request.claimId,
+        receiptId: request.receiptId,
+        role: "SUPPLY_REVIEWER",
+        actorId: operator.operatorId,
+        payload: {
+          ...recoveryEventPayload(
+            currentRows,
+            request,
+            operator,
+            reportHash,
+            attempt,
+            "FAILED",
+            failureReasonCodes,
+          ),
+          outcome: "RECONCILIATION_REQUIRED",
+        },
+        reasonCodes: failureReasonCodes,
+      },
+    );
+  },
+  {
+    code: "REVIEWER_EFFECT_RECOVERY_STALE",
+    safeMessage: "The reviewer recovery failure could not be recorded.",
+    receiptId: request.receiptId,
+  },
+);
+
+export const recoverAffiliateAgentReviewerEffect = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  requestValue: unknown,
+  operatorValue: unknown,
+): Promise<AffiliateAgentReviewerEffectRecoveryReport> => {
+  const requestParsed = affiliateAgentReviewerEffectRecoveryRequestSchema.safeParse(requestValue);
+  const operatorParsed = reviewerEffectRecoveryOperatorSchema.safeParse(operatorValue);
+  if (!requestParsed.success || !operatorParsed.success) {
+    throw recoveryError(
+      "INTERNAL_ERROR",
+      "The reviewer recovery request is invalid.",
+    );
+  }
+  const request = requestParsed.data;
+  const operator = operatorParsed.data;
+  if (dependencies.claimAdmission?.isOpen()) {
+    throw gatewayError(
+      "GATEWAY_ADMISSION_HALTED",
+      "Reviewer effect recovery requires closed gateway admission.",
+    );
+  }
+  const initialRows = await readReviewerEffectRecoveryState(
+    dependencies,
+    request,
+  );
+  const initialEvaluation = evaluateReviewerEffectRecovery(request, initialRows);
+  if (request.mode === "PREVIEW") {
+    return recoveryReport(
+      request,
+      initialRows,
+      initialEvaluation.reportHash,
+      "PREVIEW",
+      false,
+      0,
+      initialEvaluation,
+    );
+  }
+  if (!request.expectedReportHash) {
+    throw recoveryError(
+      "REVIEWER_EFFECT_RECOVERY_HASH_MISMATCH",
+      "APPLY requires the PREVIEW report hash.",
+      request.receiptId,
+    );
+  }
+  if (!isRecoverySha256(request.expectedReportHash)) {
+    throw recoveryError(
+      "REVIEWER_EFFECT_RECOVERY_HASH_MISMATCH",
+      "The PREVIEW report hash is invalid.",
+      request.receiptId,
+    );
+  }
+  const reservation = await reserveReviewerEffectRecovery(
+    dependencies,
+    request,
+    operator,
+    request.expectedReportHash,
+  );
+  if (reservation.kind === "REPLAY") {
+    return recoveryReport(
+      request,
+      reservation.rows,
+      reservation.reportHash,
+      reservation.outcome === "COMPLETED" ? "REPLAYED" : "RECONCILIATION_REQUIRED",
+      true,
+      0,
+    );
+  }
+  if (reservation.kind === "RESUME") {
+    if (!reservation.rows.reviewerResult || !reservation.rows.receipt) {
+      throw recoveryError(
+        "REVIEWER_EFFECT_RECOVERY_STALE",
+        "The recovered reviewer result is missing.",
+        request.receiptId,
+      );
+    }
+    const resumeReceipt = reservation.rows.receipt;
+    const resumeResult = reservation.rows.reviewerResult;
+    let committedWriteCount = 0;
+    try {
+      const completion = await completeOperatorReviewerResult(
+        dependencies,
+        resumeReceipt,
+        resumeResult,
+        operator.operatorId,
+      );
+      committedWriteCount += completion.writeCount;
+      const currentRows = await readReviewerEffectRecoveryState(
+        dependencies,
+        request,
+      );
+      const completionAuditWrites = await runSerializableEffectTransaction(
+        dependencies,
+        (transaction) => appendReviewerEffectRecoveryEvent(
+          transaction,
+          dependencies,
+          {
+            eventType: REVIEWER_EFFECT_RECOVERY_COMPLETED_EVENT,
+            eventKey: [
+              "reviewer-effect-recovery:completed",
+              request.receiptId,
+              reservation.reportHash,
+            ].join(":"),
+            requestHash: resumeReceipt.requestHash,
+            reportHash: reservation.reportHash,
+            jobId: request.jobId,
+            claimId: request.claimId,
+            receiptId: request.receiptId,
+            role: "SUPPLY_REVIEWER",
+            actorId: operator.operatorId,
+            payload: {
+              ...recoveryEventPayload(
+                currentRows,
+                request,
+                operator,
+                reservation.reportHash,
+                0,
+                "COMPLETED",
+              ),
+              outcome: "COMPLETED",
+            },
+            reasonCodes: ["COMPLETED"],
+          },
+        ),
+        {
+          code: "REVIEWER_EFFECT_RECOVERY_STALE",
+          safeMessage: "The reviewer recovery completion could not be recorded.",
+          receiptId: request.receiptId,
+        },
+      );
+      committedWriteCount += completionAuditWrites;
+      return recoveryReport(
+        request,
+        currentRows,
+        reservation.reportHash,
+        completion.outcome === "REPLAYED" ? "REPLAYED" : "COMPLETED",
+        true,
+        committedWriteCount,
+      );
+    } catch (error) {
+      if (error instanceof AffiliateAgentGatewayError) {
+        const failureAuditWrites = await appendReviewerEffectRecoveryFailure(
+          dependencies,
+          request,
+          operator,
+          reservation.rows,
+          reservation.reportHash,
+          0,
+          ["COMPLETION_FAILED"],
+        );
+        const currentRows = await readReviewerEffectRecoveryState(
+          dependencies,
+          request,
+        );
+        return recoveryReport(
+          request,
+          currentRows,
+          reservation.reportHash,
+          "RECONCILIATION_REQUIRED",
+          false,
+          committedWriteCount + failureAuditWrites,
+        );
+      }
+      throw error;
+    }
+  }
+  if (
+    !reservation.rows.reviewerResult
+    || !reservation.rows.envelope
+    || !reservation.rows.receipt
+  ) {
+    throw recoveryError(
+      "REVIEWER_EFFECT_RECOVERY_STALE",
+      "The retained reviewer effect is incomplete.",
+      request.receiptId,
+    );
+  }
+  const effectReceipt = reservation.rows.receipt;
+  const reviewerEnvelope = reservation.rows.envelope;
+  const approvedResult = reservation.rows.reviewerResult;
+  if (!effectReceipt || !reviewerEnvelope || !approvedResult) {
+    throw recoveryError(
+      "REVIEWER_EFFECT_RECOVERY_STALE",
+      "The retained reviewer effect is incomplete.",
+      request.receiptId,
+    );
+  }
+  if (approvedResult.disposition !== "APPROVED") {
+    throw recoveryError(
+      "REVIEWER_EFFECT_RECOVERY_STALE",
+      "The retained reviewer result is not an approval.",
+      request.receiptId,
+    );
+  }
+  const terminalEffects = dependencies.terminalEffects;
+  if (
+    !terminalEffects
+    || !terminalEffects.APPROVED
+    || typeof terminalEffects.APPROVED.recover !== "function"
+  ) {
+    throw recoveryError(
+      "REVIEWER_EFFECT_RECOVERY_NOT_ELIGIBLE",
+      "The approved reviewer effect adapter is unavailable.",
+      request.receiptId,
+    );
+  }
+  let recovered: Readonly<Record<string, unknown>> | null = null;
+  let failureReasonCodes: readonly string[] = [];
+  const adapter = terminalEffects;
+  const invocation = await runReviewerTerminalEffectWithRecovery(
+    adapter,
+    {
+      receiptId: effectReceipt.id,
+      claim: reviewerEnvelope,
+      result: approvedResult,
+    },
+    true,
+    async (diagnostic) => {
+      await persistReviewerTerminalEffectFailureDiagnostics(
+        dependencies,
+        effectReceipt,
+        [diagnostic],
+      );
+    },
+  );
+  recovered = invocation.recovered;
+  const diagnosticReasonCodes = invocation.failureDiagnostics.flatMap(
+    (diagnostic) => diagnostic.reasonCodes,
+  );
+  failureReasonCodes = diagnosticReasonCodes.length > 0
+    ? Array.from(new Set(
+      diagnosticReasonCodes.map((code) => (
+        code === "UNCLASSIFIED" ? "RECOVERY_FAILED" : code
+      )),
+    )).sort()
+    : recovered === null
+      ? ["RECOVERY_UNRESOLVED"]
+      : [];
+  if (recovered === null) {
+    const failureAuditWrites = await appendReviewerEffectRecoveryFailure(
+      dependencies,
+      request,
+      operator,
+      reservation.rows,
+      reservation.reportHash,
+      reservation.attempt,
+      failureReasonCodes,
+    );
+    const currentRows = await readReviewerEffectRecoveryState(
+      dependencies,
+      request,
+    );
+    return recoveryReport(
+      request,
+      currentRows,
+      reservation.reportHash,
+      "RECONCILIATION_REQUIRED",
+      false,
+      reservation.writeCount + failureAuditWrites,
+    );
+  }
+  let safeOutput: Readonly<Record<string, unknown>>;
+  try {
+    safeOutput = parseBoundedSafeOutput(
+      recovered,
+      effectReceipt.id,
+    );
+  } catch {
+    const failureAuditWrites = await appendReviewerEffectRecoveryFailure(
+      dependencies,
+      request,
+      operator,
+      reservation.rows,
+      reservation.reportHash,
+      reservation.attempt,
+      ["RECOVERY_OUTPUT_INVALID"],
+    );
+    const currentRows = await readReviewerEffectRecoveryState(
+      dependencies,
+      request,
+    );
+    return recoveryReport(
+      request,
+      currentRows,
+      reservation.reportHash,
+      "RECONCILIATION_REQUIRED",
+      false,
+      reservation.writeCount + failureAuditWrites,
+    );
+  }
+  let committedWriteCount = reservation.writeCount;
+  try {
+    const finalized = await finalizeOperatorReviewerEffect(
+      dependencies,
+      effectReceipt,
+      approvedResult,
+      safeOutput,
+      operator.operatorId,
+    );
+    committedWriteCount += finalized.writeCount;
+    const completed = await completeOperatorReviewerResult(
+      dependencies,
+      effectReceipt,
+      approvedResult,
+      operator.operatorId,
+    );
+    committedWriteCount += completed.writeCount;
+    const currentRows = await readReviewerEffectRecoveryState(
+      dependencies,
+      request,
+    );
+    const completionAuditWrites = await runSerializableEffectTransaction(
+      dependencies,
+      (transaction) => appendReviewerEffectRecoveryEvent(
+        transaction,
+        dependencies,
+        {
+          eventType: REVIEWER_EFFECT_RECOVERY_COMPLETED_EVENT,
+          eventKey: [
+            "reviewer-effect-recovery:completed",
+            request.receiptId,
+            reservation.reportHash,
+          ].join(":"),
+          requestHash: reservation.rows.receipt?.requestHash ?? null,
+          reportHash: reservation.reportHash,
+          jobId: request.jobId,
+          claimId: request.claimId,
+          receiptId: request.receiptId,
+          role: "SUPPLY_REVIEWER",
+          actorId: operator.operatorId,
+          payload: {
+            ...recoveryEventPayload(
+              currentRows,
+              request,
+              operator,
+              reservation.reportHash,
+              reservation.attempt,
+              "COMPLETED",
+            ),
+            outcome: "COMPLETED",
+          },
+          reasonCodes: ["COMPLETED"],
+        },
+      ),
+      {
+        code: "REVIEWER_EFFECT_RECOVERY_STALE",
+        safeMessage: "The reviewer recovery completion could not be recorded.",
+        receiptId: request.receiptId,
+      },
+    );
+    committedWriteCount += completionAuditWrites;
+    return recoveryReport(
+      request,
+      currentRows,
+      reservation.reportHash,
+      completed.outcome === "REPLAYED" ? "REPLAYED" : "COMPLETED",
+      false,
+      committedWriteCount,
+    );
+  } catch (error) {
+    if (!(error instanceof AffiliateAgentGatewayError)) throw error;
+    const failureAuditWrites = await appendReviewerEffectRecoveryFailure(
+      dependencies,
+      request,
+      operator,
+      reservation.rows,
+      reservation.reportHash,
+      reservation.attempt,
+      ["COMPLETION_FAILED"],
+    );
+    const currentRows = await readReviewerEffectRecoveryState(
+      dependencies,
+      request,
+    );
+    return recoveryReport(
+      request,
+      currentRows,
+      reservation.reportHash,
+      "RECONCILIATION_REQUIRED",
+      false,
+      committedWriteCount + failureAuditWrites,
+    );
+  }
+};
 export function createPrismaAffiliateAgentInvocationReconciler(
   dependencies: AffiliateAgentGatewayDependencies,
 ): AffiliateAgentInvocationReconciler {

@@ -1136,3 +1136,19 @@ Plan revision note (2026-08-21): Closed the duplicate package-commit rollback an
 Plan revision note (2026-08-21): Recorded the full-suite result accurately. The complete site Jest run had one unrelated generated-value failure in `EventForm.test.tsx`; the exact file passed all 130 tests when rerun alone. No gateway or supervisor test failed.
 Plan revision note (2026-08-21): Committed the follow-up at `96bef7b54` and completed the final exact-tip two-axis review against `main`. Standards and Spec returned no findings. The required Prisma gateway modules are tracked in the commit. Issue #67 remains open pending operator closure.
 Plan revision note (2026-08-21): Ran the remaining explicit ExecPlan gates on the committed implementation. `npm run test:ci`, the local-URL Prisma check, and the local-URL production build all passed. The latest full Jest rerun still has one unrelated generated-value EventForm failure, while the isolated EventForm suite passes 130 tests.
+
+## Recovery review record (baseline `b0827c8a0`)
+
+The new operator reviewer-effect recovery operation was reviewed against the complete source findings. Production state remains unchanged; recovery remains admission-closed, operator-authenticated, and scoped to the exact receipt, claim, job, Supply Source, legacy sport-repair hold, inactive bound mapping, producer proof, package, contract, and catalog.
+
+- **R1/R2 — legacy scope and inactive mapping:** Fixed. The exact `LEGACY_SPORT_REPAIR` hold is admitted, and recovery binds the source’s `activeMappingId` to the inactive mapping while checking schema, package, and evidence fields; `validatedAt: null` is allowed for the committed repair mapping.
+- **R3 — operator reason:** Fixed. The normalized, bounded reason is part of the canonical PREVIEW/APPLY report hash and recovery audit payload.
+- **R4 — lineage and root identity:** Fixed. Source snapshots carry root `identityKey` and `canonicalUrl`; the report hash includes source identity, mapping evidence, and stable producer claim/job/envelope/result proof hashes.
+- **R5 — receipt-wide lease:** Fixed. Authorization leases are checked across every report hash for the receipt before drift evaluation; mutable audit `eventSequence` is excluded from the reviewed fingerprint, and attempts span the receipt’s audit history.
+- **R6 — durable failure audit:** Fixed. Failure-event persistence uses the safe serializable transaction wrapper; persistence failures propagate as safe errors, and a failure report is returned only after the append commits.
+- **R7 — source identity:** Fixed. Request, job, claim envelope, reviewer subject, and source-read identities must be present and equal before eligibility is reported.
+- **R8 — bounded diagnostics:** Fixed. Recovery uses the existing terminal-effect recovery wrapper and diagnostic persistence callback, preserving allowlisted lifecycle reason codes and bounded retained diagnostics.
+- **R9 — truthful writes:** Fixed. Recovery reports committed coordinator state/audit row mutations from reservation, finalization, completion, and recovery-audit operations; underlying lifecycle/diagnostic writes are excluded; exact no-op replay reports `writeCount: 0`.
+- **R10 — shared request contract:** Fixed. Core and HTTP use one strict schema with trimmed identifiers/reason, a 1,000 UTF-8-byte reason bound, PREVIEW hash rejection, and APPLY hash requirement; caller-supplied `operatorId` is not part of the request body.
+
+RecoveryProof owns the focused database cases for held/inactive mappings, replay/resume, failure durability, receipt-wide lease concurrency, lineage/root drift, source-identity denials, diagnostics, write counts, and shared-schema boundaries. Deployment and production writes are outside this record.

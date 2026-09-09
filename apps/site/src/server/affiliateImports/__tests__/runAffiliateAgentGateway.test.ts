@@ -11,6 +11,8 @@ import { AffiliateLegacyRepairAdmissionError } from "../affiliateLegacyRepairAdm
 import {
   AffiliateAgentGatewayError,
   type AffiliateAgentGateway,
+  type AffiliateAgentReviewerEffectRecoveryReport,
+  type AffiliateAgentReviewerEffectRecoveryRequest,
 } from "../agentGateway";
 import type {
   AffiliateAgentInvocationReconciler,
@@ -485,19 +487,41 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
     selectedGatewayJobIds: ["gateway-parent-boomtown", "gateway-parent-softball"],
     reportHash: "a".repeat(64),
   }));
+  const reviewerEffectRecovery = jest.fn(async (
+    request: AffiliateAgentReviewerEffectRecoveryRequest,
+  ): Promise<AffiliateAgentReviewerEffectRecoveryReport> => ({
+    schemaVersion: 1,
+    mode: request.mode,
+    eligible: true,
+    reasonCodes: [],
+    reportHash: "a".repeat(64),
+    receiptId: request.receiptId,
+    jobId: request.jobId,
+    claimId: request.claimId,
+    supplySourceId: request.supplySourceId,
+    currentState: {
+      receipt: "UNKNOWN",
+      claim: "ACTIVE",
+      job: "CLAIMED",
+      sourceStage: "MAPPED",
+      sourceLifecycleGeneration: null,
+    },
+    outcome: "PREVIEW",
+    replayed: false,
+    writeCount: 0,
+  }));
   beforeEach(async () => {
     jest.clearAllMocks();
-    readinessValue = false;
-    await admission.close();
     health = jest.fn(async () => undefined);
     readiness = jest.fn(async () => readinessValue);
-    claimAdmissionReadiness = jest.fn(async (
-      _input: unknown,
-    ): Promise<AffiliateAgentClaimAdmissionDecision> => "READY");
+    claimAdmissionReadiness = jest.fn(async () => "READY" as const);
+    readinessValue = false;
+    await admission.close();
     running = await startServer(createAffiliateAgentGatewayRequestHandler({
       legacyRepairAdmission,
       legacyRepairRetry,
       replenishment: gateway.replenishment,
+      reviewerEffectRecovery,
       gateway,
       invocationReconciler,
       health,
@@ -575,6 +599,121 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
       }),
     },
   );
+
+  const reviewerRecoveryRequest = {
+    mode: "PREVIEW" as const,
+    receiptId: "agw-receipt-reviewer-effect",
+    jobId: "agw-job-reviewer-effect",
+    claimId: "agw-claim-reviewer-effect",
+    supplySourceId: "supply-source-reviewer-effect",
+    reason: "authorized reviewer effect recovery preview",
+  };
+
+  it("keeps reviewer effect recovery operator-only and validates strict input", async () => {
+    let response = await request(
+      "/reviewer-effects/recover",
+      WORKER_ROLE_CREDENTIAL,
+      "POST",
+      reviewerRecoveryRequest,
+    );
+    expect(response.status).toBe(401);
+
+    response = await request("/reviewer-effects/recover", OPERATOR_TOKEN, "POST", {
+      ...reviewerRecoveryRequest,
+      operatorId: "spoofed-operator",
+    });
+    expect(response.status).toBe(400);
+
+    response = await request("/reviewer-effects/recover", OPERATOR_TOKEN, "POST", {
+      ...reviewerRecoveryRequest,
+      mode: "APPLY",
+    });
+    expect(response.status).toBe(400);
+    response = await request("/reviewer-effects/recover", OPERATOR_TOKEN, "POST", {
+      ...reviewerRecoveryRequest,
+      expectedReportHash: "a".repeat(64),
+    });
+    expect(response.status).toBe(400);
+    expect(reviewerEffectRecovery).not.toHaveBeenCalled();
+  });
+
+  it("requires closed admission before reviewer effect recovery", async () => {
+    await admission.open();
+    const response = await request(
+      "/reviewer-effects/recover",
+      OPERATOR_TOKEN,
+      "POST",
+      reviewerRecoveryRequest,
+    );
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "REVIEWER_EFFECT_RECOVERY_NOT_ELIGIBLE",
+        safeMessage: "Gateway admission must be closed before reviewer effect recovery.",
+        isRetryable: false,
+      },
+    });
+    expect(reviewerEffectRecovery).not.toHaveBeenCalled();
+    await admission.close();
+  });
+
+  it("forwards the exact reviewed recovery scope and returns a safe stale conflict", async () => {
+    let response = await request(
+      "/reviewer-effects/recover",
+      OPERATOR_TOKEN,
+      "POST",
+      reviewerRecoveryRequest,
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      result: {
+        schemaVersion: 1,
+        mode: "PREVIEW",
+        eligible: true,
+        receiptId: reviewerRecoveryRequest.receiptId,
+        jobId: reviewerRecoveryRequest.jobId,
+        claimId: reviewerRecoveryRequest.claimId,
+        supplySourceId: reviewerRecoveryRequest.supplySourceId,
+        outcome: "PREVIEW",
+        writeCount: 0,
+      },
+    });
+    expect(reviewerEffectRecovery).toHaveBeenCalledWith(reviewerRecoveryRequest);
+
+
+    reviewerEffectRecovery.mockRejectedValueOnce(new AffiliateAgentGatewayError({
+      code: "REVIEWER_EFFECT_RECOVERY_STALE",
+      safeMessage: "The reviewer effect recovery scope is stale.",
+      isRetryable: false,
+      receiptId: reviewerRecoveryRequest.receiptId,
+    }));
+    response = await request(
+      "/reviewer-effects/recover",
+      OPERATOR_TOKEN,
+      "POST",
+      reviewerRecoveryRequest,
+    );
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "REVIEWER_EFFECT_RECOVERY_STALE",
+        safeMessage: "The reviewer effect recovery scope is stale.",
+        isRetryable: false,
+        receiptId: reviewerRecoveryRequest.receiptId,
+      },
+    });
+  });
+
+  it("keeps reviewer effect recovery outside the configured path prefix", async () => {
+    const response = await requestAt(
+      "/reviewer-effects/recover",
+      OPERATOR_TOKEN,
+      "POST",
+      reviewerRecoveryRequest,
+    );
+    expect(response.status).toBe(404);
+    expect(reviewerEffectRecovery).not.toHaveBeenCalled();
+  });
 
   it("keeps legacy repair admission operator-only and rejects unreviewed apply", async () => {
     const denied = await request("/legacy-repair/admission", WORKER_ROLE_CREDENTIAL, "POST", {

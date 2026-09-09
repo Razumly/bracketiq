@@ -49,3 +49,28 @@ Evidence:
 Initial findings moved through `open -> fixed -> re-reviewed -> verified` across commits `121d5fcf7`, `cb287f97d`, `f113f0463`, and `21df110ae`.
 
 No unresolved review finding may block release. CI status remains a separate release gate.
+
+## Final guarded recovery review
+
+- Fixed base: `b0827c8a086f03dd583a591767c50eaf336295b2`.
+- Final Standards review: **PASS**.
+- Final Spec review: **PASS**.
+- Isolated core database recovery suite: **45/45 passed**.
+- HTTP recovery subset: **55/55 passed**.
+- Exact complete validation set: **15 suites / 531 tests passed**.
+- `npx tsc --noEmit`: **passed**.
+- Targeted ESLint: **passed**.
+
+The source prerequisite is verified. A real production PREVIEW ran in a
+temporary process with `SHOW default_transaction_read_only = on` before the
+recovery call. It used generated role-contract version 4 and deployment
+version 5, returned `eligible: true`, `reasonCodes: ["ELIGIBLE"]`,
+`outcome: "PREVIEW"`, and `writeCount: 0` for the retained Boomtown
+receipt/claim/job and Supply Source. The report hash is
+`f4373cc8e3a9c84852dc8c327f8e407d3e4039c806118dae12ac944195bd4d20`;
+the safe report is preserved at
+`/tmp/recovery-production-preview.safe.json`.
+
+Deployment, actual guarded recovery, and the authorized Softball retry remain
+pending. This verification performed no production write, token revival,
+claim creation, or retry.

@@ -161,7 +161,8 @@ export type AffiliateReplenishmentPriority = (typeof AFFILIATE_REPLENISHMENT_PRI
 
 export type AffiliateSupplySourceEvidence = Readonly<{
   id: string;
-  canonicalUrl: string;
+  identityKey?: string | null;
+  canonicalUrl?: string | null;
   targetKind?: string | null;
   status?: string | null;
   autoScrapeEnabled: boolean;
