@@ -3409,6 +3409,7 @@ const retryAuditMatchesEdge = (
     && child.dedupeKey === expectedChildDedupeKey
     && audit.childDedupeKey === expectedChildDedupeKey
     && audit.intakeId === intake.id
+    && audit.sourceId === mappingJob.sourceId
     && audit.mappingId === reportRow.mappingId
     && audit.mappingId === reportWrite.mappingId
     && audit.evidenceRunId === parent.subject.repairContext.evidenceRunId
@@ -3452,6 +3453,7 @@ const retryAuditMatchesEdge = (
     && reportRow.gatewayDedupeKey === expectedChildDedupeKey
     && reportRow.currentDeploymentContractHash === report.deploymentContractHash
     && reportWrite.gatewayJobId === parent.gatewayJob.id
+    && reportWrite.mappingJobId === mappingJob.id
     && reportWrite.parentReceiptId === parent.receipt.id
     && reportWrite.parentResultHash === parent.gatewayJob.resultHash
     && reportWrite.parentDeploymentContractHash === parent.claim.deploymentContractHash
@@ -3597,7 +3599,14 @@ const retryEvaluateJob = async (
     && ACTIVE_APPROVAL_STATUSES.has(normalizedUpper(approval.status))
   ))) reasons.push('ACTIVE_APPROVAL_PRESENT');
   if (!retryParentLineageValid(snapshot, parent)) reasons.push('MALFORMED_PARENT_LINEAGE');
-  if (parent.claim.deploymentContractHash === currentDeploymentContractHash) reasons.push('SAME_DEPLOYMENT_RETRY');
+  if (
+    parent.claim.deploymentContractVersion === bundle.deploymentContract.version
+    || parent.claim.deploymentContractHash === currentDeploymentContractHash
+  ) reasons.push('SAME_DEPLOYMENT_RETRY');
+  if (
+    parent.claim.supplyContractVersion !== bundle.supplyContract.version
+    || parent.claim.supplyContractHash !== bundle.supplyContract.hash
+  ) reasons.push('PARENT_SUPPLY_CONTRACT_DRIFT');
   const retryPass = parent.subject.pass + 1;
   if (retryPass > 3) reasons.push('RETRY_PASS_EXHAUSTED');
   let source: SourceRow | null = null;

@@ -615,7 +615,7 @@ automatic scraping.
 
 ### Retry implementation verification
 
-The new retry path passed 395 tests across 11 focused suites, TypeScript,
+The new retry path passed 399 tests across 11 focused suites, TypeScript,
 targeted ESLint, and the pinned SDK no-provider probe. A bundled read-only
 preview also ran against the actual held records. PostgreSQL reported
 `default_transaction_read_only=on` before the preview. Both parents were
@@ -673,3 +673,8 @@ rejects a hash-equivalent PREVIEW snapshot or an unchanged-deployment audit.
 Replay binds historical mapping IDs to the audit/report rather than to a
 mapping pointer that normal successful descendant work can advance. The
 actual incoming child dedupe key is checked against its parent-stable key.
+
+Eligibility and incoming-audit validation use the same deployment and Supply
+identity rules: both deployment version and hash must change, and the Supply
+version/hash must match the parent. Immutable source and mapping-job IDs remain
+bound even when the historical mapping pointer is permitted to advance.

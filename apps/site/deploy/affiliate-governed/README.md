@@ -116,7 +116,8 @@ reason with `"mode":"APPLY"` and its `expectedReportHash`.
 Only completed legacy producer `CONTRACT_GAP` parents are eligible. The
 parent claim, result hash, receipt, mapping/source/intake identity, capture
 run, pinned artifacts, root generation, and safety state must agree.
-The active deployment contract must differ from the parent's deployment.
+Both the deployment contract version and hash must differ from the parent's.
+The current Supply Contract version and hash must still match the parent.
 The new mapping pass is the parent's pass plus one, with a maximum of three.
 Historical results are not revalidated under newer sport-result semantics.
 Legacy null run/page root links are permitted only through the verified
