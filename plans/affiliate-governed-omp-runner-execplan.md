@@ -615,7 +615,7 @@ automatic scraping.
 
 ### Retry implementation verification
 
-The new retry path passed 388 tests across 11 focused suites, TypeScript,
+The new retry path passed 392 tests across 11 focused suites, TypeScript,
 targeted ESLint, and the pinned SDK no-provider probe. A bundled read-only
 preview also ran against the actual held records. PostgreSQL reported
 `default_transaction_read_only=on` before the preview. Both parents were
@@ -657,3 +657,12 @@ After these fixes, an enforced read-only preview against the actual two
 parents again returned two eligible pass-2 attempts, no held rows, and a stable
 report hash. Old parent rows remain unchanged. Independent re-review is the
 remaining source gate before main integration and image publication.
+
+The final historical checks also validate version-3 terminal sport evidence
+against its frozen parent catalog, capture context, and retained artifact bytes.
+Version-2 history remains exempt from the later assessment requirement. Every
+non-root retry edge requires its own hash-verified incoming audit. Replay binds
+immutable audit, parent, child, routing, catalog, manifest, and identity fields
+back to the reviewed report row and proposed write, not only to each other.
+The real read-only preview still selects both intended parents with no blockers
+and a stable hash; no application rows changed during this verification.

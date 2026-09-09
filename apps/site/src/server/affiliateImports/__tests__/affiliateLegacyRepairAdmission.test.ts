@@ -11,6 +11,7 @@ import {
 import type { EnsureAffiliateSupplySourceResult } from '../affiliateSupplyPersistence';
 import { buildAffiliateSupplyContractManifest, normalizeAffiliateSupplyIdentity } from '../affiliateSupplyLifecycle';
 import { affiliateSportsCatalogSha256 } from '../affiliateSportsCatalog';
+import type { AffiliateAgentArtifactStore } from '../agentGatewayAdapters';
 import * as affiliateSupplyPersistence from '../affiliateSupplyPersistence';
 import {
   applyAffiliateLegacyRepairAdmission,
@@ -172,6 +173,7 @@ const retryFixture = () => {
   const runs: Record<string, unknown>[] = [];
   const pages: Record<string, unknown>[] = [];
   const artifacts: Record<string, unknown>[] = [];
+  const artifactBytesByFileId = new Map<string, Buffer>();
   const priorDeploymentContractVersion = 3;
   const priorDeploymentContractHash = '15c37807d319b38b1c8558bfb3b1b84a16e5a85e4734aaf861d2f1259e4a7679';
   const files: Record<string, unknown>[] = [];
@@ -237,23 +239,28 @@ const retryFixture = () => {
     const sourceUrl = `https://${suffix}.example.test`;
     const runId = `run-retry-${suffix}`;
     const pageId = `page-retry-${suffix}`;
-    const artifactRows = (['PAGE_HTML', 'PAGE_MARKDOWN'] as const).map((kind) => ({
-      id: `artifact-retry-${suffix}-${kind.toLowerCase()}`,
-      intakeId,
-      supplySourceId: rootId,
-      pageId,
-      runId,
-      kind,
-      sourceUrl,
-      finalUrl: sourceUrl,
-      contentHash: createHash('sha256').update(`${suffix}:${kind}`).digest('hex'),
-      fileId: `file-retry-${suffix}-${kind.toLowerCase()}`,
-      mimeType: kind === 'PAGE_HTML' ? 'text/html' : 'text/markdown',
-      sizeBytes: 100,
-      createdAt: new Date('2026-08-20T00:01:00Z'),
-      isPinned: true,
-      retainUntil: null,
-    }));
+    const artifactRows = (['PAGE_HTML', 'PAGE_MARKDOWN'] as const).map((kind) => {
+      const fileId = `file-retry-${suffix}-${kind.toLowerCase()}`;
+      const bytes = Buffer.from(`${suffix} source evidence confirms Grass Soccer for ${kind}.`, 'utf8');
+      artifactBytesByFileId.set(fileId, bytes);
+      return {
+        id: `artifact-retry-${suffix}-${kind.toLowerCase()}`,
+        intakeId,
+        supplySourceId: rootId,
+        pageId,
+        runId,
+        kind,
+        sourceUrl,
+        finalUrl: sourceUrl,
+        contentHash: createHash('sha256').update(bytes).digest('hex'),
+        fileId,
+        mimeType: kind === 'PAGE_HTML' ? 'text/html' : 'text/markdown',
+        sizeBytes: bytes.length,
+        createdAt: new Date('2026-08-20T00:01:00Z'),
+        isPinned: true,
+        retainUntil: null,
+      };
+    });
     const evidenceManifest = makeManifest(mappingJobId, artifactRows);
     const repairContext = {
       kind: 'LEGACY_SPORT_REPAIR' as const,
@@ -638,8 +645,34 @@ const retryFixture = () => {
       callback(database as unknown as Prisma.TransactionClient)
     ),
   } as unknown as PrismaClient;
+  const artifactStore: AffiliateAgentArtifactStore = {
+    readImmutable: async ({ fileId, maximumBytes }) => {
+      const artifactId = fileId.startsWith('intake-artifact:')
+        ? fileId.slice('intake-artifact:'.length)
+        : null;
+      const row = artifacts.find((candidate) => candidate.id === artifactId);
+      if (!row) throw new Error(`Artifact ${fileId} was not found.`);
+      const bytes = artifactBytesByFileId.get(String(row.fileId));
+      if (!bytes || bytes.length > maximumBytes) throw new Error(`Artifact ${fileId} is unavailable.`);
+      return {
+        bytes,
+        mimeType: String(row.mimeType),
+        byteSize: bytes.length,
+        sourceUrl: String(row.sourceUrl),
+        finalUrl: String(row.finalUrl),
+        runId: String(row.runId),
+        intakeId: String(row.intakeId),
+      };
+    },
+  };
   return {
-    input: { prisma, bundle, gatewayJobIds: ['gateway-parent-softball', 'gateway-parent-boomtown'], reason: 'authorized bounded retry' },
+    input: {
+      prisma,
+      bundle,
+      gatewayJobIds: ['gateway-parent-softball', 'gateway-parent-boomtown'],
+      reason: 'authorized bounded retry',
+      artifactStore,
+    },
     mappingJobs,
     gatewayJobs,
     gatewayClaims,
@@ -663,6 +696,7 @@ type RetryFixtureState = {
     bundle: typeof bundle;
     gatewayJobIds: string[];
     reason: string;
+    artifactStore: AffiliateAgentArtifactStore;
   };
   mappingJobs: Record<string, unknown>[];
   gatewayJobs: Record<string, unknown>[];
@@ -769,6 +803,25 @@ const completeRetryChild = (
   const childSubject = child.subjectJson as Record<string, unknown>;
   const repairContext = childSubject.repairContext as Record<string, unknown>;
   const evidenceManifest = child.evidenceManifestJson as Record<string, unknown>;
+  const evidenceEntries = Array.isArray(evidenceManifest.entries)
+    ? evidenceManifest.entries.map((entry) => entry as Record<string, unknown>)
+    : [];
+  const citationEntry = evidenceEntries[0];
+  if (!citationEntry) throw new Error(`Retry evidence manifest for ${suffix} is empty.`);
+  const sportDetermination = {
+    sourceLabels: ['Grass Soccer'],
+    status: 'RESOLVED' as const,
+    resolutionBasis: 'SOURCE_EVIDENCE' as const,
+    canonicalSportNames: ['Grass Soccer'],
+    rationale: 'The retained source evidence identifies Grass Soccer.',
+    evidence: [{
+      artifactId: String(citationEntry.artifactId),
+      artifactSha256: String(citationEntry.sha256),
+      artifactKind: String(citationEntry.kind) as 'PAGE_HTML' | 'PAGE_MARKDOWN',
+      pageUrl: `https://${suffix}.example.test`,
+      excerpt: 'Grass Soccer',
+    }],
+  };
   const childClaimId = `claim-retry-${suffix}`;
   const childReceiptId = `receipt-retry-${suffix}`;
   const roleContract = AFFILIATE_AGENT_ROLE_CONTRACTS.MAPPING_PRODUCER;
@@ -821,15 +874,15 @@ const completeRetryChild = (
     evidenceRefs: (Array.isArray(evidenceManifest.entries) ? evidenceManifest.entries : [])
       .map((entry) => String((entry as Record<string, unknown>).evidenceRef)),
     summary: 'The retry fixture completed with a contract gap.',
-    role: 'MAPPING_PRODUCER' as const,
     disposition: 'CONTRACT_GAP' as const,
+    role: 'MAPPING_PRODUCER' as const,
     payload: {
       contractArea: 'MAPPING_EVIDENCE' as const,
       requestedChange: 'Retry the mapping with the current reviewed contract.',
       sportEvidence: {
         evidenceRunId: String(repairContext.evidenceRunId),
         sportsCatalogSha256: String((repairContext.sportsCatalog as Record<string, unknown>).sha256),
-        sportDeterminations: [],
+        sportDeterminations: [sportDetermination],
       },
     },
   };
@@ -1149,6 +1202,80 @@ describe('legacy repair admission with real contract validators', () => {
       expectedReportHash: preview.reportHash,
     })).rejects.toMatchObject({ code: 'RETRY_STATE_DRIFT' });
   });
+  it('rejects replay when the audited child and audit co-tamper to a valid different catalog', async () => {
+    const state = await retryFixtureWithAdmission();
+    const preview = await previewAffiliateLegacyRepairRetry(state.input);
+    await applyAffiliateLegacyRepairRetry({
+      ...state.input,
+      operatorId: 'affiliate-gateway-operator',
+      expectedReportHash: preview.reportHash,
+    });
+    const child = state.gatewayJobs.find((job) => (
+      job.parentClaimId === 'claim-parent-softball'
+      && job.id !== 'gateway-parent-softball'
+    ));
+    const mappingJob = state.mappingJobs.find((job) => job.id === 'mapping-retry-softball');
+    if (!child || !mappingJob) throw new Error('Retry child or mapping job was not created.');
+    const alternateSports = [
+      { id: 'grass-soccer', name: 'Grass Soccer' },
+      { id: 'indoor-soccer', name: 'Indoor Soccer' },
+    ];
+    const alternateCatalog = {
+      schemaVersion: 1 as const,
+      capturedAt: '2026-08-20T00:07:00.000Z',
+      sha256: affiliateSportsCatalogSha256(alternateSports),
+      sports: alternateSports,
+    };
+    const parent = state.gatewayJobs.find((job) => job.id === 'gateway-parent-softball');
+    const parentClaim = state.gatewayClaims.find((claim) => claim.id === 'claim-parent-softball');
+    if (!parent || !parentClaim) throw new Error('Softball parent contract rows were not created.');
+    const parentSubject = parent.subjectJson as Record<string, unknown>;
+    const parentContext = parentSubject.repairContext as Record<string, unknown>;
+    parentContext.sportsCatalog = alternateCatalog;
+    const parentClaimEnvelope = parentClaim.claimEnvelopeJson as Record<string, unknown>;
+    (parentClaimEnvelope.subject as Record<string, unknown>).repairContext = parentContext;
+    parentClaim.claimEnvelopeHash = hashAffiliateAgentValue(parentClaimEnvelope);
+    const childSubject = child.subjectJson as Record<string, unknown>;
+    const childContext = childSubject.repairContext as Record<string, unknown>;
+    childContext.sportsCatalog = alternateCatalog;
+    const summary = mappingJob.resultSummary as Record<string, unknown>;
+    const history = summary.legacyRepairRetryHistory as Record<string, unknown>[];
+    const audit = history.find((entry) => entry.parentGatewayJobId === 'gateway-parent-softball');
+    if (!audit) throw new Error('Retry audit was not created.');
+    audit.sportsCatalogSha256 = alternateCatalog.sha256;
+    const auditContext = audit.repairContext as Record<string, unknown>;
+    auditContext.sportsCatalog = alternateCatalog;
+    await expect(applyAffiliateLegacyRepairRetry({
+      ...state.input,
+      operatorId: 'affiliate-gateway-operator',
+      expectedReportHash: preview.reportHash,
+    })).rejects.toMatchObject({ code: 'RETRY_STATE_DRIFT' });
+  });
+
+  it.each([
+    ['queue', 'WRONG_QUEUE'],
+    ['lane', 'WRONG_LANE'],
+  ] as const)('holds replay when the audited child has an invalid %s', async (field, value) => {
+    const state = await retryFixtureWithAdmission();
+    const preview = await previewAffiliateLegacyRepairRetry(state.input);
+    await applyAffiliateLegacyRepairRetry({
+      ...state.input,
+      operatorId: 'affiliate-gateway-operator',
+      expectedReportHash: preview.reportHash,
+    });
+    const child = state.gatewayJobs.find((job) => (
+      job.parentClaimId === 'claim-parent-softball'
+      && job.id !== 'gateway-parent-softball'
+    ));
+    if (!child) throw new Error('Retry child was not created.');
+    child[field] = value;
+    const report = await previewAffiliateLegacyRepairRetry({
+      ...state.input,
+      gatewayJobIds: ['gateway-parent-softball'],
+    });
+    expect(report.selectedGatewayJobIds).toEqual([]);
+    expect(report.rows[0].reasonCodes).toContain('MALFORMED_RETRY_AUDIT');
+  });
 
   it('blocks retry apply when only the gateway job active-claim pointer is set', async () => {
     const state = await retryFixtureWithAdmission();
@@ -1229,6 +1356,29 @@ describe('legacy repair admission with real contract validators', () => {
       job.parentClaimId === 'claim-retry-softball'
       && job.dedupeKey === `legacy-sport-repair-retry:${childId}`
     ))).toBe(true);
+  });
+  it('holds pass-three retry when its incoming pass-two audit is deleted', async () => {
+    const state = await retryFixtureWithAdmission();
+    const passTwoPreview = await previewAffiliateLegacyRepairRetry(state.input);
+    await applyAffiliateLegacyRepairRetry({
+      ...state.input,
+      operatorId: 'affiliate-gateway-operator',
+      expectedReportHash: passTwoPreview.reportHash,
+    });
+    const childId = completeRetryChild(state, 'softball');
+    const mappingJob = state.mappingJobs.find((candidate) => candidate.id === 'mapping-retry-softball');
+    if (!mappingJob) throw new Error('Softball mapping job was not created.');
+    const summary = mappingJob.resultSummary as Record<string, unknown>;
+    const history = summary.legacyRepairRetryHistory as Record<string, unknown>[];
+    const auditIndex = history.findIndex((entry) => entry.parentGatewayJobId === 'gateway-parent-softball');
+    expect(auditIndex).toBeGreaterThanOrEqual(0);
+    history.splice(auditIndex, 1);
+    const report = await previewAffiliateLegacyRepairRetry({
+      ...state.input,
+      gatewayJobIds: [childId],
+    });
+    expect(report.selectedGatewayJobIds).toEqual([]);
+    expect(report.rows[0].reasonCodes).toContain('MALFORMED_PARENT_LINEAGE');
   });
   it('rejects a retry chain whose ancestor resolves to a different root', async () => {
     const state = await retryFixtureWithAdmission();

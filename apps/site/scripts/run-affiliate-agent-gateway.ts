@@ -1569,6 +1569,7 @@ const createGateway = async (): Promise<AffiliateAgentGatewayRuntime> => {
         bundle,
         limit: request.limit,
         jobIds: request.jobIds,
+        artifactStore,
       };
       if (request.mode === 'PREVIEW') {
         return previewAffiliateLegacyRepairAdmission(options);
@@ -1594,6 +1595,7 @@ const createGateway = async (): Promise<AffiliateAgentGatewayRuntime> => {
         bundle,
         gatewayJobIds: request.gatewayJobIds,
         reason: request.reason,
+        artifactStore,
       };
       if (request.mode === 'PREVIEW') {
         return previewAffiliateLegacyRepairRetry(options);

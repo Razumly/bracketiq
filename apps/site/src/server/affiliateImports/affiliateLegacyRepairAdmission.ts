@@ -5,6 +5,7 @@ import {
   affiliateAgentClaimEnvelopeSchema,
   affiliateAgentTerminalResultEnvelopeSchema,
   affiliateAgentEvidenceManifestSchema,
+  affiliateAgentSportEvidenceSchema,
   affiliateAgentSubjectSchema,
   type AffiliateAgentSubject,
   type AffiliateAgentClaimEnvelope,
@@ -13,6 +14,7 @@ import {
   type AffiliateAgentLegacySportRepairContext,
   hashAffiliateAgentValue,
 } from './agentGatewayContracts';
+import type { AffiliateAgentArtifactStore } from './agentGatewayAdapters';
 import {
   buildAffiliateSportsCatalogSnapshot,
   type AffiliateSportsCatalogSnapshot,
@@ -21,6 +23,10 @@ import {
   normalizeAffiliateSupplyIdentity,
   type AffiliateSupplyIdentity,
 } from './affiliateSupplyLifecycle';
+import {
+  verifyAffiliateSportCompletion,
+  type AffiliateSportCompletionStoredArtifact,
+} from './affiliateSportDetermination';
 import {
   affiliateSupplyDatabase,
   ensureAffiliateSupplySource,
@@ -36,6 +42,7 @@ const ADMISSION_READ_BATCH_SIZE = 500;
 const SUCCESSFUL_INTAKE_RUN_STATUSES = new Set(['SUCCEEDED', 'PARTIAL']);
 const ACTIVE_MAPPING_JOB_STATUSES = new Set(['QUEUED', 'CLAIMED', 'REVIEW_REQUIRED']);
 const ACTIVE_APPROVAL_STATUSES = new Set(['QUEUED', 'CLAIMED']);
+const LEGACY_SPORT_EVIDENCE_MAX_ARTIFACT_BYTES = 10 * 1024 * 1024;
 const PUBLIC_SOURCE_STATUSES = new Set(['PUBLIC', 'PUBLISHED', 'LISTED', 'ACTIVE_PUBLIC']);
 const HASH_PATTERN = /^[a-f0-9]{64}$/i;
 
@@ -161,16 +168,27 @@ export const AFFILIATE_LEGACY_REPAIR_RETRY_MAX_REASON_BYTES = 1_000;
 export type AffiliateLegacyRepairRetryWrite = Readonly<{
   gatewayJobId: string;
   parentClaimId: string;
+  parentReceiptId: string;
+  parentResultHash: string;
+  parentDeploymentContractHash: string;
+  parentClaimGeneration: number;
+  parentLifecycleGeneration: number;
   mappingJobId: string;
   intakeId: string;
+  sourceKey: string;
   sourceId: string;
   mappingId: string | null;
   rootId: string;
+  rootIdentityKey: string;
   rootLifecycleGeneration: number;
   parentPass: number;
   retryPass: number;
   evidenceRunId: string;
   sportsCatalogSha256: string;
+  currentDeploymentContractHash: string;
+  repairContext: Readonly<Record<string, unknown>>;
+  manifestHash: string;
+  manifest: Readonly<Record<string, unknown>>;
   artifactIds: readonly string[];
   gatewayDedupeKey: string;
   writes: readonly string[];
@@ -243,12 +261,12 @@ export type AffiliateLegacyRepairRetryPreview = AffiliateLegacyRepairRetryReport
 export type AffiliateLegacyRepairRetryApplyReport = AffiliateLegacyRepairRetryReport & {
   mode: 'APPLY';
 };
-
 export type PreviewAffiliateLegacyRepairRetryInput = Readonly<{
   prisma: PrismaClient;
   bundle: AffiliateAgentContractBundle;
   gatewayJobIds: readonly string[];
   reason: string;
+  artifactStore?: AffiliateAgentArtifactStore;
 }>;
 
 export type ApplyAffiliateLegacyRepairRetryInput = Readonly<{
@@ -258,6 +276,7 @@ export type ApplyAffiliateLegacyRepairRetryInput = Readonly<{
   reason: string;
   expectedReportHash: string;
   operatorId: string;
+  artifactStore?: AffiliateAgentArtifactStore;
 }>;
 
 type MappingJobRow = {
@@ -1555,6 +1574,91 @@ const sameRetryLineageContext = (left: unknown, right: unknown): boolean => {
       evidenceRunId: rightContext.evidenceRunId,
     },
   );
+};
+const retryHistoricalSportEvidenceValid = async (
+  parent: RetryParentParts,
+  artifactStore?: AffiliateAgentArtifactStore,
+): Promise<boolean> => {
+  if (parent.claim.roleContractVersion < 3) return true;
+  const sportEvidence = affiliateAgentSportEvidenceSchema.safeParse(
+    recordValue(parent.result.payload).sportEvidence,
+  );
+  if (!sportEvidence.success || sportEvidence.data.sportDeterminations.length === 0 || !artifactStore) return false;
+  const manifest = affiliateAgentEvidenceManifestSchema.safeParse(parent.gatewayJob.evidenceManifestJson);
+  if (!manifest.success) return false;
+  const evidenceRefs = new Set(parent.result.evidenceRefs);
+  const artifacts: AffiliateSportCompletionStoredArtifact[] = [];
+  const loaded = new Set<string>();
+  try {
+    for (const determination of sportEvidence.data.sportDeterminations) {
+      for (const citation of determination.evidence) {
+        const key = `${citation.artifactId}:${citation.artifactKind}`;
+        const entry = manifest.data.entries.find((candidate) => (
+          candidate.artifactId === citation.artifactId
+          && candidate.kind === citation.artifactKind
+        ));
+        if (!entry || !evidenceRefs.has(entry.evidenceRef)) return false;
+        if (loaded.has(key)) continue;
+        loaded.add(key);
+        const artifact = await artifactStore.readImmutable({
+          fileId: entry.artifactId,
+          maximumBytes: LEGACY_SPORT_EVIDENCE_MAX_ARTIFACT_BYTES,
+        });
+        artifacts.push({
+          artifactId: entry.artifactId,
+          runId: artifact.runId ?? '',
+          intakeId: artifact.intakeId ?? null,
+          kind: citation.artifactKind,
+          sourceUrl: artifact.sourceUrl,
+          finalUrl: artifact.finalUrl,
+          mimeType: artifact.mimeType,
+          artifactSha256: entry.sha256,
+          bytes: artifact.bytes,
+        });
+      }
+    }
+    const reviewReady = sportEvidence.data.sportDeterminations.every(
+      (determination) => determination.status === 'RESOLVED' || determination.status === 'BLACKLISTED',
+    ) && sportEvidence.data.sportDeterminations.some(
+      (determination) => determination.status === 'RESOLVED',
+    );
+    const resultKind = reviewReady ? 'REVIEW_REQUIRED' : 'HUMAN_REVIEW_REQUIRED';
+    await verifyAffiliateSportCompletion({
+      result: {
+        status: resultKind,
+        evidenceRunId: sportEvidence.data.evidenceRunId,
+        sportsCatalogSha256: sportEvidence.data.sportsCatalogSha256,
+        sportDeterminations: sportEvidence.data.sportDeterminations,
+        humanReviewRequired: resultKind === 'HUMAN_REVIEW_REQUIRED'
+          ? {
+            reasonCodes: [...parent.result.reasonCodes],
+            sourceSportLabels: sportEvidence.data.sportDeterminations.flatMap(
+              (determination) => determination.sourceLabels,
+            ),
+          }
+          : null,
+      },
+      resultKind,
+      reasonCodes: parent.result.reasonCodes,
+      determinations: sportEvidence.data.sportDeterminations,
+      claimEvidenceContext: {
+        intakeId: parent.subject.repairContext.intakeId,
+        evidenceRunId: parent.subject.repairContext.evidenceRunId,
+        sportsCatalog: parent.subject.repairContext.sportsCatalog,
+      },
+      freshCatalog: parent.subject.repairContext.sportsCatalog,
+      expectedIntakeId: parent.subject.repairContext.intakeId,
+      artifacts,
+      observedSportNames: reviewReady
+        ? Array.from(new Set(sportEvidence.data.sportDeterminations.flatMap(
+          (determination) => determination.canonicalSportNames,
+        ))).sort()
+        : undefined,
+    });
+    return true;
+  } catch {
+    return false;
+  }
 };
 
 const stateFingerprintFor = (input: Readonly<{
@@ -3063,10 +3167,17 @@ const retryParentLineageValid = (
   if (!ancestorClaim || !ancestorJob) return false;
   const ancestorParts = retryParentPartsFor(snapshot, ancestorJob.id).parts;
   if (!ancestorParts || ancestorParts.subject.pass !== parent.subject.pass - 1) return false;
+  const mappingJob = snapshot.admission.jobs.find((job) => job.id === parent.subject.mappingJobId) ?? null;
+  const intake = mappingJob
+    ? snapshot.admission.intakes.find((candidate) => candidate.id === mappingJob.intakeId) ?? null
+    : null;
   return ancestorParts.subject.mappingJobId === parent.subject.mappingJobId
     && ancestorParts.subject.supplySourceId === parent.subject.supplySourceId
     && sameRetryLineageContext(ancestorParts.subject.repairContext, parent.subject.repairContext)
     && sameAdmissionValue(ancestorJob.evidenceManifestJson, parent.gatewayJob.evidenceManifestJson)
+    && mappingJob !== null
+    && intake !== null
+    && retryAuditMatchesEdge(snapshot, mappingJob, intake, ancestorParts, parent.gatewayJob, parent.subject.pass)
     && retryParentLineageValid(snapshot, ancestorParts, seen);
 };
 
@@ -3103,6 +3214,10 @@ const retryOriginalAncestorFor = (
       : null;
     if (!ancestorJob) return null;
     const ancestor = retryParentPartsFor(snapshot, ancestorJob.id).parts;
+    const mappingJob = snapshot.admission.jobs.find((job) => job.id === current.subject.mappingJobId) ?? null;
+    const intake = mappingJob
+      ? snapshot.admission.intakes.find((candidate) => candidate.id === mappingJob.intakeId) ?? null
+      : null;
     if (
       !ancestor
       || ancestor.subject.pass !== current.subject.pass - 1
@@ -3110,6 +3225,9 @@ const retryOriginalAncestorFor = (
       || ancestor.subject.supplySourceId !== current.subject.supplySourceId
       || !sameRetryLineageContext(ancestor.subject.repairContext, current.subject.repairContext)
       || !sameAdmissionValue(ancestor.gatewayJob.evidenceManifestJson, current.gatewayJob.evidenceManifestJson)
+      || !mappingJob
+      || !intake
+      || !retryAuditMatchesEdge(snapshot, mappingJob, intake, ancestor, current.gatewayJob, current.subject.pass)
     ) return null;
     current = ancestor;
   }
@@ -3174,6 +3292,155 @@ const retryReportHashFor = (input: Readonly<{
   proposedWrites: [...input.proposedWrites]
     .sort((left, right) => left.gatewayJobId < right.gatewayJobId ? -1 : left.gatewayJobId > right.gatewayJobId ? 1 : 0),
 }) ?? null);
+const retryAuditMatchesEdge = (
+  snapshot: RetrySnapshot,
+  mappingJob: MappingJobRow,
+  intake: IntakeRow,
+  parent: RetryParentParts,
+  child: GatewayJobRow,
+  childPass: number,
+): boolean => {
+  const audits = retryAuditForParent(mappingJob, parent.gatewayJob.id);
+  if (audits.length !== 1) return false;
+  const audit = audits[0];
+  const report = recordValue(audit.reportSnapshot);
+  const reportRows = Array.isArray(report.rows) ? report.rows.map(recordValue) : [];
+  const reportWrites = Array.isArray(report.proposedWrites) ? report.proposedWrites.map(recordValue) : [];
+  const reportRow = reportRows.find((row) => row.gatewayJobId === parent.gatewayJob.id);
+  const reportWrite = reportWrites.find((write) => write.gatewayJobId === parent.gatewayJob.id);
+  if (!reportRow || !reportWrite) return false;
+  const reportHash = stringValue(audit.reportHash);
+  if (!reportHash || report.reportHash !== reportHash) return false;
+  try {
+    if (retryReportHashFor(report as unknown as AffiliateLegacyRepairRetryReport) !== reportHash) return false;
+  } catch {
+    return false;
+  }
+  const childSubject = affiliateAgentSubjectSchema.safeParse(child.subjectJson);
+  if (!childSubject.success || childSubject.data.type !== 'MAPPING_PRODUCER') return false;
+  const root = snapshot.admission.roots.find((candidate) => candidate.id === parent.subject.supplySourceId) ?? null;
+  const auditManifest = affiliateAgentEvidenceManifestSchema.safeParse(audit.manifest);
+  if (!auditManifest.success) return false;
+  if (!root) return false;
+  const manifestArtifactIds = auditManifest.data.entries.map((entry) => entry.artifactId).sort();
+  const rowArtifacts = Array.isArray(reportRow.artifacts)
+    ? reportRow.artifacts.map(recordValue).map((artifact) => ({
+      kind: artifact.kind,
+      artifactId: artifact.artifactId,
+      sha256: artifact.sha256,
+      mimeType: artifact.mimeType,
+      byteSize: artifact.byteSize,
+    }))
+    : [];
+  const catalogHash = stringValue(audit.sportsCatalogSha256);
+  const auditContextCatalogHash = stringValue(recordValue(recordValue(audit.repairContext).sportsCatalog).sha256);
+  const childContextCatalogHash = stringValue(
+    recordValue(recordValue(childSubject.data.repairContext).sportsCatalog).sha256,
+  );
+  const auditArtifactIds = stringArrayValue(audit.artifactIds);
+  const expectedChildDedupeKey = retryDedupeKeyFor(parent.gatewayJob.id);
+  const expectedRootLifecycleGeneration = child.expectedLifecycleGeneration;
+  return audit.kind === 'LEGACY_SPORT_REPAIR_RETRY'
+    && parent.gatewayJob.queue === 'AFFILIATE_MAPPING'
+    && parent.gatewayJob.lane === 'MAPPING_PRODUCTION'
+    && parent.claim.queue === 'AFFILIATE_MAPPING'
+    && parent.claim.lane === 'MAPPING_PRODUCTION'
+    && child.parentClaimId === parent.claim.id
+    && child.role === 'MAPPING_PRODUCER'
+    && child.queue === 'AFFILIATE_MAPPING'
+    && child.lane === 'MAPPING_PRODUCTION'
+    && child.subjectType === 'MAPPING_PRODUCER'
+    && child.subjectId === mappingJob.id
+    && child.supplySourceId === parent.subject.supplySourceId
+    && childSubject.data.mappingJobId === mappingJob.id
+    && childSubject.data.supplySourceId === parent.subject.supplySourceId
+    && audit.schemaVersion === AFFILIATE_LEGACY_REPAIR_ADMISSION_SCHEMA_VERSION
+    && sameAdmissionValue(audit.requestedGatewayJobIds, report.requestedGatewayJobIds)
+    && audit.parentGatewayJobId === parent.gatewayJob.id
+    && audit.parentClaimId === parent.claim.id
+    && audit.parentMappingJobId === mappingJob.id
+    && audit.parentReceiptId === parent.receipt.id
+    && audit.parentResultHash === parent.gatewayJob.resultHash
+    && audit.parentDeploymentContractHash === parent.claim.deploymentContractHash
+    && audit.parentPass === parent.subject.pass
+    && audit.retryPass === childPass
+    && audit.rootId === childSubject.data.supplySourceId
+    && audit.rootLifecycleGeneration === expectedRootLifecycleGeneration
+    && audit.childGatewayJobId === child.id
+    && audit.childDedupeKey === expectedChildDedupeKey
+    && audit.intakeId === intake.id
+    && audit.sourceId === mappingJob.sourceId
+    && audit.mappingId === mappingJob.mappingId
+    && audit.evidenceRunId === parent.subject.repairContext.evidenceRunId
+    && sameRepairContext(audit.repairContext, childSubject.data.repairContext)
+    && sameRetryLineageContext(audit.repairContext, parent.subject.repairContext)
+    && audit.rootId === parent.subject.supplySourceId
+    && audit.rootLifecycleGeneration === parent.claim.lifecycleGeneration
+    && parent.gatewayJob.expectedLifecycleGeneration === parent.claim.lifecycleGeneration
+    && child.expectedLifecycleGeneration === parent.claim.lifecycleGeneration
+    && catalogHash !== null
+    && catalogHash === stringValue(reportRow.sportsCatalogSha256)
+    && catalogHash === stringValue(reportWrite.sportsCatalogSha256)
+    && catalogHash === auditContextCatalogHash
+    && catalogHash === childContextCatalogHash
+    && sameAdmissionValue(auditArtifactIds, manifestArtifactIds)
+    && sameAdmissionValue(rowArtifacts, auditManifest.data.entries.map((entry) => ({
+      kind: entry.kind,
+      artifactId: entry.artifactId,
+      sha256: entry.sha256,
+      mimeType: entry.mimeType,
+      byteSize: entry.byteSize,
+    })))
+    && sameAdmissionValue(audit.manifest, parent.gatewayJob.evidenceManifestJson)
+    && sameAdmissionValue(audit.manifest, child.evidenceManifestJson)
+    && sameAdmissionValue(auditManifest.data.entries.map((entry) => entry.artifactId), reportWrite.artifactIds)
+    && reportRow.gatewayJobId === parent.gatewayJob.id
+    && reportRow.parentClaimId === parent.claim.id
+    && reportRow.mappingJobId === mappingJob.id
+    && reportRow.intakeId === intake.id
+    && reportRow.sourceKey === intake.sourceKey
+    && reportRow.sourceId === mappingJob.sourceId
+    && reportRow.mappingId === mappingJob.mappingId
+    && reportRow.rootId === childSubject.data.supplySourceId
+    && reportRow.rootIdentityKey === root?.identityKey
+    && reportRow.parentPass === parent.subject.pass
+    && reportRow.retryPass === childPass
+    && reportRow.parentReceiptId === parent.receipt.id
+    && reportRow.parentResultHash === parent.gatewayJob.resultHash
+    && reportRow.parentDeploymentContractHash === parent.claim.deploymentContractHash
+    && reportRow.evidenceRunId === parent.subject.repairContext.evidenceRunId
+    && reportRow.gatewayDedupeKey === expectedChildDedupeKey
+    && reportRow.currentDeploymentContractHash === report.deploymentContractHash
+    && reportWrite.gatewayJobId === parent.gatewayJob.id
+    && reportWrite.parentReceiptId === parent.receipt.id
+    && reportWrite.parentResultHash === parent.gatewayJob.resultHash
+    && reportWrite.parentDeploymentContractHash === parent.claim.deploymentContractHash
+    && reportWrite.parentClaimGeneration === parent.claim.claimGeneration
+    && reportWrite.parentLifecycleGeneration === parent.claim.lifecycleGeneration
+    && reportWrite.parentClaimId === parent.claim.id
+    && reportWrite.mappingJobId === mappingJob.id
+    && reportWrite.sourceKey === intake.sourceKey
+    && reportWrite.rootIdentityKey === root.identityKey
+    && reportWrite.intakeId === intake.id
+    && reportWrite.sourceId === mappingJob.sourceId
+    && reportWrite.mappingId === mappingJob.mappingId
+    && reportWrite.rootId === childSubject.data.supplySourceId
+    && reportWrite.rootLifecycleGeneration === expectedRootLifecycleGeneration
+    && reportWrite.parentPass === parent.subject.pass
+    && reportWrite.retryPass === childPass
+    && reportWrite.evidenceRunId === parent.subject.repairContext.evidenceRunId
+    && reportWrite.gatewayDedupeKey === expectedChildDedupeKey
+    && sameAdmissionValue(reportWrite.artifactIds, auditArtifactIds)
+    && sameAdmissionValue(reportWrite.writes, [
+      'AFFILIATE_LEGACY_MAPPING_JOB_QUEUE',
+      'AFFILIATE_GATEWAY_MAPPING_PRODUCER_RETRY_JOB',
+      'AFFILIATE_LEGACY_REPAIR_RETRY_AUDIT',
+    ])
+    && reportWrite.currentDeploymentContractHash === report.deploymentContractHash
+    && sameRepairContext(reportWrite.repairContext, audit.repairContext)
+    && reportWrite.manifestHash === auditManifest.data.hash
+    && sameAdmissionValue(reportWrite.manifest, audit.manifest);
+};
 
 const retryStateFingerprintFor = (input: Readonly<Record<string, unknown>>): string => (
   hashAffiliateAgentValue(normalizeAdmissionHashValue(input) ?? null)
@@ -3230,6 +3497,8 @@ const retryAuditedChildMatches = (
   return child.id === stringValue(audit.childGatewayJobId)
     && child.dedupeKey === stringValue(audit.childDedupeKey)
     && child.role === 'MAPPING_PRODUCER'
+    && child.queue === 'AFFILIATE_MAPPING'
+    && child.lane === 'MAPPING_PRODUCTION'
     && child.subjectType === 'MAPPING_PRODUCER'
     && child.subjectId === mappingJob.id
     && child.parentClaimId === parent.claim.id
@@ -3245,12 +3514,13 @@ const retryAuditedChildMatches = (
     && sameAdmissionValue(child.evidenceManifestJson, manifest);
 };
 
-const retryEvaluateJob = (
+const retryEvaluateJob = async (
   snapshot: RetrySnapshot,
   gatewayJobId: string,
   bundle: ParsedBundle,
   requestedReason: string,
-): { row: AffiliateLegacyRepairRetryRow; plan: RetryPlan | null } => {
+  artifactStore?: AffiliateAgentArtifactStore,
+): Promise<{ row: AffiliateLegacyRepairRetryRow; plan: RetryPlan | null }> => {
   const currentDeploymentContractHash = bundle.deploymentContract.hash;
   const partsResult = retryParentPartsFor(snapshot, gatewayJobId);
   if (!partsResult.parts) {
@@ -3261,6 +3531,9 @@ const retryEvaluateJob = (
   }
   const parent = partsResult.parts;
   const reasons: string[] = [];
+  if (!await retryHistoricalSportEvidenceValid(parent, artifactStore)) {
+    reasons.push('PARENT_SPORT_EVIDENCE_INVALID');
+  }
   const mappingJob = snapshot.admission.jobs.find((job) => job.id === parent.subject.mappingJobId) ?? null;
   const intake = mappingJob
     ? snapshot.admission.intakes.find((candidate) => candidate.id === mappingJob.intakeId) ?? null
@@ -3666,16 +3939,27 @@ const retryEvaluateJob = (
   const write: AffiliateLegacyRepairRetryWrite = {
     gatewayJobId: parent.gatewayJob.id,
     parentClaimId: parent.claim.id,
+    parentReceiptId: parent.receipt.id,
+    parentResultHash: parent.gatewayJob.resultHash ?? '',
+    parentDeploymentContractHash: parent.claim.deploymentContractHash,
+    parentClaimGeneration: parent.claim.claimGeneration,
+    parentLifecycleGeneration: parent.claim.lifecycleGeneration ?? 0,
     mappingJobId: mappingJob.id,
     intakeId: intake.id,
+    sourceKey: intake.sourceKey,
     sourceId: source.id,
     mappingId: mapping.id,
     rootId: root.id,
+    rootIdentityKey: root.identityKey,
     rootLifecycleGeneration: root.lifecycleGeneration,
     parentPass: parent.subject.pass,
     retryPass,
     evidenceRunId: run.id,
     sportsCatalogSha256: currentCatalog.sha256,
+    currentDeploymentContractHash,
+    repairContext: stableRepairContext(freshRepairContext) as Record<string, unknown>,
+    manifestHash: String((manifest as Record<string, unknown>).hash),
+    manifest,
     artifactIds: artifacts.map((artifact) => `intake-artifact:${artifact.id}`).sort(),
     gatewayDedupeKey,
     writes: [
@@ -3715,15 +3999,16 @@ const buildRetryReport = async (
   gatewayJobIds: readonly string[],
   requestedReason: string,
   mode: 'PREVIEW' | 'APPLY',
+  artifactStore?: AffiliateAgentArtifactStore,
 ): Promise<{
   report: AffiliateLegacyRepairRetryReport;
   plans: readonly RetryPlan[];
   snapshot: RetrySnapshot;
 }> => {
   const snapshot = await readRetrySnapshot(client, gatewayJobIds);
-  const evaluated = gatewayJobIds.map((gatewayJobId) => (
-    retryEvaluateJob(snapshot, gatewayJobId, bundle, requestedReason)
-  ));
+  const evaluated = await Promise.all(gatewayJobIds.map((gatewayJobId) => (
+    retryEvaluateJob(snapshot, gatewayJobId, bundle, requestedReason, artifactStore)
+  )));
   const rows = evaluated.map(({ row }) => row);
   const allEligible = evaluated.length === gatewayJobIds.length
     && evaluated.every(({ row, plan }) => row.eligible && plan !== null);
@@ -3950,7 +4235,6 @@ const applyRetryPlan = async (
   });
   return childGatewayJobId;
 };
-
 const retryReplayReport = async (
   snapshot: RetrySnapshot,
   bundle: ParsedBundle,
@@ -3958,6 +4242,7 @@ const retryReplayReport = async (
   reasonText: string,
   expectedReportHash: string,
   operatorId: string,
+  artifactStore?: AffiliateAgentArtifactStore,
 ): Promise<AffiliateLegacyRepairRetryApplyReport | null> => {
   const audits: JsonRecord[] = [];
   for (const gatewayJobId of gatewayJobIds) {
@@ -3966,6 +4251,7 @@ const retryReplayReport = async (
     const mappingJob = mappingJobId
       ? snapshot.admission.jobs.find((job) => job.id === mappingJobId)
       : null;
+    if (parent && !await retryHistoricalSportEvidenceValid(parent, artifactStore)) return null;
     const entries = mappingJob ? retryAuditForParent(mappingJob, gatewayJobId) : [];
     if (entries.length === 0) return null;
     if (entries.length !== 1) {
@@ -4055,13 +4341,16 @@ const retryReplayReport = async (
   for (let index = 0; index < audits.length; index += 1) {
     const audit = audits[index];
     const parentParts = retryParentPartsFor(snapshot, gatewayJobIds[index]).parts;
-    const write = recordValue(storedWrites[index]);
+    const write = storedWrites.find((value) => recordValue(value).gatewayJobId === gatewayJobIds[index]) ?? {};
     const childId = stringValue(audit.childGatewayJobId);
     const child = childId
       ? snapshot.gatewayJobs.find((job) => job.id === childId) ?? null
       : null;
     const mappingJob = parentParts
       ? snapshot.admission.jobs.find((job) => job.id === parentParts.subject.mappingJobId) ?? null
+      : null;
+    const intake = mappingJob
+      ? snapshot.admission.intakes.find((candidate) => candidate.id === mappingJob.intakeId) ?? null
       : null;
     const root = parentParts
       ? snapshot.admission.roots.find((candidate) => candidate.id === parentParts.subject.supplySourceId) ?? null
@@ -4083,10 +4372,23 @@ const retryReplayReport = async (
         auditManifest,
         retryPass,
       );
+    const auditReportMatches = parentParts
+      && mappingJob
+      && intake
+      && child
+      && retryAuditMatchesEdge(
+        snapshot,
+        mappingJob,
+        intake,
+        parentParts,
+        child,
+        retryPass ?? 0,
+      );
     if (
       !parentParts
       || !childId
       || !childMatches
+      || !auditReportMatches
       || (child !== null && child.status === 'COMPLETED' && child.terminalReceiptId === null)
       || write.gatewayJobId !== gatewayJobIds[index]
       || !sameAdmissionValue(write.gatewayDedupeKey, audit.childDedupeKey)
@@ -4125,6 +4427,7 @@ export const previewAffiliateLegacyRepairRetry = async (
     gatewayJobIds,
     reasonText,
     'PREVIEW',
+    input.artifactStore,
   );
   return report as AffiliateLegacyRepairRetryPreview;
 };
@@ -4170,6 +4473,7 @@ export const applyAffiliateLegacyRepairRetry = async (
       reasonText,
       expectedReportHash,
       operatorId,
+      input.artifactStore,
     );
     if (replay) return replay;
     const current = await buildRetryReport(
@@ -4178,6 +4482,7 @@ export const applyAffiliateLegacyRepairRetry = async (
       gatewayJobIds,
       reasonText,
       'APPLY',
+      input.artifactStore,
     );
     if (current.report.reportHash !== expectedReportHash) {
       throw new AffiliateLegacyRepairAdmissionError(
