@@ -19,9 +19,25 @@ import {
 } from "../affiliateSupplyPersistence";
 
 const describeDatabase = process.env.RUN_DATABASE_INTEGRATION === "1" ? describe : describe.skip;
-const DATABASE_NAME = "bracketiq_e2e_68_lifecycle";
+const DATABASE_NAME = process.env.AFFILIATE_TEST_DATABASE_NAME?.trim() || "bracketiq_e2e_68_lifecycle";
+const DATABASE_NAME_PATTERN = /^bracketiq_e2e_[a-z0-9_]+$/;
 const TEST_PREFIX = `issue68-lifecycle-${randomUUID()}`;
 const NOW = new Date("2026-08-22T12:00:00.000Z");
+
+const assertIsolatedDatabaseUrl = (): void => {
+  if (!DATABASE_NAME_PATTERN.test(DATABASE_NAME)) {
+    throw new Error("Lifecycle integration requires a bracketiq_e2e_ database name.");
+  }
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) throw new Error("DATABASE_URL is required.");
+  const parsed = new URL(databaseUrl);
+  if (!["127.0.0.1", "localhost"].includes(parsed.hostname)) {
+    throw new Error("Lifecycle integration requires a localhost database.");
+  }
+  if (parsed.pathname.slice(1) !== DATABASE_NAME) {
+    throw new Error(`Lifecycle integration requires ${DATABASE_NAME}.`);
+  }
+};
 
 const newId = (label: string): string => `${TEST_PREFIX}-${label}-${randomUUID()}`;
 
@@ -138,6 +154,7 @@ const cleanup = async (): Promise<void> => {
 
 describeDatabase("Affiliate Supply lifecycle PostgreSQL authority", () => {
   beforeAll(async () => {
+    assertIsolatedDatabaseUrl();
     const rows = await prisma.$queryRaw<Array<{ database: string }>>`
       SELECT current_database() AS database
     `;

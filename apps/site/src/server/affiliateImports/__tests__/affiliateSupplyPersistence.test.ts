@@ -597,6 +597,776 @@ const createManifestDatabase = () => {
   } as unknown as AffiliateSupplyDatabase;
   return { database, contractManifests };
 };
+type CurrentProofFixture = {
+  database: AffiliateSupplyDatabase;
+  root: Record<string, unknown>;
+  source: Record<string, unknown>;
+  mapping: Record<string, unknown>;
+  mappingJob: Record<string, unknown>;
+  producerClaim: Record<string, unknown>;
+  reviewerClaim: Record<string, unknown>;
+  producerJob: Record<string, unknown>;
+  reviewerJob: Record<string, unknown>;
+  producerEnvelope: Record<string, unknown>;
+  reviewerEnvelope: Record<string, unknown>;
+  gatewayClaims: Record<string, unknown>[];
+  gatewayJobs: Record<string, unknown>[];
+  gatewayReceipts: Record<string, unknown>[];
+  artifacts: Record<string, unknown>[];
+  transitions: Record<string, unknown>[];
+  packageHash: string;
+  getApproval: () => Record<string, unknown> | null;
+  setApproval: (approval: Record<string, unknown> | null) => void;
+};
+
+const currentProofRecord = (value: unknown): Record<string, unknown> => (
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+);
+
+const currentProofManifestFor = (
+  entries: readonly Record<string, unknown>[],
+): Record<string, unknown> => {
+  const preimage = {
+    schemaVersion: 1,
+    entries: [...entries].sort((left, right) => codeUnitCompare(
+      String(left.evidenceRef),
+      String(right.evidenceRef),
+    )),
+  };
+  return { ...preimage, hash: hashAffiliateAgentValue(preimage) };
+};
+
+const createCurrentProofFixture = (): CurrentProofFixture => {
+  const supplySourceId = 'supply-current-proof-happy';
+  const sourceId = 'source-current-proof-happy';
+  const mappingId = 'mapping-current-proof-happy';
+  const mappingJobId = 'mapping-job-current-proof-happy';
+  const producerClaimId = 'producer-claim-current-proof-happy';
+  const producerJobId = 'producer-job-current-proof-happy';
+  const reviewerClaimId = 'reviewer-claim-current-proof-happy';
+  const reviewerJobId = 'reviewer-job-current-proof-happy';
+  const producerWorkerId = 'producer-worker-current-proof-happy';
+  const producerInvocationId = 'producer-invocation-current-proof-happy';
+  const producerWorkspaceId = 'producer-workspace-current-proof-happy';
+  const reviewerWorkerId = 'reviewer-worker-current-proof-happy';
+  const reviewerInvocationId = 'reviewer-invocation-current-proof-happy';
+  const reviewerWorkspaceId = 'reviewer-workspace-current-proof-happy';
+  const commitReceiptId = 'commit-receipt-current-proof-happy';
+  const terminalReceiptId = 'terminal-receipt-current-proof-happy';
+  const deterministicArtifactId = `${producerClaimId}:gateway-deterministic-validation`;
+  const committedArtifactId = `${producerClaimId}:gateway-committed-package`;
+  const durableArtifactId = 'source-page-current-proof-artifact';
+  const supplyContractHash = manifest.supplyContract.hash;
+  const now = new Date('2026-08-22T12:00:00.000Z');
+  const candidatePackage: Record<string, unknown> = {
+    schemaVersion: 1,
+    supplySourceId,
+    listingKind: 'EVENT',
+    listUrlRef: 'source-page-current-proof',
+    itemSelector: '.event',
+    fields: [
+      {
+        field: 'officialActionUrl',
+        selector: 'a',
+        mode: 'ATTRIBUTE',
+        attribute: 'href',
+        transform: 'ABSOLUTE_URL',
+      },
+      {
+        field: 'title',
+        selector: '.title',
+        mode: 'TEXT',
+        attribute: null,
+        transform: 'TRIM',
+      },
+    ],
+    evidenceRefs: ['source-page-current-proof'],
+  };
+  const packageHash = hashAffiliateAgentValue(candidatePackage);
+  const validationOutput: Record<string, unknown> = {
+    schemaVersion: 1,
+    isValid: true,
+    validatedPackageHash: packageHash,
+    evidenceRefs: ['source-page-current-proof'],
+    evidenceKinds: ['PAGE_HTML'],
+    validationReceiptId: 'validation-receipt-current-proof-happy',
+    claimId: producerClaimId,
+    claimGeneration: 1,
+    invocationId: producerInvocationId,
+    supplyContractHash,
+  };
+  const validationHash = hashAffiliateAgentValue(validationOutput);
+  const durableHash = hashAffiliateAgentValue({
+    artifactId: durableArtifactId,
+    evidence: 'durable source evidence',
+  });
+  const producerManifest = currentProofManifestFor([
+    {
+      evidenceRef: 'gateway-deterministic-validation',
+      kind: 'DETERMINISTIC_VALIDATION',
+      artifactId: deterministicArtifactId,
+      sha256: validationHash,
+      mimeType: 'application/json',
+      byteSize: 1,
+      retention: 'INDEFINITE',
+    },
+    {
+      evidenceRef: 'gateway-durable-evidence',
+      kind: 'DURABLE_EVIDENCE',
+      artifactId: durableArtifactId,
+      sha256: durableHash,
+      mimeType: 'application/json',
+      byteSize: 1,
+      retention: 'INDEFINITE',
+    },
+    {
+      evidenceRef: 'source-page-current-proof',
+      kind: 'PAGE_HTML',
+      artifactId: 'page-current-proof-artifact',
+      sha256: hashAffiliateAgentValue({ page: 'current' }),
+      mimeType: 'text/html',
+      byteSize: 1,
+      retention: 'INDEFINITE',
+    },
+  ]);
+  const reviewerManifest = currentProofManifestFor([
+    {
+      evidenceRef: 'active-contract-current-proof',
+      kind: 'ACTIVE_SUPPLY_CONTRACT',
+      artifactId: 'active-contract-current-proof-artifact',
+      sha256: manifest.hash,
+      mimeType: 'application/json',
+      byteSize: 1,
+      retention: 'INDEFINITE',
+    },
+    {
+      evidenceRef: 'committed-package-current-proof',
+      kind: 'COMMITTED_PACKAGE',
+      artifactId: committedArtifactId,
+      sha256: packageHash,
+      mimeType: 'application/json',
+      byteSize: 1,
+      retention: 'INDEFINITE',
+    },
+    {
+      evidenceRef: 'gateway-deterministic-validation',
+      kind: 'DETERMINISTIC_VALIDATION',
+      artifactId: deterministicArtifactId,
+      sha256: validationHash,
+      mimeType: 'application/json',
+      byteSize: 1,
+      retention: 'INDEFINITE',
+    },
+    {
+      evidenceRef: 'gateway-durable-evidence',
+      kind: 'DURABLE_EVIDENCE',
+      artifactId: durableArtifactId,
+      sha256: durableHash,
+      mimeType: 'application/json',
+      byteSize: 1,
+      retention: 'INDEFINITE',
+    },
+  ]);
+  const deploymentContractHash = '1'.repeat(64);
+  const roleContractHash = '2'.repeat(64);
+  const promptTemplateHash = '3'.repeat(64);
+  const producerSubject = {
+    type: 'MAPPING_PRODUCER',
+    supplySourceId,
+    mappingJobId,
+    listingKind: 'EVENT',
+    pass: 1,
+  };
+  const producerEnvelope: Record<string, unknown> = {
+    schemaVersion: 1,
+    queue: 'AFFILIATE_MAPPING',
+    lane: 'MAPPING_PRODUCTION',
+    jobId: producerJobId,
+    claimId: producerClaimId,
+    supplySourceId,
+    claimGeneration: 1,
+    lifecycleGeneration: 0,
+    role: 'MAPPING_PRODUCER',
+    deploymentContractVersion: 1,
+    deploymentContractHash,
+    supplyContractVersion: manifest.version,
+    supplyContractHash,
+    roleContractVersion: 4,
+    roleContractHash,
+    promptTemplateVersion: 4,
+    promptTemplateHash,
+    executionClass: 'PRODUCTION_OMP',
+    workerId: producerWorkerId,
+    invocationId: producerInvocationId,
+    workspaceId: producerWorkspaceId,
+    claimedAt: '2026-08-22T10:00:00.000Z',
+    expiresAt: '2026-08-22T13:00:00.000Z',
+    evidenceManifest: producerManifest,
+    subject: producerSubject,
+    permittedCommands: [
+      'CAPTURE_CLAIM_URL',
+      'COMMIT_DECLARATIVE_PACKAGE',
+      'SUBMIT_TERMINAL_RESULT',
+      'VALIDATE_DECLARATIVE_PACKAGE',
+    ],
+  };
+  const reviewerSubject = {
+    type: 'SUPPLY_REVIEWER',
+    supplySourceId,
+    producerClaimId,
+    producerWorkerId,
+    producerInvocationId,
+    producerWorkspaceId,
+    committedPackageHash: packageHash,
+    targetId: 'target-current-proof-happy',
+    targetType: 'EVENT',
+    reviewPass: 1,
+  };
+  const reviewerEnvelope: Record<string, unknown> = {
+    schemaVersion: 1,
+    queue: 'AFFILIATE_REVIEW',
+    lane: 'SUPPLY_REVIEW',
+    jobId: reviewerJobId,
+    claimId: reviewerClaimId,
+    supplySourceId,
+    claimGeneration: 1,
+    lifecycleGeneration: 1,
+    role: 'SUPPLY_REVIEWER',
+    deploymentContractVersion: 1,
+    deploymentContractHash,
+    supplyContractVersion: manifest.version,
+    supplyContractHash,
+    roleContractVersion: 4,
+    roleContractHash,
+    promptTemplateVersion: 4,
+    promptTemplateHash,
+    executionClass: 'PRODUCTION_OMP',
+    workerId: reviewerWorkerId,
+    invocationId: reviewerInvocationId,
+    workspaceId: reviewerWorkspaceId,
+    claimedAt: '2026-08-22T11:00:00.000Z',
+    expiresAt: '2026-08-22T14:00:00.000Z',
+    evidenceManifest: reviewerManifest,
+    subject: reviewerSubject,
+    permittedCommands: ['SUBMIT_TERMINAL_RESULT'],
+  };
+  const commitSafeOutput = { packageHash };
+  const commitResponse = {
+    kind: 'COMMAND_SUCCEEDED',
+    receiptId: commitReceiptId,
+    commandType: 'COMMIT_DECLARATIVE_PACKAGE',
+    safeOutput: commitSafeOutput,
+  };
+  const terminalResponse = {
+    kind: 'COMMAND_SUCCEEDED',
+    receiptId: terminalReceiptId,
+    commandType: 'SUBMIT_TERMINAL_RESULT',
+  };
+  const terminalResult: Record<string, unknown> = {
+    schemaVersion: 1,
+    jobId: producerJobId,
+    claimId: producerClaimId,
+    claimGeneration: 1,
+    lifecycleGeneration: 0,
+    deploymentContractVersion: 1,
+    deploymentContractHash,
+    supplyContractVersion: manifest.version,
+    supplyContractHash,
+    roleContractVersion: 4,
+    roleContractHash,
+    promptTemplateVersion: 4,
+    promptTemplateHash,
+    workerId: producerWorkerId,
+    invocationId: producerInvocationId,
+    role: 'MAPPING_PRODUCER',
+    disposition: 'PACKAGE_COMMITTED',
+    reasonCodes: [],
+    evidenceRefs: ['source-page-current-proof'],
+    summary: 'The current mapping package was committed by the producer.',
+    payload: { packageHash, commitReceiptId },
+  };
+  const producerClaim: Record<string, unknown> = {
+    id: producerClaimId,
+    jobId: producerJobId,
+    parentClaimId: null,
+    claimGeneration: 1,
+    lifecycleGeneration: 0,
+    queue: 'AFFILIATE_MAPPING',
+    lane: 'MAPPING_PRODUCTION',
+    role: 'MAPPING_PRODUCER',
+    workerId: producerWorkerId,
+    invocationId: producerInvocationId,
+    workspaceId: producerWorkspaceId,
+    workspaceMode: 'READ_WRITE',
+    status: 'COMPLETED',
+    claimRequestId: 'producer-claim-request-current-proof-happy',
+    claimRequestHash: hashAffiliateAgentValue({ producerClaimId }),
+    claimedAt: now,
+    lastHeartbeatAt: now,
+    leaseExpiresAt: new Date('2026-08-22T12:30:00.000Z'),
+    hardDeadlineAt: new Date('2026-08-22T13:00:00.000Z'),
+    endedAt: now,
+    tokenNonce: 'producer-token-nonce-current-proof-happy',
+    tokenHash: 'producer-token-hash-current-proof-happy',
+    tokenKeyVersion: 'gateway-key-v1',
+    tokenExpiresAt: new Date('2026-08-22T13:00:00.000Z'),
+    tokenInvalidatedAt: now,
+    deploymentContractVersion: 1,
+    deploymentContractHash,
+    roleContractVersion: 4,
+    roleContractHash,
+    promptTemplateVersion: 4,
+    promptTemplateHash,
+    supplyContractVersion: manifest.version,
+    supplyContractHash,
+    claimEnvelopeHash: hashAffiliateAgentValue(producerEnvelope),
+    claimEnvelopeJson: producerEnvelope,
+    evidenceManifestHash: (producerManifest.hash as string),
+    permittedCommandHash: hashAffiliateAgentValue(producerEnvelope.permittedCommands),
+    terminalReceiptId,
+  };
+  const reviewerClaim: Record<string, unknown> = {
+    id: reviewerClaimId,
+    jobId: reviewerJobId,
+    parentClaimId: producerClaimId,
+    claimGeneration: 1,
+    lifecycleGeneration: 1,
+    queue: 'AFFILIATE_REVIEW',
+    lane: 'SUPPLY_REVIEW',
+    role: 'SUPPLY_REVIEWER',
+    workerId: reviewerWorkerId,
+    invocationId: reviewerInvocationId,
+    workspaceId: reviewerWorkspaceId,
+    workspaceMode: 'READ_ONLY',
+    status: 'ACTIVE',
+    claimRequestId: 'reviewer-claim-request-current-proof-happy',
+    claimRequestHash: hashAffiliateAgentValue({ reviewerClaimId }),
+    claimedAt: now,
+    lastHeartbeatAt: now,
+    leaseExpiresAt: new Date('2026-08-22T13:30:00.000Z'),
+    hardDeadlineAt: new Date('2026-08-22T14:00:00.000Z'),
+    endedAt: null,
+    tokenNonce: 'reviewer-token-nonce-current-proof-happy',
+    tokenHash: 'reviewer-token-hash-current-proof-happy',
+    tokenKeyVersion: 'gateway-key-v1',
+    tokenExpiresAt: new Date('2026-08-22T14:00:00.000Z'),
+    tokenInvalidatedAt: null,
+    deploymentContractVersion: 1,
+    deploymentContractHash,
+    roleContractVersion: 4,
+    roleContractHash,
+    promptTemplateVersion: 4,
+    promptTemplateHash,
+    supplyContractVersion: manifest.version,
+    supplyContractHash,
+    claimEnvelopeHash: hashAffiliateAgentValue(reviewerEnvelope),
+    claimEnvelopeJson: reviewerEnvelope,
+    evidenceManifestHash: (reviewerManifest.hash as string),
+    permittedCommandHash: hashAffiliateAgentValue(reviewerEnvelope.permittedCommands),
+    terminalReceiptId: null,
+  };
+  const producerJob: Record<string, unknown> = {
+    id: producerJobId,
+    parentClaimId: null,
+    claimGeneration: 1,
+    queue: 'AFFILIATE_MAPPING',
+    lane: 'MAPPING_PRODUCTION',
+    role: 'MAPPING_PRODUCER',
+    subjectType: 'MAPPING_PRODUCER',
+    subjectId: mappingJobId,
+    subjectJson: producerSubject,
+    evidenceManifestJson: producerManifest,
+    supplySourceId,
+    expectedLifecycleGeneration: 0,
+    status: 'COMPLETED',
+    activeClaimId: null,
+    terminalDisposition: 'PACKAGE_COMMITTED',
+    resultHash: hashAffiliateAgentValue(terminalResult),
+    resultJson: terminalResult,
+    terminalReceiptId,
+  };
+  const reviewerJob: Record<string, unknown> = {
+    id: reviewerJobId,
+    parentClaimId: producerClaimId,
+    claimGeneration: 1,
+    queue: 'AFFILIATE_REVIEW',
+    lane: 'SUPPLY_REVIEW',
+    role: 'SUPPLY_REVIEWER',
+    subjectType: 'SUPPLY_REVIEWER',
+    subjectId: supplySourceId,
+    subjectJson: reviewerSubject,
+    evidenceManifestJson: reviewerManifest,
+    supplySourceId,
+    expectedLifecycleGeneration: 1,
+    status: 'RECONCILIATION_REQUIRED',
+    activeClaimId: reviewerClaimId,
+    terminalDisposition: null,
+    resultHash: null,
+    resultJson: null,
+    terminalReceiptId: null,
+  };
+  const commitReceipt: Record<string, unknown> = {
+    id: commitReceiptId,
+    status: 'SUCCEEDED',
+    claimId: producerClaimId,
+    jobId: producerJobId,
+    claimGeneration: 1,
+    operationKind: 'EXECUTE_COMMAND',
+    commandName: 'COMMIT_DECLARATIVE_PACKAGE',
+    responseHash: hashAffiliateAgentValue({
+      commandType: commitResponse.commandType,
+      safeOutput: commitSafeOutput,
+    }),
+    responseJson: commitResponse,
+  };
+  const terminalReceipt: Record<string, unknown> = {
+    id: terminalReceiptId,
+    status: 'SUCCEEDED',
+    claimId: producerClaimId,
+    jobId: producerJobId,
+    claimGeneration: 1,
+    operationKind: 'SUBMIT_RESULT',
+    responseHash: hashAffiliateAgentValue(terminalResponse),
+    responseJson: terminalResponse,
+  };
+  const artifacts: Record<string, unknown>[] = [
+    {
+      id: 'validation-artifact-current-proof-happy',
+      claimId: producerClaimId,
+      claimGeneration: 1,
+      evidenceKind: 'DETERMINISTIC_VALIDATION',
+      evidenceRef: 'gateway-deterministic-validation',
+      creatingClaimId: producerClaimId,
+      sourceArtifactId: deterministicArtifactId,
+      fileId: deterministicArtifactId,
+      contentHash: validationHash,
+    },
+    {
+      id: 'committed-artifact-current-proof-happy',
+      claimId: producerClaimId,
+      claimGeneration: 1,
+      evidenceKind: 'COMMITTED_PACKAGE',
+      evidenceRef: 'gateway-committed-package',
+      creatingClaimId: producerClaimId,
+      sourceArtifactId: committedArtifactId,
+      fileId: committedArtifactId,
+      contentHash: packageHash,
+    },
+    {
+      id: 'durable-artifact-current-proof-happy',
+      claimId: producerClaimId,
+      claimGeneration: 1,
+      evidenceKind: 'DURABLE_EVIDENCE',
+      evidenceRef: 'gateway-durable-evidence',
+      creatingClaimId: producerClaimId,
+      sourceArtifactId: durableArtifactId,
+      fileId: durableArtifactId,
+      contentHash: durableHash,
+    },
+  ];
+  const mappingJson: Record<string, unknown> = {
+    kind: 'EVENT',
+    listUrl: 'https://club.example/events',
+    itemSelector: '.event',
+    fields: {
+      officialActionUrl: {
+        selector: 'a',
+        mode: 'attribute',
+        attribute: 'href',
+        transform: 'absoluteUrl',
+      },
+      title: { selector: '.title', mode: 'text', transform: 'trim' },
+    },
+    metadata: {
+      packageHash,
+      evidenceRefs: ['source-page-current-proof'],
+      evidenceKinds: ['PAGE_HTML'],
+      validationOutput,
+    },
+  };
+  const mapping: Record<string, unknown> = {
+    id: mappingId,
+    supplySourceId,
+    sourceId,
+    version: 1,
+    createdAt: new Date('2026-08-22T10:30:00.000Z'),
+    isActive: false,
+    validatedAt: null,
+    mapping: mappingJson,
+  };
+  const validationMetadata: Record<string, unknown> = {
+    ...validationOutput,
+    validationOutput,
+    durableEvidenceArtifact: {
+      sourceArtifactId: durableArtifactId,
+      contentHash: durableHash,
+    },
+  };
+  const mappingJob: Record<string, unknown> = {
+    id: mappingJobId,
+    supplySourceId,
+    sourceId,
+    mappingId,
+    status: 'REVIEW_REQUIRED',
+    createdAt: new Date('2026-08-22T10:45:00.000Z'),
+    resultSummary: {
+      packageHash,
+      evidenceRefs: ['source-page-current-proof'],
+      gatewayCandidatePackage: {
+        candidatePackage,
+        packageHash,
+        validatedPackageHash: packageHash,
+        claimId: producerClaimId,
+        claimGeneration: 1,
+        invocationId: producerInvocationId,
+        validationMetadata,
+        validationOutput,
+        deterministicValidationArtifact: {
+          sourceArtifactId: deterministicArtifactId,
+          contentHash: validationHash,
+        },
+        durableEvidenceArtifact: {
+          sourceArtifactId: durableArtifactId,
+          contentHash: durableHash,
+        },
+      },
+    },
+  };
+  const source: Record<string, unknown> = {
+    id: sourceId,
+    supplySourceId,
+    activeMappingId: mappingId,
+    autoScrapeEnabled: false,
+    status: 'ACTIVE',
+    targetKind: 'EVENT',
+    lifecycleGeneration: 1,
+    activeSupplyContractVersion: manifest.version,
+    activeSupplyContractHash: supplyContractHash,
+    operatorDomain: 'club.example',
+    metadata: {
+      automationReviewRequired: {
+        hold: true,
+        reason: 'LEGACY_SPORT_REPAIR',
+        evidenceRefs: ['reviewer-current-proof'],
+      },
+    },
+  };
+  const root: Record<string, unknown> = {
+    id: supplySourceId,
+    canonicalUrl: 'https://club.example/events',
+    origin: 'https://club.example',
+    pathKey: '/events',
+    identityKey: 'current-proof-happy-root',
+    targetKind: 'EVENT',
+    rolloutCohort: 'DEFAULT',
+    liveSourceId: sourceId,
+    intakeId: null,
+    predecessorId: null,
+    successorId: null,
+    lifecycleGeneration: 1,
+    derivedStage: 'MAPPED',
+    derivedOutcome: null,
+    freshnessStatus: 'UNKNOWN',
+    targetContribution: 0,
+    repairPriority: 2,
+    isAutomationEnabled: false,
+    isExcluded: false,
+    activeSupplyContractVersion: manifest.version,
+    activeSupplyContractHash: supplyContractHash,
+    operatorDomain: 'club.example',
+    metadata: {},
+  };
+  let currentApproval: Record<string, unknown> | null = null;
+  const gatewayClaims = [producerClaim, reviewerClaim];
+  const gatewayJobs = [producerJob, reviewerJob];
+  const gatewayReceipts = [commitReceipt, terminalReceipt];
+  const transitions: Record<string, unknown>[] = [];
+  const idsFromFilter = (value: unknown): string[] => {
+    if (!value || typeof value !== 'object' || Array.isArray(value) || !('in' in value)) return [];
+    const values = value.in;
+    return Array.isArray(values)
+      ? values.filter((entry): entry is string => typeof entry === 'string')
+      : [];
+  };
+  const database = {
+    supplySources: {
+      findUnique: jest.fn(async () => root),
+      update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        Object.assign(root, data);
+        return root;
+      }),
+    },
+    contractManifests: {
+      findFirst: jest.fn(async () => ({
+        status: 'ACTIVE',
+        version: manifest.version,
+        rolloutCohort: manifest.rolloutCohort,
+        contractHash: manifest.hash,
+        contractJson: manifest.supplyContract,
+      })),
+    },
+    sources: {
+      findUnique: jest.fn(async () => source),
+      findFirst: jest.fn(async () => source),
+      update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        Object.assign(source, data);
+        return source;
+      }),
+    },
+    intakes: {
+      findUnique: jest.fn(async () => null),
+      findFirst: jest.fn(async () => null),
+    },
+    mappings: {
+      findUnique: jest.fn(async () => mapping),
+      findFirst: jest.fn(async () => mapping),
+      update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        Object.assign(mapping, data);
+        return mapping;
+      }),
+    },
+    mappingJobs: {
+      findMany: jest.fn(async () => [mappingJob]),
+      findFirst: jest.fn(async () => mappingJob),
+    },
+    approvals: {
+      findMany: jest.fn(async () => (currentApproval ? [currentApproval] : [])),
+      findFirst: jest.fn(async () => currentApproval),
+      upsert: jest.fn(async ({
+        create,
+        update,
+      }: {
+        create: Record<string, unknown>;
+        update: Record<string, unknown>;
+      }) => {
+        currentApproval = {
+          ...(currentApproval ?? create),
+          ...update,
+        };
+        return currentApproval;
+      }),
+    },
+    runs: {
+      findFirst: jest.fn(async () => null),
+      findMany: jest.fn(async () => []),
+    },
+    candidates: { findMany: jest.fn(async () => []) },
+    targets: { findMany: jest.fn(async () => []) },
+    gatewayClaims: {
+      findMany: jest.fn(async ({ where }: { where: Record<string, unknown> }) => {
+        const ids = idsFromFilter(where.id);
+        if (ids.length) {
+          return gatewayClaims.filter((claim) => ids.includes(String(claim.id)));
+        }
+        const jobIds = idsFromFilter(where.jobId);
+        if (jobIds.length) {
+          return gatewayClaims.filter((claim) => jobIds.includes(String(claim.jobId)));
+        }
+        return [];
+      }),
+    },
+    gatewayJobs: {
+      findMany: jest.fn(async ({ where }: { where: Record<string, unknown> }) => {
+        const ids = idsFromFilter(where.id);
+        if (ids.length) {
+          return gatewayJobs.filter((job) => ids.includes(String(job.id)));
+        }
+        const parentClaimIds = idsFromFilter(where.parentClaimId);
+        if (parentClaimIds.length) {
+          return gatewayJobs.filter((job) => (
+            parentClaimIds.includes(String(job.parentClaimId))
+            && job.supplySourceId === supplySourceId
+            && job.role === 'SUPPLY_REVIEWER'
+          ));
+        }
+        return [];
+      }),
+    },
+    gatewayReceipts: {
+      findMany: jest.fn(async ({ where }: { where: Record<string, unknown> }) => {
+        const ids = idsFromFilter(where.id);
+        if (ids.length) return gatewayReceipts.filter((receipt) => ids.includes(String(receipt.id)));
+        const claimIds = idsFromFilter(where.claimId);
+        return gatewayReceipts.filter((receipt) => claimIds.includes(String(receipt.claimId)));
+      }),
+    },
+    gatewayArtifacts: {
+      findMany: jest.fn(async ({ where }: { where: Record<string, unknown> }) => {
+        const ids = idsFromFilter(where.claimId);
+        return artifacts.filter((artifact) => ids.includes(String(artifact.claimId)));
+      }),
+    },
+    transitions: {
+      findUnique: jest.fn(async () => null),
+      findFirst: jest.fn(async () => transitions.at(-1) ?? null),
+      create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        transitions.push(data);
+        return data;
+      }),
+    },
+    transaction: async (
+      callback: (transactionDatabase: AffiliateSupplyDatabase) => Promise<unknown>,
+    ) => callback(database as unknown as AffiliateSupplyDatabase),
+  } as unknown as AffiliateSupplyDatabase;
+  return {
+    database,
+    root,
+    source,
+    mapping,
+    mappingJob,
+    producerClaim,
+    reviewerClaim,
+    producerJob,
+    reviewerJob,
+    producerEnvelope,
+    reviewerEnvelope,
+    gatewayClaims,
+    gatewayJobs,
+    gatewayReceipts,
+    artifacts,
+    transitions,
+    packageHash,
+    getApproval: () => currentApproval,
+    setApproval: (approval) => {
+      currentApproval = approval;
+    },
+  };
+};
+const executeCurrentProofApproval = (
+  fixture: CurrentProofFixture,
+  idempotencyKey: string,
+) => executeAffiliateSupplyLifecycleCommand({
+  supplySourceId: String(fixture.root.id),
+  command: 'APPROVE',
+  authority: 'SUPPLY_REVIEWER',
+  expectedLifecycleGeneration: 1,
+  actorKind: 'SUPPLY_REVIEWER',
+  actorId: 'reviewer-current-proof-happy',
+  idempotencyKey,
+  request: {
+    mappingId: String(fixture.mapping.id),
+    mappingJobId: String(fixture.mappingJob.id),
+    packageHash: fixture.packageHash,
+    lifecycleEvidenceKinds: ['DURABLE_SOURCE_EVIDENCE', 'VALIDATION_OUTPUT'],
+    evidenceRefs: ['reviewer-current-proof-evidence'],
+  },
+  db: fixture.database,
+  now: new Date('2026-08-22T12:00:00.000Z'),
+});
+const expectCurrentProofApprovalRejected = async (
+  fixture: CurrentProofFixture,
+  idempotencyKey: string,
+): Promise<void> => {
+  await expect(executeCurrentProofApproval(fixture, idempotencyKey))
+    .rejects.toThrow(/APPROVAL_LIFECYCLE_EVIDENCE_MISSING/);
+  expect(fixture.transitions).toHaveLength(0);
+  expect(fixture.root.lifecycleGeneration).toBe(1);
+};
+
+
+
 
 describe('affiliate supply persistence seams', () => {
   it('does not infer lifecycle stage from timestamps, job completion, or persisted projections', () => {
@@ -1412,6 +2182,8 @@ describe('affiliate supply persistence seams', () => {
     });
     const mapping = {
       id: 'mapping-1',
+      sourceId: 'source-1',
+      supplySourceId: 'supply-1',
       version: 1,
       isActive: true,
       validatedAt: null,
@@ -1425,6 +2197,11 @@ describe('affiliate supply persistence seams', () => {
         },
         evidenceKinds: ['PAGE_HTML'],
       },
+    };
+    const mappingPackageHash = hashAffiliateAgentValue(mapping.mapping);
+    mapping.mapping = {
+      ...mapping.mapping,
+      metadata: { packageHash: mappingPackageHash },
     };
     const source = {
       id: 'source-1',
@@ -1462,13 +2239,16 @@ describe('affiliate supply persistence seams', () => {
     };
     const approval = {
       id: 'approval-1',
+      subjectType: 'MAPPING_PACKAGE',
+      subjectKey: mapping.id,
+      supplySourceId: root.id,
       status: 'APPROVED',
       reviewerId: 'reviewer-1',
       decision: {
         decision: 'APPROVE',
         isIndependent: true,
         reviewerId: 'reviewer-1',
-        packageHash: hashAffiliateAgentValue(mapping.mapping),
+        packageHash: mappingPackageHash,
         evidenceRefs: ['run:1'],
         lifecycleEvidenceKinds: ['DURABLE_SOURCE_EVIDENCE', 'VALIDATION_OUTPUT'],
       },
@@ -1478,7 +2258,7 @@ describe('affiliate supply persistence seams', () => {
       decision: 'APPROVE',
       supplySourceId: root.id,
       mappingId: mapping.id,
-      packageHash: hashAffiliateAgentValue(mapping.mapping),
+      packageHash: mappingPackageHash,
       baselineHash: 'baseline-hash',
       reviewedCandidateIds: ['candidate-1'],
       candidateReviewEvidenceRefs: ['candidate-review:1'],
@@ -1571,7 +2351,7 @@ describe('affiliate supply persistence seams', () => {
       request: {
         sourceId: source.id,
         mappingId: mapping.id,
-        packageHash: hashAffiliateAgentValue(mapping.mapping),
+        packageHash: mappingPackageHash,
         baselineHash: 'wrong-baseline-hash',
         candidateReviewId: candidateReview.id,
         evidenceRefs: ['review:1'],
@@ -1594,7 +2374,7 @@ describe('affiliate supply persistence seams', () => {
       request: {
         sourceId: source.id,
         mappingId: mapping.id,
-        packageHash: hashAffiliateAgentValue(mapping.mapping),
+        packageHash: mappingPackageHash,
         baselineHash: 'baseline-hash',
         candidateReviewId: candidateReview.id,
         evidenceRefs: ['review:1'],
@@ -1623,7 +2403,7 @@ describe('affiliate supply persistence seams', () => {
       request: {
         sourceId: source.id,
         mappingId: mapping.id,
-        packageHash: hashAffiliateAgentValue(mapping.mapping),
+        packageHash: mappingPackageHash,
         baselineHash: 'baseline-hash',
         candidateReviewId: candidateReview.id,
         evidenceRefs: ['review:1'],
@@ -1691,6 +2471,191 @@ describe('affiliate supply persistence seams', () => {
   });
 
   it('keeps approval quarantined until activation', async () => {
+    const fixture = createCurrentProofFixture();
+    const result = await executeCurrentProofApproval(fixture, 'approve-approval');
+
+    expect(result.assessment.stage).toBe('APPROVED');
+    expect(result.assessment.targetContribution).toBe(0);
+    expect(result.assessment.isAutomationEnabled).toBe(false);
+    expect(fixture.source.autoScrapeEnabled).toBe(false);
+    expect((fixture.source.metadata as Record<string, unknown>).automationReviewRequired).toEqual(expect.objectContaining({
+      hold: true,
+      reason: 'LEGACY_SPORT_REPAIR',
+    }));
+    expect(result.assessment.outcome).toBe('AUTOMATION_HOLD');
+    expect(fixture.mapping.isActive).toBe(false);
+    expect(fixture.gatewayJobs.find((job) => job.id === fixture.reviewerJob.id)?.status).toBe('RECONCILIATION_REQUIRED');
+    expect(fixture.gatewayClaims.find((claim) => claim.id === fixture.reviewerClaim.id)?.status).toBe('ACTIVE');
+    expect(fixture.getApproval()).toEqual(expect.objectContaining({
+      status: 'APPROVED',
+      supplySourceId: fixture.root.id,
+    }));
+    expect(fixture.transitions).toEqual([expect.objectContaining({
+      fromStage: 'MAPPED',
+      toStage: 'APPROVED',
+      generation: 2,
+      command: 'APPROVE',
+    })]);
+  });
+  it('accepts current producer commit proof and a reconciliation-required reviewer manifest for APPROVE', async () => {
+    const fixture = createCurrentProofFixture();
+    const result = await executeCurrentProofApproval(
+      fixture,
+      'approve-current-proof-happy',
+    );
+
+    expect(result.assessment.stage).toBe('APPROVED');
+    expect(result.assessment.outcome).toBe('AUTOMATION_HOLD');
+    expect(result.assessment.automationHoldReason).toBe('LEGACY_SPORT_REPAIR');
+    expect(result.assessment.hasRequiredLifecycleEvidence).toBe(true);
+    expect(result.assessment.isAutomationEnabled).toBe(false);
+    expect(result.assessment.reasonCodes).toEqual(expect.arrayContaining([
+      'INDEPENDENT_REVIEW_APPROVED',
+      'AUTOMATION_HOLD',
+    ]));
+    expect(fixture.source.autoScrapeEnabled).toBe(false);
+    expect(fixture.mapping.isActive).toBe(false);
+    expect(fixture.mapping.validatedAt).toEqual(new Date('2026-08-22T12:00:00.000Z'));
+    expect(fixture.reviewerClaim.status).toBe('ACTIVE');
+    expect(fixture.reviewerJob.status).toBe('RECONCILIATION_REQUIRED');
+    expect(fixture.reviewerJob.expectedLifecycleGeneration).toBe(1);
+    expect(fixture.getApproval()).toEqual(expect.objectContaining({
+      status: 'APPROVED',
+      subjectKey: fixture.mapping.id,
+      supplySourceId: fixture.root.id,
+    }));
+    expect(fixture.transitions).toHaveLength(1);
+    expect(fixture.transitions[0]).toEqual(expect.objectContaining({
+      command: 'APPROVE',
+      fromStage: 'MAPPED',
+      toStage: 'APPROVED',
+      generation: 2,
+    }));
+    expect(fixture.root.lifecycleGeneration).toBe(2);
+  });
+
+  it('rejects a current proof whose mapping is bound to another source', async () => {
+    const fixture = createCurrentProofFixture();
+    fixture.mapping.sourceId = 'different-source';
+
+    await expectCurrentProofApprovalRejected(
+      fixture,
+      'approve-current-proof-source-mismatch',
+    );
+  });
+
+  it('rejects a current proof whose committed package differs from the mapping package', async () => {
+    const fixture = createCurrentProofFixture();
+    const summary = currentProofRecord(fixture.mappingJob.resultSummary);
+    const gatewayPackage = currentProofRecord(summary.gatewayCandidatePackage);
+    const candidatePackage = currentProofRecord(gatewayPackage.candidatePackage);
+    gatewayPackage.candidatePackage = {
+      ...candidatePackage,
+      itemSelector: '.tampered-event',
+    };
+
+    await expectCurrentProofApprovalRejected(
+      fixture,
+      'approve-current-proof-package-mismatch',
+    );
+  });
+
+  it('rejects a current proof when an artifact is owned by another claim', async () => {
+    const fixture = createCurrentProofFixture();
+    const committedArtifact = fixture.artifacts.find(
+      (artifact) => artifact.evidenceKind === 'COMMITTED_PACKAGE',
+    );
+    expect(committedArtifact).toBeDefined();
+    if (!committedArtifact) return;
+    committedArtifact.creatingClaimId = 'different-claim';
+
+    await expectCurrentProofApprovalRejected(
+      fixture,
+      'approve-current-proof-artifact-owner',
+    );
+  });
+
+  it('rejects a current proof when an artifact claim generation is stale', async () => {
+    const fixture = createCurrentProofFixture();
+    const deterministicArtifact = fixture.artifacts.find(
+      (artifact) => artifact.evidenceKind === 'DETERMINISTIC_VALIDATION',
+    );
+    expect(deterministicArtifact).toBeDefined();
+    if (!deterministicArtifact) return;
+    deterministicArtifact.claimGeneration = 2;
+
+    await expectCurrentProofApprovalRejected(
+      fixture,
+      'approve-current-proof-artifact-generation',
+    );
+  });
+
+  it('rejects a current proof when an artifact content hash is altered', async () => {
+    const fixture = createCurrentProofFixture();
+    const durableArtifact = fixture.artifacts.find(
+      (artifact) => artifact.evidenceKind === 'DURABLE_EVIDENCE',
+    );
+    expect(durableArtifact).toBeDefined();
+    if (!durableArtifact) return;
+    durableArtifact.contentHash = 'a'.repeat(64);
+
+    await expectCurrentProofApprovalRejected(
+      fixture,
+      'approve-current-proof-artifact-hash',
+    );
+  });
+
+  it('rejects mixed producer claims even when every claim id is present in metadata', async () => {
+    const fixture = createCurrentProofFixture();
+    const mappingJson = currentProofRecord(fixture.mapping.mapping);
+    const metadata = currentProofRecord(mappingJson.metadata);
+    const mappingValidationOutput = currentProofRecord(metadata.validationOutput);
+    metadata.validationOutput = {
+      ...mappingValidationOutput,
+      claimId: 'different-producer-claim',
+    };
+
+    await expectCurrentProofApprovalRejected(
+      fixture,
+      'approve-current-proof-mixed-claims',
+    );
+  });
+
+  it('rejects metadata labels when the owned proof artifacts are missing', async () => {
+    const fixture = createCurrentProofFixture();
+    fixture.artifacts.splice(0, fixture.artifacts.length);
+
+    await expectCurrentProofApprovalRejected(
+      fixture,
+      'approve-current-proof-missing-artifacts',
+    );
+  });
+
+  it('rejects a reviewer frozen manifest that changes the durable artifact hash', async () => {
+    const fixture = createCurrentProofFixture();
+    const reviewerManifest = currentProofRecord(fixture.reviewerEnvelope.evidenceManifest);
+    const entries = Array.isArray(reviewerManifest.entries)
+      ? reviewerManifest.entries.map(currentProofRecord)
+      : [];
+    const tamperedManifest = currentProofManifestFor(entries.map((entry) => (
+      entry.kind === 'DURABLE_EVIDENCE'
+        ? { ...entry, sha256: 'a'.repeat(64) }
+        : entry
+    )));
+    fixture.reviewerEnvelope.evidenceManifest = tamperedManifest;
+    fixture.reviewerClaim.claimEnvelopeJson = fixture.reviewerEnvelope;
+    fixture.reviewerClaim.claimEnvelopeHash = hashAffiliateAgentValue(
+      fixture.reviewerEnvelope,
+    );
+    fixture.reviewerClaim.evidenceManifestHash = tamperedManifest.hash;
+
+    await expectCurrentProofApprovalRejected(
+      fixture,
+      'approve-current-proof-reviewer-manifest-hash',
+    );
+  });
+
+  it('does not trust unbound current mapping labels while retaining historical approval and run rows', async () => {
     const mappingPackage = {
       kind: 'EVENT',
       listUrl: 'https://club.example/events',
@@ -1701,73 +2666,108 @@ describe('affiliate supply persistence seams', () => {
       },
       evidenceKinds: ['PAGE_HTML'],
     };
-    const mapping = {
-      id: 'mapping-approval',
-      supplySourceId: 'supply-approval',
-      sourceId: 'source-approval',
-      version: 1,
+    const currentMapping = {
+      id: 'mapping-v2',
+      supplySourceId: 'supply-current-proof',
+      sourceId: 'source-current-proof',
+      version: 2,
+      createdAt: new Date('2026-08-22T11:00:00.000Z'),
       isActive: false,
       validatedAt: null,
       isSchemaValid: true,
-      packageHash: hashAffiliateAgentValue(mappingPackage),
-      mapping: mappingPackage,
-    };
-    const baseline = {
-      schemaVersion: 1,
-      mappingId: mapping.id,
-      mappingVersion: mapping.version,
-      approvedAt: '2026-08-22T10:00:00.000Z',
-      candidateCount: 1,
-      rejectedCount: 0,
-      listingKinds: ['EVENT'],
-      criticalMissingCount: 0,
-      criticalMissingRate: 0,
-      normalizedFieldsHash: 'baseline-approval',
-    };
-    const source = {
-      id: 'source-approval',
-      supplySourceId: 'supply-approval',
-      activeMappingId: mapping.id,
-      autoScrapeEnabled: false,
-      status: 'ACTIVE',
-      targetKind: 'EVENT',
-      metadata: {
-        automationReviewRequired: {
-          hold: true,
-          reason: 'LEGACY_SPORT_REPAIR',
-          reportHash: 'legacy-report-hash',
-          evidenceRefs: ['intake-artifact:1'],
+      packageHash: 'package-v2',
+      mapping: {
+        ...mappingPackage,
+        metadata: {
+          packageHash: 'package-v2',
+          evidenceRefs: ['source-page-v2'],
+          evidenceKinds: ['PAGE_HTML'],
+          validationOutput: {
+            isValid: true,
+            packageHash: 'package-v2',
+            validationMetadata: {
+              claimId: 'claim-producer-v2',
+              evidenceRefs: ['source-page-v2'],
+              evidenceManifestHash: 'manifest-v2',
+            },
+          },
         },
       },
     };
+    const historicalApproval = {
+      id: 'approval-v1',
+      supplySourceId: 'supply-current-proof',
+      subjectKey: 'mapping-v1',
+      status: 'APPROVED',
+      decision: 'APPROVE',
+      isIndependent: true,
+      reviewerId: 'reviewer-v1',
+      reviewedPackageHash: 'package-v1',
+      evidenceRefs: ['review-v1'],
+    };
+    let currentApproval: Record<string, unknown> = historicalApproval;
+    const historicalRun = {
+      id: 'run-v1',
+      supplySourceId: 'supply-current-proof',
+      sourceId: 'source-current-proof',
+      mappingId: 'mapping-v1',
+      createdAt: new Date('2026-08-21T10:00:00.000Z'),
+      status: 'SUCCEEDED',
+      finishedAt: new Date('2026-08-21T10:05:00.000Z'),
+      candidateCount: 1,
+      itemCount: 1,
+      logs: { evidenceRefs: ['run-v1'] },
+    };
+    const source = {
+      id: 'source-current-proof',
+      supplySourceId: 'supply-current-proof',
+      activeMappingId: currentMapping.id,
+      autoScrapeEnabled: false,
+      status: 'ACTIVE',
+      targetKind: 'EVENT',
+      lifecycleGeneration: 0,
+      lastScrapeRunId: historicalRun.id,
+      metadata: {},
+    };
     const root = {
-      id: 'supply-approval',
+      id: 'supply-current-proof',
       canonicalUrl: 'https://club.example/events',
       origin: 'https://club.example',
       pathKey: '/events',
-      identityKey: 'approval-root',
+      identityKey: 'current-proof-root',
       targetKind: 'EVENT',
       rolloutCohort: 'DEFAULT',
       liveSourceId: source.id,
       intakeId: null,
       lifecycleGeneration: 0,
-      derivedStage: 'MAPPED',
+      derivedStage: 'APPROVED',
       isExcluded: false,
-      metadata: {
-        automationReviewRequired: {
-          hold: true,
-          reason: 'LEGACY_SPORT_REPAIR',
-          reportHash: 'legacy-report-hash',
-          evidenceRefs: ['intake-artifact:1'],
+      metadata: {},
+    };
+    const mappingJob = {
+      id: 'mapping-job-v2',
+      supplySourceId: root.id,
+      sourceId: source.id,
+      mappingId: null,
+      status: 'REVIEW_REQUIRED',
+      createdAt: new Date('2026-08-22T11:05:00.000Z'),
+      resultSummary: {
+        packageHash: 'package-v2',
+        gatewayCandidatePackage: {
+          claimId: 'claim-producer-v2',
+          packageHash: 'package-v2',
+          validationMetadata: {
+            claimId: 'claim-producer-v2',
+            evidenceRefs: ['source-page-v2'],
+            evidenceManifestHash: 'manifest-v2',
+          },
         },
       },
     };
-    let approval: Record<string, unknown> | null = null;
-    let transition: Record<string, unknown> | null = null;
+    const transitions: Record<string, unknown>[] = [];
     const database = {
       supplySources: {
         findUnique: jest.fn(async () => root),
-        findMany: jest.fn(async () => [root]),
         update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => Object.assign(root, data)),
       },
       contractManifests: {
@@ -1785,82 +2785,84 @@ describe('affiliate supply persistence seams', () => {
         update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => Object.assign(source, data)),
       },
       mappings: {
-        findUnique: jest.fn(async () => mapping),
-        findFirst: jest.fn(async () => mapping),
-        update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => Object.assign(mapping, data)),
+        findUnique: jest.fn(async () => currentMapping),
+        findFirst: jest.fn(async () => currentMapping),
+        update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => Object.assign(currentMapping, data)),
       },
-      mappingJobs: { findFirst: jest.fn(async () => null) },
+      mappingJobs: {
+        findFirst: jest.fn(async () => mappingJob),
+      },
       approvals: {
-        findFirst: jest.fn(async () => approval),
+        findFirst: jest.fn(async () => currentApproval),
         upsert: jest.fn(async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => {
-          approval = { ...(approval ?? create), ...update };
-          return approval;
+          currentApproval = {
+            ...currentApproval,
+            ...create,
+            ...update,
+            subjectKey: currentMapping.id,
+          };
+          return currentApproval;
         }),
       },
-      runs: { findFirst: jest.fn(async () => null) },
-      candidates: { findMany: jest.fn(async () => []) },
-      targets: {
-        findMany: jest.fn(async () => []),
-        count: jest.fn(async () => 0),
-        upsert: jest.fn(),
+      runs: {
+        findFirst: jest.fn(async () => historicalRun),
       },
+      gatewayArtifacts: {
+        findMany: jest.fn(async () => [
+          {
+            claimId: 'claim-producer-v2',
+            evidenceRef: 'deterministic-validation',
+            evidenceKind: 'DETERMINISTIC_VALIDATION',
+            sourceArtifactId: 'validation-v2',
+            contentHash: 'validation-hash-v2',
+          },
+          {
+            claimId: 'claim-producer-v2',
+            evidenceRef: 'gateway-durable-evidence',
+            evidenceKind: 'DURABLE_EVIDENCE',
+            sourceArtifactId: 'source-page-v2',
+            contentHash: 'source-hash-v2',
+          },
+        ]),
+      },
+      candidates: { findMany: jest.fn(async () => []) },
+      targets: { findMany: jest.fn(async () => []) },
+      intakes: { findUnique: jest.fn(async () => null), findFirst: jest.fn(async () => null) },
       transitions: {
         findUnique: jest.fn(async () => null),
         findFirst: jest.fn(async () => null),
         create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
-          transition = data;
+          transitions.push(data);
           return data;
         }),
       },
-      intakes: { findUnique: jest.fn(async () => null), findFirst: jest.fn(async () => null) },
-      transaction: async (callback: (db: AffiliateSupplyDatabase) => Promise<unknown>) => callback(database as AffiliateSupplyDatabase),
+      transaction: async (callback: (db: AffiliateSupplyDatabase) => Promise<unknown>) => callback(
+        database as unknown as AffiliateSupplyDatabase,
+      ),
     } as unknown as AffiliateSupplyDatabase;
 
-    const result = await executeAffiliateSupplyLifecycleCommand({
+    await expect(executeAffiliateSupplyLifecycleCommand({
       supplySourceId: root.id,
       command: 'APPROVE',
       authority: 'SUPPLY_REVIEWER',
       expectedLifecycleGeneration: 0,
       actorKind: 'SUPPLY_REVIEWER',
-      actorId: 'reviewer-approval',
-      idempotencyKey: 'approve-approval',
+      actorId: 'reviewer-v2',
+      idempotencyKey: 'approve-v2',
       request: {
-        mappingId: mapping.id,
-        packageHash: mapping.packageHash,
-        baseline,
-        lifecycleEvidenceKinds: ['DURABLE_SOURCE_EVIDENCE', 'VALIDATION_OUTPUT'],
-        evidenceRefs: ['review:approval'],
+        mappingId: currentMapping.id,
+        packageHash: currentMapping.packageHash,
+        evidenceRefs: ['review-v2'],
       },
       db: database,
       now: new Date('2026-08-22T12:00:00.000Z'),
-    });
+    })).rejects.toThrow('APPROVAL_LIFECYCLE_EVIDENCE_MISSING');
 
-    expect(result.assessment.stage).toBe('APPROVED');
-    expect(result.assessment.targetContribution).toBe(0);
-    expect(result.assessment.isAutomationEnabled).toBe(false);
-    expect(source.autoScrapeEnabled).toBe(false);
-    expect((source.metadata as Record<string, unknown>).automationReviewRequired).toEqual(expect.objectContaining({
-      hold: true,
-      reason: 'LEGACY_SPORT_REPAIR',
-    }));
-    expect(result.assessment.outcome).toBe('AUTOMATION_HOLD');
-    expect(mapping.isActive).toBe(false);
-    expect(database.targets.upsert).not.toHaveBeenCalled();
-    expect(approval).toEqual(expect.objectContaining({
-      status: 'APPROVED',
-      supplySourceId: root.id,
-    }));
-    expect((approval?.decision as Record<string, unknown>).lifecycleEvidenceKinds).toEqual([
-      'DURABLE_SOURCE_EVIDENCE',
-      'VALIDATION_OUTPUT',
-    ]);
-    expect(transition).toEqual(expect.objectContaining({
-      fromStage: 'MAPPED',
-      toStage: 'APPROVED',
-      generation: 1,
-      command: 'APPROVE',
-    }));
+    expect(transitions).toHaveLength(0);
+    expect(currentApproval).toBe(historicalApproval);
+    expect(historicalRun.mappingId).toBe('mapping-v1');
   });
+
 
   it('records provider failure as retryable wave state without zero yield', async () => {
     const now = new Date('2026-08-22T12:00:00.000Z');
@@ -4648,85 +5650,45 @@ describe('affiliate supply persistence seams', () => {
   });
   it('runs admitted target publication inside the lifecycle command transaction', async () => {
     const now = new Date('2026-08-22T12:00:00.000Z');
-    const root = {
-      id: 'supply-publish-1',
-      canonicalUrl: 'https://club.example/events',
-      targetKind: 'EVENT',
-      rolloutCohort: policy.rolloutCohort,
-      liveSourceId: 'source-publish-1',
-      intakeId: null,
-      lifecycleGeneration: 4,
-      derivedStage: 'ACTIVATED',
-      isExcluded: false,
-      operatorDomain: 'club.example',
-    };
-    const source = {
-      id: 'source-publish-1',
-      supplySourceId: root.id,
-      activeMappingId: 'mapping-publish-1',
-      status: 'ACTIVE',
-      autoScrapeEnabled: true,
-      metadata: {
-        automationBaseline: {
-          schemaVersion: 1,
-          mappingId: 'mapping-publish-1',
-          mappingVersion: 1,
-          approvedAt: now.toISOString(),
-          candidateCount: 1,
-          rejectedCount: 0,
-          listingKinds: ['EVENT'],
-          criticalMissingCount: 0,
-          criticalMissingRate: 0,
-          normalizedFieldsHash: 'baseline-hash',
-        },
-      },
-      targetKind: 'EVENT',
-    };
-    const mapping = {
-      id: 'mapping-publish-1',
-      version: 1,
-      isActive: true,
-      isSchemaValid: true,
-      validatedAt: now,
-      packageHash: hashAffiliateAgentValue({
-        kind: 'EVENT',
-        listUrl: 'https://club.example/events',
-        itemSelector: '.event',
-        fields: {
-          title: { selector: '.title' },
-          officialActionUrl: { selector: 'a', mode: 'attribute', attribute: 'href' },
-        },
-        evidenceKinds: ['PAGE_HTML'],
-      }),
-      evidenceKinds: ['PAGE_HTML'],
-      validationOutput: { isValid: true },
-      mapping: {
-        kind: 'EVENT',
-        listUrl: 'https://club.example/events',
-        itemSelector: '.event',
-        fields: {
-          title: { selector: '.title' },
-          officialActionUrl: { selector: 'a', mode: 'attribute', attribute: 'href' },
-        },
-        evidenceKinds: ['PAGE_HTML'],
+    const fixture = createCurrentProofFixture();
+    fixture.root.isAutomationEnabled = true;
+    fixture.root.derivedStage = 'ACTIVATED';
+    fixture.source.autoScrapeEnabled = true;
+    fixture.source.metadata = {
+      automationBaseline: {
+        schemaVersion: 1,
+        mappingId: fixture.mapping.id,
+        mappingVersion: 1,
+        approvedAt: now.toISOString(),
+        candidateCount: 1,
+        rejectedCount: 0,
+        listingKinds: ['EVENT'],
+        criticalMissingCount: 0,
+        criticalMissingRate: 0,
+        normalizedFieldsHash: 'baseline-publish',
       },
     };
-    const approval = {
+    fixture.mapping.isActive = true;
+    fixture.mapping.validatedAt = now;
+    fixture.setApproval({
       id: 'approval-publish-1',
+      subjectType: 'MAPPING_PACKAGE',
+      subjectKey: fixture.mapping.id,
+      supplySourceId: fixture.root.id,
       status: 'APPROVED',
-      reviewerId: 'reviewer-1',
+      reviewerId: 'reviewer-publish',
       decision: {
         decision: 'APPROVE',
         isIndependent: true,
-        packageHash: hashAffiliateAgentValue(mapping.mapping),
+        packageHash: fixture.packageHash,
         evidenceRefs: ['review:evidence-1'],
         lifecycleEvidenceKinds: ['DURABLE_SOURCE_EVIDENCE', 'VALIDATION_OUTPUT'],
       },
-    };
+    });
     const candidate = {
       id: 'candidate-publish-1',
-      sourceId: source.id,
-      supplySourceId: root.id,
+      sourceId: fixture.source.id,
+      supplySourceId: fixture.root.id,
       status: 'DISCOVERED',
       listingKind: 'EVENT',
       publishedEventId: null,
@@ -4747,72 +5709,33 @@ describe('affiliate supply persistence seams', () => {
       sourceProfile: 'EVENT',
       evidenceRefs: ['target:evidence-1'],
     }));
-    let persistedTransition: Record<string, unknown> | null = null;
-    const database = {
-      supplySources: {
-        findUnique: jest.fn(async () => root),
-        update: jest.fn(),
-      },
-      contractManifests: {
-        findFirst: jest.fn(async () => ({
-          status: 'ACTIVE',
-          version: manifest.version,
-          rolloutCohort: manifest.rolloutCohort,
-          contractHash: manifest.hash,
-          contractJson: manifest.supplyContract,
-        })),
-      },
-      transitions: {
-        findUnique: jest.fn(async () => persistedTransition),
-        findFirst: jest.fn(async () => null),
-        create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => data),
-      },
-      targets,
-      sources: {
-        findUnique: jest.fn(async () => source),
-        findFirst: jest.fn(async () => source),
-        update: jest.fn(),
-      },
-      mappings: { findUnique: jest.fn(async () => mapping), findFirst: jest.fn(async () => mapping) },
-      mappingJobs: { findFirst: jest.fn(async () => null) },
-      approvals: { findFirst: jest.fn(async () => approval) },
-      runs: {
-        findFirst: jest.fn(async () => ({
-          id: 'run-publish-1',
-          status: 'SUCCEEDED',
-          mappingId: mapping.id,
-          finishedAt: now,
-          candidateCount: 1,
-          itemCount: 1,
-          isEmptyStateMatched: false,
-        })),
-      },
-      intakes: { findUnique: jest.fn(async () => null), findFirst: jest.fn(async () => null) },
-      candidates: {
-        findMany: jest.fn(async () => [candidate]),
-        update: jest.fn(),
-      },
-      transaction: async (callback: (db: AffiliateSupplyDatabase) => Promise<unknown>) => callback(database as AffiliateSupplyDatabase),
-    } as unknown as AffiliateSupplyDatabase;
+    const candidates = {
+      findMany: jest.fn(async () => [candidate]),
+      update: jest.fn(),
+    };
+    const databaseRecord = fixture.database as unknown as Record<string, unknown>;
+    Object.assign(databaseRecord, { candidates, targets });
+    const transitionsDelegate = fixture.database.transitions as unknown as {
+      findUnique: (args: unknown) => Promise<Record<string, unknown> | null>;
+    };
+    transitionsDelegate.findUnique = jest.fn(async () => fixture.transitions.at(-1) ?? null);
 
     const commandInput = {
-      supplySourceId: root.id,
+      supplySourceId: fixture.root.id,
       command: 'PUBLISH_TARGET',
       authority: 'HUMAN_DIRECTED_EXECUTOR',
       actorKind: 'HUMAN_DIRECTED_EXECUTOR',
       actorId: 'human-1',
-      expectedLifecycleGeneration: root.lifecycleGeneration,
-      idempotencyKey: 'publish-target-1',
+      expectedLifecycleGeneration: 1,
       request: {
         candidateId: candidate.id,
         evidenceRefs: ['publication:evidence-1'],
       },
       targetWriter,
-      db: database,
+      db: fixture.database,
       now,
     } as const;
     const result = await executeAffiliateSupplyLifecycleCommand(commandInput);
-    persistedTransition = result.transition;
     const replay = await executeAffiliateSupplyLifecycleCommand(commandInput);
 
     expect(targetWriter).toHaveBeenCalledWith(expect.objectContaining({

@@ -1,6 +1,11 @@
 /** @jest-environment node */
 import { createServer, type Server } from "node:http";
 import { Readable } from "node:stream";
+import { canonicalizeAffiliateAgentValue } from "../agentGatewayContracts";
+import {
+  buildAffiliateSupplyContractManifest,
+  type AffiliateSupplyContractManifest,
+} from "../affiliateSupplyLifecycle";
 import { AffiliateLegacyRepairAdmissionError } from "../affiliateLegacyRepairAdmission";
 
 import {
@@ -32,6 +37,130 @@ const REPLENISHMENT_TOKEN = "replenishment-token-4f3a9e7c";
 const SUPERVISOR_HALT_CREDENTIAL = "supervisor-halt-credential-4f3a9e7c";
 const WORKER_ROLE_CREDENTIAL = "worker-role-credential-4f3a9e7c";
 const PATH_PREFIX = "/v1/affiliate-agent";
+describe("affiliate agent gateway active contract artifacts", () => {
+  const activeManifestFor = (): AffiliateSupplyContractManifest =>
+    buildAffiliateSupplyContractManifest({
+      version: 7,
+      rolloutCohort: "TEST-COHORT",
+      status: "ACTIVE",
+      supplyContract: {
+        schemaVersion: 1,
+        version: 7,
+        rolloutCohort: "TEST-COHORT",
+        hash: undefined,
+        freshnessWindows: [{ sourceProfile: "EVENT", maximumAgeHours: 24 }],
+        targets: [{
+          marketKey: "test-market",
+          sourceProfile: "EVENT",
+          minimumFreshPublishedSupply: 1,
+        }],
+        requiredMappingEvidenceKinds: ["PAGE_HTML"],
+        requiredLifecycleEvidenceKinds: ["DURABLE_SOURCE_EVIDENCE"],
+      },
+    });
+
+  const activeRowFor = (manifest: AffiliateSupplyContractManifest) => ({
+    version: manifest.version,
+    rolloutCohort: manifest.rolloutCohort,
+    status: manifest.status,
+    contractHash: manifest.hash,
+    contractJson: manifest.supplyContract,
+  });
+
+  const activeContractBytesFor = (
+    manifest: AffiliateSupplyContractManifest,
+  ): Buffer => {
+    const { hash: _policyHash, ...contractPreimage } = manifest.supplyContract;
+    return Buffer.from(
+      canonicalizeAffiliateAgentValue(contractPreimage),
+      "utf8",
+    );
+  };
+
+  const artifactStoreFor = (rows: readonly unknown[]) => {
+    const storageRead = jest.fn(async () => {
+      throw new Error("NoSuchKey");
+    });
+    const database = {
+      affiliateSupplyContractManifests: {
+        findMany: jest.fn(async () => rows),
+      },
+    } as unknown as Parameters<typeof createAffiliateAgentGatewayArtifactStore>[0];
+    const storage = {
+      getObjectStream: storageRead,
+    } as unknown as Parameters<typeof createAffiliateAgentGatewayArtifactStore>[1];
+    return {
+      artifactStore: createAffiliateAgentGatewayArtifactStore(database, storage),
+      storageRead,
+    };
+  };
+
+  it("reads a canonical active contract without object storage", async () => {
+    const manifest = activeManifestFor();
+    const bytes = activeContractBytesFor(manifest);
+    const { hash: policyHash } = manifest.supplyContract;
+    const { artifactStore, storageRead } = artifactStoreFor([activeRowFor(manifest)]);
+
+    await expect(artifactStore.readImmutable({
+      fileId: `supply-contract:${policyHash}`,
+      maximumBytes: 8 * 1024 * 1024,
+    })).resolves.toEqual({
+      bytes,
+      mimeType: "application/json",
+      byteSize: bytes.byteLength,
+      sourceUrl: null,
+      finalUrl: null,
+    });
+    expect(manifest.hash).not.toBe(policyHash);
+    expect(storageRead).not.toHaveBeenCalled();
+  });
+
+  it("rejects an active contract handle with the wrong policy hash", async () => {
+    const manifest = activeManifestFor();
+    const { artifactStore, storageRead } = artifactStoreFor([activeRowFor(manifest)]);
+
+    await expect(artifactStore.readImmutable({
+      fileId: `supply-contract:${"a".repeat(64)}`,
+      maximumBytes: 8 * 1024 * 1024,
+    })).rejects.toThrow("The active Supply Contract artifact is not valid.");
+    expect(storageRead).not.toHaveBeenCalled();
+  });
+
+  it("rejects ambiguous active contract matches", async () => {
+    const manifest = activeManifestFor();
+    const row = activeRowFor(manifest);
+    const { artifactStore, storageRead } = artifactStoreFor([row, row]);
+
+    await expect(artifactStore.readImmutable({
+      fileId: `supply-contract:${manifest.supplyContract.hash}`,
+      maximumBytes: 8 * 1024 * 1024,
+    })).rejects.toThrow("The active Supply Contract artifact is not valid.");
+    expect(storageRead).not.toHaveBeenCalled();
+  });
+
+  it("rejects stale or corrupted active contract manifests", async () => {
+    const manifest = activeManifestFor();
+    const stale = artifactStoreFor([]);
+    await expect(stale.artifactStore.readImmutable({
+      fileId: `supply-contract:${manifest.supplyContract.hash}`,
+      maximumBytes: 8 * 1024 * 1024,
+    })).rejects.toThrow("The active Supply Contract artifact is not valid.");
+    expect(stale.storageRead).not.toHaveBeenCalled();
+
+    const corruptHash = manifest.hash[0] === "0"
+      ? `1${manifest.hash.slice(1)}`
+      : `0${manifest.hash.slice(1)}`;
+    const corrupt = artifactStoreFor([{
+      ...activeRowFor(manifest),
+      contractHash: corruptHash,
+    }]);
+    await expect(corrupt.artifactStore.readImmutable({
+      fileId: `supply-contract:${manifest.supplyContract.hash}`,
+      maximumBytes: 8 * 1024 * 1024,
+    })).rejects.toThrow("The active Supply Contract artifact is not valid.");
+    expect(corrupt.storageRead).not.toHaveBeenCalled();
+  });
+});
 describe("affiliate agent gateway artifact store", () => {
   it("preserves stored MIME and distinct capture URLs for local artifacts", async () => {
     const bytes = Buffer.from("<html>captured</html>", "utf8");

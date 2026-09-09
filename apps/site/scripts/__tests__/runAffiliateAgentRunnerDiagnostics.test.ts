@@ -6,7 +6,10 @@ import {
   serializeAffiliateAgentRunnerChildFailureDiagnostic,
   type AffiliateAgentRunnerChildFailureDiagnostic,
 } from "../run-affiliate-agent-runner";
-import { gatewayCommandRejectionDiagnosticFor } from "../../src/server/affiliateImports/affiliateAgentCommandDiagnostics";
+import {
+  gatewayCommandRejectionDiagnosticFor,
+  parseAffiliateAgentCommandRejectionDiagnostic,
+} from "../../src/server/affiliateImports/affiliateAgentCommandDiagnostics";
 
 describe("affiliate agent runner child diagnostics", () => {
   it.each([
@@ -78,5 +81,25 @@ describe("affiliate agent runner child diagnostics", () => {
     });
     expect(unknown).toEqual(expect.objectContaining({ reasonCode: "UNKNOWN" }));
     expect(JSON.stringify(unknown)).not.toContain("unsafe secret-bearing detail");
+  });
+  it("retains the source-kind reason without accepting appended source text", () => {
+    const safeMessage = "The declarative package listing kind does not match the source target kind.";
+    const diagnosticFor = (message: string) => gatewayCommandRejectionDiagnosticFor({
+      command: { type: "VALIDATE_DECLARATIVE_PACKAGE", data: {} },
+      errorCode: "COMMAND_SCHEMA_INVALID",
+      safeMessage: message,
+      isRetryable: false,
+    });
+    expect(diagnosticFor(safeMessage)).toMatchObject({
+      reasonCode: "SOURCE_KIND_MISMATCH",
+      isRetryable: false,
+    });
+    expect(parseAffiliateAgentCommandRejectionDiagnostic(diagnosticFor(safeMessage))).toMatchObject({
+      stage: "GATEWAY",
+      reasonCode: "SOURCE_KIND_MISMATCH",
+    });
+    const untrusted = diagnosticFor(`${safeMessage} private-source-value`);
+    expect(untrusted).toMatchObject({ reasonCode: "UNKNOWN" });
+    expect(JSON.stringify(untrusted)).not.toContain("private-source-value");
   });
 });

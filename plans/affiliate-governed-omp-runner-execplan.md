@@ -36,6 +36,12 @@ The operator selected OMP with two ChatGPT accounts. The governed affiliate work
 - [x] Publish and deploy the reviewed retry-capable correction.
 - [ ] Complete both linked repairs and independent review. Blocked by Softball validation errors and Boomtown review reconciliation.
 - [x] Verify final records, close admission, and stop trial workers.
+- [x] Carry the stored mapping kind into new producer claims.
+- [x] Preserve deterministic validation errors and server retryability.
+- [x] Resolve authorized synthetic Supply Contract artifacts.
+- [ ] Use current mapping run and evidence lineage for independent review.
+- [x] Retain bounded reviewer effect failure diagnostics.
+- [ ] Run focused regressions, source replays, and independent review.
 ## Current approval record
 
 Conditional `AUTH SETUP` approval (recorded 2026-09-07): after source
@@ -782,3 +788,145 @@ Further work must resolve the Softball validation failure, make the supplied
 contract artifact readable through the governed path, and safely reconcile
 the unknown reviewer effect. Do not reset the completed jobs, remove the
 holds, or call a reviewer recommendation a recorded approval.
+
+## Post-retry source corrections
+
+
+The operator requested continued correction after the read-only diagnosis.
+This authorizes source implementation and verification. It does not authorize
+another deployment, worker start, retry, or production data repair.
+
+The Softball source has target kind CLUB. Its producer claim omits that kind,
+and the retained model result describes EVENT packages. A pure source probe
+rejects that combination. The worker also changes an explicit non-retryable
+Gateway error into a retryable error for HTTP 500. The exact failed package
+requests were not retained, so the original six failures cannot be replayed.
+
+The Boomtown read-only lifecycle replay rejects APPROVE. Its current version-2
+mapping is paired with a version-1 scrape run. The assessment reports
+LATEST_RUN_MAPPING_MISMATCH and REQUIRED_LIFECYCLE_EVIDENCE_MISSING.
+It returns stage APPROVED with outcome REPAIR_REQUIRED, rather than MAPPED.
+The reviewer effect discards the original exception before reconciliation.
+
+The reviewer contract artifact is synthetic. The HTTP artifact reader sends
+its handle to object storage, where no object exists. The adapter resolver
+also compares a policy hash with the outer manifest hash. The stored values
+differ. Both paths must resolve the same authorized canonical bytes.
+
+### Plan of work and acceptance
+
+
+Add required `subject.listingKind` to new mapping producer claims. Load it
+from the stored source. Migrate current claim callers and fixtures. Do not
+rewrite old claims or their hashes. Reject a package kind mismatch with a
+fixed safe diagnostic. Honor explicit server retryability in the worker.
+
+Resolve synthetic contracts through the authorized artifact-read path.
+Validate the handle, canonical bytes, and claim manifest. Preserve integrity
+failures for wrong hashes and invalid records.
+
+Correct current-mapping evidence selection for replacement mappings. Keep
+historical runs intact. Do not invent a successful scrape or erase a genuine
+identity violation. A valid replacement package must reach independent review
+with genuine bound validation and durable source evidence. Missing or
+mismatched evidence must still block review. Approval must retain quarantine
+and the existing automation hold.
+
+Retain fixed, bounded reviewer failure codes with the existing operation
+receipt or event structure. Do not retain arbitrary exception text, source
+arguments, credentials, or stack traces. Preserve UNKNOWN when an effect
+cannot be established safely.
+
+Run the affected complete Jest suites from `apps/site` after concurrent edits
+finish. Run TypeScript and targeted ESLint. Replay the demonstrated source
+kind and retryability cases without providers. Exercise the contract read
+and replacement-mapping approval through their application boundaries.
+Run independent Standards and Spec review before source delivery.
+
+Decision: Preserve prior production evidence and require separate operational
+authorization. Source verification must not consume another claim or alter
+the unresolved reviewer receipt.
+
+Revision note: Added the source correction scope and the read-only findings
+after the operator requested continued work.
+
+The operator separately authorized Docker Desktop and the local PostgreSQL
+service for isolated integration tests. Docker Desktop started. The existing
+`mvp-site-db` container became healthy on local port 5433. A new
+`bracketiq_e2e_70_gateway_retryfix` database received all 219 migrations.
+Migration status reports that its schema is up to date. This approval does
+not include any production runtime or data change.
+
+## Independent correction review
+
+The fixed-point correction review records independent findings separately
+from the earlier production-read-only evidence. All identified findings moved
+through `fixed -> re-reviewed -> verified` before this handoff:
+
+- Gateway G1 (historical producer claim identity): **fixed, re-reviewed,
+  verified**. Historical producer envelopes require non-null lifecycle
+  generation, non-null outer Supply Source, and exact outer-to-subject Supply
+  Source equality while retaining the historical absence of `listingKind`.
+- Gateway G2 (reviewer terminal-effect diagnostics): **fixed, re-reviewed,
+  verified**. EXECUTE and RECOVER diagnostics are persisted before
+  recovery/finalization, bounded diagnostics merge into pending or UNKNOWN
+  receipt state, and a late diagnostic after immutable `SUCCEEDED` is retained
+  in a durable failure event without changing the succeeded response/hash.
+- Lifecycle L1 (reviewer authority): **fixed, re-reviewed, verified**.
+  Current Gateway proof is required; prior labels are compatibility evidence
+  only rather than fresh approval.
+- Lifecycle L2 (producer claim and artifact lineage): **fixed, re-reviewed,
+  verified**. One current producer claim binds the mapping/job package and all
+  artifacts by claim, generation, creating claim, source artifact, and
+  content hash.
+- Lifecycle L3 (bounded batch proof selection): **fixed, re-reviewed,
+  verified**. Current mapping/job selection precedes proof IDs, large proof
+  reads are chunked, and historical rows are limited to selection without
+  truncating complete candidate/target identity.
+- Lifecycle L4 (snapshot mapping/job fallback): **fixed, re-reviewed,
+  verified**. Missing exact mapping/job identity no longer falls back to an
+  arbitrary newest row; a pointed run is current only when it belongs to the
+  exact current mapping lineage.
+- Lifecycle reviewer-read recovery and future-writer integration: **fixed,
+  re-reviewed, verified** against retained database metadata and strict
+  read-only replay. Unavailable content bytes are not inferred.
+
+Gateway Standards and Gateway Spec reviews both passed at the fixed point.
+LifecycleFinalReview re-grounded the final source and reported no L1-L4,
+admitted-reviewer, future-writer, pre-terminal `RECORD_MAPPING`, single/batch,
+or loader findings.
+
+Authorized local verification used Docker PostgreSQL `mvp-site-db` on
+`127.0.0.1:5433`, isolated database
+`bracketiq_e2e_70_gateway_retryfix`, with all 219 migrations applied. No
+production database writes or runtime changes were made. The complete
+affected verification finished with:
+
+- `npx jest src/server/affiliateImports/__tests__/affiliateSupplyPersistence.test.ts --runInBand --coverage=false`:
+  **88/88 passed**.
+- The focused duplicate-reviewer recovery race in
+  `agentGateway.test.ts`: **1 passed**.
+- The exact 15-suite database run from
+  `/tmp/issue70-fourth-correction-tests.json`: **15 suites, 505/505 tests
+  passed**; result is saved at `/tmp/issue70-final-tests.json`.
+- `npx tsc --noEmit`: **passed**.
+- Targeted ESLint for the changed persistence and gateway test files:
+  **passed** (only the existing Babel >500KB deoptimization note).
+- `npm exec --yes --package=bun@1.3.14 -- bun scripts/test-affiliate-omp-agent-sdk-schema.ts`:
+  **passed** with no provider call.
+
+The strict production replay was read-only: the remote process set
+`default_transaction_read_only=on` and exited 0 with empty stderr. It verified
+the active contract artifact (`647` bytes,
+SHA-256 `c808492a7d60741b508978987441a0a31f59602a5e5321789d9865823f6098cf`)
+and assessed source
+`c9a05d4c-ed7a-4809-b3f6-39f1af8f806e` at lifecycle generation 2 as
+`MAPPED`, with `hasRequiredLifecycleEvidence: true`,
+`reasonCodes: ["MAPPING_PACKAGE_VALID"]`, no invariant violations, and an
+accepted `APPROVE` decision. Replay stdout is preserved at
+`/tmp/issue70-final-readonly.jsonl`; the consolidated evidence is at
+`/tmp/issue70-final-validation.json`.
+
+This record does not authorize production deployment, retry, automation
+enablement, writes, or UNKNOWN reconciliation. Those operational actions were
+not performed.

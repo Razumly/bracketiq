@@ -380,8 +380,11 @@ const sha256Schema = z
   .regex(/^[a-f0-9]{64}$/, "Expected a lowercase SHA-256 hash.");
 const identifierSchema = z.string().trim().min(1).max(200);
 const positiveIntegerSchema = z.number().int().positive();
-const sourceProfileSchema = z.enum(["CLUB", "EVENT", "RENTAL"]);
-
+export const affiliateAgentListingKindSchema = z.enum(["CLUB", "EVENT", "RENTAL"]);
+export type AffiliateAgentListingKind = z.infer<
+  typeof affiliateAgentListingKindSchema
+>;
+const sourceProfileSchema = affiliateAgentListingKindSchema;
 export const AFFILIATE_AGENT_MAX_MANIFEST_CANONICAL_BYTES = 65_536 as const;
 export const AFFILIATE_AGENT_MAX_CLAIM_ENVELOPE_CANONICAL_BYTES = 65_536 as const;
 export const AFFILIATE_AGENT_MAX_ENVIRONMENT_VALUE_BYTES = 65_536 as const;
@@ -711,8 +714,8 @@ export const AFFILIATE_AGENT_ROLES = [
 ] as const;
 
 export type AffiliateAgentRole = (typeof AFFILIATE_AGENT_ROLES)[number];
-export const AFFILIATE_AGENT_ROLE_CONTRACT_VERSION = 3 as const;
-export const AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION = 3 as const;
+export const AFFILIATE_AGENT_ROLE_CONTRACT_VERSION = 4 as const;
+export const AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION = 4 as const;
 
 const AFFILIATE_AGENT_TERMINAL_RESULT_PAYLOAD_SHAPES: Readonly<
   Record<AffiliateAgentRole, readonly string[]>
@@ -789,6 +792,7 @@ const ROLE_PROMPT_INSTRUCTIONS: Readonly<
     "Extract officialActionUrl from an evidenced link with an ATTRIBUTE selector and ABSOLUTE_URL transform. An outbound registration link in stored evidence does not require a new capture just to preserve that link.",
     "Build only the closed declarative package shape defined by the mapping contract. Keep live mappings and provider access behind the Gateway. Never submit executable code.",
     "Validate the package before you commit it. Commit only the validated package receipt.",
+    "Set declarative package listingKind to the claim subject listingKind. The Gateway rejects packages whose listing kind differs from the persisted source target kind.",
     ...LEGACY_SPORT_EVIDENCE_INSTRUCTIONS,
     "Use the explicit CONSTANT sportName field only when sportEvidence proves the exact canonical sport union. Include every sport citation's manifest evidence reference in package evidenceRefs.",
     "Every legacy sport repair CONTRACT_GAP must include payload.sportEvidence and all cited evidenceRefs, even when reasonCodes are generic. A sport-related gap must use the matching SPORT_ reason codes. A non-sport gap may carry verified RESOLVED sports and explain the separate obstacle.",
@@ -1491,11 +1495,37 @@ const coveragePlannerSubjectSchema = z
   })
   .strict();
 
+export const affiliateAgentQueuedMappingProducerSubjectSchema = z
+  .object({
+    type: z.literal("MAPPING_PRODUCER"),
+    supplySourceId: identifierSchema,
+    mappingJobId: identifierSchema,
+    listingKind: affiliateAgentListingKindSchema.optional(),
+    pass: z.number().int().min(1).max(3),
+    repairContext: affiliateAgentLegacySportRepairContextSchema.optional(),
+  })
+  .strict();
+export type AffiliateAgentQueuedMappingProducerSubject = z.infer<
+  typeof affiliateAgentQueuedMappingProducerSubjectSchema
+>;
+export const affiliateAgentHistoricalMappingProducerSubjectSchema =
+  affiliateAgentQueuedMappingProducerSubjectSchema;
+export type AffiliateAgentHistoricalMappingProducerSubject = z.infer<
+  typeof affiliateAgentHistoricalMappingProducerSubjectSchema
+>;
+
+const historicalProducerContractVersionSchema = z.union([
+  z.literal(2),
+  z.literal(3),
+]);
+
+
 const mappingProducerSubjectSchema = z
   .object({
     type: z.literal("MAPPING_PRODUCER"),
     supplySourceId: identifierSchema,
     mappingJobId: identifierSchema,
+    listingKind: affiliateAgentListingKindSchema,
     pass: z.number().int().min(1).max(3),
     repairContext: affiliateAgentLegacySportRepairContextSchema.optional(),
   })
@@ -1717,6 +1747,68 @@ const assertSupplyReviewerIdentity = (
 export type AffiliateAgentClaimEnvelope = z.infer<
   typeof affiliateAgentClaimEnvelopeSchema
 >;
+export const affiliateAgentHistoricalProducerClaimEnvelopeSchema = z
+  .object({
+    ...claimEnvelopeBase,
+    role: z.literal("MAPPING_PRODUCER"),
+    queue: z.literal("AFFILIATE_MAPPING"),
+    lane: z.literal("MAPPING_PRODUCTION"),
+    roleContractVersion: historicalProducerContractVersionSchema,
+    promptTemplateVersion: historicalProducerContractVersionSchema,
+    subject: affiliateAgentHistoricalMappingProducerSubjectSchema,
+  })
+  .strict()
+  .superRefine((claim, context) => {
+    addCanonicalByteLimitIssue(
+      claim,
+      AFFILIATE_AGENT_MAX_CLAIM_ENVELOPE_CANONICAL_BYTES,
+      context,
+      [],
+      "Historical producer claim envelope",
+    );
+    if (claim.supplySourceId === null) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Non-coverage claims require a Supply Source.",
+        path: ["supplySourceId"],
+      });
+    }
+    if (claim.lifecycleGeneration === null) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Non-coverage claims require a lifecycle generation.",
+        path: ["lifecycleGeneration"],
+      });
+    }
+    if (
+      claim.supplySourceId !== null
+      && claim.supplySourceId !== claim.subject.supplySourceId
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Claim Supply Source must match the role subject Supply Source.",
+        path: ["supplySourceId"],
+      });
+    }
+  });
+
+export type AffiliateAgentHistoricalProducerClaimEnvelope = z.infer<
+  typeof affiliateAgentHistoricalProducerClaimEnvelopeSchema
+>;
+
+export type AffiliateAgentProducerClaimEnvelopeForHistoricalRead =
+  | AffiliateAgentClaimEnvelope
+  | AffiliateAgentHistoricalProducerClaimEnvelope;
+
+export const parseAffiliateAgentProducerClaimEnvelopeForHistoricalRead = (
+  value: unknown,
+): AffiliateAgentProducerClaimEnvelopeForHistoricalRead | null => {
+  const current = affiliateAgentClaimEnvelopeSchema.safeParse(value);
+  if (current.success) return current.data;
+  const historical = affiliateAgentHistoricalProducerClaimEnvelopeSchema.safeParse(value);
+  return historical.success ? historical.data : null;
+};
+
 
 const affiliateAgentDeclarativePackageFieldNames = [
   "address",
@@ -1776,7 +1868,7 @@ export const affiliateAgentDeclarativePackageSchema = z
   .object({
     schemaVersion: z.literal(1),
     supplySourceId: identifierSchema,
-    listingKind: z.enum(["CLUB", "EVENT", "RENTAL"]),
+    listingKind: affiliateAgentListingKindSchema,
     listUrlRef: identifierSchema.describe("The claim evidenceRef of the listing PAGE_HTML or PAGE_MARKDOWN artifact. The Gateway resolves its stored finalUrl/sourceUrl. Do not supply a raw URL or artifactId; existing stored evidence needs no capture profile."),
     itemSelector: z.string().trim().min(1).max(500),
     fields: z

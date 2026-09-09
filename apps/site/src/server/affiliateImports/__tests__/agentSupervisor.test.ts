@@ -143,6 +143,7 @@ const claimEnvelopeFor = (
           type: request.role,
           supplySourceId: "supply-source-1",
           mappingJobId: "mapping-job-1",
+          listingKind: "EVENT",
           pass: 1,
         },
       };
@@ -2306,7 +2307,9 @@ describe("affiliate agent one-claim supervisor", () => {
   it("rejects offline open-weight execution before queue access or executable publication", async () => {
     const databaseAccess = jest.fn();
     const prisma = new Proxy({} as PrismaClient, {
-      get: () => {
+      get: (_target, property) => {
+        // Dependency construction probes transaction capability without running a query.
+        if (property === "$transaction") return undefined;
         databaseAccess();
         throw new Error("Queue access is forbidden in this test.");
       },

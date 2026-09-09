@@ -16,12 +16,13 @@ import type {
   AffiliateAgentEvidenceManifest,
   AffiliateAgentExecutionClass,
   AffiliateAgentLegacySportRepairContext,
+  AffiliateAgentProducerClaimEnvelopeForHistoricalRead,
   AffiliateAgentRole,
   AffiliateAgentSportEvidence,
   AffiliateAgentTerminalResultEnvelope,
 } from "./agentGatewayContracts";
 import {
-  affiliateAgentClaimEnvelopeSchema,
+  parseAffiliateAgentProducerClaimEnvelopeForHistoricalRead,
   affiliateAgentDeclarativePackageSchema,
   affiliateAgentEvidenceManifestSchema,
   affiliateAgentSportEvidenceSchema,
@@ -35,12 +36,15 @@ import {
   type AffiliateAgentCaptureTextSummary,
 } from "./agentGatewayContracts";
 import {
+  affiliateSupplyContractManifestSchema,
+  type AffiliateSupplyLifecycleCommand,
+} from "./affiliateSupplyLifecycle";
+import {
   affiliateSupplyDatabase,
   createAffiliateSupplyLifecycleAuthority,
   executeAffiliateSupplyLifecycleCommand,
   recordAffiliateAgentWorkerHeartbeat,
 } from './affiliateSupplyPersistence';
-import type { AffiliateSupplyLifecycleCommand } from "./affiliateSupplyLifecycle";
 import type {
   AffiliateSupplyDatabase,
   ExecuteAffiliateSupplyLifecycleCommandInput,
@@ -559,6 +563,8 @@ type ProductionAdapterInput = Readonly<{
   publicUrlResolver?: PublicUrlResolver;
   activationTargetWriter?: ProductionActivationTargetWriterFactory;
 }>;
+type ProducerClaimEnvelopeForRead =
+  AffiliateAgentProducerClaimEnvelopeForHistoricalRead;
 const PRODUCTION_ADAPTER_MAX_SAFE_OUTPUT_BYTES = 16_384;
 
 const PRODUCTION_ADAPTER_MAX_ARTIFACT_BYTES = 8 * 1024 * 1024;
@@ -694,36 +700,139 @@ const verifyProductionArtifact = (
     throw new Error("The command evidence failed its immutable byte, hash, size, or MIME check.");
   }
 };
-const productionActiveContractArtifact = async (
-  input: ProductionAdapterInput,
-  entry: Readonly<{
-    kind: string;
-    artifactId: string;
-    sha256: string;
-    mimeType: string;
-    byteSize: number;
+export type AffiliateAgentActiveSupplyContractArtifactEntry = Readonly<{
+  kind: string;
+  artifactId: string;
+  sha256?: string;
+  mimeType?: string;
+  byteSize?: number;
+}>;
+
+export const AFFILIATE_AGENT_ACTIVE_SUPPLY_CONTRACT_ARTIFACT_PREFIX =
+  "supply-contract:";
+
+const ACTIVE_SUPPLY_CONTRACT_ARTIFACT_ERROR =
+  "The active Supply Contract artifact is not valid.";
+type ParsedAffiliateAgentActiveSupplyContractManifest = z.infer<
+  typeof affiliateSupplyContractManifestSchema
+>;
+
+export const resolveAffiliateAgentActiveSupplyContractArtifact = async (
+  input: Readonly<{
+    prisma: PrismaClient;
+    entry: AffiliateAgentActiveSupplyContractArtifactEntry;
+    maximumBytes?: number;
   }>,
 ): Promise<AffiliateAgentArtifactRead | null> => {
-  if (entry.kind !== "ACTIVE_SUPPLY_CONTRACT") return null;
-  const contractManifests = input.prisma.affiliateSupplyContractManifests;
-  if (!contractManifests?.findFirst) return null;
-  const row = await contractManifests.findFirst({
-    where: {
-      status: "ACTIVE",
-      contractHash: entry.sha256,
-    },
-    select: { contractJson: true },
-  });
-  if (!row) return null;
-  const contract = productionRecord(row.contractJson);
-  const { hash, ...contractPreimage } = contract;
-  if (hash !== entry.sha256 || productionHash(contractPreimage) !== entry.sha256) {
+  const { entry } = input;
+  const isSyntheticHandle = typeof entry.artifactId === "string"
+    && entry.artifactId.startsWith(
+      AFFILIATE_AGENT_ACTIVE_SUPPLY_CONTRACT_ARTIFACT_PREFIX,
+    );
+  if (entry.kind !== "ACTIVE_SUPPLY_CONTRACT") {
+    if (isSyntheticHandle) {
+      throw new Error(ACTIVE_SUPPLY_CONTRACT_ARTIFACT_ERROR);
+    }
     return null;
   }
+
+  const policyHash = entry.artifactId.startsWith(
+    AFFILIATE_AGENT_ACTIVE_SUPPLY_CONTRACT_ARTIFACT_PREFIX,
+  )
+    ? entry.artifactId.slice(
+      AFFILIATE_AGENT_ACTIVE_SUPPLY_CONTRACT_ARTIFACT_PREFIX.length,
+    )
+    : "";
+  if (
+    !/^[a-f0-9]{64}$/.test(policyHash)
+    || entry.artifactId
+      !== `${AFFILIATE_AGENT_ACTIVE_SUPPLY_CONTRACT_ARTIFACT_PREFIX}${policyHash}`
+    || (entry.sha256 !== undefined && entry.sha256 !== policyHash)
+    || (entry.mimeType !== undefined && entry.mimeType !== "application/json")
+    || (entry.byteSize !== undefined
+      && (!Number.isSafeInteger(entry.byteSize) || entry.byteSize < 0))
+    || (input.maximumBytes !== undefined
+      && (!Number.isSafeInteger(input.maximumBytes) || input.maximumBytes < 0))
+  ) {
+    throw new Error(ACTIVE_SUPPLY_CONTRACT_ARTIFACT_ERROR);
+  }
+
+  const prismaWithContractManifests = input.prisma as unknown as {
+    affiliateSupplyContractManifests?: {
+      findMany?: (args: unknown) => Promise<unknown>;
+    };
+  };
+  const contractManifests = prismaWithContractManifests.affiliateSupplyContractManifests;
+  if (!contractManifests || typeof contractManifests.findMany !== "function") {
+    throw new Error(ACTIVE_SUPPLY_CONTRACT_ARTIFACT_ERROR);
+  }
+
+  let rows: unknown;
+  try {
+    rows = await contractManifests.findMany({
+      where: { status: "ACTIVE" },
+      select: {
+        version: true,
+        rolloutCohort: true,
+        status: true,
+        contractHash: true,
+        contractJson: true,
+      },
+    });
+  } catch {
+    throw new Error(ACTIVE_SUPPLY_CONTRACT_ARTIFACT_ERROR);
+  }
+  if (!Array.isArray(rows)) {
+    throw new Error(ACTIVE_SUPPLY_CONTRACT_ARTIFACT_ERROR);
+  }
+
+  const matches: ParsedAffiliateAgentActiveSupplyContractManifest[] = [];
+  try {
+    for (const row of rows) {
+      if (row === null || typeof row !== "object" || Array.isArray(row)) {
+        throw new Error(ACTIVE_SUPPLY_CONTRACT_ARTIFACT_ERROR);
+      }
+      const record = productionRecord(row);
+      const manifest = affiliateSupplyContractManifestSchema.parse({
+        schemaVersion: 1,
+        version: record.version,
+        rolloutCohort: record.rolloutCohort,
+        status: record.status,
+        supplyContract: record.contractJson,
+        hash: record.contractHash,
+      });
+      if (manifest.status !== "ACTIVE") continue;
+      if (
+        manifest.supplyContract.version !== manifest.version
+        || ("rolloutCohort" in manifest.supplyContract
+          && manifest.supplyContract.rolloutCohort !== manifest.rolloutCohort)
+      ) {
+        throw new Error(ACTIVE_SUPPLY_CONTRACT_ARTIFACT_ERROR);
+      }
+      if (manifest.supplyContract.hash === policyHash) {
+        matches.push(manifest);
+      }
+    }
+  } catch {
+    throw new Error(ACTIVE_SUPPLY_CONTRACT_ARTIFACT_ERROR);
+  }
+  if (matches.length !== 1) {
+    throw new Error(ACTIVE_SUPPLY_CONTRACT_ARTIFACT_ERROR);
+  }
+
+  const { hash: _policyHash, ...contractPreimage } =
+    matches[0]!.supplyContract;
   const bytes = Buffer.from(
     canonicalizeAffiliateAgentValue(contractPreimage),
     "utf8",
   );
+  if (
+    productionHash(contractPreimage) !== policyHash
+    || (entry.byteSize !== undefined && entry.byteSize !== bytes.byteLength)
+    || (input.maximumBytes !== undefined && bytes.byteLength > input.maximumBytes)
+  ) {
+    throw new Error(ACTIVE_SUPPLY_CONTRACT_ARTIFACT_ERROR);
+  }
   return {
     bytes,
     mimeType: "application/json",
@@ -732,6 +841,7 @@ const productionActiveContractArtifact = async (
     finalUrl: null,
   };
 };
+
 type ProductionGatewayCommandContext = Readonly<{
   demand: Readonly<{
     id: string;
@@ -944,7 +1054,7 @@ const productionGatewayCommandArtifact = async (
 
 const productionEvidenceArtifact = async (
   input: ProductionAdapterInput,
-  claim: AffiliateAgentClaimEnvelope,
+  claim: ProducerClaimEnvelopeForRead,
   evidenceRef: string,
 ): Promise<AffiliateAgentArtifactRead> => {
   const entry = claim.evidenceManifest.entries.find(
@@ -953,7 +1063,11 @@ const productionEvidenceArtifact = async (
   if (!entry) {
     throw new Error(`The command evidence reference ${evidenceRef} is not in the claim manifest.`);
   }
-  const artifact = await productionActiveContractArtifact(input, entry)
+  const artifact = await resolveAffiliateAgentActiveSupplyContractArtifact({
+    prisma: input.prisma,
+    entry,
+    maximumBytes: PRODUCTION_ADAPTER_MAX_ARTIFACT_BYTES,
+  })
     ?? await productionGatewayCommandArtifact(input, entry)
     ?? await input.artifacts.readImmutable({
       fileId: entry.artifactId,
@@ -966,7 +1080,7 @@ const productionEvidenceArtifact = async (
 export type AffiliateAgentLegacySportRepairVerificationInput = Readonly<{
   prisma: Pick<PrismaClient, "sports">;
   artifacts: AffiliateAgentArtifactStore;
-  claim: AffiliateAgentClaimEnvelope;
+  claim: ProducerClaimEnvelopeForRead,
   sportEvidence: AffiliateAgentSportEvidence;
   resultKind: "REVIEW_REQUIRED" | "HUMAN_REVIEW_REQUIRED";
   reasonCodes?: readonly string[];
@@ -981,7 +1095,7 @@ const legacySportRepairEvidenceError = (
   safeMessage: message,
 });
 const legacySportRepairContextFor = (
-  claim: AffiliateAgentClaimEnvelope,
+  claim: ProducerClaimEnvelopeForRead,
 ): AffiliateAgentLegacySportRepairContext => {
   if (claim.role === "MAPPING_PRODUCER") {
     if (claim.subject.repairContext?.kind === "LEGACY_SPORT_REPAIR") {
@@ -1125,7 +1239,7 @@ export const verifyAffiliateAgentLegacySportRepair = async (
 
 const productionEvidence = async (
   input: ProductionAdapterInput,
-  claim: AffiliateAgentClaimEnvelope,
+  claim: ProducerClaimEnvelopeForRead,
   evidenceRef: string,
 ): Promise<Readonly<{
   sourceUrl: string | null;
@@ -1649,7 +1763,7 @@ const persistProductionDurableEvidence = async (
   transaction: Prisma.TransactionClient,
   claim: AffiliateAgentClaimEnvelope,
   evidenceRefs: readonly string[],
-): Promise<void> => {
+): Promise<ProductionClaimArtifact> => {
   const entries = await Promise.all(evidenceRefs.map(async (evidenceRef) => {
     const artifact = await productionEvidenceArtifact(input, claim, evidenceRef);
     const bytes = Buffer.from(artifact.bytes);
@@ -1672,13 +1786,19 @@ const persistProductionDurableEvidence = async (
     },
     "The durable mapping evidence",
   );
+  const durableArtifact = productionClaimArtifactFor(
+    claim,
+    "DURABLE_EVIDENCE",
+    durableBytes,
+  );
   await persistProductionClaimArtifact(
     input,
     transaction,
     claim,
-    productionClaimArtifactFor(claim, "DURABLE_EVIDENCE", durableBytes),
+    durableArtifact,
     durableBytes,
   );
+  return durableArtifact;
 };
 
 
@@ -2747,7 +2867,12 @@ const assertLegacySportRepairApprovalFresh = async (
   ) {
     throw legacySportRepairEvidenceError("The producer claim envelope is not bound to its persisted hash.");
   }
-  const producerEnvelope = affiliateAgentClaimEnvelopeSchema.parse(producerClaimRow.claimEnvelopeJson);
+  const producerEnvelope = parseAffiliateAgentProducerClaimEnvelopeForHistoricalRead(
+    producerClaimRow.claimEnvelopeJson,
+  );
+  if (!producerEnvelope || producerEnvelope.role !== "MAPPING_PRODUCER") {
+    throw legacySportRepairEvidenceError("The producer claim envelope is invalid.");
+  }
   if (
     producerClaimRow.role !== producerEnvelope.role
     || producerClaimRow.claimGeneration !== producerEnvelope.claimGeneration
@@ -2873,7 +2998,7 @@ const productionLifecycleEffect = (
 };
 
 const productionRepairEvidenceManifestFor = (
-  producerEnvelope: AffiliateAgentClaimEnvelope,
+  producerEnvelope: ProducerClaimEnvelopeForRead,
   reviewerEnvelope: AffiliateAgentClaimEnvelope,
 ): AffiliateAgentEvidenceManifest => {
   const entriesByRef = new Map<string, AffiliateAgentEvidenceManifest["entries"][number]>();
@@ -2904,12 +3029,12 @@ type ProductionProducerRepairContext = Readonly<{
     AffiliateAgentClaimEnvelope["subject"],
     { type: "SUPPLY_REVIEWER" }
   >;
-  producerEnvelope: AffiliateAgentClaimEnvelope;
+  producerEnvelope: ProducerClaimEnvelopeForRead,
   mappingJobId: string;
 }>;
 
 const assertProductionProducerRepairEnvelope = (
-  producerEnvelope: AffiliateAgentClaimEnvelope,
+  producerEnvelope: ProducerClaimEnvelopeForRead,
   reviewerSubject: Extract<
     AffiliateAgentClaimEnvelope["subject"],
     { type: "SUPPLY_REVIEWER" }
@@ -2969,14 +3094,28 @@ const productionProducerRepairContext = async (
   if (!producerClaim) {
     throw new Error("The producer claim for this repair was not found.");
   }
-  const producerEnvelope = affiliateAgentClaimEnvelopeSchema.parse(
+  if (
+    hashAffiliateAgentValue(producerClaim.claimEnvelopeJson) !== producerClaim.claimEnvelopeHash
+    || producerClaim.id !== reviewerSubject.producerClaimId
+  ) {
+    throw new Error("The producer claim envelope is not bound to its persisted hash.");
+  }
+  const producerEnvelope = parseAffiliateAgentProducerClaimEnvelopeForHistoricalRead(
     producerClaim.claimEnvelopeJson,
   );
+  if (!producerEnvelope || producerEnvelope.role !== "MAPPING_PRODUCER") {
+    throw new Error("The producer claim envelope is invalid.");
+  }
+  if (
+    producerClaim.role !== producerEnvelope.role
+    || producerClaim.claimGeneration !== producerEnvelope.claimGeneration
+    || producerClaim.workerId !== producerEnvelope.workerId
+    || producerClaim.invocationId !== producerEnvelope.invocationId
+  ) {
+    throw new Error("The producer claim row is not bound to its claim envelope.");
+  }
   assertProductionProducerRepairEnvelope(producerEnvelope, reviewerSubject);
-  const producerSubject = producerEnvelope.subject as Extract<
-    AffiliateAgentClaimEnvelope["subject"],
-    { type: "MAPPING_PRODUCER" }
-  >;
+  const producerSubject = producerEnvelope.subject;
   const mappingJob = await input.prisma.affiliateSourceMappingJobs.findUnique({
     where: { id: producerSubject.mappingJobId },
   });
@@ -3271,7 +3410,7 @@ const assertProductionMappingPackage: (
 
 const extractProductionValidationCandidates = (
   candidatePackage: ProductionValidationCommand["data"]["candidatePackage"],
-  claim: AffiliateAgentClaimEnvelope,
+  claim: ProducerClaimEnvelopeForRead,
   listEvidence: Readonly<{
     sourceUrl: string | null;
     finalUrl: string | null;
@@ -3468,7 +3607,7 @@ const persistProductionValidation = async (
     validationArtifact,
     validationBytes,
   );
-  await persistProductionDurableEvidence(
+  const durableEvidenceArtifact = await persistProductionDurableEvidence(
     input,
     transaction,
     claim,
@@ -3494,9 +3633,11 @@ const persistProductionValidation = async (
           validationMetadata: {
             ...validation.validationMetadata,
             deterministicValidationArtifact: validationArtifact,
+            durableEvidenceArtifact,
           },
           validationOutput: validation.validationOutput,
           deterministicValidationArtifact: validationArtifact,
+          durableEvidenceArtifact,
           claimId: claim.claimId,
           claimGeneration: claim.claimGeneration,
           invocationId: claim.invocationId,
@@ -3655,22 +3796,32 @@ const productionMappingKindFrom = (
 ): ProductionMappingKind | null =>
   PRODUCTION_MAPPING_KINDS.find((kind) => kind === value) ?? null;
 
+const productionSourceKindError = (): AffiliateAgentGatewayError => new AffiliateAgentGatewayError({
+  code: "COMMAND_SCHEMA_INVALID",
+  isRetryable: false,
+  safeMessage: "The declarative package listing kind does not match the source target kind.",
+});
+
 const assertProductionSourceKind = (
   source: Record<string, unknown>,
   candidatePackage: ProductionCandidatePackageRecord,
+  expectedListingKind?: unknown,
 ): ProductionMappingKind => {
   const sourceKind = productionMappingKindFrom(source.targetKind);
-  if (sourceKind === null) {
-    throw new Error("The scrape source has an unsupported target kind.");
-  }
   const packageKind = productionMappingKindFrom(candidatePackage.listingKind);
-  if (packageKind === null) {
-    throw new Error("The declarative package has an unsupported listing kind.");
-  }
-  if (sourceKind !== packageKind) {
-    throw new Error(
-      "The declarative package listing kind does not match the scrape source target kind.",
-    );
+  const expectedKind = expectedListingKind === undefined
+    ? null
+    : productionMappingKindFrom(expectedListingKind);
+  if (
+    sourceKind === null
+    || packageKind === null
+    || (
+      expectedListingKind !== undefined
+      && (expectedKind === null || expectedKind !== packageKind)
+    )
+    || sourceKind !== packageKind
+  ) {
+    throw productionSourceKindError();
   }
   return packageKind;
 };
@@ -3766,7 +3917,11 @@ const buildProductionCommitMapping = async (
   if (!listUrlRef) throw new Error("The committed package has no list URL evidence reference.");
   const listEvidence = await productionEvidence(input, claim, listUrlRef);
   const listUrl = productionUrlFromEvidence(listEvidence);
-  assertProductionSourceKind(source, parsedCandidatePackage);
+  assertProductionSourceKind(
+    source,
+    parsedCandidatePackage,
+    "listingKind" in claim.subject ? claim.subject.listingKind : undefined,
+  );
   const mapping = productionMappingFor(parsedCandidatePackage, listUrl);
   const mappingFields = mapping.fields;
   if (!mappingFields.title || !mappingFields.officialActionUrl) {
@@ -3962,7 +4117,11 @@ export const createProductionAffiliateAgentGatewayAdapters = (
           });
           if (!source) throw new Error("The package Supply Source does not exist.");
           const scrapeSource = await findProductionValidationSource(transaction, claim);
-          assertProductionSourceKind(scrapeSource, candidatePackage);
+          assertProductionSourceKind(
+            scrapeSource,
+            candidatePackage,
+            "listingKind" in claim.subject ? claim.subject.listingKind : undefined,
+          );
           const validation = await prepareProductionValidation(
             input,
             transaction,

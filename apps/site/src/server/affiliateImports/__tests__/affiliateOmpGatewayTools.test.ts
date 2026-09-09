@@ -57,7 +57,7 @@ const claimFor = (role: "MAPPING_PRODUCER" | "SUPPLY_REVIEWER"): AffiliateAgentC
     role,
     queue: "AFFILIATE_MAPPING",
     lane: "MAPPING_PRODUCTION",
-    subject: { type: role, supplySourceId: "supply-1", mappingJobId: "mapping-1", pass: 1 },
+    subject: { type: role, supplySourceId: "supply-1", mappingJobId: "mapping-1", listingKind: "EVENT", pass: 1 },
   } : {
     ...common,
     role,

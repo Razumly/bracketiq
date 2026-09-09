@@ -14,6 +14,12 @@ import {
 } from "../agentGatewayContracts";
 import { buildAffiliateSportsCatalogSnapshot } from "../affiliateSportsCatalog";
 import {
+  buildAffiliateSupplyContractManifest,
+  type AffiliateSupplyContractManifest,
+} from "../affiliateSupplyLifecycle";
+import {
+  AFFILIATE_AGENT_ACTIVE_SUPPLY_CONTRACT_ARTIFACT_PREFIX,
+  resolveAffiliateAgentActiveSupplyContractArtifact,
   verifyAffiliateAgentLegacySportRepair,
   createProductionAffiliateAgentGatewayAdapters,
   type AffiliateAgentCommandAdapters,
@@ -382,6 +388,7 @@ const packageAdapterFixtureFor = (initialMetadata: PackageEvidenceMetadata) => {
       type: "MAPPING_PRODUCER" as const,
       supplySourceId: "supply-source-package",
       mappingJobId: "mapping-job-package",
+      listingKind: "EVENT" as const,
       pass: 1,
     },
     evidenceManifest: {
@@ -575,8 +582,8 @@ const legacyApprovalFixture = () => {
     supplyContractVersion: 1,
     supplyContractHash: "2".repeat(64),
     roleContractHash: "3".repeat(64),
-    roleContractVersion: AFFILIATE_AGENT_ROLE_CONTRACTS.MAPPING_PRODUCER.version,
-    promptTemplateVersion: AFFILIATE_AGENT_ROLE_CONTRACTS.MAPPING_PRODUCER.promptTemplateVersion,
+    roleContractVersion: 3,
+    promptTemplateVersion: 3,
     promptTemplateHash: "4".repeat(64),
     executionClass: "PRODUCTION_OMP" as const,
     workerId: "producer-worker-1",
@@ -710,8 +717,14 @@ const legacyApprovalFixture = () => {
   return {
     candidatePackage,
     prisma,
+    producerEnvelope,
     reviewerClaim,
     result,
+    setProducerEnvelope: (next: Record<string, unknown>) => {
+      producerClaimRow.claimEnvelopeJson =
+        next as typeof producerClaimRow.claimEnvelopeJson;
+      producerClaimRow.claimEnvelopeHash = hashAffiliateAgentValue(next);
+    },
     setCurrentCatalog: (nextCatalog: typeof evidence.catalog) => {
       currentCatalog = nextCatalog;
     },
@@ -974,6 +987,40 @@ describe("production Affiliate Agent activation effect", () => {
     expect(lifecycleCommand).not.toHaveBeenCalled();
     expect(fixture.activationJobUpsert).not.toHaveBeenCalled();
   });
+
+  it("rejects hash-consistent historical producer identity tampering before lifecycle effect", async () => {
+    const lifecycleCommand = jest
+      .spyOn(affiliateSupplyPersistence, "executeAffiliateSupplyLifecycleCommand")
+      .mockResolvedValue({} as AffiliateSupplyLifecycleCommandResult);
+    const malformedOverrides: readonly Readonly<Record<string, unknown>>[] = [
+      { supplySourceId: "other-source" },
+      { supplySourceId: null },
+      { lifecycleGeneration: null },
+    ];
+
+    for (const override of malformedOverrides) {
+      const fixture = legacyApprovalFixture();
+      fixture.setProducerEnvelope({
+        ...fixture.producerEnvelope,
+        ...override,
+      });
+      const adapters = createProductionAffiliateAgentGatewayAdapters({
+        prisma: fixture.prisma,
+        artifacts: fixture.artifacts,
+        storage: {} as StorageProvider,
+      });
+
+      await expect(adapters.terminalEffects.APPROVED.execute({
+        receiptId: "approval-repair-identity-tamper",
+        claim: fixture.reviewerClaim,
+        result: fixture.result,
+      })).rejects.toMatchObject({
+        code: "EVIDENCE_REFERENCE_NOT_PERMITTED",
+        isRetryable: false,
+      });
+    }
+    expect(lifecycleCommand).not.toHaveBeenCalled();
+  });
   it("binds producer repair jobs to the committing lifecycle generation", async () => {
     const packageHash = "a".repeat(64);
     const repairContext = {
@@ -1001,8 +1048,8 @@ describe("production Affiliate Agent activation effect", () => {
       supplyContractVersion: 1,
       supplyContractHash: "c".repeat(64),
       roleContractHash: "d".repeat(64),
-      roleContractVersion: AFFILIATE_AGENT_ROLE_CONTRACTS.MAPPING_PRODUCER.version,
-      promptTemplateVersion: AFFILIATE_AGENT_ROLE_CONTRACTS.MAPPING_PRODUCER.promptTemplateVersion,
+      roleContractVersion: 3,
+      promptTemplateVersion: 3,
       promptTemplateHash: "e".repeat(64),
       executionClass: "PRODUCTION_OMP" as const,
       workerId: "producer-worker-1",
@@ -1042,10 +1089,20 @@ describe("production Affiliate Agent activation effect", () => {
       .mockResolvedValueOnce({ id: "supply-source-1", lifecycleGeneration: 8 })
       .mockResolvedValueOnce({ id: "supply-source-1", lifecycleGeneration: 10 });
     const repairJobUpsert = jest.fn(async () => ({ id: "repair-job-1" }));
+    const producerClaimRow = {
+      id: producerEnvelope.claimId,
+      role: producerEnvelope.role,
+      claimGeneration: producerEnvelope.claimGeneration,
+      workerId: producerEnvelope.workerId,
+      invocationId: producerEnvelope.invocationId,
+      workspaceId: producerEnvelope.workspaceId,
+      claimEnvelopeJson: producerEnvelope,
+      claimEnvelopeHash: hashAffiliateAgentValue(producerEnvelope),
+    };
     const prisma = {
       affiliateSupplySources: { findUnique: supplySourceFindUnique },
       affiliateAgentGatewayClaims: {
-        findUnique: jest.fn(async () => ({ claimEnvelopeJson: producerEnvelope })),
+        findUnique: jest.fn(async () => producerClaimRow),
       },
       affiliateSourceMappingJobs: {
         findUnique: jest.fn(async () => ({
@@ -1797,6 +1854,7 @@ describe("production Affiliate Agent capture adapter", () => {
         supplySourceId: "supply-source-1",
         mappingJobId: "mapping-job-1",
         pass: 1,
+        listingKind: "EVENT",
       },
       evidenceManifest: {
         hash: "c".repeat(64),
@@ -1856,9 +1914,11 @@ describe("production Affiliate Agent capture adapter", () => {
         },
       },
       receiptId: "mismatched-kind-receipt",
-    })).rejects.toThrow(
-      "The declarative package listing kind does not match the scrape source target kind.",
-    );
+    })).rejects.toMatchObject({
+      code: "COMMAND_SCHEMA_INVALID",
+      isRetryable: false,
+      safeMessage: "The declarative package listing kind does not match the source target kind.",
+    });
   });
 
 
@@ -2057,5 +2117,132 @@ describe("production Affiliate Agent capture adapter", () => {
 
     await expect(captureAdapterFor(fixture).recover(operationKey))
       .rejects.toBe(error);
+  });
+});
+describe("production active Supply Contract artifact resolver", () => {
+  const activeManifestFor = (): AffiliateSupplyContractManifest =>
+    buildAffiliateSupplyContractManifest({
+      version: 7,
+      rolloutCohort: "TEST-COHORT",
+      status: "ACTIVE",
+      supplyContract: {
+        schemaVersion: 1,
+        version: 7,
+        rolloutCohort: "TEST-COHORT",
+        hash: undefined,
+        freshnessWindows: [{ sourceProfile: "EVENT", maximumAgeHours: 24 }],
+        targets: [{
+          marketKey: "test-market",
+          sourceProfile: "EVENT",
+          minimumFreshPublishedSupply: 1,
+        }],
+        requiredMappingEvidenceKinds: ["PAGE_HTML"],
+        requiredLifecycleEvidenceKinds: ["DURABLE_SOURCE_EVIDENCE"],
+      },
+    });
+
+  const rowFor = (manifest: AffiliateSupplyContractManifest) => ({
+    version: manifest.version,
+    rolloutCohort: manifest.rolloutCohort,
+    status: manifest.status,
+    contractHash: manifest.hash,
+    contractJson: manifest.supplyContract,
+  });
+
+  const bytesFor = (manifest: AffiliateSupplyContractManifest): Buffer => {
+    const { hash: _policyHash, ...contractPreimage } = manifest.supplyContract;
+    return Buffer.from(
+      canonicalizeAffiliateAgentValue(contractPreimage),
+      "utf8",
+    );
+  };
+
+  const prismaFor = (rows: readonly unknown[]) => ({
+    affiliateSupplyContractManifests: {
+      findMany: jest.fn(async () => rows),
+    },
+  }) as unknown as PrismaClient;
+
+  it("resolves the policy hash handle against its active manifest", async () => {
+    const manifest = activeManifestFor();
+    const bytes = bytesFor(manifest);
+    const entry = {
+      kind: "ACTIVE_SUPPLY_CONTRACT",
+      artifactId: `${AFFILIATE_AGENT_ACTIVE_SUPPLY_CONTRACT_ARTIFACT_PREFIX}${manifest.supplyContract.hash}`,
+      sha256: manifest.supplyContract.hash,
+      mimeType: "application/json",
+      byteSize: bytes.byteLength,
+    };
+
+    await expect(resolveAffiliateAgentActiveSupplyContractArtifact({
+      prisma: prismaFor([rowFor(manifest)]),
+      entry,
+      maximumBytes: 8 * 1024 * 1024,
+    })).resolves.toEqual({
+      bytes,
+      mimeType: "application/json",
+      byteSize: bytes.byteLength,
+      sourceUrl: null,
+      finalUrl: null,
+    });
+    expect(manifest.hash).not.toBe(manifest.supplyContract.hash);
+  });
+
+  it("rejects synthetic handles with invalid manifest binding metadata", async () => {
+    const manifest = activeManifestFor();
+    const bytes = bytesFor(manifest);
+    const artifactId = `${AFFILIATE_AGENT_ACTIVE_SUPPLY_CONTRACT_ARTIFACT_PREFIX}${manifest.supplyContract.hash}`;
+    const baseEntry = {
+      kind: "ACTIVE_SUPPLY_CONTRACT",
+      artifactId,
+      sha256: manifest.supplyContract.hash,
+      mimeType: "application/json",
+      byteSize: bytes.byteLength,
+    };
+    const rows = [rowFor(manifest)];
+
+    await expect(resolveAffiliateAgentActiveSupplyContractArtifact({
+      prisma: prismaFor(rows),
+      entry: { ...baseEntry, sha256: "a".repeat(64) },
+    })).rejects.toThrow("The active Supply Contract artifact is not valid.");
+    await expect(resolveAffiliateAgentActiveSupplyContractArtifact({
+      prisma: prismaFor(rows),
+      entry: { ...baseEntry, mimeType: "text/plain" },
+    })).rejects.toThrow("The active Supply Contract artifact is not valid.");
+    await expect(resolveAffiliateAgentActiveSupplyContractArtifact({
+      prisma: prismaFor(rows),
+      entry: { ...baseEntry, byteSize: bytes.byteLength + 1 },
+    })).rejects.toThrow("The active Supply Contract artifact is not valid.");
+    await expect(resolveAffiliateAgentActiveSupplyContractArtifact({
+      prisma: prismaFor(rows),
+      entry: { ...baseEntry, kind: "COMMITTED_PACKAGE" },
+    })).rejects.toThrow("The active Supply Contract artifact is not valid.");
+  });
+
+  it("rejects ambiguous and corrupted active manifests", async () => {
+    const manifest = activeManifestFor();
+    const entry = {
+      kind: "ACTIVE_SUPPLY_CONTRACT",
+      artifactId: `${AFFILIATE_AGENT_ACTIVE_SUPPLY_CONTRACT_ARTIFACT_PREFIX}${manifest.supplyContract.hash}`,
+      sha256: manifest.supplyContract.hash,
+      mimeType: "application/json",
+      byteSize: bytesFor(manifest).byteLength,
+    };
+
+    await expect(resolveAffiliateAgentActiveSupplyContractArtifact({
+      prisma: prismaFor([rowFor(manifest), rowFor(manifest)]),
+      entry,
+    })).rejects.toThrow("The active Supply Contract artifact is not valid.");
+
+    const corruptHash = manifest.hash[0] === "0"
+      ? `1${manifest.hash.slice(1)}`
+      : `0${manifest.hash.slice(1)}`;
+    await expect(resolveAffiliateAgentActiveSupplyContractArtifact({
+      prisma: prismaFor([{
+        ...rowFor(manifest),
+        contractHash: corruptHash,
+      }]),
+      entry,
+    })).rejects.toThrow("The active Supply Contract artifact is not valid.");
   });
 });

@@ -56,10 +56,11 @@ const runSupervisorCli = (...arguments_: readonly string[]) => spawnSync(
 );
 const serverWithPayload = async (
   payload: unknown,
+  statusCode = 200,
 ): Promise<Readonly<{ server: ReturnType<typeof createHttpServer>; address: string }>> => {
   const server = createHttpServer((_request, response) => {
     const body = JSON.stringify(payload);
-    response.writeHead(200, {
+    response.writeHead(statusCode, {
       "content-type": "application/json",
       "content-length": Buffer.byteLength(body),
     });
@@ -364,6 +365,33 @@ describe("affiliate agent supervisor CLI", () => {
       await expect(gateway.perform(artifactReadRequest)).rejects.toMatchObject({
         code: "INTERNAL_ERROR",
         isRetryable: true,
+      });
+    } finally {
+      await new Promise<void>((resolvePromise) => server.close(() => resolvePromise()));
+    }
+  });
+
+  it.each([
+    { statusCode: 500, isRetryable: false },
+    { statusCode: 409, isRetryable: true },
+  ])("preserves explicit retryability $isRetryable for HTTP $statusCode", async ({
+    statusCode,
+    isRetryable,
+  }) => {
+    const { server, address } = await serverWithPayload({
+      error: {
+        code: "INTERNAL_ERROR",
+        safeMessage: "The validation command failed.",
+        isRetryable,
+      },
+    }, statusCode);
+    try {
+      const gateway = new AffiliateAgentHttpGateway(address, {
+        roleCredential: "role-credential",
+      });
+      await expect(gateway.perform(artifactReadRequest)).rejects.toMatchObject({
+        code: "INTERNAL_ERROR",
+        isRetryable,
       });
     } finally {
       await new Promise<void>((resolvePromise) => server.close(() => resolvePromise()));

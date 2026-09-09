@@ -115,6 +115,7 @@ const AFFILIATE_AGENT_GATEWAY_ERROR_CODES: Record<AffiliateAgentGatewayErrorCode
   SUPPLY_CONTRACT_STALE: true,
   DEPLOYMENT_CONTRACT_STALE: true,
   COMMAND_NOT_PERMITTED: true,
+  COMMAND_SCHEMA_INVALID: true,
   ARTIFACT_NOT_PERMITTED: true,
   ARTIFACT_INTEGRITY_FAILED: true,
   RESULT_SCHEMA_INVALID: true,
@@ -648,7 +649,7 @@ const gatewayErrorFrom = (
   return new AffiliateAgentGatewayError({
     code: gatewayErrorCode(payload.code, status),
     isRetryable: status !== 401
-      && (payload.isRetryable === true || status >= 500),
+      && (typeof payload.isRetryable === "boolean" ? payload.isRetryable : status >= 500),
     safeMessage: typeof payload.safeMessage === "string"
       ? payload.safeMessage
       : `The affiliate gateway returned HTTP ${status}.`,

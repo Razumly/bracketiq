@@ -105,6 +105,174 @@ describe('affiliate supply lifecycle assessment', () => {
     expect(assessment.isAutomationEnabled).toBe(false);
     expect(assessment.reasonCodes).toEqual(expect.arrayContaining(['MAPPING_PACKAGE_VALID']));
   });
+  it('treats ordinary producer REVIEW_REQUIRED as independent mapping review', () => {
+    const assessment = deriveAffiliateSupplyAssessment(mappedSnapshot({
+      source: {
+        ...mappedSnapshot().source,
+        status: 'REVIEW_REQUIRED',
+        isAutomationOnHold: true,
+        automationHoldReason: 'LEGACY_SPORT_REPAIR',
+      },
+    }));
+
+    expect(assessment.automationHoldReason).toBe('LEGACY_SPORT_REPAIR');
+    expect(assessment.stage).toBe('MAPPED');
+    expect(assessment.outcome).toBeNull();
+    expect(assessment.reasonCodes).not.toContain('HUMAN_REVIEW_REQUIRED');
+
+    const decision = validateAffiliateSupplyCommand({
+      command: 'APPROVE',
+      authority: 'SUPPLY_REVIEWER',
+      expectedLifecycleGeneration: 4,
+      currentLifecycleGeneration: 4,
+      activeContractVersion: contract.version,
+      activeContractHash: contract.hash,
+      commandContractVersion: contract.version,
+      commandContractHash: contract.hash,
+      evidenceRefs: ['review:ordinary-mapping'],
+      assessment,
+    });
+
+    expect(decision.isAccepted).toBe(true);
+    expect(decision.nextStage).toBe('MAPPED');
+  });
+
+  it('keeps an explicit HUMAN_REVIEW_REQUIRED source out of mapping approval', () => {
+    const assessment = deriveAffiliateSupplyAssessment(mappedSnapshot({
+      source: { ...mappedSnapshot().source, status: 'HUMAN_REVIEW_REQUIRED' },
+    }));
+
+    expect(assessment.stage).toBe('HUMAN_REVIEW_REQUIRED');
+    expect(assessment.outcome).toBe('HUMAN_REVIEW_REQUIRED');
+
+    const decision = validateAffiliateSupplyCommand({
+      command: 'APPROVE',
+      authority: 'SUPPLY_REVIEWER',
+      expectedLifecycleGeneration: 4,
+      currentLifecycleGeneration: 4,
+      activeContractVersion: contract.version,
+      activeContractHash: contract.hash,
+      commandContractVersion: contract.version,
+      commandContractHash: contract.hash,
+      evidenceRefs: ['review:explicit-human-hold'],
+      assessment,
+    });
+
+    expect(decision.isAccepted).toBe(false);
+    expect(decision.reasonCodes).toContain('APPROVAL_PRECONDITION_FAILED');
+  });
+  it('keeps a historical run from a replaced mapping out of current review readiness', () => {
+    const assessment = deriveAffiliateSupplyAssessment(mappedSnapshot({
+      latestRun: null,
+      historicalRuns: [{
+        id: 'run-v1',
+        status: 'SUCCEEDED',
+        mappingId: 'mapping-v1',
+        finishedAt: new Date('2026-08-21T10:00:00.000Z'),
+        candidateCount: 1,
+        itemCount: 1,
+        evidenceRefs: ['historical-run'],
+      }],
+    }));
+
+    expect(assessment.stage).toBe('MAPPED');
+    expect(assessment.reasonCodes).not.toContain('LATEST_RUN_MAPPING_MISMATCH');
+    expect(assessment.evidenceRefs).not.toContain('historical-run');
+
+    const approval = validateAffiliateSupplyCommand({
+      command: 'APPROVE',
+      authority: 'SUPPLY_REVIEWER',
+      expectedLifecycleGeneration: 4,
+      currentLifecycleGeneration: 4,
+      activeContractVersion: contract.version,
+      activeContractHash: contract.hash,
+      commandContractVersion: contract.version,
+      commandContractHash: contract.hash,
+      evidenceRefs: ['review:historical-replacement'],
+      assessment,
+    });
+    expect(approval.isAccepted).toBe(true);
+    expect(approval.nextStage).toBe('MAPPED');
+  });
+
+  it('still rejects a current run whose mapping lineage is corrupt', () => {
+    const assessment = deriveAffiliateSupplyAssessment(mappedSnapshot({
+      latestRun: {
+        id: 'run-corrupt',
+        status: 'SUCCEEDED',
+        mappingId: 'mapping-v1',
+        finishedAt: new Date('2026-08-22T10:00:00.000Z'),
+        candidateCount: 1,
+        itemCount: 1,
+      },
+    }));
+
+    expect(assessment.stage).toBe('APPROVED');
+    expect(assessment.outcome).toBe('REPAIR_REQUIRED');
+    expect(assessment.invariantViolations).toContain('LATEST_RUN_MAPPING_MISMATCH');
+
+    const approval = validateAffiliateSupplyCommand({
+      command: 'APPROVE',
+      authority: 'SUPPLY_REVIEWER',
+      expectedLifecycleGeneration: 4,
+      currentLifecycleGeneration: 4,
+      activeContractVersion: contract.version,
+      activeContractHash: contract.hash,
+      commandContractVersion: contract.version,
+      commandContractHash: contract.hash,
+      evidenceRefs: ['review:corrupt-current-run'],
+      assessment,
+    });
+    expect(approval.isAccepted).toBe(false);
+    expect(approval.reasonCodes).toContain('APPROVAL_PRECONDITION_FAILED');
+  });
+
+
+  it('does not infer lifecycle evidence from an unbound validation result', () => {
+    const assessment = deriveAffiliateSupplyAssessment(mappedSnapshot({
+      lifecycleEvidenceKinds: [],
+      mapping: {
+        ...mappedSnapshot().mapping!,
+        validationOutput: { isValid: true },
+      },
+      approval: {
+        id: 'approval-unbound',
+        status: 'APPROVED',
+        decision: 'APPROVE',
+        isIndependent: true,
+        reviewerId: 'reviewer-1',
+        reviewedPackageHash: 'package-hash',
+        evidenceRefs: ['review-1'],
+      },
+    }));
+
+    expect(assessment.stage).toBe('APPROVED');
+    expect(assessment.outcome).toBe('REPAIR_REQUIRED');
+    expect(assessment.reasonCodes).toContain('REQUIRED_LIFECYCLE_EVIDENCE_MISSING');
+  });
+  it('rejects approval without current mapping lifecycle proof even when no approval exists', () => {
+    const assessment = deriveAffiliateSupplyAssessment(mappedSnapshot({
+      lifecycleEvidenceKinds: [],
+      approval: null,
+    }));
+    const decision = validateAffiliateSupplyCommand({
+      command: 'APPROVE',
+      authority: 'SUPPLY_REVIEWER',
+      expectedLifecycleGeneration: 0,
+      currentLifecycleGeneration: 0,
+      activeContractVersion: contract.version,
+      activeContractHash: contract.hash,
+      commandContractVersion: contract.version,
+      commandContractHash: contract.hash,
+      evidenceRefs: ['review:approval'],
+      assessment,
+    });
+
+    expect(decision.isAccepted).toBe(false);
+    expect(decision.reasonCodes).toContain('APPROVAL_LIFECYCLE_EVIDENCE_MISSING');
+  });
+
+
 
   it('does not promote a malformed mapping package', () => {
     const assessment = deriveAffiliateSupplyAssessment(mappedSnapshot({

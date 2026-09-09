@@ -91,6 +91,7 @@ export const AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_REASON_CODES = [
   "COMMAND_IN_PROGRESS",
   "COMMAND_PARTIAL_UNRESOLVED",
   "PACKAGE_SOURCE_MISMATCH",
+  "SOURCE_KIND_MISMATCH",
   "PACKAGE_MANIFEST_MISMATCH",
   "PACKAGE_EVIDENCE_OUTSIDE_CLAIM",
 ] as const;
@@ -158,7 +159,6 @@ const diagnosticFromParsed = (
   const isLocalSchema = parsed.stage === "LOCAL_SCHEMA";
   if (
     (isLocalSchema && parsed.errorCode !== "COMMAND_SCHEMA_INVALID")
-    || (!isLocalSchema && parsed.errorCode === "COMMAND_SCHEMA_INVALID")
     || (isLocalSchema && (issueCodes.length === 0 || issuePaths.length === 0))
     || (!isLocalSchema && (issueCodes.length !== 0 || issuePaths.length !== 0))
   ) return null;
@@ -345,6 +345,8 @@ const gatewayReasonCodeFor = (
       return "COMMAND_PARTIAL_UNRESOLVED";
     case "The package Supply Source does not match the claim.":
       return "PACKAGE_SOURCE_MISMATCH";
+    case "The declarative package listing kind does not match the source target kind.":
+      return "SOURCE_KIND_MISMATCH";
     case "The package validation manifest does not match the claim.":
       return "PACKAGE_MANIFEST_MISMATCH";
     case "The package commit does not match a successful validation receipt.":
@@ -366,7 +368,6 @@ export const gatewayCommandRejectionDiagnosticFor = (
 ): AffiliateAgentCommandRejectionDiagnostic | null => {
   if (
     !includes(AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_ERROR_CODES, input.errorCode)
-    || input.errorCode === "COMMAND_SCHEMA_INVALID"
   ) return null;
   return {
     version: AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_VERSION,

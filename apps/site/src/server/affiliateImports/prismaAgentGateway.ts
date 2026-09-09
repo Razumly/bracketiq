@@ -56,11 +56,14 @@ import {
   AFFILIATE_AGENT_ROLE_CONTRACTS,
   AFFILIATE_AGENT_ROLES,
   affiliateAgentClaimEnvelopeSchema,
+  parseAffiliateAgentProducerClaimEnvelopeForHistoricalRead,
   affiliateAgentContractBundleSchema,
   affiliateAgentCommandSchema,
   affiliateAgentDeclarativePackageCommitOutputSchema,
   affiliateAgentDeclarativePackageValidationOutputSchema,
   affiliateAgentEvidenceManifestSchema,
+  affiliateAgentListingKindSchema,
+  affiliateAgentQueuedMappingProducerSubjectSchema,
   affiliateAgentSubjectSchema,
   affiliateAgentTerminalResultEnvelopeSchema,
   canonicalizeAffiliateAgentValue,
@@ -68,15 +71,16 @@ import {
   hashAffiliateAgentValue,
   type AffiliateAgentCaptureMetadata,
   renderAffiliateAgentPrompt,
+  type AffiliateAgentProducerClaimEnvelopeForHistoricalRead,
   type AffiliateAgentClaimEnvelope,
   type AffiliateAgentCommand,
   type AffiliateAgentContractBundle,
   type AffiliateAgentRoleContract,
   type AffiliateAgentSubject,
+  type AffiliateAgentQueuedMappingProducerSubject,
   type AffiliateAgentRole,
   type AffiliateAgentTerminalResultEnvelope,
 } from "./agentGatewayContracts";
-
 import type {
   AffiliateOperationalAlertInput,
   AffiliateOperationalAlertWriter,
@@ -1276,7 +1280,11 @@ export const validateAffiliateAgentClaimForAdmission = async (
   activeRoleContract(bundle, value.role);
   return value;
 };
-const subjectPrimaryId = (subject: AffiliateAgentSubject): string => {
+type ParsedQueuedSubject =
+  | AffiliateAgentSubject
+  | AffiliateAgentQueuedMappingProducerSubject;
+
+const subjectPrimaryId = (subject: ParsedQueuedSubject): string => {
   switch (subject.type) {
     case "COVERAGE_PLANNER":
       return subject.coverageCellId;
@@ -1292,8 +1300,27 @@ const subjectPrimaryId = (subject: AffiliateAgentSubject): string => {
 const parseQueuedSubject = (
   job: AffiliateAgentGatewayJobs,
   role: AffiliateAgentClaimRequest["role"],
-): AffiliateAgentSubject => {
-  const parsed = affiliateAgentSubjectSchema.safeParse(job.subjectJson);
+): ParsedQueuedSubject => {
+  if (
+    role === "MAPPING_PRODUCER"
+    && isGatewayRecord(job.subjectJson)
+    && job.subjectJson.type === "MAPPING_PRODUCER"
+    && job.subjectJson.listingKind !== undefined
+    && !affiliateAgentListingKindSchema.safeParse(job.subjectJson.listingKind).success
+  ) {
+    throw gatewayError(
+      "COMMAND_SCHEMA_INVALID",
+      SOURCE_KIND_MISMATCH_SAFE_MESSAGE,
+    );
+  }
+  const current = affiliateAgentSubjectSchema.safeParse(job.subjectJson);
+  const parsed = current.success
+    ? current
+    : role === "MAPPING_PRODUCER"
+      ? affiliateAgentQueuedMappingProducerSubjectSchema.safeParse(
+          job.subjectJson,
+        )
+      : current;
   if (
     !parsed.success ||
     parsed.data.type !== role ||
@@ -1307,6 +1334,40 @@ const parseQueuedSubject = (
     );
   }
   return parsed.data;
+};
+
+const SOURCE_KIND_MISMATCH_SAFE_MESSAGE =
+  "The declarative package listing kind does not match the source target kind.";
+
+const assertMappingProducerSourceKind = async (
+  transaction: Prisma.TransactionClient,
+  subject: ParsedQueuedSubject,
+): Promise<AffiliateAgentSubject> => {
+  if (subject.type !== "MAPPING_PRODUCER") return subject;
+  const source = await transaction.affiliateSupplySources.findUnique({
+    where: { id: subject.supplySourceId },
+    select: { targetKind: true },
+  });
+  const sourceKind = typeof source?.targetKind === "string"
+    ? source.targetKind.trim().toUpperCase()
+    : null;
+  const parsedSourceKind = affiliateAgentListingKindSchema.safeParse(sourceKind);
+  if (
+    !parsedSourceKind.success
+    || (
+      subject.listingKind !== undefined
+      && parsedSourceKind.data !== subject.listingKind
+    )
+  ) {
+    throw gatewayError(
+      "COMMAND_SCHEMA_INVALID",
+      SOURCE_KIND_MISMATCH_SAFE_MESSAGE,
+    );
+  }
+  return {
+    ...subject,
+    listingKind: parsedSourceKind.data,
+  };
 };
 
 type ClaimTransactionResult =
@@ -1495,7 +1556,6 @@ const parseClaimEvidenceManifest = (
   }
   return result.data;
 };
-
 const parseClaimEnvelope = (
   claim: AffiliateAgentGatewayClaims | null,
 ): AffiliateAgentClaimEnvelope | null => {
@@ -1504,6 +1564,15 @@ const parseClaimEnvelope = (
     claim.claimEnvelopeJson,
   );
   return result.success ? result.data : null;
+};
+
+const parseProducerClaimEnvelope = (
+  claim: AffiliateAgentGatewayClaims | null,
+): AffiliateAgentProducerClaimEnvelopeForHistoricalRead | null => {
+  if (!claim) return null;
+  return parseAffiliateAgentProducerClaimEnvelopeForHistoricalRead(
+    claim.claimEnvelopeJson,
+  );
 };
 
 const parseClaimTerminalResult = (
@@ -1519,7 +1588,7 @@ const parseClaimTerminalResult = (
 type ProducerReviewContext = Readonly<{
   producerClaim: AffiliateAgentGatewayClaims | null;
   producerJob: AffiliateAgentGatewayJobs | null;
-  producerEnvelope: AffiliateAgentClaimEnvelope | null;
+  producerEnvelope: AffiliateAgentProducerClaimEnvelopeForHistoricalRead | null;
   producerResult: AffiliateAgentTerminalResultEnvelope | null;
 }>;
 
@@ -1539,7 +1608,7 @@ const loadProducerReviewContext = async (
   return {
     producerClaim,
     producerJob,
-    producerEnvelope: parseClaimEnvelope(producerClaim),
+    producerEnvelope: parseProducerClaimEnvelope(producerClaim),
     producerResult: parseClaimTerminalResult(producerJob),
   };
 };
@@ -2386,7 +2455,11 @@ const executeClaimTransaction = (
         haltedLanes,
       );
       if (!job) return { kind: "NO_WORK" as const };
-      const subject = parseQueuedSubject(job, input.role);
+      const queuedSubject = parseQueuedSubject(job, input.role);
+      const subject = await assertMappingProducerSourceKind(
+        transaction,
+        queuedSubject,
+      );
       const evidenceManifest = parseClaimEvidenceManifest(job, input.role);
       if (input.role === "SUPPLY_REVIEWER") {
         await assertReviewerProducerAdmission(
@@ -6499,6 +6572,16 @@ const executePackageValidation = async (
     );
   }
   if (
+    authorized.envelope.role === "MAPPING_PRODUCER"
+    && command.data.candidatePackage.listingKind
+      !== authorized.envelope.subject.listingKind
+  ) {
+    throw gatewayError(
+      "COMMAND_SCHEMA_INVALID",
+      SOURCE_KIND_MISMATCH_SAFE_MESSAGE,
+    );
+  }
+  if (
     command.data.evidenceManifestHash !==
     authorized.envelope.evidenceManifest.hash
   ) {
@@ -7931,12 +8014,115 @@ const hasPostEffectCompletionReceipt = async (
   );
 };
 
+const REVIEWER_TERMINAL_EFFECT_FAILURE_CODE =
+  "REVIEWER_TERMINAL_EFFECT_FAILED" as const;
+const REVIEWER_TERMINAL_EFFECT_FAILURE_REASON_CODES = [
+  "LIFECYCLE_GENERATION_STALE",
+  "SUPPLY_CONTRACT_STALE",
+  "COMMAND_AUTHORITY_NOT_PERMITTED",
+  "LEGACY_RECONCILIATION_WRITER_REQUIRED",
+  "REVIEWER_OUTCOME_NOT_PERMITTED",
+  "EVIDENCE_REQUIRED",
+  "APPROVAL_PRECONDITION_FAILED",
+  "APPROVAL_LIFECYCLE_EVIDENCE_MISSING",
+  "ACTIVATION_PRECONDITION_FAILED",
+  "PUBLICATION_PRECONDITION_FAILED",
+  "TARGET_REJECTION_PRECONDITION_FAILED",
+  "REFRESH_PRECONDITION_FAILED",
+  "EMPTY_REFRESH_PRECONDITION_FAILED",
+  "UNCLASSIFIED",
+] as const;
+type ReviewerTerminalEffectFailureReasonCode =
+  (typeof REVIEWER_TERMINAL_EFFECT_FAILURE_REASON_CODES)[number];
+const reviewerTerminalEffectFailureReasonCodeSchema = z.enum(
+  REVIEWER_TERMINAL_EFFECT_FAILURE_REASON_CODES,
+);
+const reviewerTerminalEffectFailureDiagnosticSchema = z
+  .object({
+    code: z.literal(REVIEWER_TERMINAL_EFFECT_FAILURE_CODE),
+    stage: z.enum(["EXECUTE", "RECOVER"]),
+    reasonCodes: reviewerTerminalEffectFailureReasonCodeSchema
+      .array()
+      .min(1)
+      .max(REVIEWER_TERMINAL_EFFECT_FAILURE_REASON_CODES.length),
+  })
+  .strict();
+type ReviewerTerminalEffectFailureDiagnostic = Readonly<{
+  code: typeof REVIEWER_TERMINAL_EFFECT_FAILURE_CODE;
+  stage: "EXECUTE" | "RECOVER";
+  reasonCodes: readonly ReviewerTerminalEffectFailureReasonCode[];
+}>;
+
+const mergeReviewerTerminalEffectFailureDiagnostics = (
+  existing: readonly ReviewerTerminalEffectFailureDiagnostic[],
+  incoming: readonly ReviewerTerminalEffectFailureDiagnostic[],
+): readonly ReviewerTerminalEffectFailureDiagnostic[] => {
+  const merged = [...existing];
+  for (const diagnostic of incoming) {
+    if (
+      merged.some(
+        (candidate) =>
+          candidate.stage === diagnostic.stage
+          && canonicalizeAffiliateAgentValue(candidate.reasonCodes)
+            === canonicalizeAffiliateAgentValue(diagnostic.reasonCodes),
+      )
+    ) {
+      continue;
+    }
+    if (merged.length >= 2) break;
+    merged.push(diagnostic);
+  }
+  return merged;
+};
+
+
+const reviewerTerminalEffectFailureDiagnosticFor = (
+  error: unknown,
+  stage: "EXECUTE" | "RECOVER",
+): ReviewerTerminalEffectFailureDiagnostic => {
+  const message = error instanceof Error ? error.message : "";
+  const prefix = "Affiliate lifecycle command rejected: ";
+  let reasonCodes: ReviewerTerminalEffectFailureReasonCode[] = ["UNCLASSIFIED"];
+  if (
+    message.startsWith(prefix)
+    && message.length <= 2_048
+  ) {
+    const allowed = new Set<string>(
+      REVIEWER_TERMINAL_EFFECT_FAILURE_REASON_CODES,
+    );
+    const parsed = message
+      .slice(prefix.length)
+      .split(",")
+      .map((reason) => reason.trim())
+      .filter((reason): reason is ReviewerTerminalEffectFailureReasonCode =>
+        allowed.has(reason),
+      );
+    if (parsed.length > 0) {
+      reasonCodes = Array.from(new Set(parsed)).slice(
+        0,
+        REVIEWER_TERMINAL_EFFECT_FAILURE_REASON_CODES.length,
+      );
+    }
+  }
+  return {
+    code: REVIEWER_TERMINAL_EFFECT_FAILURE_CODE,
+    stage,
+    reasonCodes,
+  };
+};
+
+type ReviewerTerminalEffectInvocation = Readonly<{
+  recovered: Readonly<Record<string, unknown>> | null;
+  failureDiagnostics: readonly ReviewerTerminalEffectFailureDiagnostic[];
+}>;
+
 type ReviewerTerminalEffectReceiptState =
   | Readonly<{
       kind: "PENDING";
       result: AffiliateAgentReviewerTerminalResult;
       terminalIdempotencyKey: string;
       terminalRequestHash: string;
+      failureDiagnostics?: readonly ReviewerTerminalEffectFailureDiagnostic[];
     }>
   | Readonly<{
       kind: "SUCCEEDED";
@@ -7945,6 +8131,7 @@ type ReviewerTerminalEffectReceiptState =
       safeOutput: Readonly<Record<string, unknown>>;
       terminalIdempotencyKey: string;
       terminalRequestHash: string;
+      failureDiagnostics?: readonly ReviewerTerminalEffectFailureDiagnostic[];
     }>;
 type SucceededReviewerTerminalEffectState = Extract<
   ReviewerTerminalEffectReceiptState,
@@ -7956,6 +8143,7 @@ type ReviewerTerminalEffectReservation = Readonly<{
   isReplayed: boolean;
   terminalIdempotencyKey: string;
   terminalRequestHash: string;
+  failureDiagnostics?: readonly ReviewerTerminalEffectFailureDiagnostic[];
 }>;
 
 const reviewerTerminalEffectRequestHash = (
@@ -8052,6 +8240,20 @@ const assertReviewerTerminalEffectRecord = (
   return value;
 };
 
+const parseReviewerTerminalEffectFailureDiagnostics = (
+  value: unknown,
+): readonly ReviewerTerminalEffectFailureDiagnostic[] | undefined => {
+  if (value === undefined) return undefined;
+  const parsed = z
+    .array(reviewerTerminalEffectFailureDiagnosticSchema)
+    .max(2)
+    .safeParse(value);
+  if (!parsed.success) {
+    throw new Error("Invalid reviewer terminal effect failure diagnostic.");
+  }
+  return parsed.data as readonly ReviewerTerminalEffectFailureDiagnostic[];
+};
+
 const parsePendingReviewerTerminalEffect = (
   value: Record<string, unknown>,
 ): ReviewerTerminalEffectReceiptState => {
@@ -8066,11 +8268,15 @@ const parsePendingReviewerTerminalEffect = (
   ) {
     throw new Error("Invalid pending terminal effect state.");
   }
+  const failureDiagnostics = parseReviewerTerminalEffectFailureDiagnostics(
+    value.failureDiagnostics,
+  );
   return {
     kind: "PENDING",
     result: result.data,
     terminalIdempotencyKey: value.terminalIdempotencyKey,
     terminalRequestHash: value.terminalRequestHash,
+    ...(failureDiagnostics === undefined ? {} : { failureDiagnostics }),
   };
 };
 
@@ -8092,6 +8298,9 @@ const parseSucceededReviewerTerminalEffect = (
   if (!result.success || result.data.role !== "SUPPLY_REVIEWER") {
     throw new Error("Invalid completed terminal effect result.");
   }
+  const failureDiagnostics = parseReviewerTerminalEffectFailureDiagnostics(
+    value.failureDiagnostics,
+  );
   return {
     kind: "SUCCEEDED",
     result: result.data,
@@ -8099,6 +8308,7 @@ const parseSucceededReviewerTerminalEffect = (
     safeOutput: parseBoundedSafeOutput(value.safeOutput, receiptId),
     terminalIdempotencyKey: value.terminalIdempotencyKey,
     terminalRequestHash: value.terminalRequestHash,
+    ...(failureDiagnostics === undefined ? {} : { failureDiagnostics }),
   };
 };
 
@@ -8168,6 +8378,9 @@ const resolveReviewerTerminalEffectReservationReplay = async (
       isReplayed: existing.status === "PENDING",
       terminalIdempotencyKey: existingState.terminalIdempotencyKey,
       terminalRequestHash: existingState.terminalRequestHash,
+      ...(existingState.failureDiagnostics === undefined
+        ? {}
+        : { failureDiagnostics: existingState.failureDiagnostics }),
     };
   }
   throw gatewayError(
@@ -8388,6 +8601,14 @@ const resolveReviewerEffectFinalizationReplay = (
       current.responseJson,
       current.id,
     );
+    if (current.responseHash !== hashAffiliateAgentValue(completed)) {
+      throw gatewayError(
+        "PARTIAL_COMMAND_UNRESOLVED",
+        "The reviewer terminal effect receipt is invalid.",
+        false,
+        current.id,
+      );
+    }
     if (
       completed.kind !== "SUCCEEDED" ||
       completed.resultHash !== state.resultHash ||
@@ -8573,7 +8794,6 @@ const finalizeReviewerTerminalEffectTransaction = async (
   reservation: ReviewerTerminalEffectReservation,
   result: AffiliateAgentReviewerTerminalResult,
   requestHash: string,
-  responseHash: string,
   state: SucceededReviewerTerminalEffectState,
   completedAt: Date,
   safeOutput: Readonly<Record<string, unknown>>,
@@ -8589,6 +8809,30 @@ const finalizeReviewerTerminalEffectTransaction = async (
     state,
   );
   if (replay) return replay;
+  const pendingState = parseReviewerTerminalEffectState(
+    current.responseJson,
+    current.id,
+  );
+  if (pendingState.kind !== "PENDING") {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The reviewer terminal effect receipt requires reconciliation.",
+      false,
+      current.id,
+    );
+  }
+  const mergedFailureDiagnostics =
+    mergeReviewerTerminalEffectFailureDiagnostics(
+      pendingState.failureDiagnostics ?? [],
+      state.failureDiagnostics ?? [],
+    );
+  const finalState: SucceededReviewerTerminalEffectState = {
+    ...state,
+    ...(mergedFailureDiagnostics.length === 0
+      ? {}
+      : { failureDiagnostics: mergedFailureDiagnostics }),
+  };
+  const finalResponseHash = hashAffiliateAgentValue(finalState);
   const [claim, job] = await Promise.all([
     transaction.affiliateAgentGatewayClaims.findUnique({
       where: { id: current.claimId },
@@ -8608,8 +8852,8 @@ const finalizeReviewerTerminalEffectTransaction = async (
     job,
     result,
     requestHash,
-    responseHash,
-    state,
+    finalResponseHash,
+    finalState,
     completedAt,
     safeOutput,
   );
@@ -8621,7 +8865,13 @@ const finalizeReviewerTerminalEffect = async (
   result: AffiliateAgentReviewerTerminalResult,
   requestHash: string,
   safeOutput: Readonly<Record<string, unknown>>,
+  failureDiagnostics: readonly ReviewerTerminalEffectFailureDiagnostic[] = [],
 ): Promise<Readonly<Record<string, unknown>>> => {
+  const mergedFailureDiagnostics =
+    mergeReviewerTerminalEffectFailureDiagnostics(
+      reservation.failureDiagnostics ?? [],
+      failureDiagnostics,
+    );
   const state: SucceededReviewerTerminalEffectState = {
     kind: "SUCCEEDED",
     result,
@@ -8629,8 +8879,10 @@ const finalizeReviewerTerminalEffect = async (
     safeOutput,
     terminalIdempotencyKey: reservation.terminalIdempotencyKey,
     terminalRequestHash: reservation.terminalRequestHash,
+    ...(mergedFailureDiagnostics.length === 0
+      ? {}
+      : { failureDiagnostics: mergedFailureDiagnostics }),
   };
-  const responseHash = hashAffiliateAgentValue(state);
   const completedAt = dependencies.clock.now();
   return runSerializableEffectTransaction(
     dependencies,
@@ -8641,7 +8893,6 @@ const finalizeReviewerTerminalEffect = async (
         reservation,
         result,
         requestHash,
-        responseHash,
         state,
         completedAt,
         safeOutput,
@@ -8663,24 +8914,209 @@ const assertDatabaseAuthorizationFailure = (error: unknown): void => {
   }
 };
 
+const persistReviewerTerminalEffectFailureDiagnosticsTransaction = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  diagnostics: readonly ReviewerTerminalEffectFailureDiagnostic[],
+): Promise<void> => {
+  if (diagnostics.length === 0) return;
+  const current =
+    await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
+      where: { id: receipt.id },
+    });
+  if (
+    !current
+    || current.operationKind !== AFFILIATE_AGENT_TERMINAL_EFFECT_OPERATION
+    || current.commandName !== AFFILIATE_AGENT_TERMINAL_EFFECT_COMMAND
+    || (
+      current.status !== "PENDING"
+      && current.status !== "SUCCEEDED"
+      && current.status !== "UNKNOWN"
+    )
+  ) {
+    return;
+  }
+  const state = parseReviewerTerminalEffectState(
+    current.responseJson,
+    current.id,
+  );
+  if (
+    (current.status === "SUCCEEDED") !== (state.kind === "SUCCEEDED")
+    || (
+      state.kind === "SUCCEEDED"
+      && current.responseHash !== hashAffiliateAgentValue(state)
+    )
+  ) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The reviewer terminal effect receipt is invalid.",
+      false,
+      current.id,
+    );
+  }
+  const existing = state.failureDiagnostics ?? [];
+  const merged = mergeReviewerTerminalEffectFailureDiagnostics(
+    existing,
+    diagnostics,
+  );
+  if (state.kind !== "SUCCEEDED") {
+    const diagnosticsChanged =
+      canonicalizeAffiliateAgentValue(existing)
+      !== canonicalizeAffiliateAgentValue(merged);
+    if (diagnosticsChanged) {
+      const nextState = {
+        ...state,
+        failureDiagnostics: merged,
+      };
+      const updated =
+        await transaction.affiliateAgentGatewayOperationReceipts.updateMany({
+          where: {
+            id: current.id,
+            status: current.status,
+            requestHash: current.requestHash,
+          },
+          data: {
+            responseJson: asPrismaJson(nextState),
+            ...(current.status === "PENDING"
+              && (current.safeErrorCode === null
+                || current.safeErrorCode === undefined)
+              ? { safeErrorCode: "PARTIAL_COMMAND_UNRESOLVED" }
+              : {}),
+          },
+        });
+      if (updated.count !== 1) return;
+    }
+  }
+  const eventKey =
+    `terminal-effect-failure:${current.id}:${hashAffiliateAgentValue(merged)}`;
+  const existingEvent =
+    await transaction.affiliateAgentGatewayEvents.findFirst({
+      where: { eventKey },
+    });
+  if (existingEvent) return;
+  const [claim, job] = await Promise.all([
+    transaction.affiliateAgentGatewayClaims.findUnique({
+      where: { id: current.claimId },
+    }),
+    transaction.affiliateAgentGatewayJobs.findUnique({
+      where: { id: current.jobId },
+    }),
+  ]);
+  if (!claim || !job || typeof job.eventSequence !== "number") return;
+  const jobUpdated = await transaction.affiliateAgentGatewayJobs.updateMany({
+    where: {
+      id: job.id,
+      eventSequence: job.eventSequence,
+    },
+    data: { eventSequence: { increment: 1 } },
+  });
+  if (jobUpdated.count !== 1) return;
+  const reasonCodes = Array.from(
+    new Set(merged.flatMap((diagnostic) => diagnostic.reasonCodes)),
+  ).sort();
+  await transaction.affiliateAgentGatewayEvents.create({
+    data: {
+      id: dependencies.identifiers.create("event"),
+      eventKey,
+      jobId: job.id,
+      claimId: claim.id,
+      receiptId: current.id,
+      sequence: job.eventSequence + 1,
+      eventType: "TERMINAL_EFFECT_FAILURE_RECORDED",
+      actorKind: "AGENT_INVOCATION",
+      actorId: claim.invocationId,
+      role: claim.role,
+      requestHash: current.requestHash,
+      inputHash: hashAffiliateAgentValue(state.result),
+      reasonCodes,
+      payload: asPrismaJson({
+        code: REVIEWER_TERMINAL_EFFECT_FAILURE_CODE,
+        diagnostics: merged,
+      }),
+      retentionClass: "INDEFINITE",
+    },
+  });
+};
+
+const persistReviewerTerminalEffectFailureDiagnostics = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  diagnostics: readonly ReviewerTerminalEffectFailureDiagnostic[],
+): Promise<void> => {
+  await runSerializableEffectTransaction(
+    dependencies,
+    (transaction) =>
+      persistReviewerTerminalEffectFailureDiagnosticsTransaction(
+        transaction,
+        dependencies,
+        receipt,
+        diagnostics,
+      ),
+    {
+      code: "PARTIAL_COMMAND_UNRESOLVED",
+      safeMessage: "The reviewer terminal effect failure could not be retained.",
+      receiptId: receipt.id,
+    },
+  );
+};
+
 const runReviewerTerminalEffectWithRecovery = async (
   adapter: AffiliateAgentTerminalEffectAdapter,
   input: AffiliateAgentTerminalEffectAdapterInput,
   isReplayed: boolean,
-): Promise<Readonly<Record<string, unknown>> | null> => {
-  try {
-    if (isReplayed) {
-      return await runReviewerTerminalEffect(adapter, input, "RECOVER");
-    }
+  persistFailureDiagnostic?: (
+    diagnostic: ReviewerTerminalEffectFailureDiagnostic,
+  ) => Promise<void>,
+): Promise<ReviewerTerminalEffectInvocation> => {
+  if (isReplayed) {
     try {
-      return await runReviewerTerminalEffect(adapter, input, "EXECUTE");
+      return {
+        recovered: await runReviewerTerminalEffect(adapter, input, "RECOVER"),
+        failureDiagnostics: [],
+      };
     } catch (error) {
       assertDatabaseAuthorizationFailure(error);
-      return await runReviewerTerminalEffect(adapter, input, "RECOVER");
+      const diagnostic = reviewerTerminalEffectFailureDiagnosticFor(
+        error,
+        "RECOVER",
+      );
+      await persistFailureDiagnostic?.(diagnostic);
+      return {
+        recovered: null,
+        failureDiagnostics: [diagnostic],
+      };
     }
+  }
+  try {
+    return {
+      recovered: await runReviewerTerminalEffect(adapter, input, "EXECUTE"),
+      failureDiagnostics: [],
+    };
   } catch (error) {
     assertDatabaseAuthorizationFailure(error);
-    return null;
+    const executeDiagnostic = reviewerTerminalEffectFailureDiagnosticFor(
+      error,
+      "EXECUTE",
+    );
+    await persistFailureDiagnostic?.(executeDiagnostic);
+    try {
+      return {
+        recovered: await runReviewerTerminalEffect(adapter, input, "RECOVER"),
+        failureDiagnostics: [executeDiagnostic],
+      };
+    } catch (recoveryError) {
+      assertDatabaseAuthorizationFailure(recoveryError);
+      const recoveryDiagnostic = reviewerTerminalEffectFailureDiagnosticFor(
+        recoveryError,
+        "RECOVER",
+      );
+      await persistFailureDiagnostic?.(recoveryDiagnostic);
+      return {
+        recovered: null,
+        failureDiagnostics: [executeDiagnostic, recoveryDiagnostic],
+      };
+    }
   }
 };
 
@@ -8722,7 +9158,8 @@ const ensureReviewerTerminalEffect = async (
     );
     if (
       state.kind !== "SUCCEEDED" ||
-      state.resultHash !== hashAffiliateAgentValue(result)
+      state.resultHash !== hashAffiliateAgentValue(result) ||
+      reservation.receipt.responseHash !== hashAffiliateAgentValue(state)
     ) {
       throw gatewayError(
         "IDEMPOTENCY_KEY_REUSED",
@@ -8736,12 +9173,23 @@ const ensureReviewerTerminalEffect = async (
     claim: authorized.envelope,
     result,
   };
-  const recovered = await runReviewerTerminalEffectWithRecovery(
+  const invocation = await runReviewerTerminalEffectWithRecovery(
     adapter,
     effectInput,
     reservation.isReplayed,
+    async (diagnostic) => {
+      await persistReviewerTerminalEffectFailureDiagnostics(
+        dependencies,
+        reservation.receipt,
+        [diagnostic],
+      );
+    },
   );
-  if (recovered === null) {
+  const failureDiagnostics = mergeReviewerTerminalEffectFailureDiagnostics(
+    reservation.failureDiagnostics ?? [],
+    invocation.failureDiagnostics,
+  );
+  if (invocation.recovered === null) {
     throw gatewayError(
       "PARTIAL_COMMAND_UNRESOLVED",
       "The reviewer terminal effect requires reconciliation.",
@@ -8751,7 +9199,10 @@ const ensureReviewerTerminalEffect = async (
   }
   let safeOutput: Readonly<Record<string, unknown>>;
   try {
-    safeOutput = parseBoundedSafeOutput(recovered, reservation.receipt.id);
+    safeOutput = parseBoundedSafeOutput(
+      invocation.recovered,
+      reservation.receipt.id,
+    );
   } catch (error) {
     await markReceiptReconciliationRequired(
       dependencies,
@@ -8767,6 +9218,7 @@ const ensureReviewerTerminalEffect = async (
     result,
     requestHash,
     safeOutput,
+    failureDiagnostics,
   );
   return reservation.receipt.id;
 };
@@ -8830,6 +9282,8 @@ const parseRecoveredReviewerEffectState = (
   );
   if (
     completedEffectState.kind !== "SUCCEEDED" ||
+    currentEffect.responseHash === null ||
+    currentEffect.responseHash !== hashAffiliateAgentValue(completedEffectState) ||
     completedEffectState.resultHash !== hashAffiliateAgentValue(result) ||
     hashAffiliateAgentValue(completedEffectState.result) !==
       hashAffiliateAgentValue(result)
@@ -13554,6 +14008,7 @@ type ReconciliationReceiptRecovery = Readonly<{
   recovered: Readonly<Record<string, unknown>> | null;
   reviewerTerminalEffectResult: AffiliateAgentReviewerTerminalResult | null;
   reviewerTerminalEffectReservation: ReviewerTerminalEffectReservation | null;
+  reviewerTerminalEffectFailureDiagnostics?: readonly ReviewerTerminalEffectFailureDiagnostic[];
   isImpossible: boolean;
 }>;
 
@@ -13637,7 +14092,20 @@ const parseReviewerTerminalEffectStateSafely = (
 ): ReviewerTerminalEffectReceiptState | null => {
   if (!shouldParse) return null;
   try {
-    return parseReviewerTerminalEffectState(receipt.responseJson, receipt.id);
+    const state = parseReviewerTerminalEffectState(
+      receipt.responseJson,
+      receipt.id,
+    );
+    if (
+      state.kind === "SUCCEEDED"
+      && (
+        receipt.responseHash === null
+        || receipt.responseHash !== hashAffiliateAgentValue(state)
+      )
+    ) {
+      return null;
+    }
+    return state;
   } catch {
     return null;
   }
@@ -13893,6 +14361,9 @@ const reviewerTerminalRecoveryReservation = (
   isReplayed: true,
   terminalIdempotencyKey: effectState.terminalIdempotencyKey,
   terminalRequestHash: effectState.terminalRequestHash,
+  ...(effectState.failureDiagnostics === undefined
+    ? {}
+    : { failureDiagnostics: effectState.failureDiagnostics }),
 });
 
 type ValidReviewerTerminalRecovery = Readonly<{
@@ -13934,25 +14405,41 @@ const recoverPendingReviewerTerminalReceipt = async (
   const adapter = dependencies.terminalEffects;
   if (!adapter) return impossibleReceiptRecovery();
   try {
+    const invocation = await runReviewerTerminalEffectWithRecovery(
+      adapter,
+      {
+        receiptId: receipt.id,
+        claim: envelope,
+        result: reviewerResult,
+      },
+      true,
+      async (diagnostic) => {
+        await persistReviewerTerminalEffectFailureDiagnostics(
+          dependencies,
+          receipt,
+          [diagnostic],
+        );
+      },
+    );
+    const failureDiagnostics = mergeReviewerTerminalEffectFailureDiagnostics(
+      reservation.failureDiagnostics ?? [],
+      invocation.failureDiagnostics,
+    );
     return {
-      recovered: await runReviewerTerminalEffect(
-        adapter,
-        {
-          receiptId: receipt.id,
-          claim: envelope,
-          result: reviewerResult,
-        },
-        "RECOVER",
-      ),
+      recovered: invocation.recovered,
       reviewerTerminalEffectResult: reviewerResult,
       reviewerTerminalEffectReservation: reservation,
+      reviewerTerminalEffectFailureDiagnostics: failureDiagnostics,
       isImpossible: false,
     };
-  } catch {
+  } catch (error) {
+    assertDatabaseAuthorizationFailure(error);
     return {
       recovered: null,
       reviewerTerminalEffectResult: reviewerResult,
       reviewerTerminalEffectReservation: reservation,
+      reviewerTerminalEffectFailureDiagnostics:
+        reservation.failureDiagnostics ?? [],
       isImpossible: false,
     };
   }
@@ -13988,6 +14475,8 @@ const recoverReviewerTerminalReceipt = async (
       recovered: validRecovery.effectState.safeOutput,
       reviewerTerminalEffectResult: validRecovery.reviewerResult,
       reviewerTerminalEffectReservation: reservation,
+      reviewerTerminalEffectFailureDiagnostics:
+        validRecovery.effectState.failureDiagnostics ?? [],
       isImpossible: false,
     };
   }
@@ -14101,10 +14590,8 @@ const markReceiptForReconciliation = async (
   return {
     recovered,
     completed: false,
-    unresolved: marked !== "UNCHANGED",
-    isAdmissionHalted: isImpossibleState
-      ? marked !== "UNCHANGED"
-      : marked === "HALTED_GATEWAY",
+    unresolved: marked !== "UNCHANGED" || isImpossibleState,
+    isAdmissionHalted: isImpossibleState || marked === "HALTED_GATEWAY",
   };
 };
 
@@ -14162,6 +14649,7 @@ const finalizeRecoveredReviewerTerminalReceipt = async (
   reviewerTerminalEffectResult: AffiliateAgentReviewerTerminalResult,
   reviewerTerminalEffectReservation: ReviewerTerminalEffectReservation,
   recovered: Readonly<Record<string, unknown>>,
+  failureDiagnostics: readonly ReviewerTerminalEffectFailureDiagnostic[] = [],
 ): Promise<"COMPLETED"> => {
   await finalizeReviewerTerminalEffect(
     dependencies,
@@ -14169,6 +14657,7 @@ const finalizeRecoveredReviewerTerminalReceipt = async (
     reviewerTerminalEffectResult,
     receipt.requestHash,
     parseBoundedSafeOutput(recovered, receipt.id),
+    failureDiagnostics,
   );
   await completeRecoveredReviewerTerminalResult(
     dependencies,
@@ -14184,6 +14673,7 @@ const finalizeReconciliationReceipt = async (
   recovered: Readonly<Record<string, unknown>>,
   reviewerTerminalEffectResult: AffiliateAgentReviewerTerminalResult | null,
   reviewerTerminalEffectReservation: ReviewerTerminalEffectReservation | null,
+  reviewerTerminalEffectFailureDiagnostics: readonly ReviewerTerminalEffectFailureDiagnostic[] = [],
 ): Promise<"COMPLETED" | "IMPOSSIBLE" | "LANE_FAILURE" | "UNCHANGED"> => {
   if (
     receipt.commandName === "CAPTURE_CLAIM_URL" ||
@@ -14202,6 +14692,7 @@ const finalizeReconciliationReceipt = async (
       reviewerTerminalEffectResult,
       reviewerTerminalEffectReservation,
       recovered,
+      reviewerTerminalEffectFailureDiagnostics,
     );
   }
   return finalizeRecoveredLifecycleReceipt(dependencies, receipt, recovered);
@@ -14228,6 +14719,7 @@ const reconcileRecoveredReceipt = async (
       recovered,
       recovery.reviewerTerminalEffectResult,
       recovery.reviewerTerminalEffectReservation,
+      recovery.reviewerTerminalEffectFailureDiagnostics ?? [],
     );
     if (finalized === "COMPLETED") {
       return {

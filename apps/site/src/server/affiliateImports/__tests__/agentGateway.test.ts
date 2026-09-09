@@ -14,6 +14,8 @@ import {
   affiliateAgentPromptTemplateSchema,
   affiliateAgentRoleContractSchema,
   affiliateAgentClaimEnvelopeSchema,
+  affiliateAgentHistoricalProducerClaimEnvelopeSchema,
+  parseAffiliateAgentProducerClaimEnvelopeForHistoricalRead,
   affiliateAgentCommandSchema,
   affiliateAgentDeploymentContractSchema,
   affiliateAgentContractBundleSchema,
@@ -298,6 +300,7 @@ const claimRoleFields = {
       type: "MAPPING_PRODUCER",
       supplySourceId: "supply-source-1",
       mappingJobId: "mapping-job-1",
+      listingKind: "EVENT",
       pass: 1,
     },
   },
@@ -913,6 +916,45 @@ describe("affiliate Agent Gateway contracts", () => {
       },
     ]);
   });
+  it("reads valid historical producer claims but rejects source identity tampering", () => {
+    const current = claimFixtureForRole("MAPPING_PRODUCER");
+    const { listingKind: _listingKind, ...historicalSubject } =
+      current.subject;
+    const historical = {
+      ...current,
+      roleContractVersion: 2,
+      promptTemplateVersion: 2,
+      subject: historicalSubject,
+    };
+
+    expect(affiliateAgentClaimEnvelopeSchema.safeParse(historical).success)
+      .toBe(false);
+    const parsedHistorical =
+      parseAffiliateAgentProducerClaimEnvelopeForHistoricalRead(historical);
+    if (!parsedHistorical) throw new Error("Expected a historical claim.");
+    expect(parsedHistorical).toMatchObject({
+      role: "MAPPING_PRODUCER",
+      supplySourceId: "supply-source-1",
+      lifecycleGeneration: 7,
+    });
+    expect("listingKind" in parsedHistorical.subject).toBe(false);
+
+    const malformed = [
+      { ...historical, supplySourceId: "other-source" },
+      { ...historical, supplySourceId: null },
+      { ...historical, lifecycleGeneration: null },
+    ];
+    for (const candidate of malformed) {
+      expect(hashAffiliateAgentValue(candidate)).toMatch(/^[a-f0-9]{64}$/);
+      expect(
+        affiliateAgentHistoricalProducerClaimEnvelopeSchema.safeParse(candidate)
+          .success,
+      ).toBe(false);
+      expect(
+        parseAffiliateAgentProducerClaimEnvelopeForHistoricalRead(candidate),
+      ).toBeNull();
+    }
+  });
   it("rejects claim identity conflicts within role subjects", () => {
     const mappingClaim = claimFixtureForRole("MAPPING_PRODUCER");
     const reviewerClaim = claimFixtureForRole("SUPPLY_REVIEWER");
@@ -1212,6 +1254,10 @@ type GatewayOperationReceiptReadBarrier = {
   entered(): void;
   released: Promise<void>;
 };
+type ReviewerTerminalEffectRecoveryBarrier = Readonly<{
+  entered(callNumber: number): void;
+  released: Promise<void>;
+}>;
 
 type GatewayClaimTestPrisma = {
   affiliateAgentGatewayJobs: {
@@ -1369,7 +1415,6 @@ const gatewayTestIncrement = (value: unknown): number | null => {
   }
   return null;
 };
-
 type GatewayClaimHarnessOptions = Readonly<{
   disableExternalAdapters?: boolean;
   advanceClockDuringCredentialVerificationSeconds?: number;
@@ -1380,6 +1425,12 @@ type GatewayClaimHarnessOptions = Readonly<{
   claimAdmissionOpen?: boolean;
   claimAdmission?: AffiliateAgentClaimAdmission;
   claimTransactionBarrier?: GatewayClaimTransactionBarrier;
+  sourceTargetKind?: string | null;
+  reviewerTerminalEffectExecuteError?: unknown;
+  reviewerTerminalEffectRecoverError?: unknown;
+  reviewerTerminalEffectRecoverErrors?: readonly unknown[];
+  reviewerTerminalEffectRecoveryOutput?: Readonly<Record<string, unknown>> | null;
+  reviewerTerminalEffectRecoveryBarrier?: ReviewerTerminalEffectRecoveryBarrier;
 }>;
 const captureRecordSummaryFixture = (
   value: Readonly<Record<string, unknown>>,
@@ -1435,6 +1486,18 @@ const createGatewayClaimHarness = (
   let lifecycleSafeOutputDetails: string | null = null;
   let terminalEffectTimeAdvanceSeconds = 0;
   let currentLifecycleGeneration = 7;
+  let sourceTargetKind = options.sourceTargetKind ?? "EVENT";
+  let reviewerTerminalEffectExecuteError =
+    options.reviewerTerminalEffectExecuteError ?? null;
+  let reviewerTerminalEffectRecoverError =
+    options.reviewerTerminalEffectRecoverError ?? null;
+  const reviewerTerminalEffectRecoverErrors =
+    options.reviewerTerminalEffectRecoverErrors;
+  const reviewerTerminalEffectRecoveryOutput =
+    options.reviewerTerminalEffectRecoveryOutput;
+  const reviewerTerminalEffectRecoveryBarrier =
+    options.reviewerTerminalEffectRecoveryBarrier;
+  let reviewerTerminalEffectRecoverCallCount = 0;
   let externalMimeType = "text/markdown";
   let claimAdmissionOpen = options.claimAdmissionOpen ?? true;
   let claimTransactionBarrier = options.claimTransactionBarrier ?? null;
@@ -1720,6 +1783,7 @@ const reviewerEffectRows = (): Array<{ id: unknown }> =>
           ? {
               id: where.id,
               lifecycleGeneration: currentLifecycleGeneration,
+              targetKind: sourceTargetKind,
             }
           : null,
     },
@@ -1917,13 +1981,33 @@ const reviewerEffectRows = (): Array<{ id: unknown }> =>
           currentTime.getTime() + terminalEffectTimeAdvanceSeconds * 1_000,
         );
       }
+      if (reviewerTerminalEffectExecuteError !== null) {
+        throw reviewerTerminalEffectExecuteError;
+      }
       const output = { effect: "APPLIED", receiptId };
       reviewerTerminalEffects.set(receiptId, output);
       return output;
     },
     recover: async ({ receiptId }: { receiptId: string }) => {
       state.reviewerEffectCalls.push(`${disposition}:recover`);
-      return reviewerTerminalEffects.get(receiptId) ?? null;
+      const callNumber = ++reviewerTerminalEffectRecoverCallCount;
+      reviewerTerminalEffectRecoveryBarrier?.entered(callNumber);
+      if (
+        callNumber === 1
+        && reviewerTerminalEffectRecoveryBarrier !== undefined
+      ) {
+        await reviewerTerminalEffectRecoveryBarrier.released;
+      }
+      const configuredError =
+        reviewerTerminalEffectRecoverErrors === undefined
+          ? reviewerTerminalEffectRecoverError
+          : reviewerTerminalEffectRecoverErrors[callNumber - 1] ?? null;
+      if (configuredError !== null) {
+        throw configuredError;
+      }
+      return reviewerTerminalEffectRecoveryOutput !== undefined
+        ? reviewerTerminalEffectRecoveryOutput
+        : reviewerTerminalEffects.get(receiptId) ?? null;
     },
   });
 
@@ -2760,8 +2844,82 @@ const standaloneReviewerRequest = (): AffiliateAgentClaimRequest => ({
     signature: "valid-workspace-signature",
   },
 });
+const standaloneReviewerTerminalFor = (
+  reviewerGrant: AffiliateAgentClaimGrant,
+  idempotencyKey: string,
+): Extract<AffiliateAgentClaimOperation, { kind: "SUBMIT_RESULT" }> => ({
+  kind: "SUBMIT_RESULT",
+  idempotencyKey,
+  authorization: gatewayAuthorizationFor(reviewerGrant),
+  result: {
+    schemaVersion: 1,
+    jobId: reviewerGrant.envelope.jobId,
+    claimId: reviewerGrant.envelope.claimId,
+    claimGeneration: reviewerGrant.envelope.claimGeneration,
+    lifecycleGeneration: reviewerGrant.envelope.lifecycleGeneration,
+    deploymentContractVersion: reviewerGrant.envelope.deploymentContractVersion,
+    deploymentContractHash: reviewerGrant.envelope.deploymentContractHash,
+    supplyContractVersion: reviewerGrant.envelope.supplyContractVersion,
+    supplyContractHash: reviewerGrant.envelope.supplyContractHash,
+    roleContractVersion: reviewerGrant.envelope.roleContractVersion,
+    roleContractHash: reviewerGrant.envelope.roleContractHash,
+    promptTemplateVersion: reviewerGrant.envelope.promptTemplateVersion,
+    promptTemplateHash: reviewerGrant.envelope.promptTemplateHash,
+    workerId: reviewerGrant.envelope.workerId,
+    role: reviewerGrant.envelope.role,
+    invocationId: reviewerGrant.envelope.invocationId,
+    disposition: "APPROVED",
+    reasonCodes: ["EVIDENCE_VERIFIED"],
+    evidenceRefs: ["review-evidence-2"],
+    summary: "The committed mapping package passed independent review.",
+    payload: {
+      committedPackageHash:
+        claimRoleFields.SUPPLY_REVIEWER.subject.committedPackageHash,
+    },
+  } as AffiliateAgentReviewerTerminalResult,
+});
 
 describe("Prisma affiliate Agent Gateway", () => {
+  it("rejects hash-consistent historical producer identity tampering at admission", async () => {
+    const malformedOverrides: readonly GatewayTestRow[] = [
+      { supplySourceId: "other-source" },
+      { supplySourceId: null },
+      { lifecycleGeneration: null },
+    ];
+
+    for (const override of malformedOverrides) {
+      const harness = createGatewayClaimHarness();
+      configureStandaloneReviewerScenario(harness);
+      const producerClaim = harness.state.claims.find(
+        (claim) => claim.id === "producer-claim-1",
+      );
+      if (!producerClaim) throw new Error("Expected the producer claim.");
+      const envelope = producerClaim.claimEnvelopeJson as GatewayTestRow;
+      const { listingKind: _listingKind, ...historicalSubject } =
+        envelope.subject as GatewayTestRow;
+      const historicalEnvelope = {
+        ...envelope,
+        roleContractVersion: 2,
+        promptTemplateVersion: 2,
+        subject: historicalSubject,
+        ...override,
+      };
+      producerClaim.claimEnvelopeJson = historicalEnvelope;
+      producerClaim.claimEnvelopeHash = hashAffiliateAgentValue(
+        historicalEnvelope,
+      );
+
+      await expect(
+        harness.gateway.claim(standaloneReviewerRequest()),
+      ).rejects.toMatchObject({
+        code: "REVIEW_WORKSPACE_INVALID",
+        safeMessage: expect.any(String),
+      });
+      expect(
+        harness.state.claims.some((claim) => claim.role === "SUPPLY_REVIEWER"),
+      ).toBe(false);
+    }
+  });
   it("claims one eligible Coverage Planner job with a scoped lease and deadline", async () => {
     const { gateway, request, state } = createGatewayClaimHarness();
 
@@ -3611,6 +3769,315 @@ describe("Prisma affiliate Agent Gateway", () => {
       disposition: "APPROVED",
     });
   });
+  it("retains bounded reviewer lifecycle failure diagnostics through reconciliation", async () => {
+    const harness = createGatewayClaimHarness({
+      reviewerTerminalEffectExecuteError: new Error(
+        "Affiliate lifecycle command rejected: APPROVAL_PRECONDITION_FAILED, SUPPLY_CONTRACT_STALE, private-execute-secret",
+      ),
+      reviewerTerminalEffectRecoverError: new Error(
+        "private-recover-secret",
+      ),
+    });
+    configureStandaloneReviewerScenario(harness);
+    const grant = await harness.gateway.claim(standaloneReviewerRequest());
+    if (!grant) throw new Error("Expected one Supply Reviewer claim.");
+    const result = {
+      schemaVersion: 1 as const,
+      jobId: grant.envelope.jobId,
+      claimId: grant.envelope.claimId,
+      claimGeneration: grant.envelope.claimGeneration,
+      lifecycleGeneration: grant.envelope.lifecycleGeneration,
+      deploymentContractVersion: grant.envelope.deploymentContractVersion,
+      deploymentContractHash: grant.envelope.deploymentContractHash,
+      supplyContractVersion: grant.envelope.supplyContractVersion,
+      supplyContractHash: grant.envelope.supplyContractHash,
+      roleContractVersion: grant.envelope.roleContractVersion,
+      roleContractHash: grant.envelope.roleContractHash,
+      promptTemplateVersion: grant.envelope.promptTemplateVersion,
+      promptTemplateHash: grant.envelope.promptTemplateHash,
+      workerId: grant.envelope.workerId,
+      role: "SUPPLY_REVIEWER" as const,
+      invocationId: grant.envelope.invocationId,
+      disposition: "APPROVED" as const,
+      reasonCodes: ["EVIDENCE_VERIFIED"] as const,
+      evidenceRefs: ["review-evidence-2"] as const,
+      summary: "The committed mapping package passed independent review.",
+      payload: {
+        committedPackageHash:
+          claimRoleFields.SUPPLY_REVIEWER.subject.committedPackageHash,
+      },
+    };
+    const operation = {
+      kind: "SUBMIT_RESULT" as const,
+      idempotencyKey: "reviewer-terminal-failure-retention",
+      authorization: gatewayAuthorizationFor(grant),
+      result,
+    };
+    await expect(harness.gateway.perform(operation)).rejects.toMatchObject({
+      code: "PARTIAL_COMMAND_UNRESOLVED",
+      receiptId: expect.any(String),
+    });
+    const effectReceipt = harness.state.receipts.find(
+      (candidate) =>
+        candidate.commandName === "SUPPLY_REVIEWER_TERMINAL_EFFECT",
+    );
+    if (!effectReceipt) throw new Error("Expected a pending effect receipt.");
+    expect(effectReceipt).toMatchObject({
+      status: "PENDING",
+      safeErrorCode: "PARTIAL_COMMAND_UNRESOLVED",
+      responseJson: {
+        kind: "PENDING",
+        failureDiagnostics: [
+          {
+            code: "REVIEWER_TERMINAL_EFFECT_FAILED",
+            stage: "EXECUTE",
+            reasonCodes: [
+              "APPROVAL_PRECONDITION_FAILED",
+              "SUPPLY_CONTRACT_STALE",
+            ],
+          },
+          {
+            code: "REVIEWER_TERMINAL_EFFECT_FAILED",
+            stage: "RECOVER",
+            reasonCodes: ["UNCLASSIFIED"],
+          },
+        ],
+      },
+    });
+    expect(JSON.stringify(effectReceipt.responseJson)).not.toContain(
+      "private-",
+    );
+    harness.setNow("2026-08-20T18:01:00.000Z");
+    await expect(
+      harness.gateway.reconcile({
+        limit: 10,
+        reconcileBefore: "2026-08-20T18:01:00.000Z",
+      }),
+    ).resolves.toMatchObject({
+      examinedReceipts: 1,
+      recoveredReceipts: 0,
+      completedReceipts: 0,
+      unresolvedReceipts: 1,
+    });
+    expect(effectReceipt).toMatchObject({
+      status: "UNKNOWN",
+      safeErrorCode: "PARTIAL_COMMAND_UNRESOLVED",
+      responseJson: {
+        kind: "PENDING",
+        failureDiagnostics: expect.arrayContaining([
+          expect.objectContaining({
+            stage: "EXECUTE",
+            reasonCodes: ["APPROVAL_PRECONDITION_FAILED", "SUPPLY_CONTRACT_STALE"],
+          }),
+        ]),
+      },
+    });
+    expect(harness.state.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: "TERMINAL_EFFECT_FAILURE_RECORDED",
+          reasonCodes: expect.arrayContaining([
+            "APPROVAL_PRECONDITION_FAILED",
+            "SUPPLY_CONTRACT_STALE",
+          ]),
+        }),
+      ]),
+    );
+  });
+  it("preserves late reviewer recovery diagnostics when duplicate recovery wins", async () => {
+    let releaseFirstRecovery: () => void = () => {};
+    const firstRecoveryReleased = new Promise<void>((resolve) => {
+      releaseFirstRecovery = resolve;
+    });
+    let resolveFirstRecoveryEntered: () => void = () => {};
+    const firstRecoveryEntered = new Promise<void>((resolve) => {
+      resolveFirstRecoveryEntered = resolve;
+    });
+    let resolveSecondRecoveryEntered: () => void = () => {};
+    const secondRecoveryEntered = new Promise<void>((resolve) => {
+      resolveSecondRecoveryEntered = resolve;
+    });
+    const harness = createGatewayClaimHarness({
+      reviewerTerminalEffectExecuteError: new Error(
+        "Affiliate lifecycle command rejected: APPROVAL_PRECONDITION_FAILED, first-private-secret",
+      ),
+      reviewerTerminalEffectRecoverErrors: [
+        new Error(
+          "Affiliate lifecycle command rejected: SUPPLY_CONTRACT_STALE, second-private-secret",
+        ),
+        null,
+      ],
+      reviewerTerminalEffectRecoveryOutput: { effect: "APPLIED" },
+      reviewerTerminalEffectRecoveryBarrier: {
+        entered: (callNumber) => {
+          if (callNumber === 1) resolveFirstRecoveryEntered();
+          if (callNumber === 2) resolveSecondRecoveryEntered();
+        },
+        released: firstRecoveryReleased,
+      },
+    });
+    configureStandaloneReviewerScenario(harness);
+    const grant = await harness.gateway.claim(standaloneReviewerRequest());
+    if (!grant) throw new Error("Expected one Supply Reviewer claim.");
+    const operation = standaloneReviewerTerminalFor(
+      grant,
+      "reviewer-terminal-recovery-race",
+    );
+
+    const firstAttempt = harness.gateway.perform(operation);
+    await firstRecoveryEntered;
+    const duplicateAttempt = harness.recreateGateway().perform(operation);
+    await secondRecoveryEntered;
+    await expect(duplicateAttempt).resolves.toMatchObject({
+      kind: "TERMINAL_ACCEPTED",
+      disposition: "APPROVED",
+    });
+    releaseFirstRecovery();
+    await expect(firstAttempt).rejects.toMatchObject({
+      code: "PARTIAL_COMMAND_UNRESOLVED",
+    });
+
+    const effectReceipt = harness.state.receipts.find(
+      (candidate) =>
+        candidate.commandName === "SUPPLY_REVIEWER_TERMINAL_EFFECT",
+    );
+    if (!effectReceipt) throw new Error("Expected the reviewer effect receipt.");
+    expect(effectReceipt).toMatchObject({
+      status: "SUCCEEDED",
+      responseJson: {
+        kind: "SUCCEEDED",
+        failureDiagnostics: [
+          {
+            stage: "EXECUTE",
+            reasonCodes: ["APPROVAL_PRECONDITION_FAILED"],
+          },
+        ],
+      },
+    });
+    expect(effectReceipt.responseHash).toBe(
+      hashAffiliateAgentValue(effectReceipt.responseJson),
+    );
+    const successEvent = harness.state.events.find(
+      (event) => event.eventType === "TERMINAL_EFFECT_SUCCEEDED",
+    );
+    expect(successEvent?.outputHash).toBe(effectReceipt.responseHash);
+    const lateFailureEvent = [...harness.state.events]
+      .reverse()
+      .find((event) => event.eventType === "TERMINAL_EFFECT_FAILURE_RECORDED");
+    if (!lateFailureEvent) throw new Error("Expected the late failure event.");
+    expect(lateFailureEvent).toMatchObject({
+      payload: {
+        diagnostics: expect.arrayContaining([
+          expect.objectContaining({
+            stage: "EXECUTE",
+            reasonCodes: ["APPROVAL_PRECONDITION_FAILED"],
+          }),
+          expect.objectContaining({
+            stage: "RECOVER",
+            reasonCodes: ["SUPPLY_CONTRACT_STALE"],
+          }),
+        ]),
+      },
+    });
+    expect(JSON.stringify(lateFailureEvent)).not.toContain(
+      "private-secret",
+    );
+
+    const expectedTerminalResultHash = hashAffiliateAgentValue(operation.result);
+    const terminalReceipt = harness.state.receipts.find(
+      (candidate) => candidate.operationKind === "SUBMIT_RESULT",
+    );
+    if (!terminalReceipt) throw new Error("Expected the terminal result receipt.");
+    expect(terminalReceipt).toMatchObject({
+      status: "SUCCEEDED",
+      responseJson: {
+        kind: "TERMINAL_ACCEPTED",
+        disposition: "APPROVED",
+        resultHash: expectedTerminalResultHash,
+      },
+    });
+    expect(terminalReceipt.responseHash).toBe(
+      hashAffiliateAgentValue(terminalReceipt.responseJson),
+    );
+    await expect(
+      harness.recreateGateway().perform(operation),
+    ).resolves.toMatchObject({
+      kind: "TERMINAL_ACCEPTED",
+      disposition: "APPROVED",
+    });
+  });
+  it("leaves tampered succeeded reviewer effects unresolved during reconciliation", async () => {
+    const harness = createGatewayClaimHarness();
+    configureStandaloneReviewerScenario(harness);
+    const grant = await harness.gateway.claim(standaloneReviewerRequest());
+    if (!grant) throw new Error("Expected one Supply Reviewer claim.");
+    const operation = standaloneReviewerTerminalFor(
+      grant,
+      "reviewer-terminal-tampered-success",
+    );
+    await expect(harness.gateway.perform(operation)).resolves.toMatchObject({
+      kind: "TERMINAL_ACCEPTED",
+      disposition: "APPROVED",
+    });
+
+    const claim = harness.state.claims.find(
+      (candidate) => candidate.id === grant.envelope.claimId,
+    );
+    const job = harness.state.jobs.find(
+      (candidate) => candidate.id === grant.envelope.jobId,
+    );
+    const effectReceipt = harness.state.receipts.find(
+      (candidate) =>
+        candidate.commandName === "SUPPLY_REVIEWER_TERMINAL_EFFECT",
+    );
+    if (!claim || !job || !effectReceipt) {
+      throw new Error("Expected completed reviewer state.");
+    }
+    const originalResponseHash = effectReceipt.responseHash;
+    const completedState = effectReceipt.responseJson as GatewayTestRow;
+    effectReceipt.responseJson = {
+      ...completedState,
+      failureDiagnostics: [
+        {
+          code: "REVIEWER_TERMINAL_EFFECT_FAILED",
+          stage: "RECOVER",
+          reasonCodes: ["UNCLASSIFIED"],
+        },
+      ],
+    };
+    Object.assign(claim, {
+      status: "ACTIVE",
+      terminalReceiptId: null,
+      tokenInvalidatedAt: null,
+      endedAt: null,
+    });
+    Object.assign(job, {
+      status: "CLAIMED",
+      activeClaimId: claim.id,
+      terminalReceiptId: null,
+      finishedAt: null,
+    });
+    const effectCallsBeforeReconciliation = [...harness.state.reviewerEffectCalls];
+
+    await expect(
+      harness.gateway.reconcile({
+        limit: 10,
+        reconcileBefore: "2026-08-20T18:00:00.000Z",
+      }),
+    ).resolves.toMatchObject({
+      examinedReceipts: 1,
+      recoveredReceipts: 0,
+      completedReceipts: 0,
+      unresolvedReceipts: 1,
+      isAdmissionHalted: true,
+    });
+    expect(harness.state.reviewerEffectCalls).toEqual(
+      effectCallsBeforeReconciliation,
+    );
+    expect(effectReceipt.status).toBe("SUCCEEDED");
+    expect(effectReceipt.responseHash).toBe(originalResponseHash);
+  });
+
   it("replays a finalized reviewer result after claim expiry without rerunning its effect", async () => {
     const harness = createGatewayClaimHarness();
     configureStandaloneReviewerScenario(harness);
@@ -4036,16 +4503,6 @@ describe("Prisma affiliate Agent Gateway", () => {
         }),
       }),
     }));
-    expect(gatewayJobs.upsert).toHaveBeenCalledWith(expect.objectContaining({
-      create: expect.objectContaining({
-        subjectJson: {
-          type: "MAPPING_PRODUCER",
-          supplySourceId: supplySource.id,
-          mappingJobId: mappingJob.id,
-          pass: 1,
-        },
-      }),
-    }));
     expect(harness.state.receipts).toEqual(expect.arrayContaining([
       expect.objectContaining({
         commandName: "GOVERNED_TERMINAL_DOMAIN_EFFECT",
@@ -4110,6 +4567,7 @@ describe("Prisma affiliate Agent Gateway", () => {
         type: "MAPPING_PRODUCER",
         supplySourceId: "supply-source-domain",
         mappingJobId: "mapping-job-domain",
+        listingKind: "EVENT",
         pass: 1,
       },
       supplySourceId: "supply-source-domain",
@@ -4293,6 +4751,45 @@ describe("Prisma affiliate Agent Gateway", () => {
     expect(reviewerUpsert).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects a mapping claim when its listing kind differs from the persisted source", async () => {
+    const harness = createGatewayClaimHarness({ sourceTargetKind: "CLUB" });
+    Object.assign(harness.state.jobs[0], {
+      queue: "AFFILIATE_MAPPING",
+      lane: "MAPPING_PRODUCTION",
+      role: "MAPPING_PRODUCER",
+      subjectType: "MAPPING_PRODUCER",
+      subjectId: "mapping-job-1",
+      subjectJson: claimRoleFields.MAPPING_PRODUCER.subject,
+      supplySourceId: "supply-source-1",
+      expectedLifecycleGeneration: 7,
+    });
+    await expect(
+      harness.gateway.claim({
+        ...harness.request,
+        idempotencyKey: "mapping-kind-mismatch-claim",
+        roleCredential: "mapping-role-credential",
+        role: "MAPPING_PRODUCER",
+        workerId: "mapping-worker-kind-mismatch",
+        invocationId: "mapping-invocation-kind-mismatch",
+        workspaceAttestation: {
+          ...harness.request.workspaceAttestation,
+          workspaceId: "mapping-workspace-kind-mismatch",
+          workerId: "mapping-worker-kind-mismatch",
+          invocationId: "mapping-invocation-kind-mismatch",
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "COMMAND_SCHEMA_INVALID",
+      safeMessage:
+        "The declarative package listing kind does not match the source target kind.",
+    });
+    expect(harness.state.jobs[0]).toMatchObject({
+      status: "QUEUED",
+      activeClaimId: null,
+    });
+    expect(harness.state.claims).toHaveLength(0);
+  });
+
   it("claims Mapping Producer work, validates and commits one declarative package, and replays its terminal result", async () => {
     let alertWriterCalls = 0;
     const operationalAlert: AffiliateOperationalAlertWriter = async (
@@ -4421,6 +4918,28 @@ describe("Prisma affiliate Agent Gateway", () => {
         },
       }),
     ).rejects.toMatchObject({ code: "COMMAND_NOT_PERMITTED" });
+
+    await expect(
+      harness.gateway.perform({
+        kind: "EXECUTE_COMMAND",
+        idempotencyKey: "mapping-validate-mismatched-kind",
+        authorization,
+        command: {
+          type: "VALIDATE_DECLARATIVE_PACKAGE",
+          data: {
+            candidatePackage: {
+              ...candidatePackage,
+              listingKind: "CLUB",
+            },
+            evidenceManifestHash: grant.envelope.evidenceManifest.hash,
+          },
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "COMMAND_SCHEMA_INVALID",
+      safeMessage:
+        "The declarative package listing kind does not match the source target kind.",
+    });
 
     const validation = await harness.gateway.perform({
       kind: "EXECUTE_COMMAND",

@@ -1035,6 +1035,38 @@ describe('legacy repair admission with real contract validators', () => {
     expect(first.reportHash).toBe(second.reportHash);
     expect(calculateAffiliateLegacyRepairRetryReportHash(first)).toBe(first.reportHash);
   });
+  it('rejects a current producer envelope without listing kind as historical evidence', async () => {
+    const state = retryFixture();
+    const parentJob = state.gatewayJobs.find((job) => job.id === 'gateway-parent-boomtown');
+    const parentClaim = state.gatewayClaims.find((claim) => claim.id === 'claim-parent-boomtown');
+    if (!parentJob || !parentClaim) throw new Error('Boomtown parent claim fixture was not created.');
+    const roleContract = AFFILIATE_AGENT_ROLE_CONTRACTS.MAPPING_PRODUCER;
+    const promptTemplate = AFFILIATE_AGENT_PROMPT_TEMPLATES.MAPPING_PRODUCER;
+    const claimEnvelope = parentClaim.claimEnvelopeJson as Record<string, unknown>;
+    claimEnvelope.roleContractVersion = roleContract.version;
+    claimEnvelope.roleContractHash = roleContract.hash;
+    claimEnvelope.promptTemplateVersion = promptTemplate.version;
+    claimEnvelope.promptTemplateHash = promptTemplate.hash;
+    parentClaim.roleContractVersion = roleContract.version;
+    parentClaim.roleContractHash = roleContract.hash;
+    parentClaim.promptTemplateVersion = promptTemplate.version;
+    parentClaim.promptTemplateHash = promptTemplate.hash;
+    parentClaim.claimEnvelopeHash = hashAffiliateAgentValue(claimEnvelope);
+    const terminalResult = parentJob.resultJson as Record<string, unknown>;
+    terminalResult.roleContractVersion = roleContract.version;
+    terminalResult.roleContractHash = roleContract.hash;
+    terminalResult.promptTemplateVersion = promptTemplate.version;
+    terminalResult.promptTemplateHash = promptTemplate.hash;
+    parentJob.resultHash = hashAffiliateAgentValue(terminalResult);
+
+    const report = await previewAffiliateLegacyRepairRetry({
+      ...state.input,
+      gatewayJobIds: ['gateway-parent-boomtown'],
+    });
+    expect(report.selectedGatewayJobIds).toEqual([]);
+    expect(report.rows[0].eligible).toBe(false);
+    expect(report.rows[0].reasonCodes).toContain('PARENT_CLAIM_ENVELOPE_INVALID');
+  });
 
   it('replays both retries after normal root progress without mutating parent history', async () => {
     const fixtureState = await retryFixtureWithAdmission();
@@ -1127,6 +1159,74 @@ describe('legacy repair admission with real contract validators', () => {
     })).rejects.toMatchObject({ code: 'ADMISSION_REPORT_DRIFT' });
     expect(fixtureState.gatewayJobs).toHaveLength(4);
   });
+  it('replays a recorded version-one retry without adding fields to its history', async () => {
+    const state = await retryFixtureWithAdmission();
+    const preview = await previewAffiliateLegacyRepairRetry(state.input);
+    const applied = await applyAffiliateLegacyRepairRetry({
+      ...state.input,
+      operatorId: 'affiliate-gateway-operator',
+      expectedReportHash: preview.reportHash,
+    });
+    const historical = structuredClone(applied);
+    historical.schemaVersion = 1;
+    for (const write of historical.proposedWrites) delete write.listingKind;
+    for (const row of historical.rows) if (row.write) delete row.write.listingKind;
+    historical.reportHash = calculateAffiliateLegacyRepairRetryReportHash(historical);
+    historical.reviewedReportHash = historical.reportHash;
+    for (const child of state.gatewayJobs.filter((job) => applied.appliedGatewayJobIds.includes(String(job.id)))) {
+      delete (child.subjectJson as Record<string, unknown>).listingKind;
+    }
+    for (const job of state.mappingJobs) {
+      const history = (job.resultSummary as Record<string, unknown>).legacyRepairRetryHistory as Record<string, unknown>[];
+      for (const audit of history) {
+        audit.schemaVersion = 1;
+        audit.reportHash = historical.reportHash;
+        audit.reportSnapshot = structuredClone(historical);
+      }
+    }
+    const before = JSON.stringify({
+      jobs: state.gatewayJobs,
+      claims: state.gatewayClaims,
+      receipts: state.gatewayReceipts,
+      mappingJobs: state.mappingJobs,
+    });
+    const replay = await applyAffiliateLegacyRepairRetry({
+      ...state.input,
+      operatorId: 'affiliate-gateway-operator',
+      expectedReportHash: historical.reportHash,
+    });
+    expect(replay).toMatchObject({
+      schemaVersion: 1,
+      replayed: true,
+      writeCount: 0,
+      appliedGatewayJobIds: applied.appliedGatewayJobIds,
+    });
+    expect(JSON.stringify({
+      jobs: state.gatewayJobs,
+      claims: state.gatewayClaims,
+      receipts: state.gatewayReceipts,
+      mappingJobs: state.mappingJobs,
+    })).toBe(before);
+  });
+
+  it('rejects a current retry whose audited listing kind is removed', async () => {
+    const state = await retryFixtureWithAdmission();
+    const preview = await previewAffiliateLegacyRepairRetry(state.input);
+    const applied = await applyAffiliateLegacyRepairRetry({
+      ...state.input,
+      operatorId: 'affiliate-gateway-operator',
+      expectedReportHash: preview.reportHash,
+    });
+    const child = state.gatewayJobs.find((job) => job.id === applied.appliedGatewayJobIds[0]);
+    if (!child) throw new Error('Retry child was not created.');
+    delete (child.subjectJson as Record<string, unknown>).listingKind;
+    await expect(applyAffiliateLegacyRepairRetry({
+      ...state.input,
+      operatorId: 'affiliate-gateway-operator',
+      expectedReportHash: preview.reportHash,
+    })).rejects.toMatchObject({ code: 'RETRY_STATE_DRIFT' });
+  });
+
   it('rejects a same-version changed-hash deployment before retry writes', async () => {
     const state = await retryFixtureWithAdmission();
     const parentClaim = state.gatewayClaims.find((claim) => claim.id === 'claim-parent-softball');
@@ -1257,6 +1357,7 @@ describe('legacy repair admission with real contract validators', () => {
         type: 'MAPPING_PRODUCER',
         supplySourceId: 'root-retry-softball',
         mappingJobId: 'mapping-retry-softball',
+        listingKind: 'CLUB',
         pass: 2,
       },
       evidenceManifestJson: {},

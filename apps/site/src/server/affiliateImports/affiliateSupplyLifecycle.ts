@@ -242,6 +242,7 @@ export type AffiliateSupplyEvidenceSnapshot = Readonly<{
   mappingJob?: AffiliateSupplyMappingJobEvidence | null;
   approval?: AffiliateSupplyApprovalEvidence | null;
   latestRun?: AffiliateSupplyRefreshEvidence | null;
+  historicalRuns?: readonly AffiliateSupplyRefreshEvidence[];
   baseline?: AffiliateAutomationBaseline | null | unknown;
   lifecycleEvidenceKinds?: readonly string[];
   candidates: readonly AffiliateSupplyCandidateEvidence[];
@@ -263,6 +264,7 @@ export type AffiliateSupplyAssessment = Readonly<{
   isTargetMet: boolean;
   targetMinimum: number;
   repairPriority: AffiliateReplenishmentPriority;
+  hasRequiredLifecycleEvidence: boolean;
   reasonCodes: readonly string[];
   evidenceRefs: readonly string[];
   invariantViolations: readonly string[];
@@ -1038,10 +1040,12 @@ const assessmentStateForExcluded: AffiliateSupplyAssessmentTransition = (context
 };
 
 const assessmentStateForHumanReview: AffiliateSupplyAssessmentTransition = (context) => {
-  const sourceStatus = context.snapshot.source.status;
-  if (!sourceStatus || !['HUMAN_REVIEW_REQUIRED', 'REVIEW_REQUIRED'].includes(uppercase(sourceStatus))) {
-    return null;
-  }
+  const sourceStatus = uppercase(context.snapshot.source.status);
+  // REVIEW_REQUIRED is the producer's ordinary repair queue state. The
+  // reviewer dispositions that are terminal human holds persist the explicit
+  // HUMAN_REVIEW_REQUIRED status; do not turn a repair-ready mapping into an
+  // identity or policy hold merely because its producer job awaits review.
+  if (sourceStatus !== 'HUMAN_REVIEW_REQUIRED') return null;
   return {
     stage: 'HUMAN_REVIEW_REQUIRED',
     outcome: 'HUMAN_REVIEW_REQUIRED',
@@ -1289,6 +1293,7 @@ export const deriveAffiliateSupplyAssessment = (
     isAutomationEnabled: state.isAutomationEnabled,
     isTargetMet,
     targetMinimum: context.targetMinimum,
+    hasRequiredLifecycleEvidence: context.lifecycleEvidenceSatisfied,
     repairPriority: state.repairPriority,
     reasonCodes: sortedUnique(state.reasonCodes),
     evidenceRefs: resultEvidenceRefs(snapshot),
@@ -2014,11 +2019,16 @@ const commandPreconditionValidationReasons = (
   const hasRejectableTarget = input.assessment.targets.some((target) => (
     ['PUBLISHED', 'LAST_KNOWN_GOOD'].includes(target.status.toUpperCase())
   ));
+  const lifecycleEvidenceMissing = input.assessment.hasRequiredLifecycleEvidence !== true;
   return [
     ...assessmentReasonIf(input.evidenceRefs.length === 0, 'EVIDENCE_REQUIRED'),
     ...assessmentReasonIf(
       input.command === 'APPROVE' && stage !== 'MAPPED',
       'APPROVAL_PRECONDITION_FAILED',
+    ),
+    ...assessmentReasonIf(
+      input.command === 'APPROVE' && lifecycleEvidenceMissing,
+      'APPROVAL_LIFECYCLE_EVIDENCE_MISSING',
     ),
     ...assessmentReasonIf(
       input.command === 'ACTIVATE'

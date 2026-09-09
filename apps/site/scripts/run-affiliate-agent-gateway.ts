@@ -33,8 +33,10 @@ import type {
   AffiliateAgentWorkspaceAttestation,
 } from '../src/server/affiliateImports/agentGateway';
 import {
+  AFFILIATE_AGENT_ACTIVE_SUPPLY_CONTRACT_ARTIFACT_PREFIX,
   createProductionAffiliateAgentGatewayAdapters,
   createProductionAffiliateAgentGatewayDependencies,
+  resolveAffiliateAgentActiveSupplyContractArtifact,
   type AffiliateAgentBoundedAdmissionLease,
   type AffiliateAgentBoundedAdmissionLeaseRequest,
   type AffiliateAgentBoundedAdmissionRole,
@@ -159,6 +161,20 @@ export const createAffiliateAgentGatewayArtifactStore = (
     fileId: string;
     maximumBytes: number;
   }) => {
+    if (fileId.startsWith(AFFILIATE_AGENT_ACTIVE_SUPPLY_CONTRACT_ARTIFACT_PREFIX)) {
+      const artifact = await resolveAffiliateAgentActiveSupplyContractArtifact({
+        prisma: database,
+        entry: {
+          kind: 'ACTIVE_SUPPLY_CONTRACT',
+          artifactId: fileId,
+        },
+        maximumBytes: Math.min(maximumBytes, MAX_ARTIFACT_BYTES),
+      });
+      if (artifact === null) {
+        throw new Error('The active Supply Contract artifact is not valid.');
+      }
+      return artifact;
+    }
     if (fileId.startsWith('intake-artifact:')) {
       const artifact = await database.affiliateSourceIntakeArtifacts.findUnique({
         where: { id: fileId.slice('intake-artifact:'.length) },

@@ -12,8 +12,10 @@ import type {
   AffiliateSourceMappingJobs,
   AffiliateApprovalJobs,
   AffiliateImportCandidates,
+  AffiliateAgentGatewayArtifacts,
   AffiliateAgentGatewayClaims,
   AffiliateAgentGatewayJobs,
+  AffiliateAgentGatewayOperationReceipts,
   AffiliateCoverageAgentJobs,
   AffiliateSupplySources,
   AffiliateSupplyTargets,
@@ -101,7 +103,14 @@ import type {
   AffiliateAgentActiveContractRegistry,
   AffiliateAgentLifecycleAuthority,
 } from './agentGatewayAdapters';
-import { canonicalizeAffiliateAgentValue, hashAffiliateAgentValue } from './agentGatewayContracts';
+import {
+  affiliateAgentClaimEnvelopeSchema,
+  affiliateAgentTerminalResultEnvelopeSchema,
+  parseAffiliateAgentProducerClaimEnvelopeForHistoricalRead,
+  hashAffiliateAgentValue,
+  canonicalizeAffiliateAgentValue,
+  type AffiliateAgentProducerClaimEnvelopeForHistoricalRead,
+} from './agentGatewayContracts';
 import {
   affiliateDiscoveryPolicyKeyForUrl,
   affiliateDiscoveryUrlKey,
@@ -211,6 +220,7 @@ export type AffiliateSupplyDatabase = Readonly<{
   candidates: AffiliateSupplyDelegate<'affiliateImportCandidates'>;
   gatewayReceipts?: AffiliateSupplyDelegate<'affiliateAgentGatewayOperationReceipts'>;
   gatewayEvents?: AffiliateSupplyDelegate<'affiliateAgentGatewayEvents'>;
+  gatewayArtifacts?: AffiliateSupplyDelegate<'affiliateAgentGatewayArtifacts'>;
   gatewayClaims: AffiliateSupplyDelegate<'affiliateAgentGatewayClaims'>;
   gatewayJobs: AffiliateSupplyDelegate<'affiliateAgentGatewayJobs'>;
   coverageJobs?: Prisma.AffiliateCoverageAgentJobsDelegate;
@@ -227,15 +237,15 @@ type AffiliateSupplyDatabaseWithTransactionState = AffiliateSupplyDatabase & {
   readonly [affiliateSupplyExistingTransaction]?: boolean;
 };
 
+// The exported Prisma client is a Proxy over an empty target; an `in` check
+// sees no `$transaction` property even though the proxy resolves one.
 const affiliateSupplyClientHasNestedTransaction = (
   client: AffiliateSupplyClient,
 ): boolean => (
   typeof client === 'object'
   && client !== null
-  && '$transaction' in client
-  && typeof client.$transaction === 'function'
+  && typeof (client as AffiliateSupplyRawTransactionalClient).$transaction === 'function'
 );
-
 const affiliateSupplyDatabaseHasExistingTransaction = (
   database: AffiliateSupplyDatabase,
 ): boolean => (
@@ -276,6 +286,7 @@ const supplyDatabaseForClient = (client: AffiliateSupplyClient): AffiliateSupply
     candidates: 'affiliateImportCandidates',
     gatewayClaims: 'affiliateAgentGatewayClaims',
     gatewayJobs: 'affiliateAgentGatewayJobs',
+    gatewayArtifacts: 'affiliateAgentGatewayArtifacts',
     gatewayEvents: 'affiliateAgentGatewayEvents',
     coverageJobs: 'affiliateCoverageAgentJobs',
     campaigns: 'affiliateSourceDiscoveryCampaigns',
@@ -1772,7 +1783,12 @@ type AffiliateSupplySnapshotRows = Readonly<{
   mapping: AffiliateScrapeMappings | null;
   mappingJob: AffiliateSourceMappingJobs | null;
   approval: AffiliateApprovalJobs | null;
+  gatewayClaims: AffiliateAgentGatewayClaims[];
+  gatewayJobs: AffiliateAgentGatewayJobs[];
+  gatewayReceipts: AffiliateAgentGatewayOperationReceipts[];
+  gatewayArtifacts: AffiliateAgentGatewayArtifacts[];
   latestRun: AffiliateScrapeRuns | null;
+  historicalRuns: AffiliateScrapeRuns[];
   candidates: AffiliateImportCandidates[];
   targets: AffiliateSupplyTargets[];
   contract: AffiliateSupplyContractPolicy;
@@ -2029,6 +2045,465 @@ const buildAffiliateSnapshotTargets = (
   evidenceRefs: target.evidenceRefs,
   metadata: recordValue(target.metadata),
 }));
+const equalAffiliateSnapshotStringArrays = (
+  left: readonly string[],
+  right: readonly string[],
+): boolean => {
+  const normalize = (values: readonly string[]): string[] => Array.from(new Set(values)).sort(codeUnitCompare);
+  return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right));
+};
+
+const isAffiliateSnapshotSha256 = (value: unknown): value is string => (
+  typeof value === 'string' && /^[a-f0-9]{64}$/.test(value)
+);
+
+type AffiliateCurrentProducerProof = Readonly<{
+  claim: AffiliateAgentGatewayClaims;
+  envelope: AffiliateAgentProducerClaimEnvelopeForHistoricalRead;
+  gatewayJob: AffiliateAgentGatewayJobs;
+  terminalResult: Record<string, unknown>;
+  commitReceipt: AffiliateAgentGatewayOperationReceipts;
+  artifacts: readonly AffiliateAgentGatewayArtifacts[];
+  packageHash: string;
+}>;
+
+const affiliateSnapshotGatewayArtifactFor = (
+  artifacts: readonly AffiliateAgentGatewayArtifacts[],
+  claimId: string,
+  claimGeneration: number,
+  evidenceKind: string,
+  evidenceRef: string,
+  sourceArtifactId: string,
+  expectedContentHash: string | null,
+): AffiliateAgentGatewayArtifacts | null => {
+  const matching = artifacts.filter((artifact) => (
+    artifact.claimId === claimId
+    && artifact.claimGeneration === claimGeneration
+    && artifact.evidenceKind === evidenceKind
+    && artifact.evidenceRef === evidenceRef
+    && artifact.creatingClaimId === claimId
+    && artifact.sourceArtifactId === sourceArtifactId
+    && artifact.fileId === sourceArtifactId
+    && isAffiliateSnapshotSha256(artifact.contentHash)
+    && (!expectedContentHash || artifact.contentHash === expectedContentHash)
+  ));
+  return matching.length === 1 ? matching[0] : null;
+};
+
+const affiliateSnapshotManifestArtifactHash = (
+  envelope: AffiliateAgentProducerClaimEnvelopeForHistoricalRead,
+  evidenceKind: string,
+): Readonly<{ artifactId: string; sha256: string }> | null => {
+  const entry = envelope.evidenceManifest.entries.find((candidate) => candidate.kind === evidenceKind);
+  return entry?.artifactId && entry.sha256
+    ? { artifactId: entry.artifactId, sha256: entry.sha256 }
+    : null;
+};
+
+const affiliateSnapshotCurrentProducerProof = (input: Readonly<{
+  root: AffiliateSupplySources;
+  source: AffiliateScrapeSources | null;
+  mapping: AffiliateScrapeMappings | null;
+  mappingJob: AffiliateSourceMappingJobs | null;
+  contract: AffiliateSupplyContractPolicy;
+  gatewayClaims: readonly AffiliateAgentGatewayClaims[];
+  gatewayJobs: readonly AffiliateAgentGatewayJobs[];
+  gatewayReceipts: readonly AffiliateAgentGatewayOperationReceipts[];
+  gatewayArtifacts: readonly AffiliateAgentGatewayArtifacts[];
+}>): AffiliateCurrentProducerProof | null => {
+  const {
+    root,
+    source,
+    mapping,
+    mappingJob,
+    contract,
+    gatewayClaims,
+    gatewayJobs,
+    gatewayReceipts,
+    gatewayArtifacts,
+  } = input;
+  if (!mapping || !mappingJob) return null;
+  const mappingJson = recordValue(mapping.mapping);
+  const mappingMetadata = recordValue(mappingJson.metadata);
+  const packageHash = mappingPackageHashForSnapshot(mapping);
+  if (
+    !packageHash
+    || (mapping.sourceId && source?.id && mapping.sourceId !== source.id)
+    || (mapping.supplySourceId && mapping.supplySourceId !== root.id)
+    || (mappingJob.supplySourceId && mappingJob.supplySourceId !== root.id)
+    || (mappingJob.sourceId && source?.id && mappingJob.sourceId !== source.id)
+    || (mappingJob.mappingId && mappingJob.mappingId !== mapping.id)
+  ) return null;
+  const summary = recordValue(mappingJob.resultSummary);
+  const candidateContainer = recordValue(summary.gatewayCandidatePackage);
+  const candidatePackage = recordValue(candidateContainer.candidatePackage);
+  const validationOutput = recordValue(candidateContainer.validationOutput);
+  const validationMetadata = recordValue(candidateContainer.validationMetadata);
+  const mappingValidationOutput = Object.keys(recordValue(mappingMetadata.validationOutput)).length > 0
+    ? recordValue(mappingMetadata.validationOutput)
+    : recordValue(mappingJson.validationOutput);
+  const candidatePackageHash = Object.keys(candidatePackage).length > 0
+    ? hashAffiliateAgentValue(candidatePackage)
+    : null;
+  const jobPackageHash = stringValue(summary.packageHash)
+    ?? stringValue(candidateContainer.validatedPackageHash)
+    ?? stringValue(candidateContainer.packageHash)
+    ?? stringValue(validationOutput.validatedPackageHash)
+    ?? stringValue(validationMetadata.validatedPackageHash);
+  const claimIds = snapshotClaimIdsFor(mapping, [mappingJob]);
+  if (
+    !candidatePackageHash
+    || candidatePackageHash !== packageHash
+    || jobPackageHash !== packageHash
+    || stringValue(candidatePackage.supplySourceId) !== root.id
+    || !affiliateScrapeMappingSchema.safeParse(mappingJson).success
+    || Object.keys(mappingValidationOutput).length === 0
+    || Object.keys(validationOutput).length === 0
+    || Object.keys(validationMetadata).length === 0
+  ) return null;
+  const claimId = stringValue(mappingValidationOutput.claimId);
+  if (!claimId || !claimIds.includes(claimId)) return null;
+  const claim = gatewayClaims.find((candidate) => candidate.id === claimId) ?? null;
+  if (!claim || String(claim.status).toUpperCase() !== 'COMPLETED') return null;
+  const envelope = parseAffiliateAgentProducerClaimEnvelopeForHistoricalRead(claim.claimEnvelopeJson);
+  if (
+    !envelope
+    || envelope.role !== 'MAPPING_PRODUCER'
+    || envelope.claimId !== claim.id
+    || envelope.jobId !== claim.jobId
+    || envelope.subject.type !== 'MAPPING_PRODUCER'
+    || envelope.subject.supplySourceId !== root.id
+    || envelope.subject.mappingJobId !== mappingJob.id
+    || envelope.claimGeneration !== claim.claimGeneration
+    || envelope.lifecycleGeneration !== claim.lifecycleGeneration
+    || envelope.workerId !== claim.workerId
+    || envelope.invocationId !== claim.invocationId
+    || envelope.workspaceId !== claim.workspaceId
+    || envelope.supplyContractVersion !== contract.version
+    || envelope.supplyContractHash !== contract.hash
+    || claim.claimEnvelopeHash !== hashAffiliateAgentValue(envelope)
+    || claim.evidenceManifestHash !== envelope.evidenceManifest.hash
+    || claim.role !== envelope.role
+    || claim.queue !== envelope.queue
+    || claim.lane !== envelope.lane
+    || claim.deploymentContractVersion !== envelope.deploymentContractVersion
+    || claim.deploymentContractHash !== envelope.deploymentContractHash
+    || claim.roleContractVersion !== envelope.roleContractVersion
+    || claim.roleContractHash !== envelope.roleContractHash
+    || claim.promptTemplateVersion !== envelope.promptTemplateVersion
+    || claim.promptTemplateHash !== envelope.promptTemplateHash
+    || claim.supplyContractVersion !== envelope.supplyContractVersion
+    || claim.supplyContractHash !== envelope.supplyContractHash
+  ) return null;
+  const gatewayJob = gatewayJobs.find((candidate) => candidate.id === claim.jobId) ?? null;
+  if (
+    !gatewayJob
+    || String(gatewayJob.status).toUpperCase() !== 'COMPLETED'
+    || gatewayJob.activeClaimId !== null
+    || gatewayJob.terminalReceiptId !== claim.terminalReceiptId
+    || gatewayJob.claimGeneration !== claim.claimGeneration
+    || gatewayJob.role !== 'MAPPING_PRODUCER'
+    || gatewayJob.subjectType !== 'MAPPING_PRODUCER'
+    || gatewayJob.subjectId !== mappingJob.id
+    || gatewayJob.supplySourceId !== root.id
+    || recordValue(gatewayJob.subjectJson).mappingJobId !== mappingJob.id
+    || recordValue(gatewayJob.subjectJson).supplySourceId !== root.id
+    || recordValue(gatewayJob.subjectJson).type !== 'MAPPING_PRODUCER'
+  ) return null;
+  const parsedTerminalResult = affiliateAgentTerminalResultEnvelopeSchema.safeParse(gatewayJob.resultJson);
+  if (!parsedTerminalResult.success || parsedTerminalResult.data.role !== 'MAPPING_PRODUCER') return null;
+  const terminalResult = parsedTerminalResult.data as unknown as Record<string, unknown>;
+  const terminalPayload = recordValue(terminalResult.payload);
+  if (
+    !['PACKAGE_COMMITTED', 'BOUNDED_REPAIR_SUBMITTED'].includes(String(terminalResult.disposition))
+    || stringValue(terminalPayload.packageHash) !== packageHash
+    || !stringValue(terminalPayload.commitReceiptId)
+    || stringValue(terminalResult.jobId) !== gatewayJob.id
+    || stringValue(terminalResult.claimId) !== claim.id
+    || Number(terminalResult.claimGeneration) !== claim.claimGeneration
+    || stringValue(terminalResult.workerId) !== claim.workerId
+    || stringValue(terminalResult.invocationId) !== claim.invocationId
+    || stringValue(gatewayJob.resultHash) !== hashAffiliateAgentValue(parsedTerminalResult.data)
+  ) return null;
+  const commitReceiptId = stringValue(terminalPayload.commitReceiptId);
+  const commitReceipt = gatewayReceipts.find((candidate) => candidate.id === commitReceiptId) ?? null;
+  const commitResponse = recordValue(commitReceipt?.responseJson);
+  const commitSafeOutput = recordValue(commitResponse.safeOutput);
+  if (
+    !commitReceipt
+    || commitReceipt.status !== 'SUCCEEDED'
+    || commitReceipt.claimId !== claim.id
+    || commitReceipt.jobId !== gatewayJob.id
+    || commitReceipt.claimGeneration !== claim.claimGeneration
+    || commitReceipt.operationKind !== 'EXECUTE_COMMAND'
+    || commitReceipt.commandName !== 'COMMIT_DECLARATIVE_PACKAGE'
+    || commitReceipt.responseHash !== hashAffiliateAgentValue({
+      commandType: commitResponse.commandType,
+      safeOutput: commitSafeOutput,
+    })
+    || commitResponse.kind !== 'COMMAND_SUCCEEDED'
+    || commitResponse.receiptId !== commitReceipt.id
+    || commitResponse.commandType !== 'COMMIT_DECLARATIVE_PACKAGE'
+    || stringValue(commitSafeOutput.packageHash) !== packageHash
+  ) return null;
+  const terminalReceipt = gatewayReceipts.find((candidate) => candidate.id === claim.terminalReceiptId) ?? null;
+  if (
+    !terminalReceipt
+    || terminalReceipt.status !== 'SUCCEEDED'
+    || terminalReceipt.claimId !== claim.id
+    || terminalReceipt.jobId !== gatewayJob.id
+    || terminalReceipt.claimGeneration !== claim.claimGeneration
+    || terminalReceipt.operationKind !== 'SUBMIT_RESULT'
+    || terminalReceipt.responseHash !== hashAffiliateAgentValue(terminalReceipt.responseJson)
+) return null;
+  const reviewerManifests = gatewayClaims.flatMap((reviewerClaim) => {
+    if (reviewerClaim.id === claim.id) return [];
+    const reviewerEnvelopeResult = affiliateAgentClaimEnvelopeSchema.safeParse(
+      reviewerClaim.claimEnvelopeJson,
+    );
+    if (!reviewerEnvelopeResult.success || reviewerEnvelopeResult.data.role !== 'SUPPLY_REVIEWER') {
+      return [];
+    }
+    const reviewerEnvelope = reviewerEnvelopeResult.data;
+    const reviewerJob = gatewayJobs.find((candidate) => candidate.id === reviewerClaim.jobId);
+    const reviewerSubject = reviewerEnvelope.subject;
+    const reviewerJobSubject = recordValue(reviewerJob?.subjectJson);
+    if (
+      !reviewerJob
+      || reviewerJob.claimGeneration !== reviewerClaim.claimGeneration
+      || !['ACTIVE', 'COMPLETED', 'RECONCILIATION_REQUIRED'].includes(
+        String(reviewerClaim.status).toUpperCase(),
+      )
+      || !['CLAIMED', 'COMPLETED', 'RECONCILIATION_REQUIRED'].includes(
+        String(reviewerJob.status).toUpperCase(),
+      )
+      || (
+        reviewerJob.activeClaimId !== null
+        && reviewerJob.activeClaimId !== reviewerClaim.id
+      )
+      || (
+        reviewerClaim.terminalReceiptId !== null
+        && reviewerJob.terminalReceiptId !== reviewerClaim.terminalReceiptId
+      )
+      || (
+        reviewerJob.expectedLifecycleGeneration !== null
+        && reviewerJob.expectedLifecycleGeneration !== reviewerClaim.lifecycleGeneration
+      )
+      || reviewerJob.role !== 'SUPPLY_REVIEWER'
+      || reviewerJob.subjectType !== 'SUPPLY_REVIEWER'
+      || reviewerJob.parentClaimId !== claim.id
+      || reviewerClaim.claimGeneration !== reviewerEnvelope.claimGeneration
+      || reviewerClaim.lifecycleGeneration !== reviewerEnvelope.lifecycleGeneration
+      || reviewerClaim.workerId !== reviewerEnvelope.workerId
+      || reviewerClaim.invocationId !== reviewerEnvelope.invocationId
+      || reviewerClaim.workspaceId !== reviewerEnvelope.workspaceId
+      || reviewerEnvelope.supplyContractVersion !== contract.version
+      || reviewerEnvelope.supplyContractHash !== contract.hash
+      || reviewerClaim.claimEnvelopeHash !== hashAffiliateAgentValue(reviewerEnvelope)
+      || reviewerClaim.evidenceManifestHash !== reviewerEnvelope.evidenceManifest.hash
+      || reviewerSubject.supplySourceId !== root.id
+      || reviewerSubject.producerClaimId !== claim.id
+      || reviewerSubject.producerWorkerId !== claim.workerId
+      || reviewerSubject.producerInvocationId !== claim.invocationId
+      || reviewerSubject.producerWorkspaceId !== claim.workspaceId
+      || reviewerSubject.committedPackageHash !== packageHash
+      || reviewerJobSubject.producerClaimId !== claim.id
+      || reviewerJobSubject.supplySourceId !== root.id
+      || reviewerJobSubject.committedPackageHash !== packageHash
+    ) return [];
+    return [{ claim: reviewerClaim, envelope: reviewerEnvelope }];
+  });
+  if (reviewerManifests.length > 1) return null;
+  const mappingEvidenceRefs = stringArray(
+    mappingMetadata.evidenceRefs
+      ?? recordValue(mappingJson.evidence).evidenceRefs
+      ?? mappingJson.evidenceRefs,
+  );
+  const validationEvidenceRefs = stringArray(
+    validationOutput.evidenceRefs
+      ?? validationMetadata.evidenceRefs,
+  );
+  if (
+    !equalAffiliateSnapshotStringArrays(mappingEvidenceRefs, validationEvidenceRefs)
+    || stringValue(mappingValidationOutput.validatedPackageHash)
+      !== packageHash
+    || stringValue(validationOutput.validatedPackageHash) !== packageHash
+    || stringValue(mappingValidationOutput.claimId) !== claim.id
+    || stringValue(validationOutput.claimId) !== claim.id
+    || Number(mappingValidationOutput.claimGeneration) !== claim.claimGeneration
+    || Number(validationOutput.claimGeneration) !== claim.claimGeneration
+    || stringValue(mappingValidationOutput.invocationId) !== claim.invocationId
+    || stringValue(validationOutput.invocationId) !== claim.invocationId
+    || stringValue(mappingValidationOutput.supplyContractHash) !== contract.hash
+    || stringValue(validationOutput.supplyContractHash) !== contract.hash
+  ) return null;
+  const artifacts = gatewayArtifacts.filter((artifact) => artifact.claimId === claim.id);
+  const manifestValidation = affiliateSnapshotManifestArtifactHash(
+    envelope,
+    'DETERMINISTIC_VALIDATION',
+  );
+  const reviewerEnvelope = reviewerManifests[0]?.envelope ?? null;
+  const manifestDurable = affiliateSnapshotManifestArtifactHash(
+    reviewerEnvelope ?? envelope,
+    'DURABLE_EVIDENCE',
+  );
+  const durableArtifactMetadata = recordValue(
+    candidateContainer.durableEvidenceArtifact
+      ?? validationMetadata.durableEvidenceArtifact
+      ?? validationOutput.durableEvidenceArtifact
+      ?? mappingValidationOutput.durableEvidenceArtifact,
+  );
+  const durableArtifactId = stringValue(
+    durableArtifactMetadata.sourceArtifactId
+      ?? durableArtifactMetadata.artifactId
+      ?? durableArtifactMetadata.fileId,
+  );
+  const durableArtifactHash = stringValue(
+    durableArtifactMetadata.contentHash
+      ?? durableArtifactMetadata.sha256,
+  );
+  const expectedDurableArtifactId = manifestDurable?.artifactId ?? durableArtifactId;
+  const expectedDurableHash = manifestDurable?.sha256 ?? durableArtifactHash;
+  if (
+    !expectedDurableArtifactId
+    || !expectedDurableHash
+    || !isAffiliateSnapshotSha256(expectedDurableHash)
+  ) return null;
+  const deterministic = affiliateSnapshotGatewayArtifactFor(
+    artifacts,
+    claim.id,
+    claim.claimGeneration,
+    'DETERMINISTIC_VALIDATION',
+    'gateway-deterministic-validation',
+    `${claim.id}:gateway-deterministic-validation`,
+    manifestValidation?.sha256 ?? hashAffiliateAgentValue(validationOutput),
+  );
+  const committed = affiliateSnapshotGatewayArtifactFor(
+    artifacts,
+    claim.id,
+    claim.claimGeneration,
+    'COMMITTED_PACKAGE',
+    'gateway-committed-package',
+    `${claim.id}:gateway-committed-package`,
+    hashAffiliateAgentValue(candidatePackage),
+  );
+  const durable = affiliateSnapshotGatewayArtifactFor(
+    artifacts,
+    claim.id,
+    claim.claimGeneration,
+    'DURABLE_EVIDENCE',
+    'gateway-durable-evidence',
+    expectedDurableArtifactId,
+    expectedDurableHash,
+  );
+  if (
+    !deterministic
+    || !committed
+    || !durable
+    || (manifestValidation && (
+      deterministic.sourceArtifactId !== manifestValidation.artifactId
+      || deterministic.contentHash !== manifestValidation.sha256
+    ))
+    || (manifestDurable && (
+      durable.sourceArtifactId !== manifestDurable.artifactId
+      || durable.contentHash !== manifestDurable.sha256
+    ))
+  ) return null;
+  return {
+    claim,
+    envelope,
+    gatewayJob,
+    terminalResult,
+    commitReceipt,
+    artifacts,
+    packageHash,
+  };
+};
+
+const projectBoundLifecycleEvidenceKinds = (
+  input: Readonly<{
+    root: AffiliateSupplySources;
+    source: AffiliateScrapeSources | null;
+    mapping: AffiliateScrapeMappings | null;
+    mappingJob: AffiliateSourceMappingJobs | null;
+    contract: AffiliateSupplyContractPolicy;
+    gatewayClaims: readonly AffiliateAgentGatewayClaims[];
+    gatewayJobs: readonly AffiliateAgentGatewayJobs[];
+    gatewayReceipts: readonly AffiliateAgentGatewayOperationReceipts[];
+    gatewayArtifacts: readonly AffiliateAgentGatewayArtifacts[];
+  }>,
+): string[] => {
+  const proof = affiliateSnapshotCurrentProducerProof(input);
+  if (!proof) return [];
+  return ['VALIDATION_OUTPUT', 'DURABLE_SOURCE_EVIDENCE'];
+};
+
+const projectLegacyApprovedLifecycleEvidenceKinds = (
+  root: AffiliateSupplySources,
+  source: AffiliateScrapeSources | null,
+  mapping: AffiliateScrapeMappings | null,
+  mappingJob: AffiliateSourceMappingJobs | null,
+  approval: AffiliateApprovalJobs | null,
+  latestRun: AffiliateScrapeRuns | null,
+): string[] => {
+  if (!mapping || !approval) return [];
+  const mappingJson = recordValue(mapping.mapping);
+  const mappingMetadata = recordValue(mappingJson.metadata);
+  const packageHash = mappingPackageHashForSnapshot(mapping);
+  const approvalJson = recordValue(approval);
+  const decision = recordValue(approval.decision);
+  const decisionValue = decision.decision ?? approval.decision;
+  const approvalEvidenceRefs = stringArray(decision.evidenceRefs ?? approvalJson.evidenceRefs);
+  const approvalLifecycleEvidenceKinds = stringArray(
+    decision.lifecycleEvidenceKinds ?? approvalJson.lifecycleEvidenceKinds,
+  );
+  const approvalEvidenceKinds = stringArray(
+    decision.evidenceKinds ?? approvalJson.evidenceKinds,
+  );
+  const reviewerId = stringValue(decision.reviewerId ?? approval.reviewerId ?? approvalJson.reviewerId);
+  const reviewedPackageHash = stringValue(
+    decision.packageHash
+      ?? approvalJson.reviewedPackageHash
+      ?? approvalJson.packageHash,
+  );
+  const independent = decision.isIndependent === true
+    || decision.independent === true
+    || approvalJson.isIndependent === true
+    || approvalJson.independent === true;
+  if (
+    approval.subjectType !== 'MAPPING_PACKAGE'
+    || String(approval.status).toUpperCase() !== 'APPROVED'
+    || String(decisionValue).toUpperCase() !== 'APPROVE'
+    || !independent
+    || !reviewerId
+    || !approvalEvidenceRefs.length
+    || !packageHash
+    || reviewedPackageHash !== packageHash
+    || (approval.subjectKey && approval.subjectKey !== mapping.id)
+    || (approval.supplySourceId && approval.supplySourceId !== root.id)
+  ) return [];
+  const sourceMetadata = recordValue(source?.metadata);
+  const mappingJobSummary = recordValue(mappingJob?.resultSummary);
+  const runLogs = recordValue(latestRun?.logs);
+  return Array.from(new Set([
+    ...stringArray(sourceMetadata.lifecycleEvidenceKinds),
+    ...stringArray(sourceMetadata.evidenceKinds),
+    ...stringArray(mappingMetadata.lifecycleEvidenceKinds),
+    ...stringArray(mappingMetadata.evidenceKinds),
+    ...stringArray(mappingJobSummary.lifecycleEvidenceKinds),
+    ...stringArray(mappingJobSummary.evidenceKinds),
+    ...stringArray(decision.lifecycleEvidenceKinds),
+    ...stringArray(decision.evidenceKinds),
+    ...approvalLifecycleEvidenceKinds,
+    ...approvalEvidenceKinds,
+    ...approvalEvidenceRefs.filter((evidenceRef) => (
+      evidenceRef === 'VALIDATION_OUTPUT' || evidenceRef === 'DURABLE_SOURCE_EVIDENCE'
+    )),
+    ...stringArray(runLogs.lifecycleEvidenceKinds),
+    ...stringArray(runLogs.evidenceKinds),
+  ]));
+};
+
 
 const buildAffiliateSupplySnapshot = (input: AffiliateSupplySnapshotRows): AffiliateSupplyEvidenceSnapshot => {
   const {
@@ -2041,28 +2516,44 @@ const buildAffiliateSupplySnapshot = (input: AffiliateSupplySnapshotRows): Affil
     mappingJob,
     approval,
     latestRun,
+    historicalRuns,
+    gatewayClaims,
+    gatewayJobs,
+    gatewayReceipts,
+    gatewayArtifacts,
     candidates,
     targets,
     contract,
     now,
   } = input;
-  const mappingJson = recordValue(mapping?.mapping);
-  const mappingMetadata = recordValue(mappingJson.metadata);
-  const mappingEvidence = recordValue(mappingJson.evidence);
-  const mappingJobSummary = recordValue(mappingJob?.resultSummary);
-  const approvalDecision = recordValue(approval?.decision);
-  const runLogs = recordValue(latestRun?.logs);
   const sourceMetadata = recordValue(source?.metadata);
+  const runLogs = recordValue(latestRun?.logs);
   const lifecycleEvidenceKinds = Array.from(new Set([
-    ...stringArray(sourceMetadata.lifecycleEvidenceKinds),
-    ...stringArray(sourceMetadata.evidenceKinds),
-    ...stringArray(mappingJobSummary.lifecycleEvidenceKinds),
-    ...stringArray(mappingJobSummary.evidenceKinds),
-    ...stringArray(approvalDecision.lifecycleEvidenceKinds),
-    ...stringArray(approvalDecision.evidenceKinds),
-    ...stringArray(runLogs.lifecycleEvidenceKinds),
-    ...stringArray(runLogs.evidenceKinds),
+    ...projectBoundLifecycleEvidenceKinds({
+      root,
+      source,
+      mapping,
+      mappingJob,
+      contract,
+      gatewayClaims,
+      gatewayJobs,
+      gatewayReceipts,
+      gatewayArtifacts,
+    }),
+    ...projectLegacyApprovedLifecycleEvidenceKinds(
+      root,
+      source,
+      mapping,
+      mappingJob,
+      approval,
+      latestRun,
+    ),
   ]));
+  const historicalRunEvidence: NonNullable<AffiliateSupplyEvidenceSnapshot['latestRun']>[] = [];
+  for (const historicalRun of historicalRuns) {
+    const evidence = buildAffiliateSnapshotRun(historicalRun, recordValue(historicalRun.logs));
+    if (evidence) historicalRunEvidence.push(evidence);
+  }
   const supplySourceId = String(root.id);
   return {
     now,
@@ -2076,6 +2567,7 @@ const buildAffiliateSupplySnapshot = (input: AffiliateSupplySnapshotRows): Affil
     mappingJob: buildAffiliateSnapshotMappingJob(mappingJob),
     approval: buildAffiliateSnapshotApproval(approval),
     latestRun: buildAffiliateSnapshotRun(latestRun, runLogs),
+    historicalRuns: historicalRunEvidence,
     baseline: sourceMetadata[AFFILIATE_AUTOMATION_BASELINE_METADATA_KEY] ?? null,
     lifecycleEvidenceKinds,
     identityViolations: buildAffiliateSnapshotIdentityViolations(input, supplySourceId),
@@ -2083,6 +2575,7 @@ const buildAffiliateSupplySnapshot = (input: AffiliateSupplySnapshotRows): Affil
     targets: buildAffiliateSnapshotTargets(targets),
   };
 };
+
 const targetCellsForAssessment = (
   assessment: AffiliateSupplyAssessment,
 ): AffiliateSupplyContractImpactCell[] => assessment.targets.map((target) => ({
@@ -2139,15 +2632,306 @@ const loadSnapshotLineage = async (
   ]);
   return { source, intake, predecessor, successor };
 };
-
 type AffiliateSnapshotRecords = Readonly<{
   mapping: AffiliateScrapeMappings | null;
   mappingJob: AffiliateSourceMappingJobs | null;
   approval: AffiliateApprovalJobs | null;
   latestRun: AffiliateScrapeRuns | null;
+  historicalRuns: AffiliateScrapeRuns[];
   candidates: AffiliateImportCandidates[];
   targets: AffiliateSupplyTargets[];
+  gatewayClaims: AffiliateAgentGatewayClaims[];
+  gatewayJobs: AffiliateAgentGatewayJobs[];
+  gatewayReceipts: AffiliateAgentGatewayOperationReceipts[];
+  gatewayArtifacts: AffiliateAgentGatewayArtifacts[];
 }>;
+
+const snapshotRecordRows = async <T>(
+  delegate: unknown,
+  manyArgs: unknown,
+  firstArgs: unknown,
+): Promise<T[]> => {
+  const rowDelegate = delegate as {
+    findMany?: (args: unknown) => Promise<T[]>;
+    findFirst?: (args: unknown) => Promise<T | null>;
+  };
+  if (typeof rowDelegate.findMany === 'function') {
+    return rowDelegate.findMany(manyArgs);
+  }
+  if (typeof rowDelegate.findFirst === 'function') {
+    const row = await rowDelegate.findFirst(firstArgs);
+    return row ? [row] : [];
+  }
+  return [];
+};
+
+const snapshotRunRows = async (
+  delegate: unknown,
+  latestArgs: unknown,
+  currentArgs: unknown | null,
+): Promise<AffiliateScrapeRuns[]> => {
+  const rowDelegate = delegate as {
+    findFirst?: (args: unknown) => Promise<AffiliateScrapeRuns | null>;
+  };
+  if (typeof rowDelegate.findFirst !== 'function') return [];
+  const latest = await rowDelegate.findFirst(latestArgs);
+  const current = currentArgs ? await rowDelegate.findFirst(currentArgs) : null;
+  if (!latest) return current ? [current] : [];
+  if (!current || current.id === latest.id) return [latest];
+  return [latest, current];
+};
+type AffiliateSnapshotGatewayProofRows = Readonly<{
+  gatewayClaims: AffiliateAgentGatewayClaims[];
+  gatewayJobs: AffiliateAgentGatewayJobs[];
+  gatewayReceipts: AffiliateAgentGatewayOperationReceipts[];
+  gatewayArtifacts: AffiliateAgentGatewayArtifacts[];
+}>;
+
+const loadSnapshotGatewayProofRows = async (
+  database: AffiliateSupplyDatabase,
+  claimIds: readonly string[],
+  supplySourceIds: readonly string[] = [],
+): Promise<AffiliateSnapshotGatewayProofRows> => {
+  const uniqueClaimIds = Array.from(new Set(claimIds.filter((id): id is string => Boolean(id))));
+  if (!uniqueClaimIds.length) {
+    return { gatewayClaims: [], gatewayJobs: [], gatewayReceipts: [], gatewayArtifacts: [] };
+  }
+  const claimsDelegate = database.gatewayClaims as unknown as {
+    findMany?: (args: unknown) => Promise<AffiliateAgentGatewayClaims[]>;
+    findUnique?: (args: unknown) => Promise<AffiliateAgentGatewayClaims | null>;
+  } | undefined;
+  if (!claimsDelegate) {
+    return { gatewayClaims: [], gatewayJobs: [], gatewayReceipts: [], gatewayArtifacts: [] };
+  }
+  const claims: AffiliateAgentGatewayClaims[] = [];
+  for (const claimIdChunk of chunksOf(uniqueClaimIds, AFFILIATE_RECONCILIATION_QUERY_BATCH_SIZE)) {
+    const findMany = claimsDelegate.findMany;
+    const findUnique = claimsDelegate.findUnique;
+    if (typeof findMany === 'function') {
+      claims.push(...await findMany({
+        where: {
+          id: { in: claimIdChunk },
+          status: 'COMPLETED',
+        },
+      }));
+    } else if (typeof findUnique === 'function') {
+      const rows = await Promise.all(claimIdChunk.map((id) => findUnique({ where: { id } })));
+      claims.push(...rows.filter((row): row is AffiliateAgentGatewayClaims => row !== null));
+    }
+  }
+  const jobIds = Array.from(new Set(claims.map((claim) => claim.jobId).filter(Boolean)));
+  const gatewayJobs: AffiliateAgentGatewayJobs[] = [];
+  const jobsDelegate = database.gatewayJobs as unknown as {
+    findMany?: (args: unknown) => Promise<AffiliateAgentGatewayJobs[]>;
+    findUnique?: (args: unknown) => Promise<AffiliateAgentGatewayJobs | null>;
+  } | undefined;
+  if (jobsDelegate) {
+    for (const jobIdChunk of chunksOf(jobIds, AFFILIATE_RECONCILIATION_QUERY_BATCH_SIZE)) {
+      const findMany = jobsDelegate.findMany;
+      const findUnique = jobsDelegate.findUnique;
+      if (typeof findMany === 'function') {
+        gatewayJobs.push(...await findMany({ where: { id: { in: jobIdChunk } } }));
+      } else if (typeof findUnique === 'function') {
+        const rows = await Promise.all(jobIdChunk.map((id) => findUnique({ where: { id } })));
+        gatewayJobs.push(...rows.filter((row): row is AffiliateAgentGatewayJobs => row !== null));
+      }
+    }
+  }
+  if (
+    typeof jobsDelegate?.findMany === 'function'
+    && supplySourceIds.length > 0
+    && uniqueClaimIds.length > 0
+  ) {
+    for (const sourceIdChunk of chunksOf(
+      Array.from(new Set(supplySourceIds)),
+      AFFILIATE_RECONCILIATION_QUERY_BATCH_SIZE,
+    )) {
+      gatewayJobs.push(...await jobsDelegate.findMany({
+        where: {
+          parentClaimId: { in: uniqueClaimIds },
+          supplySourceId: { in: sourceIdChunk },
+          role: 'SUPPLY_REVIEWER',
+        },
+      }));
+    }
+    const reviewerJobIds = Array.from(new Set(
+      gatewayJobs
+        .filter((job) => job.role === 'SUPPLY_REVIEWER')
+        .map((job) => job.id),
+    ));
+    for (const reviewerJobIdChunk of chunksOf(
+      reviewerJobIds,
+      AFFILIATE_RECONCILIATION_QUERY_BATCH_SIZE,
+    )) {
+      if (reviewerJobIdChunk.length === 0 || typeof claimsDelegate.findMany !== 'function') continue;
+      claims.push(...await claimsDelegate.findMany({
+        where: {
+          jobId: { in: reviewerJobIdChunk },
+          status: { in: ['ACTIVE', 'COMPLETED', 'RECONCILIATION_REQUIRED'] },
+        },
+      }));
+    }
+  }
+  const uniqueClaims = Array.from(new Map(claims.map((claim) => [claim.id, claim])).values());
+  const uniqueGatewayJobs = Array.from(new Map(gatewayJobs.map((job) => [job.id, job])).values());
+  const proofClaimIds = uniqueClaims.map((claim) => claim.id);
+  const receiptIds = Array.from(new Set([
+    ...uniqueClaims.map((claim) => stringValue(claim.terminalReceiptId)),
+    ...uniqueGatewayJobs.map((job) => (
+      stringValue(recordValue(recordValue(job.resultJson).payload).commitReceiptId)
+    )),
+  ].filter((id): id is string => Boolean(id))));
+  const gatewayReceipts: AffiliateAgentGatewayOperationReceipts[] = [];
+  const receiptsDelegate = database.gatewayReceipts as unknown as {
+    findMany?: (args: unknown) => Promise<AffiliateAgentGatewayOperationReceipts[]>;
+  } | undefined;
+  const receiptsFindMany = receiptsDelegate?.findMany;
+  if (typeof receiptsFindMany === 'function') {
+    for (const receiptIdChunk of chunksOf(receiptIds, AFFILIATE_RECONCILIATION_QUERY_BATCH_SIZE)) {
+      gatewayReceipts.push(...await receiptsFindMany({
+        where: { id: { in: receiptIdChunk } },
+      }));
+    }
+  }
+  const gatewayArtifacts: AffiliateAgentGatewayArtifacts[] = [];
+  const artifactsDelegate = database.gatewayArtifacts as unknown as {
+    findMany?: (args: unknown) => Promise<AffiliateAgentGatewayArtifacts[]>;
+  } | undefined;
+  const artifactsFindMany = artifactsDelegate?.findMany;
+  if (typeof artifactsFindMany === 'function') {
+    for (const claimIdChunk of chunksOf(proofClaimIds, AFFILIATE_RECONCILIATION_QUERY_BATCH_SIZE)) {
+      gatewayArtifacts.push(...await artifactsFindMany({
+        where: {
+          claimId: { in: claimIdChunk },
+          evidenceRef: {
+            in: [
+              'gateway-deterministic-validation',
+              'gateway-committed-package',
+              'gateway-durable-evidence',
+            ],
+          },
+        },
+        orderBy: [{ claimId: 'asc' }, { evidenceRef: 'asc' }],
+      }));
+    }
+  }
+  return {
+    gatewayClaims: uniqueClaims,
+    gatewayJobs: uniqueGatewayJobs,
+    gatewayReceipts,
+    gatewayArtifacts,
+  };
+};
+const snapshotClaimIdsFor = (
+  mapping: AffiliateScrapeMappings | null,
+  mappingJobs: readonly AffiliateSourceMappingJobs[],
+): string[] => {
+  const mappingJson = recordValue(mapping?.mapping);
+  const mappingMetadata = recordValue(mappingJson.metadata);
+  const mappingValidationOutput = recordValue(mappingMetadata.validationOutput).isValid !== undefined
+    ? recordValue(mappingMetadata.validationOutput)
+    : recordValue(mappingJson.validationOutput);
+  const mappingValidationMetadata = recordValue(mappingValidationOutput.validationMetadata);
+  const packageClaims = mappingJobs.flatMap((mappingJob) => {
+    const summary = recordValue(mappingJob.resultSummary);
+    const candidatePackage = recordValue(summary.gatewayCandidatePackage);
+    const candidateValidationMetadata = recordValue(candidatePackage.validationMetadata);
+    const candidateValidationOutput = recordValue(candidatePackage.validationOutput);
+    return [
+      stringValue(candidatePackage.claimId),
+      stringValue(candidateValidationMetadata.claimId),
+      stringValue(candidateValidationOutput.claimId),
+    ];
+  });
+  return Array.from(new Set([
+    stringValue(mappingValidationOutput.claimId),
+    stringValue(mappingValidationMetadata.claimId),
+    stringValue(mappingMetadata.claimId),
+    ...packageClaims,
+  ].filter((value): value is string => Boolean(value))));
+};
+
+const mappingPackageHashForSnapshot = (
+  mapping: AffiliateScrapeMappings | null,
+): string | null => {
+  if (!mapping) return null;
+  const mappingJson = recordValue(mapping.mapping);
+  const mappingMetadata = recordValue(mappingJson.metadata);
+  return stringValue(mappingMetadata.packageHash)
+    ?? stringValue(mappingJson.packageHash)
+    ?? null;
+};
+
+const selectSnapshotMappingJob = (
+  mapping: AffiliateScrapeMappings | null,
+  mappingJobs: readonly AffiliateSourceMappingJobs[],
+): AffiliateSourceMappingJobs | null => {
+  if (!mapping) return null;
+  const packageHash = mappingPackageHashForSnapshot(mapping);
+  const ordered = [...mappingJobs].sort((left, right) => (
+    (toDate(right.createdAt)?.getTime() ?? Number.NEGATIVE_INFINITY)
+      - (toDate(left.createdAt)?.getTime() ?? Number.NEGATIVE_INFINITY)
+    || codeUnitCompare(String(left.id), String(right.id))
+  ));
+  const matching = ordered.find((mappingJob) => {
+    const summary = recordValue(mappingJob.resultSummary);
+    const candidatePackage = recordValue(summary.gatewayCandidatePackage);
+    const candidateValidationMetadata = recordValue(candidatePackage.validationMetadata);
+    const candidateValidationOutput = recordValue(candidatePackage.validationOutput);
+    const jobPackageHash = stringValue(summary.packageHash)
+      ?? stringValue(candidatePackage.packageHash)
+      ?? stringValue(candidatePackage.validatedPackageHash)
+      ?? stringValue(candidateValidationMetadata.validatedPackageHash)
+      ?? stringValue(candidateValidationOutput.validatedPackageHash);
+    const mappingIdentityMatches = mappingJob.mappingId === mapping.id;
+    const packageIdentityMatches = Boolean(packageHash && jobPackageHash === packageHash);
+    return mappingIdentityMatches && packageIdentityMatches;
+  });
+  if (matching) return matching;
+  return null;
+};
+
+const selectSnapshotRuns = (
+  mapping: AffiliateScrapeMappings | null,
+  source: AffiliateScrapeSources | null,
+  runs: readonly AffiliateScrapeRuns[],
+): Readonly<{ latestRun: AffiliateScrapeRuns | null; historicalRuns: AffiliateScrapeRuns[] }> => {
+  const ordered = [...runs].sort((left, right) => (
+    (toDate(right.createdAt)?.getTime() ?? Number.NEGATIVE_INFINITY)
+      - (toDate(left.createdAt)?.getTime() ?? Number.NEGATIVE_INFINITY)
+    || codeUnitCompare(String(left.id), String(right.id))
+  ));
+  const currentMappingId = mapping?.id ?? source?.activeMappingId ?? null;
+  if (!currentMappingId) return { latestRun: ordered[0] ?? null, historicalRuns: [] };
+  const pointedRunId = stringValue(source?.lastScrapeRunId);
+  const pointedRun = pointedRunId
+    ? ordered.find((run) => run.id === pointedRunId && run.mappingId === currentMappingId) ?? null
+    : null;
+  if (pointedRun) {
+    return {
+      latestRun: pointedRun,
+      historicalRuns: ordered.filter((run) => run.id !== pointedRun.id),
+    };
+  }
+  const latest = ordered[0] ?? null;
+  if (latest?.mappingId === currentMappingId) {
+    return {
+      latestRun: latest,
+      historicalRuns: ordered.slice(1),
+    };
+  }
+  const matching = ordered.find((run) => run.mappingId === currentMappingId) ?? null;
+  if (matching) {
+    return {
+      latestRun: matching,
+      historicalRuns: ordered.filter((run) => run.id !== matching.id),
+    };
+  }
+  return {
+    latestRun: null,
+    historicalRuns: ordered,
+  };
+};
 
 const loadSnapshotRecords = async (
   database: AffiliateSupplyDatabase,
@@ -2155,31 +2939,72 @@ const loadSnapshotRecords = async (
   sourceId: string,
   activeMappingId?: string | null,
   excludeRunId?: string | null,
+  source?: AffiliateScrapeSources | null,
 ): Promise<AffiliateSnapshotRecords> => {
-  const [mapping, mappingJob, approval, latestRun, candidates, targets] = await Promise.all([
-    activeMappingId
-      ? database.mappings.findUnique({ where: { id: activeMappingId } })
-      : database.mappings.findFirst({
-        where: { supplySourceId },
-        orderBy: [{ isActive: 'desc' }, { version: 'desc' }, { id: 'asc' }],
-      }),
-    database.mappingJobs.findFirst({
-      where: { OR: [{ supplySourceId }, { sourceId }] },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-    }),
-    database.approvals.findFirst({
-      where: { supplySourceId, subjectType: 'MAPPING_PACKAGE' },
-      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-    }),
-    database.runs.findFirst({
-      where: {
-        AND: [
-          { OR: [{ supplySourceId }, { sourceId }] },
-          ...(excludeRunId ? [{ NOT: { id: excludeRunId } }] : []),
-        ],
+  const mapping = activeMappingId === undefined
+    ? await database.mappings.findFirst({
+      where: { supplySourceId },
+      orderBy: [{ isActive: 'desc' }, { version: 'desc' }, { id: 'asc' }],
+    })
+    : activeMappingId
+      ? await database.mappings.findUnique({ where: { id: activeMappingId } })
+      : null;
+  const currentMappingId = mapping?.id ?? activeMappingId ?? null;
+  const mappingJobWhere = currentMappingId
+    ? { mappingId: currentMappingId }
+    : { id: '__affiliate-no-current-mapping-job__' };
+  const approvalWhere = currentMappingId
+    ? { supplySourceId, subjectType: 'MAPPING_PACKAGE', subjectKey: currentMappingId }
+    : { id: '__affiliate-no-current-mapping-approval__' };
+  const [mappingJobs, approvals, runs, candidates, targets] = await Promise.all([
+    snapshotRecordRows<AffiliateSourceMappingJobs>(
+      database.mappingJobs,
+      {
+        where: mappingJobWhere,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: AFFILIATE_RECONCILIATION_QUERY_BATCH_SIZE,
       },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-    }),
+      {
+        where: mappingJobWhere,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      },
+    ),
+    snapshotRecordRows<AffiliateApprovalJobs>(
+      database.approvals,
+      {
+        where: approvalWhere,
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        take: AFFILIATE_RECONCILIATION_QUERY_BATCH_SIZE,
+      },
+      {
+        where: approvalWhere,
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      },
+    ),
+    snapshotRunRows(
+      database.runs,
+      {
+        where: {
+          AND: [
+            { OR: [{ supplySourceId }, { sourceId }] },
+            ...(excludeRunId ? [{ NOT: { id: excludeRunId } }] : []),
+          ],
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      },
+      currentMappingId
+        ? {
+          where: {
+            AND: [
+              { OR: [{ supplySourceId }, { sourceId }] },
+              { mappingId: currentMappingId },
+              ...(excludeRunId ? [{ NOT: { id: excludeRunId } }] : []),
+            ],
+          },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        }
+        : null,
+    ),
     database.candidates.findMany({
       where: { OR: [{ supplySourceId }, { sourceId }] },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
@@ -2189,7 +3014,28 @@ const loadSnapshotRecords = async (
       orderBy: [{ targetType: 'asc' }, { targetId: 'asc' }, { id: 'asc' }],
     }),
   ]);
-  return { mapping, mappingJob, approval, latestRun, candidates, targets };
+  const currentMappingJob = selectSnapshotMappingJob(mapping, mappingJobs);
+  const approval = approvals
+    .sort((left, right) => (
+      (toDate(right.updatedAt)?.getTime() ?? Number.NEGATIVE_INFINITY)
+        - (toDate(left.updatedAt)?.getTime() ?? Number.NEGATIVE_INFINITY)
+      || codeUnitCompare(String(left.id), String(right.id))
+    ))
+    .find((candidate) => Boolean(currentMappingId && candidate.subjectKey === currentMappingId))
+    ?? null;
+  const runSelection = selectSnapshotRuns(mapping, source ?? null, runs);
+  const claimIds = snapshotClaimIdsFor(mapping, currentMappingJob ? [currentMappingJob] : []);
+  const proofRows = await loadSnapshotGatewayProofRows(database, claimIds, [String(supplySourceId)]);
+  return {
+    mapping,
+    mappingJob: currentMappingJob,
+    approval,
+    latestRun: runSelection.latestRun,
+    historicalRuns: runSelection.historicalRuns,
+    candidates,
+    targets,
+    ...proofRows,
+  };
 };
 
 const loadSnapshot = async (
@@ -2209,6 +3055,7 @@ const loadSnapshot = async (
     sourceId,
     lineage.source?.activeMappingId,
     excludeRunId,
+    lineage.source,
   );
   return buildAffiliateSupplySnapshot({
     root,
@@ -2226,6 +3073,10 @@ type AffiliateSnapshotBatchRows = Readonly<{
   approvals: AffiliateApprovalJobs[];
   runs: AffiliateScrapeRuns[];
   candidates: AffiliateImportCandidates[];
+  gatewayClaims: AffiliateAgentGatewayClaims[];
+  gatewayJobs: AffiliateAgentGatewayJobs[];
+  gatewayReceipts: AffiliateAgentGatewayOperationReceipts[];
+  gatewayArtifacts: AffiliateAgentGatewayArtifacts[];
   targets: AffiliateSupplyTargets[];
   linkedRoots: AffiliateSupplySources[];
 }>;
@@ -2233,6 +3084,41 @@ type AffiliateSnapshotBatchRows = Readonly<{
 const affiliateSnapshotUniqueIds = (
   values: readonly (string | null | undefined)[],
 ): string[] => Array.from(new Set(values.filter((value): value is string => Boolean(value))));
+const selectAffiliateSnapshotBatchMappingAndJob = (
+  root: AffiliateSupplySources,
+  sources: readonly AffiliateScrapeSources[],
+  mappings: readonly AffiliateScrapeMappings[],
+  mappingJobs: readonly AffiliateSourceMappingJobs[],
+): Readonly<{
+  source: AffiliateScrapeSources | null;
+  mapping: AffiliateScrapeMappings | null;
+  mappingJob: AffiliateSourceMappingJobs | null;
+}> => {
+  const rootId = String(root.id);
+  const source = root.liveSourceId
+    ? firstAffiliateSnapshotRow(sources, (row) => row.id === root.liveSourceId)
+    : firstAffiliateSnapshotRow(sources, (row) => row.supplySourceId === rootId);
+  const sourceId = source?.id ?? root.liveSourceId ?? `supply-source:${rootId}`;
+  const rootMappings = mappings
+    .filter((row) => row.supplySourceId === rootId || row.sourceId === sourceId)
+    .sort(sortAffiliateSnapshotMappings);
+  const mapping = source
+    ? source.activeMappingId
+      ? firstAffiliateSnapshotRow(rootMappings, (row) => row.id === source.activeMappingId)
+      : null
+    : root.liveSourceId
+      ? null
+      : rootMappings[0] ?? null;
+  const rootMappingJobs = mappingJobs
+    .filter((row) => row.supplySourceId === rootId || row.sourceId === sourceId)
+    .sort((left, right) => sortAffiliateSnapshotDateDesc(left, right, 'createdAt'));
+  return {
+    source,
+    mapping,
+    mappingJob: selectSnapshotMappingJob(mapping, rootMappingJobs),
+  };
+};
+
 
 const loadSnapshotBatchRows = async (
   database: AffiliateSupplyDatabase,
@@ -2311,7 +3197,29 @@ const loadSnapshotBatchRows = async (
       where: { id: { in: linkedRootIds } },
     }),
   ]);
-  return { sources, intakes, mappings, mappingJobs, approvals, runs, candidates, targets, linkedRoots };
+  const currentProofSelections = roots.map((root) => (
+    selectAffiliateSnapshotBatchMappingAndJob(root, sources, mappings, mappingJobs)
+  ));
+  const claimIds = affiliateSnapshotUniqueIds(currentProofSelections.flatMap(({ mapping, mappingJob }) => (
+    snapshotClaimIdsFor(mapping, mappingJob ? [mappingJob] : [])
+  )));
+  const proofRows = await loadSnapshotGatewayProofRows(
+    database,
+    claimIds,
+    roots.map((root) => String(root.id)),
+  );
+  return {
+    sources,
+    intakes,
+    mappings,
+    mappingJobs,
+    approvals,
+    runs,
+    candidates,
+    targets,
+    linkedRoots,
+    ...proofRows,
+  };
 };
 
 const firstAffiliateSnapshotRow = <T>(
@@ -2386,6 +3294,11 @@ type AffiliateSnapshotBatchSelection = Readonly<{
   mappingJob: AffiliateSourceMappingJobs | null;
   approval: AffiliateApprovalJobs | null;
   latestRun: AffiliateScrapeRuns | null;
+  historicalRuns: AffiliateScrapeRuns[];
+  gatewayClaims: AffiliateAgentGatewayClaims[];
+  gatewayJobs: AffiliateAgentGatewayJobs[];
+  gatewayReceipts: AffiliateAgentGatewayOperationReceipts[];
+  gatewayArtifacts: AffiliateAgentGatewayArtifacts[];
   candidates: AffiliateImportCandidates[];
   targets: AffiliateSupplyTargets[];
 }>;
@@ -2414,22 +3327,65 @@ const selectAffiliateSnapshotBatchRecords = (
   rows: AffiliateSnapshotBatchRows,
   rootId: string,
   sourceId: string,
-): Pick<AffiliateSnapshotBatchSelection, 'mapping' | 'mappingJob' | 'approval' | 'latestRun' | 'candidates' | 'targets'> => {
-  const rootMappings = rows.mappings
-    .filter((row) => row.supplySourceId === rootId || row.sourceId === sourceId)
-    .sort(sortAffiliateSnapshotMappings);
-  const mapping = root.liveSourceId
-    ? firstAffiliateSnapshotRow(rootMappings, (row) => row.id === rows.sources.find((source) => source.id === root.liveSourceId)?.activeMappingId)
-    : rootMappings[0] ?? null;
-  const mappingJobs = rows.mappingJobs
-    .filter((row) => row.supplySourceId === rootId || row.sourceId === sourceId)
-    .sort((left, right) => sortAffiliateSnapshotDateDesc(left, right, 'createdAt'));
+  source: AffiliateScrapeSources | null,
+): Pick<
+  AffiliateSnapshotBatchSelection,
+  | 'mapping'
+  | 'mappingJob'
+  | 'approval'
+  | 'latestRun'
+  | 'historicalRuns'
+  | 'gatewayClaims'
+  | 'gatewayJobs'
+  | 'gatewayReceipts'
+  | 'gatewayArtifacts'
+  | 'candidates'
+  | 'targets'
+> => {
+  const selected = selectAffiliateSnapshotBatchMappingAndJob(
+    root,
+    rows.sources,
+    rows.mappings,
+    rows.mappingJobs,
+  );
+  const mapping = selected.mapping;
+  const mappingJob = selected.mappingJob;
   const approvals = rows.approvals
-    .filter((row) => row.supplySourceId === rootId && row.subjectType === 'MAPPING_PACKAGE')
+    .filter((row) => (
+      row.supplySourceId === rootId
+      && row.subjectType === 'MAPPING_PACKAGE'
+      && Boolean(mapping && row.subjectKey === mapping.id)
+    ))
     .sort((left, right) => sortAffiliateSnapshotDateDesc(left, right, 'updatedAt'));
   const runs = rows.runs
     .filter((row) => row.supplySourceId === rootId || row.sourceId === sourceId)
     .sort((left, right) => sortAffiliateSnapshotDateDesc(left, right, 'createdAt'));
+  const runSelection = selectSnapshotRuns(mapping, source, runs);
+  const claimIds = snapshotClaimIdsFor(mapping, mappingJob ? [mappingJob] : []);
+  const producerClaimIdSet = new Set(claimIds);
+  const reviewerJobIds = new Set(
+    rows.gatewayJobs
+      .filter((job) => (
+        job.role === 'SUPPLY_REVIEWER'
+        && job.supplySourceId === rootId
+        && typeof job.parentClaimId === 'string'
+        && producerClaimIdSet.has(job.parentClaimId)
+      ))
+      .map((job) => job.id),
+  );
+  const relevantClaimIds = new Set([
+    ...claimIds,
+    ...rows.gatewayClaims
+      .filter((claim) => reviewerJobIds.has(claim.jobId))
+      .map((claim) => claim.id),
+  ]);
+  const gatewayClaims = rows.gatewayClaims.filter((claim) => relevantClaimIds.has(claim.id));
+  const gatewayJobs = rows.gatewayJobs.filter((job) => (
+    gatewayClaims.some((claim) => claim.jobId === job.id)
+    || reviewerJobIds.has(job.id)
+  ));
+  const gatewayReceipts = rows.gatewayReceipts.filter((receipt) => relevantClaimIds.has(receipt.claimId));
+  const gatewayArtifacts = rows.gatewayArtifacts.filter((artifact) => relevantClaimIds.has(artifact.claimId));
   const candidates = rows.candidates
     .filter((row) => row.supplySourceId === rootId || row.sourceId === sourceId)
     .sort(sortAffiliateSnapshotCandidates);
@@ -2438,9 +3394,14 @@ const selectAffiliateSnapshotBatchRecords = (
     .sort(sortAffiliateSnapshotTargets);
   return {
     mapping,
-    mappingJob: mappingJobs[0] ?? null,
+    mappingJob,
     approval: approvals[0] ?? null,
-    latestRun: runs[0] ?? null,
+    latestRun: runSelection.latestRun,
+    historicalRuns: runSelection.historicalRuns,
+    gatewayClaims,
+    gatewayJobs,
+    gatewayReceipts,
+    gatewayArtifacts,
     candidates,
     targets,
   };
@@ -2455,7 +3416,13 @@ const buildAffiliateSnapshotBatchRoot = (
   const rootId = String(root.id);
   const lineage = selectAffiliateSnapshotBatchLineage(root, rows, rootId);
   const sourceId = lineage.source?.id ?? root.liveSourceId ?? `supply-source:${rootId}`;
-  const records = selectAffiliateSnapshotBatchRecords(root, rows, rootId, sourceId);
+  const records = selectAffiliateSnapshotBatchRecords(
+    root,
+    rows,
+    rootId,
+    sourceId,
+    lineage.source,
+  );
   return buildAffiliateSupplySnapshot({
     root,
     ...lineage,

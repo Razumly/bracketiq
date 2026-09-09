@@ -68,6 +68,7 @@ const claimForProbe = () => {
       type: role,
       supplySourceId: "supply-sdk-schema-probe",
       mappingJobId: "mapping-sdk-schema-probe",
+      listingKind: "EVENT",
       pass: 1,
     },
   });

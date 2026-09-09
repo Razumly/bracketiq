@@ -41,7 +41,9 @@ import {
 } from "../prismaAgentGateway";
 const describeDatabase =
   process.env.RUN_DATABASE_INTEGRATION === "1" ? describe : describe.skip;
-const DATABASE_NAME = "bracketiq_e2e_67_gateway";
+const DATABASE_NAME =
+  process.env.AFFILIATE_TEST_DATABASE_NAME ?? "bracketiq_e2e_67_gateway";
+const ISOLATED_DATABASE_NAME_PATTERN = /^bracketiq_e2e_[a-z0-9_]+$/;
 const INITIAL_TIME = new Date("2026-08-20T18:00:00.000Z");
 const RUN_PREFIX = `issue67-gateway-${randomUUID()}`;
 const INPUT_BYTES = Buffer.from("database gateway evidence", "utf8");
@@ -71,6 +73,11 @@ const PROTECTED_TABLE_OPERATIONS = [
 
 const assertIsolatedDatabaseUrl = (databaseUrl: string | undefined): string => {
   if (!databaseUrl) throw new Error("DATABASE_URL is required.");
+  if (!ISOLATED_DATABASE_NAME_PATTERN.test(DATABASE_NAME)) {
+    throw new Error(
+      "AFFILIATE_TEST_DATABASE_NAME must use the bracketiq_e2e_ prefix.",
+    );
+  }
   const parsed = new URL(databaseUrl);
   const isIsolatedDatabase =
     ["127.0.0.1", "localhost"].includes(parsed.hostname) &&
@@ -444,6 +451,7 @@ const seedSupplySource = async (
       canonicalUrl: `https://source.example.test/${id}`,
       origin: "https://source.example.test",
       pathKey: `/${id}`,
+      targetKind: "EVENT",
       lifecycleGeneration,
     },
   });
@@ -451,8 +459,32 @@ const seedSupplySource = async (
 
 const seedMappingJob = async (label: string): Promise<string> => {
   const id = `${RUN_PREFIX}-${label}-job`;
+  const mappingJobId = `${RUN_PREFIX}-${label}-mapping-job`;
   const supplySourceId = `${RUN_PREFIX}-${label}-supply-source`;
+  const sourceId = `${RUN_PREFIX}-${label}-scrape-source`;
   await seedSupplySource(supplySourceId);
+  await prisma.affiliateScrapeSources.create({
+    data: {
+      id: sourceId,
+      name: `Gateway ${label} source`,
+      sourceKey: `${RUN_PREFIX}-${label}-scrape-source-key`,
+      baseUrl: `https://source.example.test/${label}`,
+      listUrl: `https://source.example.test/${label}/events`,
+      targetKind: "EVENT",
+      status: "ACTIVE",
+      supplySourceId,
+      lifecycleGeneration: 7,
+    },
+  });
+  await prisma.affiliateSourceMappingJobs.create({
+    data: {
+      id: mappingJobId,
+      intakeId: `${RUN_PREFIX}-${label}-intake`,
+      supplySourceId,
+      sourceId,
+      status: "QUEUED",
+    },
+  });
   await prisma.affiliateAgentGatewayJobs.create({
     data: {
       id,
@@ -461,11 +493,12 @@ const seedMappingJob = async (label: string): Promise<string> => {
       lane: "MAPPING_PRODUCTION",
       role: "MAPPING_PRODUCER",
       subjectType: "MAPPING_PRODUCER",
-      subjectId: `${RUN_PREFIX}-${label}-mapping-job`,
+      subjectId: mappingJobId,
       subjectJson: {
         type: "MAPPING_PRODUCER",
         supplySourceId,
-        mappingJobId: `${RUN_PREFIX}-${label}-mapping-job`,
+        mappingJobId,
+        listingKind: "EVENT",
         pass: 1,
       },
       evidenceManifestJson: mappingManifestFor(label),
@@ -766,6 +799,7 @@ const seedCoverageJob = async (
   input: Readonly<{ invocationFailureCount?: number }> = {},
 ): Promise<string> => {
   const id = `${RUN_PREFIX}-${label}-job`;
+  const coverageCellId = `${RUN_PREFIX}-${label}-coverage-cell`;
   const manifest = coverageManifestFor(label);
   await prisma.affiliateAgentGatewayJobs.create({
     data: {
@@ -775,10 +809,10 @@ const seedCoverageJob = async (
       lane: "COVERAGE_PLANNING",
       role: "COVERAGE_PLANNER",
       subjectType: "COVERAGE_PLANNER",
-      subjectId: `${RUN_PREFIX}-${label}-coverage-cell`,
+      subjectId: coverageCellId,
       subjectJson: {
         type: "COVERAGE_PLANNER",
-        coverageCellId: `${RUN_PREFIX}-${label}-coverage-cell`,
+        coverageCellId,
         assessmentCycleId: `${RUN_PREFIX}-${label}-cycle`,
       },
       evidenceManifestJson: manifest,
@@ -787,6 +821,37 @@ const seedCoverageJob = async (
     },
   });
   return id;
+};
+const seedCoveragePlanningWave = async (
+  label: string,
+  jobId: string,
+): Promise<void> => {
+  const coverageCellId = `${RUN_PREFIX}-${label}-coverage-cell`;
+  const demandId = `${RUN_PREFIX}-${label}-demand`;
+  await prisma.affiliateReplenishmentDemands.create({
+    data: {
+      id: demandId,
+      targetKey: coverageCellId,
+      marketKey: `${RUN_PREFIX}-${label}-market`,
+      sportId: `${RUN_PREFIX}-${label}-sport`,
+      sourceProfile: "EVENT",
+      rolloutCohort: "DEFAULT",
+      contractVersion: contractBundleFixture.supplyContract.version,
+      contractHash: contractBundleFixture.supplyContract.hash,
+      minimumFreshPublishedSupply: 1,
+      reasonCodes: [],
+      evidenceJson: {},
+    },
+  });
+  await prisma.affiliateReplenishmentWaves.create({
+    data: {
+      id: `${RUN_PREFIX}-${label}-wave`,
+      demandId,
+      rolloutCohort: "DEFAULT",
+      coveragePlanningJobId: jobId,
+      demandGeneration: 0,
+    },
+  });
 };
 const seedHumanJob = async (
   label: string,
@@ -1102,13 +1167,56 @@ const cleanupGatewayRows = async (): Promise<void> => {
     select: { id: true },
   });
   const jobIds = jobs.map(({ id }) => id);
-  if (jobIds.length === 0) return;
   const supplySourceIds = (
     await prisma.affiliateSupplySources.findMany({
       where: { id: { startsWith: RUN_PREFIX } },
       select: { id: true },
     })
   ).map(({ id }) => id);
+  const mappingJobIds = (
+    await prisma.affiliateSourceMappingJobs.findMany({
+      where: { id: { startsWith: RUN_PREFIX } },
+      select: { id: true },
+    })
+  ).map(({ id }) => id);
+  const scrapeSourceIds = (
+    await prisma.affiliateScrapeSources.findMany({
+      where: { id: { startsWith: RUN_PREFIX } },
+      select: { id: true },
+    })
+  ).map(({ id }) => id);
+  const scrapeMappingIds = (
+    await prisma.affiliateScrapeMappings.findMany({
+      where: {
+        OR: [
+          { id: { startsWith: RUN_PREFIX } },
+          { sourceId: { startsWith: RUN_PREFIX } },
+        ],
+      },
+      select: { id: true },
+    })
+  ).map(({ id }) => id);
+  const waveIds = (
+    await prisma.affiliateReplenishmentWaves.findMany({
+      where: { id: { startsWith: RUN_PREFIX } },
+      select: { id: true },
+    })
+  ).map(({ id }) => id);
+  const demandIds = (
+    await prisma.affiliateReplenishmentDemands.findMany({
+      where: { id: { startsWith: RUN_PREFIX } },
+      select: { id: true },
+    })
+  ).map(({ id }) => id);
+  if (
+    jobIds.length === 0
+    && supplySourceIds.length === 0
+    && mappingJobIds.length === 0
+    && scrapeSourceIds.length === 0
+    && scrapeMappingIds.length === 0
+    && waveIds.length === 0
+    && demandIds.length === 0
+  ) return;
   const claims = await prisma.affiliateAgentGatewayClaims.findMany({
     where: { jobId: { in: jobIds } },
     select: { id: true },
@@ -1133,6 +1241,31 @@ const cleanupGatewayRows = async (): Promise<void> => {
     await transaction.affiliateAgentGatewayJobs.deleteMany({
       where: { id: { in: jobIds } },
     });
+    if (scrapeMappingIds.length > 0) {
+      await transaction.affiliateScrapeMappings.deleteMany({
+        where: { id: { in: scrapeMappingIds } },
+      });
+    }
+    if (mappingJobIds.length > 0) {
+      await transaction.affiliateSourceMappingJobs.deleteMany({
+        where: { id: { in: mappingJobIds } },
+      });
+    }
+    if (waveIds.length > 0) {
+      await transaction.affiliateReplenishmentWaves.deleteMany({
+        where: { id: { in: waveIds } },
+      });
+    }
+    if (demandIds.length > 0) {
+      await transaction.affiliateReplenishmentDemands.deleteMany({
+        where: { id: { in: demandIds } },
+      });
+    }
+    if (scrapeSourceIds.length > 0) {
+      await transaction.affiliateScrapeSources.deleteMany({
+        where: { id: { in: scrapeSourceIds } },
+      });
+    }
     if (supplySourceIds.length > 0) {
       await transaction.affiliateSupplySources.deleteMany({
         where: { id: { in: supplySourceIds } },
@@ -1361,11 +1494,15 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
     let selectedCount = 0;
     let releaseSelection = (): void => undefined;
     let markBothSelected = (): void => undefined;
+    let markPendingReceipt = (): void => undefined;
     const selectionBarrier = new Promise<void>((resolve) => {
       releaseSelection = resolve;
     });
     const bothSelected = new Promise<void>((resolve) => {
       markBothSelected = resolve;
+    });
+    const pendingReceiptObserved = new Promise<void>((resolve) => {
+      markPendingReceipt = resolve;
     });
     const racingPrisma = prisma.$extends({
       query: {
@@ -1374,20 +1511,42 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
             const selected = await query(args);
             const compound = args.where.claimId_idempotencyKey;
             if (
-              selected === null &&
-              compound?.idempotencyKey === idempotencyKey
+              selected === null
+              && compound?.idempotencyKey === idempotencyKey
             ) {
               selectedCount += 1;
               if (selectedCount === 2) markBothSelected();
               await selectionBarrier;
+            }
+            if (
+              selected?.status === "PENDING"
+              && compound?.idempotencyKey === idempotencyKey
+            ) {
+              markPendingReceipt();
             }
             return selected;
           },
         },
       },
     });
+    let artifactReadCount = 0;
+    let releaseFirstArtifactRead = (): void => undefined;
+    const firstArtifactReadReleased = new Promise<void>((resolve) => {
+      releaseFirstArtifactRead = resolve;
+    });
     const harness = createGatewayHarness("artifact-read-race", {
       database: racingPrisma,
+      readImmutable: async () => {
+        artifactReadCount += 1;
+        if (artifactReadCount === 1) await firstArtifactReadReleased;
+        return {
+          bytes: new Uint8Array(INPUT_BYTES),
+          mimeType: "text/markdown",
+          byteSize: INPUT_BYTES.byteLength,
+          sourceUrl: "https://evidence.example.test/database",
+          finalUrl: "https://evidence.example.test/database",
+        };
+      },
     });
     const grant = await claimOrThrow(
       harness.gateway,
@@ -1405,6 +1564,8 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
     ];
     await bothSelected;
     releaseSelection();
+    await pendingReceiptObserved;
+    releaseFirstArtifactRead();
     const results = await Promise.allSettled(reads);
 
     expect(selectedCount).toBe(2);
@@ -1639,6 +1800,7 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
 
   it("commits one terminal result atomically, invalidates its token, and permits only exact replay", async () => {
     const jobId = await seedCoverageJob("terminal-atomic");
+    await seedCoveragePlanningWave("terminal-atomic", jobId);
     const harness = createGatewayHarness("terminal-atomic");
     const grant = await claimOrThrow(
       harness.gateway,
@@ -1694,7 +1856,9 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
       tokenInvalidatedAt: INITIAL_TIME,
       endedAt: INITIAL_TIME,
     });
-    expect(receipts).toHaveLength(1);
+    expect(receipts.filter((receipt) => receipt.operationKind === "SUBMIT_RESULT")).toEqual([
+      expect.objectContaining({ id: accepted.receiptId, status: "SUCCEEDED" }),
+    ]);
     expect(terminalEvents).toBe(1);
   });
 
@@ -2901,6 +3065,35 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
       ) {
         throw new Error("Mapping commit did not return its package hash.");
       }
+      await prisma.affiliateAgentGatewayArtifacts.updateMany({
+        where: {
+          claimId: envelope.claimId,
+          claimGeneration: envelope.claimGeneration,
+          evidenceKind: {
+            in: ["DETERMINISTIC_VALIDATION", "DURABLE_EVIDENCE"],
+          },
+        },
+        data: { creatingClaimId: envelope.claimId },
+      });
+      await prisma.affiliateAgentGatewayArtifacts.create({
+        data: {
+          id: `${RUN_PREFIX}-four-role-mapping-committed-package`,
+          claimId: envelope.claimId,
+          claimGeneration: envelope.claimGeneration,
+          evidenceRef: "committed-package",
+          evidenceKind: "COMMITTED_PACKAGE",
+          sourceArtifactId: `${RUN_PREFIX}-four-role-mapping-committed-package`,
+          fileId: `${RUN_PREFIX}-four-role-mapping-committed-package`,
+          contentHash: mappingPackageHash,
+          mimeType: "text/markdown",
+          byteSize: INPUT_BYTES.byteLength,
+          accessMode: "READ_ONLY",
+          creatingClaimId: envelope.claimId,
+          retentionClass: "INDEFINITE",
+          isPinned: true,
+        },
+      });
+
       return {
         ...common,
         role: envelope.role,
@@ -2967,10 +3160,10 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
           return {
             ...common,
             role: envelope.role,
-            disposition: "CAMPAIGN_PROPOSED" as const,
-            reasonCodes: ["EVIDENCE_VERIFIED"] as const,
-            summary: "The coverage cell has one evidence-backed campaign.",
-            payload: { campaignProposalRefs: ["smoke-campaign"] },
+            disposition: "NO_ACTION" as const,
+            reasonCodes: ["NO_QUALIFIED_ACTION"] as const,
+            summary: "No qualified campaign remains for this coverage cell.",
+            payload: { basis: "NO_QUALIFIED_ACTION" },
           };
         case "MAPPING_PRODUCER":
           return mappingTerminalResultFor(authorization, envelope, common);
@@ -3095,6 +3288,7 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
     };
 
     const coverageJobId = await seedCoverageJob("four-role-coverage");
+    await seedCoveragePlanningWave("four-role-coverage", coverageJobId);
     await runRole("COVERAGE_PLANNER", coverageJobId);
     const mappingJobId = await seedMappingJob("four-role-mapping");
     await runRole("MAPPING_PRODUCER", mappingJobId);
@@ -3105,22 +3299,19 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
     ) {
       throw new Error("Mapping claim was not launched.");
     }
-    const reviewerJobId = await seedReviewerJob(
-      "four-role-reviewer",
-      {
-        claimId: mappingEnvelope.claimId,
-        workerId: mappingEnvelope.workerId,
-        invocationId: mappingEnvelope.invocationId,
-        workspaceId: mappingEnvelope.workspaceId,
-        supplySourceId: mappingEnvelope.subject.supplySourceId,
+    const reviewerJob = await prisma.affiliateAgentGatewayJobs.findFirstOrThrow({
+      where: {
+        parentClaimId: mappingEnvelope.claimId,
+        role: "SUPPLY_REVIEWER",
+        status: "QUEUED",
       },
-      mappingPackageHash,
-      "four-role-mapping",
-    );
-    await runRole("SUPPLY_REVIEWER", reviewerJobId);
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    });
+    await runRole("SUPPLY_REVIEWER", reviewerJob.id);
     const humanPrerequisite = await completedReviewerPrerequisiteForJob(
       "four-role-reviewer",
-      reviewerJobId,
+      reviewerJob.id,
     );
     const humanJobId = await seedHumanJob("four-role-human", humanPrerequisite);
     await runRole("HUMAN_DIRECTED_EXECUTOR", humanJobId);
