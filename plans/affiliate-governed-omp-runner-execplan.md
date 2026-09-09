@@ -34,14 +34,14 @@ The operator selected OMP with two ChatGPT accounts. The governed affiliate work
 - [x] Run focused regressions and the recorded-evidence replay before source delivery.
 - [x] Add and verify the guarded completed-hold retry operation.
 - [x] Publish and deploy the reviewed retry-capable correction.
-- [ ] Complete both linked repairs and independent review. Blocked by Softball validation errors and Boomtown review reconciliation.
+- [ ] Complete both linked repairs and independent review. Boomtown is approved. Softball remains blocked after pass three exhausted the bounded retry limit.
 - [x] Verify final records, close admission, and stop trial workers.
 - [x] Carry the stored mapping kind into new producer claims.
 - [x] Preserve deterministic validation errors and server retryability.
 - [x] Resolve authorized synthetic Supply Contract artifacts.
-- [ ] Use current mapping run and evidence lineage for independent review.
+- [x] Use current mapping run and evidence lineage for independent review.
 - [x] Retain bounded reviewer effect failure diagnostics.
-- [ ] Run focused regressions, source replays, and independent review.
+- [x] Run focused regressions, source replays, and independent review.
 ## Current approval record
 
 Conditional `AUTH SETUP` approval (recorded 2026-09-07): after source
@@ -998,12 +998,99 @@ Review the new operator boundary independently before publication.
   Safe report is preserved at
   `/tmp/recovery-production-preview.safe.json`; report hash is
   `f4373cc8e3a9c84852dc8c327f8e407d3e4039c806118dae12ac944195bd4d20`.
-- [ ] Deploy the reviewed source and generated role-4/deployment-5 bundle.
-- [ ] Apply the guarded Boomtown recovery and verify the actual effect.
-- [ ] Preview and apply the authorized Softball retry after Boomtown
-  completion. Keep both legacy holds and admission controls until those
-  operations are separately verified.
+- [x] Deploy the reviewed source and generated role-4/deployment-5 bundle.
+- [x] Apply the guarded Boomtown recovery and verify the actual effect.
+- [x] Preview and apply the authorized Softball pass-three retry.
+- [ ] Complete Softball repair and review. Pass three returned CONTRACT_GAP;
+  the governed retry limit is exhausted.
 
-The source prerequisite is verified; deployment, actual recovery, and retry
-remain pending. No production write, token revival, claim creation, or
-automatic-scrape/publication action was performed by this verification.
+The source prerequisite passed before deployment. The following record
+describes the separately authorized production operation.
+
+## Production result for deployment five
+
+
+Commit `380c47c955f7aefaf569a743be7fb5c11bfb63b7` passed Site CI
+`34406958561` and governed image publication `34407780513`. The worker image
+is `ghcr.io/razumly/bracketiq-affiliate-governed@sha256:bb2a53757a8b6da0796c5015cc959220738c8d945c3e4452babc5604f31d70e2`.
+The Gateway image is
+`ghcr.io/razumly/bracketiq-affiliate-gateway@sha256:fadfb033f2d083aa4204f9fc92de1a57c14a82d5938c93e4cbca13dd30196f86`.
+Both image revision labels matched the reviewed commit. The published worker
+passed contract parsing, producer and reviewer containment, and the OMP SDK
+probe with no provider call.
+
+The deployment contract is version 5, hash
+`fe2b850218d76be65a915321c0b46f38eaccf316522f10b48ce6abf1d2940d75`.
+Fresh preflight passed with no blockers or warnings, report hash
+`4960af117c7116eab1d6a5bc4646b9c311e15a4760ff876ca8f63fa7269d2a5d`.
+Only the six authorized governed services were replaced. The canonical
+deployment environment was not overwritten.
+
+### Boomtown recorded approval
+
+
+The deployed recovery PREVIEW was eligible with zero writes. Its report hash
+was `8271b6b462dd49251ae566106c886ccd4dffa63472fd0aaafbe2d22df2cc5941`.
+APPLY completed the original reviewer effect
+`agw-receipt-42ec1599-5b1a-4583-98d4-1e7e197ca45c`. The original reviewer
+job and claim are now COMPLETED. Terminal receipt
+`agw-receipt-4e86d448-b8bd-49d4-811a-f4fa8b0a63a9` records APPROVED.
+Lifecycle transition `6889492f-1aab-4ff5-a277-4323627828ba` records APPROVE
+at generation 3 with the original effect receipt as its idempotency key.
+Exact replay returned zero writes.
+
+The authorization audit preserves the prior UNKNOWN receipt state, pending
+response snapshot, hashes, claim status, deadlines, and invalidated token
+time. The token remains invalidated at its original time. Mapping
+`agw-artifact-53fb238e-f15a-452f-a694-2bb4049ac7b5`, version 2, remains
+inactive and now has the recorded approval validation time. The root retains
+LEGACY_SPORT_REPAIR and disabled automation. The organization remains UNLISTED
+with public pages and widgets disabled.
+
+### Softball pass-three blocker
+
+
+The scoped retry created only Gateway job
+`eabe21a7-a756-4957-9b25-f825a53f0e06`, linked to the completed pass-two
+claim. Its retry report hash was
+`e75498b0f173d98427b3b6806a582a8430ee811f44047bf628f601848105fd0d`.
+Exact retry replay returned the same child and zero writes. The new claim
+`agw-claim-c2cc5d79-3187-4c6e-9c4b-cc8b11b50482` carried listingKind CLUB,
+role and prompt version 4, and deployment version 5.
+
+The producer completed as CONTRACT_GAP, terminal receipt
+`agw-receipt-c00f70fb-c8b2-4b56-8de3-1375adbb26b9`. It supplied a verified
+Softball determination but produced no validation receipt, package commit,
+or independent review job. Retained diagnostics show two local schema
+rejections, three EVIDENCE_REFERENCE_NOT_PERMITTED validation errors, and
+three INTERNAL_ERROR validation errors. All were non-retryable.
+
+The model attributed failure to the Markdown evidence reference. That is
+not a proven backend diagnosis: the evidence code also covers legacy sport
+verification, and exact rejected package arguments were not retained.
+The old version-1 mapping remains unchanged. A read-only retry preview for
+the completed pass-three job returned RETRY_PASS_EXHAUSTED, no selected jobs,
+and zero writes. No fourth attempt or forced reset was made.
+
+### Final safety state and evidence
+
+
+Admission is closed. Mapper 1, reviewer 1, and the root runner are stopped.
+The Gateway and both model services remain healthy with restart policy no.
+There are zero active claims, zero queued or retry-wait jobs, and zero
+unresolved claim pointers. The workspace volume is empty. Both roots retain
+LEGACY_SPORT_REPAIR and zero supply contribution. Both organizations remain
+UNLISTED with public surfaces and automatic scraping disabled.
+
+All 39 pre-operation fingerprints for the four completed producer jobs and
+their claims and receipts are unchanged. Prior evidence remains intact.
+Private operation evidence is retained at
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v5-recovery-380c47c95/run`.
+It includes deployment and preflight metadata, image probes, recovery
+preview/apply/replay, the preserved recovery audit, Softball retry evidence,
+command diagnostics, final safety records, and workspace/history checks.
+
+Boomtown's mapped repair and approval are complete. Softball is not repaired.
+Further production work requires a diagnosed validation correction and an
+explicitly approved bounded continuation. Do not raise the retry limit or
+rewrite completed attempts merely to clear the queue.
