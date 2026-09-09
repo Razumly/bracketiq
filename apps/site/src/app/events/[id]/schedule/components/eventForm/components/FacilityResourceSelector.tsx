@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Badge, Collapse, Text } from '@mantine/core';
+import { Badge, Collapse, Text } from '@/components/organization/organization-operation-ui';
 import { ChevronDown } from 'lucide-react';
 
 import { getFieldDisplayName } from '@/lib/fieldUtils';

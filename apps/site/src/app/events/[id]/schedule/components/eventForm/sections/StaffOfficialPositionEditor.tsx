@@ -1,17 +1,15 @@
 import type { ComponentProps } from 'react';
-import {
-    ActionIcon,
-    Alert,
-    Button,
-    Group,
-    NumberInput,
-    Paper,
-    Select as MantineSelect,
-    Stack,
-    Text,
-    TextInput,
-    Title,
-} from '@mantine/core';
+import { ActionIcon,
+Alert,
+Button,
+Group,
+NumberInput,
+Paper,
+Select as MantineSelect,
+Stack,
+Text,
+TextInput,
+Title, } from '@/components/organization/organization-operation-ui';
 
 import type { EventOfficialPosition } from '@/types';
 import type { StaffingPriority } from '@/server/officials/config';
@@ -51,13 +49,13 @@ export const StaffOfficialPositionEditor = ({
     <Paper withBorder radius="md" p="md" bg="white">
         <Stack gap="sm">
             <MantineSelect
+                native
                 label="Staffing Priority"
                 description="Choose how staffing shortages affect match placement."
                 data={STAFFING_PRIORITY_OPTIONS}
                 value={staffingPriority}
                 onChange={onStaffingPriorityChange}
                 comboboxProps={comboboxProps}
-                error={coverageError ?? undefined}
             />
             {coverageError ? (
                 <Alert color="yellow" variant="light">

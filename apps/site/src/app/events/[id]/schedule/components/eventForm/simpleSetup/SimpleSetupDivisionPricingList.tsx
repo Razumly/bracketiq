@@ -1,14 +1,12 @@
-import {
-    Alert,
-    Button,
-    Group,
-    NumberInput,
-    Paper,
-    Stack,
-    Switch,
-    Text,
-} from '@mantine/core';
-import { DateTimePicker } from '@mantine/dates';
+import { Alert,
+Button,
+Group,
+NumberInput,
+Paper,
+Stack,
+Switch,
+Text, } from '@/components/organization/organization-operation-ui';
+import { DateTimePicker } from '@/components/organization/organization-operation-ui';
 
 import CentsInput from '@/components/ui/CentsInput';
 import HostPriceInput from '@/components/ui/HostPriceInput';

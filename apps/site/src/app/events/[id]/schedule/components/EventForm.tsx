@@ -1599,7 +1599,7 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
       formId,
       handleSaveDivisionDetail,
       hasUnsetTeamCapacityLimits,
-      hideSectionNavigation: false,
+      hideSectionNavigation: isCreateMode,
       isAffiliateEvent,
       isImmutableField,
       leagueError,
@@ -1720,22 +1720,18 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
       );
 
     return (
-      <div className="space-y-3">
-        <div className="sticky top-0 z-30 space-y-3 border-b border-gray-200 bg-white/95 px-4 py-3 backdrop-blur">
-          <div className="flex flex-col items-stretch justify-between gap-3 sm:flex-row sm:items-center sm:gap-4">
-            <div>
-              <p className="font-semibold text-gray-950">Event setup</p>
-              <p className="text-xs text-gray-600">
-                Both modes edit the same event draft.
-              </p>
-            </div>
+      <div className="space-y-5">
+        <div className="sm:sticky sm:top-4 z-30 rounded-2xl border border-slate-200 bg-white/95 px-4 py-4 shadow-sm backdrop-blur sm:px-6">
+          <div className="flex justify-center">
             <SetupModeControl value={setupMode} onChange={setSetupMode} />
           </div>
           {setupMode === "SIMPLE" ? (
-            <SimpleSetupProgressRail
-              pages={simpleSetupPages}
-              onSelectPage={selectSimpleSetupPage}
-            />
+            <div className="mt-4">
+              <SimpleSetupProgressRail
+                pages={simpleSetupPages}
+                onSelectPage={selectSimpleSetupPage}
+              />
+            </div>
           ) : null}
         </div>
         {editorLockMessages.length > 0 ? (

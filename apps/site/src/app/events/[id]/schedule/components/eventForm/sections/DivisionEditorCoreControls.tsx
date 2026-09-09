@@ -1,10 +1,8 @@
 import type { ComponentProps } from 'react';
-import {
-    NumberInput,
-    Select as MantineSelect,
-    Text,
-    TextInput,
-} from '@mantine/core';
+import { NumberInput,
+Select as MantineSelect,
+Text,
+TextInput, } from '@/components/organization/organization-operation-ui';
 
 import CentsInput from '@/components/ui/CentsInput';
 import HostPriceInput from '@/components/ui/HostPriceInput';
@@ -93,6 +91,7 @@ export const DivisionEditorCoreControls = ({
 }: DivisionEditorCoreControlsProps) => (
     <>
         <MantineSelect
+            native
             label="Gender"
             placeholder="Select gender"
             data={genderOptions}
@@ -104,6 +103,7 @@ export const DivisionEditorCoreControls = ({
             onChange={(value) => onGenderChange((value as '' | 'M' | 'F' | 'C') || '')}
         />
         <MantineSelect
+            native
             label="Skill Division"
             placeholder="Select skill division"
             data={skillDivisionTypeOptions}
@@ -117,6 +117,7 @@ export const DivisionEditorCoreControls = ({
             onChange={(value) => onSkillDivisionChange(value || '')}
         />
         <MantineSelect
+            native
             label="Age Division"
             placeholder="Select age division"
             data={ageDivisionTypeOptions}

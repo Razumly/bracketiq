@@ -1,5 +1,5 @@
 import type { ComponentProps, Dispatch, SetStateAction } from "react";
-import { Stack, Text, Title } from "@mantine/core";
+import { Stack, Text, Title } from '@/components/organization/organization-operation-ui';
 import { motion } from "motion/react";
 import { type Control } from "react-hook-form";
 

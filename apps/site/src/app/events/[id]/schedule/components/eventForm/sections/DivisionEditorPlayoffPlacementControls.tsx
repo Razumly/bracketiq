@@ -1,8 +1,6 @@
 import type { ComponentProps } from 'react';
-import {
-    Select as MantineSelect,
-    Text,
-} from '@mantine/core';
+import { Select as MantineSelect,
+Text, } from '@/components/organization/organization-operation-ui';
 
 import { AnimatedLayoutSection } from '../components/AnimatedSection';
 import { DIVISION_FULL_WIDTH_CLASS } from '../divisionLayout';
@@ -37,6 +35,7 @@ export const DivisionEditorPlayoffPlacementControls = ({
                 <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                     {Array.from({ length: Math.max(0, Math.trunc(playoffTeamCount ?? 0)) }).map((_, placementIndex) => (
                         <MantineSelect
+                            native
                             key={`editor-placement-${placementIndex}`}
                             label={`Placement #${placementIndex + 1}`}
                             placeholder="Select playoff division"

@@ -1,6 +1,6 @@
 'use client';
 
-import { Alert, Badge, Button, Group, Image, Paper, Stack, Text, Title } from '@mantine/core';
+import { Alert, Badge, Button, Group, Image, Paper, Stack, Text, Title } from '@/components/organization/organization-operation-ui';
 
 import type { SimpleSetupReviewModel, SimpleSetupReviewRow } from './reviewModel';
 import type { EventSetupPageId } from './types';

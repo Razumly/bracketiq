@@ -1,18 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
-import {
-    ActionIcon,
-    Alert,
-    Button,
-    Group,
-    Loader,
-    MultiSelect,
-    NumberInput,
-    Paper,
-    SimpleGrid,
-    Stack,
-    Text,
-    Tooltip,
-} from '@mantine/core';
+import { ActionIcon,
+Alert,
+Button,
+Group,
+Loader,
+MultiSelect,
+NumberInput,
+Paper,
+SimpleGrid,
+Stack,
+Text,
+Tooltip, } from '@/components/organization/organization-operation-ui';
 import { Plus, X } from 'lucide-react';
 
 import { useSports } from '@/app/hooks/useSports';

@@ -1,13 +1,11 @@
 import type { ComponentProps } from 'react';
 import { Controller, type Control, type FieldErrors, type UseFormSetValue } from 'react-hook-form';
-import {
-    Alert,
-    Loader,
-    MultiSelect,
-    Select as MantineSelect,
-    TextInput,
-    Textarea,
-} from '@mantine/core';
+import { Alert,
+Loader,
+MultiSelect,
+Select as MantineSelect,
+TextInput,
+Textarea, } from '@/components/organization/organization-operation-ui';
 import type { Event, EventTag, Sport } from '@/types';
 import { ImageUploader } from '@/components/ui/ImageUploader';
 

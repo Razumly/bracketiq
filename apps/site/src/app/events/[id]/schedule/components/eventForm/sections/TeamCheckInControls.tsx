@@ -1,9 +1,7 @@
-import {
-    NumberInput,
-    Select,
-    Stack,
-    Switch,
-} from '@mantine/core';
+import { NumberInput,
+Select,
+Stack,
+Switch, } from '@/components/organization/organization-operation-ui';
 import {
     Controller,
     type Control,
@@ -30,6 +28,7 @@ export const TeamCheckInControls = ({
             control={control}
             render={({ field }) => (
                 <Select
+                    native
                     label="Team check-in"
                     description="Choose whether managers and coaches check in once for the event or separately for each match."
                     data={[

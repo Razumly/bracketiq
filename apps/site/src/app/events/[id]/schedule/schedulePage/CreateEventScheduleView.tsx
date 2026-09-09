@@ -1,16 +1,14 @@
 import { useCallback, useState, type ReactNode, type Ref } from 'react';
-import {
-  Alert,
-  Button,
-  Container,
-  Group,
-  Modal,
-  Select,
-  Stack,
-  Text,
-  Title,
-} from '@mantine/core';
-import { DatePickerInput } from '@mantine/dates';
+import { Alert,
+Button,
+Container,
+Group,
+Modal,
+Select,
+Stack,
+Text,
+Title, } from '@/components/organization/organization-operation-ui';
+import { DatePickerInput } from '@/components/organization/organization-operation-ui';
 
 import Navigation from '@/components/layout/Navigation';
 import Loading from '@/components/ui/Loading';
@@ -156,43 +154,61 @@ export default function CreateEventScheduleView({
     <>
       <Navigation />
       {termsModal}
-      <Container fluid py="xl">
-        <Stack gap="md">
-          <Group justify="space-between" align="center">
-            <Title order={2}>Create Event</Title>
-            <Group gap="sm">
-              <EventSchedulePendingChangesPopover
-                opened={pendingChangesOpen}
-                changes={pendingSaveChanges}
-                onOpenedChange={onPendingChangesOpenChange}
-              />
-              {hasPendingUnsavedChanges && (
-                <Button
-                  variant="default"
-                  onClick={onDiscardChanges}
+      <Container size="xl" py="lg" className="bg-slate-50/70">
+        <Stack gap="lg">
+          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-5 shadow-sm sm:px-6">
+            <div className="flex flex-col gap-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={onCancel}
                   disabled={publishing || reschedulingMatches || cancelling}
+                  className="inline-flex min-h-10 items-center rounded-lg px-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Discard Changes
-                </Button>
-              )}
-              <Button
-                color="green"
-                onClick={onPublish}
-                loading={publishing}
-                disabled={!canCreateEvent || reschedulingMatches || cancelling}
-              >
-                {createButtonLabel}
-              </Button>
-              <Button
-                variant="default"
-                onClick={onCancel}
-                loading={cancelling}
-                disabled={publishing || reschedulingMatches}
-              >
-                {cancelButtonLabel}
-              </Button>
-            </Group>
-          </Group>
+                  <span aria-hidden="true" className="mr-2 text-base">←</span>
+                  Back to Discover
+                </button>
+                <Group gap="sm" className="ml-auto">
+                  <EventSchedulePendingChangesPopover
+                    opened={pendingChangesOpen}
+                    changes={pendingSaveChanges}
+                    onOpenedChange={onPendingChangesOpenChange}
+                  />
+                  {hasPendingUnsavedChanges && (
+                    <Button
+                      variant="default"
+                      onClick={onDiscardChanges}
+                      disabled={publishing || reschedulingMatches || cancelling}
+                    >
+                      Discard changes
+                    </Button>
+                  )}
+                  <Button
+                    color="green"
+                    onClick={onPublish}
+                    loading={publishing}
+                    disabled={!canCreateEvent || reschedulingMatches || cancelling}
+                  >
+                    {createButtonLabel}
+                  </Button>
+                  <Button
+                    variant="default"
+                    onClick={onCancel}
+                    loading={cancelling}
+                    disabled={publishing || reschedulingMatches}
+                  >
+                    {cancelButtonLabel}
+                  </Button>
+                </Group>
+              </div>
+              <Title order={1} className="text-center text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">
+                Create event
+              </Title>
+              <Text ta="center" size="sm" c="dimmed">
+                Configure the event, then review it before you publish.
+              </Text>
+            </div>
+          </div>
 
 
           {submitError && (

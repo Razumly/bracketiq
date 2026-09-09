@@ -186,7 +186,7 @@ describe('TournamentFields', () => {
     );
 
     expect(screen.getByLabelText(/Set duration/i)).toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: /Winner Set Count/i })).toHaveValue('Best of 3');
+    expect(screen.getByRole('combobox', { name: /Winner Set Count/i })).toHaveValue('Best of 3');
     expect(screen.getByLabelText(/Set 3/i)).toBeInTheDocument();
   });
 
@@ -244,7 +244,7 @@ describe('TournamentFields', () => {
       />,
     );
 
-    expect(screen.getByRole('textbox', { name: /Winner Set Count/i })).toHaveValue('Best of 3');
+    expect(screen.getByRole('combobox', { name: /Winner Set Count/i })).toHaveValue('Best of 3');
 
     unmount();
 

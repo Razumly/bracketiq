@@ -1,11 +1,9 @@
 import type { ComponentProps } from 'react';
 import { Controller, type Control } from 'react-hook-form';
-import {
-    Checkbox,
-    NumberInput,
-    Select as MantineSelect,
-    TextInput,
-} from '@mantine/core';
+import { Checkbox,
+NumberInput,
+Select as MantineSelect,
+TextInput, } from '@/components/organization/organization-operation-ui';
 
 import type { Event } from '@/types';
 
@@ -27,6 +25,7 @@ type EventDetailsTypeControlsProps = {
     isImmutableField: (key: keyof Event) => boolean;
     onEventTypeChange: (eventType: Event['eventType'], applyValue: (eventType: Event['eventType']) => void) => void;
     onAffiliateEventChange: (checked: boolean, applyValue: (checked: boolean) => void) => void;
+    onAffiliateUrlChange: (value: string) => void;
     onIncludePlayoffsChange: (checked: boolean) => void;
     onIncludePoolPlayChange: (checked: boolean) => void;
 };
@@ -46,6 +45,7 @@ export const EventDetailsTypeControls = ({
     isImmutableField,
     onEventTypeChange,
     onAffiliateEventChange,
+    onAffiliateUrlChange,
     onIncludePlayoffsChange,
     onIncludePoolPlayChange,
 }: EventDetailsTypeControlsProps) => (
@@ -58,6 +58,7 @@ export const EventDetailsTypeControls = ({
                 render={({ field }) => (
                     <div className="space-y-2">
                         <MantineSelect
+                            native
                             label="Event Type"
                             data={eventTypeOptions}
                             value={field.value}
@@ -120,16 +121,16 @@ export const EventDetailsTypeControls = ({
                                     <TextInput
                                         label="Affiliate Link"
                                         withAsterisk
+                                        error={fieldState.error?.message as string | undefined}
                                         disabled={isImmutableField('affiliateUrl')}
                                         placeholder="https://example.com/event"
                                         value={affiliateUrlField.value ?? ''}
                                         name={affiliateUrlField.name}
                                         onBlur={affiliateUrlField.onBlur}
                                         ref={affiliateUrlField.ref}
-                                        error={fieldState.error?.message as string | undefined}
                                         onChange={(event) => {
                                             if (isImmutableField('affiliateUrl')) return;
-                                            affiliateUrlField.onChange(event.currentTarget.value);
+                                            onAffiliateUrlChange(event.currentTarget.value);
                                         }}
                                     />
                                 )}

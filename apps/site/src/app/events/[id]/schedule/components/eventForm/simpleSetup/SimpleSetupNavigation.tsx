@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { Check, LockKeyhole, Minus } from "lucide-react";
-import { SegmentedControl, Tooltip } from "@mantine/core";
+import { SegmentedControl, Tooltip } from '@/components/organization/organization-operation-ui';
 
 import type { EventSetupMode, EventSetupPage, EventSetupPageId } from "./types";
 
@@ -73,9 +73,9 @@ export const SimpleSetupProgressRail = ({
   return (
     <nav
       aria-label="Event setup progress"
-      className="w-full overflow-x-auto [scrollbar-gutter:stable]"
+      className="w-full"
     >
-      <ol className="flex min-w-max items-stretch gap-2 pb-2">
+      <ol className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
         {pages.map((page, index) => {
           const isCurrent = page.status === "current";
           const isMuted =
@@ -91,7 +91,7 @@ export const SimpleSetupProgressRail = ({
               aria-current={isCurrent ? "step" : undefined}
               aria-label={`${page.label}: ${pageStatusLabel(page)}`}
               onClick={() => onSelectPage(page.id)}
-              className={`flex h-14 w-44 shrink-0 items-center gap-2 rounded-md border px-3 text-left transition-colors ${
+              className={`flex min-h-14 w-full min-w-0 items-center gap-2 rounded-xl border px-3 py-2 text-left transition-colors ${
                 isCurrent
                   ? "border-slate-900 bg-slate-900 text-white shadow-sm"
                   : page.status === "complete"
@@ -172,27 +172,27 @@ export const SimpleSetupPageFrame = ({
       aria-labelledby={`simple-setup-${page.id}-title`}
       className="min-w-0 scroll-mt-28"
     >
-      <div className="border-b border-gray-200 px-5 py-4">
+      <div className="border-b border-slate-200 px-5 py-5 sm:px-8">
         <h2
           id={`simple-setup-${page.id}-title`}
-          className="text-xl font-semibold text-gray-950"
+          className="text-2xl font-semibold tracking-tight text-slate-950"
         >
           {page.label}
         </h2>
       </div>
-      <div className="min-h-72 p-5">
+      <div className="min-h-72 px-5 py-6 sm:px-8 sm:py-8">
         {page.status === "not-used" ? (
-          <div className="rounded-lg border border-gray-200 bg-gray-50 p-5">
-            <p className="font-semibold text-gray-900">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-5">
+            <p className="font-semibold text-slate-900">
               This page is not used for the current setup.
             </p>
-            <p className="mt-1 text-sm text-gray-600">
+            <p className="mt-1 text-sm text-slate-600">
               {page.unavailableReason}
             </p>
             {page.controlledByPageId ? (
               <button
                 type="button"
-                className="mt-4 text-sm font-semibold text-blue-700 hover:text-blue-800"
+                className="mt-4 min-h-10 rounded-lg px-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 hover:text-blue-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
                 onClick={() => onOpenControllerPage(page.controlledByPageId!)}
               >
                 Review the choice that controls this page
@@ -203,10 +203,10 @@ export const SimpleSetupPageFrame = ({
           children
         )}
       </div>
-      <div className="sticky bottom-0 z-20 flex items-center justify-between gap-3 border-t border-gray-200 bg-white px-5 py-4">
+      <div className="sticky bottom-0 z-20 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white/95 px-5 py-4 backdrop-blur sm:px-8">
         <button
           type="button"
-          className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 disabled:cursor-not-allowed disabled:opacity-40"
+          className="min-h-10 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
           disabled={isFirstUsedPage}
           onClick={onBack}
         >
@@ -214,7 +214,7 @@ export const SimpleSetupPageFrame = ({
         </button>
         <button
           type="button"
-          className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+          className="min-h-10 rounded-lg bg-slate-950 px-5 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
           disabled={isLastUsedPage && !canSubmit}
           onClick={isLastUsedPage && onSubmit ? onSubmit : onNext}
         >

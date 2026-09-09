@@ -1,5 +1,5 @@
 import type { ComponentProps } from 'react';
-import { NumberInput } from '@mantine/core';
+import { NumberInput } from '@/components/organization/organization-operation-ui';
 
 import type { Division, Event, EventTag, RegistrationQuestionDraft } from '@/types';
 import { resolveEventResourceLabels } from '@/lib/sportResourceLabels';
@@ -341,6 +341,7 @@ export const EventFormSections = ({
                 onToggle={() => toggleSectionCollapse('section-event-details')}
                 onEventTypeChange={handleEventTypeChange}
                 onAffiliateEventChange={handleAffiliateEventChange}
+                onAffiliateUrlChange={(value) => setValue('affiliateUrl', value, { shouldDirty: true })}
                 onIncludePlayoffsChange={handleIncludePlayoffsToggle}
                 onIncludePoolPlayChange={handleIncludePoolPlayChange}
                 onStartChange={handleStartChange}
@@ -425,7 +426,6 @@ export const EventFormSections = ({
                 staffController={staffController}
                 onToggle={() => toggleSectionCollapse('section-officials')}
                 errorCount={staffErrors.length}
-                firstErrorMessage={staffErrors[0]?.message}
             />
 
             <EventFormDivisionSection

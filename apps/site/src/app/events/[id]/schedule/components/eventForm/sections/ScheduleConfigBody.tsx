@@ -1,5 +1,5 @@
 import { Controller, type Control } from 'react-hook-form';
-import { Text } from '@mantine/core';
+import { Text } from '@/components/organization/organization-operation-ui';
 
 import LeagueFields, {
     type LeagueFieldOption,

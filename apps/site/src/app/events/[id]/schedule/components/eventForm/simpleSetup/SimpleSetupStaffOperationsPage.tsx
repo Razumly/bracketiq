@@ -1,6 +1,6 @@
 'use client';
 
-import { Stack, Text, Title } from '@mantine/core';
+import { Stack, Text, Title } from '@/components/organization/organization-operation-ui';
 
 import { normalizeStaffingPriority } from '@/server/officials/config';
 import type { EventFormSectionsProps } from '../sections/EventFormSections';

@@ -176,30 +176,34 @@ jest.mock('@mantine/core', () => {
   };
 });
 
-jest.mock('@mantine/dates', () => ({
-  DateTimePicker: ({ label, onChange, value, disabled }: {
-    label?: React.ReactNode;
-    onChange?: (value: Date) => void;
-    value?: Date | null;
-    disabled?: boolean;
-  }) => {
-    const labelText = typeof label === 'string' ? label : 'Date Time Picker';
-    const valueText = value instanceof Date && !Number.isNaN(value.getTime())
-      ? `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}T${String(value.getHours()).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')}`
-      : '';
-    return (
-      <button
-        type="button"
-        aria-label={labelText}
-        data-value={valueText}
-        disabled={disabled}
-        onClick={() => onChange?.(new Date(mockDateTimePickerValuesByLabel[labelText] ?? '2026-03-12T15:30:00'))}
-      >
-        {labelText}
-      </button>
-    );
-  },
-}));
+jest.mock('@/components/organization/organization-operation-ui', () => {
+  const actual = jest.requireActual('@/components/organization/organization-operation-ui');
+  return {
+    ...actual,
+    DateTimePicker: ({ label, onChange, value, disabled }: {
+      label?: React.ReactNode;
+      onChange?: (value: Date) => void;
+      value?: Date | null;
+      disabled?: boolean;
+    }) => {
+      const labelText = typeof label === 'string' ? label : 'Date Time Picker';
+      const valueText = value instanceof Date && !Number.isNaN(value.getTime())
+        ? `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}T${String(value.getHours()).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')}`
+        : '';
+      return (
+        <button
+          type="button"
+          aria-label={labelText}
+          data-value={valueText}
+          disabled={disabled}
+          onClick={() => onChange?.(new Date(mockDateTimePickerValuesByLabel[labelText] ?? '2026-03-12T15:30:00'))}
+        >
+          {labelText}
+        </button>
+      );
+    },
+  };
+});
 
 jest.mock('motion/react', () => {
   const React = require('react');
@@ -553,7 +557,7 @@ describe('EventForm dirty state', () => {
       snapshot.catalogs.organizations = [organization];
     }
     snapshot.catalogs.fields = Array.isArray(event.fields) ? event.fields : [];
-    return renderFormContent(
+    const rendered = renderFormContent(
       <EventForm
         ref={ref}
         isOpen
@@ -573,6 +577,10 @@ describe('EventForm dirty state', () => {
         {...extraProps}
       />,
     );
+    if ((extraProps.initialSetupMode ?? 'ADVANCED') === 'ADVANCED') {
+      rendered.queryAllByRole('button', { name: 'Expand' }).forEach((button) => fireEvent.click(button));
+    }
+    return rendered;
   };
 
   const buildOrganization = () => ({
@@ -1390,7 +1398,7 @@ describe('EventForm dirty state', () => {
 
     expect(isValid).toBe(false);
     await waitFor(() => {
-      expect(screen.getAllByLabelText('Basic Information: 1 error')).toHaveLength(3);
+      expect(screen.getAllByLabelText('Basic Information: 1 error')).toHaveLength(1);
       expect(screen.getByPlaceholderText('Enter event name')).toHaveFocus();
     });
 
@@ -1405,7 +1413,7 @@ describe('EventForm dirty state', () => {
     expect(isValid).toBe(false);
     await waitFor(() => {
       expect(screen.getAllByText('Enter a valid Cash App username or HTTPS link.').length).toBeGreaterThan(0);
-      expect(screen.getAllByLabelText('Manual Payments: 1 error')).toHaveLength(3);
+      expect(screen.getAllByLabelText('Manual Payments: 1 error')).toHaveLength(1);
       expect(screen.getByLabelText('Cash App username')).toHaveFocus();
     });
     scrollToSpy.mockRestore();

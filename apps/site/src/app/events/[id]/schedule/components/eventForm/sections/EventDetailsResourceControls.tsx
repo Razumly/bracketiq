@@ -1,6 +1,6 @@
 import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import { Controller, type Control } from 'react-hook-form';
-import { Button, Collapse, Text, TextInput, Title } from '@mantine/core';
+import { Button, Collapse, Text, TextInput, Title } from '@/components/organization/organization-operation-ui';
 
 import { getFieldDisplayName } from '@/lib/fieldUtils';
 import type { SportResourceLabels } from '@/lib/sportResourceLabels';

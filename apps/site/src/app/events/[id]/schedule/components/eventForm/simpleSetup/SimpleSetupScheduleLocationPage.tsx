@@ -1,6 +1,6 @@
 "use client";
 
-import { NumberInput, Stack, Text, Title } from "@mantine/core";
+import { NumberInput, Stack, Text, Title } from '@/components/organization/organization-operation-ui';
 
 import { resolveEventResourceLabels } from "@/lib/sportResourceLabels";
 import { deriveScheduleParticipantCount } from "../divisionForm";

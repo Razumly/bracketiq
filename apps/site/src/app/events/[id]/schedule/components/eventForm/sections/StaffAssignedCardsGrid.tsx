@@ -1,5 +1,5 @@
 import type { ComponentProps } from 'react';
-import { SimpleGrid } from '@mantine/core';
+import { SimpleGrid } from '@/components/organization/organization-operation-ui';
 
 import { StaffAssignedHostsList } from './StaffAssignedHostsList';
 import { StaffAssignedOfficialsList } from './StaffAssignedOfficialsList';

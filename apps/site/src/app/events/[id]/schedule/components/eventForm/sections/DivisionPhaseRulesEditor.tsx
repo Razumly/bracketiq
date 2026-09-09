@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Button, Group, Modal, NumberInput, Stack, Text } from "@mantine/core";
+import { Button, Group, Modal, NumberInput, Stack, Text } from '@/components/organization/organization-operation-ui';
 
 import { calculateTimedMatchDurationMinutes } from "@/lib/divisionPhaseSettings";
 import type {

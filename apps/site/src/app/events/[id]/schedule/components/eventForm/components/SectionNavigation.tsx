@@ -1,4 +1,4 @@
-import { Text } from '@mantine/core';
+import { Text } from '@/components/organization/organization-operation-ui';
 
 export type SectionNavigationItem = {
     id: string;
@@ -63,12 +63,12 @@ export const SectionNavigation = ({
     if (variant === 'desktop') {
         return (
             <aside className="hidden xl:block xl:sticky xl:top-20 xl:self-start">
-                <div className="rounded-xl border border-gray-200 bg-white/95 p-4 shadow-sm backdrop-blur">
+                <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
                     <Text fw={700} size="sm" c="gray.8" mb="xs">
                         Sections
                     </Text>
                     <Text size="xs" c="dimmed" mb="md">
-                        Jump to any section. Changes are preserved as you move.
+                        Jump to a section. Changes stay in the event draft.
                     </Text>
                     <div className="space-y-1">
                         {items.map((section) => {
@@ -78,10 +78,10 @@ export const SectionNavigation = ({
                                     key={section.id}
                                     type="button"
                                     onClick={() => onSelectSection(section.id)}
-                                    className={`w-full rounded-lg px-3 py-2 text-left text-sm transition ${
+                                    className={`min-h-11 w-full rounded-lg px-3 py-2 text-left text-sm transition ${
                                         isActive
-                                            ? 'bg-slate-900 text-white shadow-sm'
-                                            : 'text-gray-700 hover:bg-gray-100'
+                                            ? 'bg-slate-950 text-white shadow-sm'
+                                            : 'text-gray-700 hover:bg-slate-100'
                                     }`}
                                 >
                                     <span className="flex items-center justify-between gap-2">

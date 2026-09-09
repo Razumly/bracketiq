@@ -2,18 +2,16 @@
 
 import type { ComponentProps } from 'react';
 import { Controller, type Control } from 'react-hook-form';
-import {
-    Alert,
-    Button,
-    Checkbox,
-    Group,
-    Loader,
-    MultiSelect,
-    Stack,
-    Text,
-    Textarea,
-    Title,
-} from '@mantine/core';
+import { Alert,
+Button,
+Checkbox,
+Group,
+Loader,
+MultiSelect,
+Stack,
+Text,
+Textarea,
+Title, } from '@/components/organization/organization-operation-ui';
 
 import type { Event, RegistrationQuestionDraft } from '@/types';
 

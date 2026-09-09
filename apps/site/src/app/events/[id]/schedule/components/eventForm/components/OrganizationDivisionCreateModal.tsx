@@ -1,15 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import {
-    Alert,
-    Button,
-    Group,
-    Modal,
-    NumberInput,
-    Select,
-    Stack,
-    Textarea,
-    TextInput,
-} from '@mantine/core';
+import { Alert,
+Button,
+Group,
+Modal,
+NumberInput,
+Select,
+Stack,
+Textarea,
+TextInput, } from '@/components/organization/organization-operation-ui';
 
 import { organizationService } from '@/lib/organizationService';
 import type { Division } from '@/types';

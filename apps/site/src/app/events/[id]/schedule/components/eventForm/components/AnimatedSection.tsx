@@ -1,5 +1,5 @@
 import React from 'react';
-import { Collapse } from '@mantine/core';
+import { Collapse } from '@/components/organization/organization-operation-ui';
 import { AnimatePresence, motion } from 'motion/react';
 
 import {
@@ -17,9 +17,9 @@ export const AnimatedSection = ({
     children: React.ReactNode;
     className?: string;
     collapseClassName?: string;
-}) => (
+}) => inProp ? (
     <Collapse
-        in={inProp}
+        in
         transitionDuration={SECTION_ANIMATION_DURATION_MS}
         transitionTimingFunction="ease"
         animateOpacity
@@ -27,7 +27,7 @@ export const AnimatedSection = ({
     >
         {className ? <div className={className}>{children}</div> : children}
     </Collapse>
-);
+) : null;
 
 export const AnimatedLayoutSection = ({
     in: inProp,

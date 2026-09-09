@@ -1,7 +1,7 @@
 import type { ComponentProps } from "react";
 import { Controller, useWatch, type Control } from "react-hook-form";
-import { Checkbox, NumberInput, Stack } from "@mantine/core";
-import { DateTimePicker } from "@mantine/dates";
+import { Checkbox, NumberInput, Stack } from '@/components/organization/organization-operation-ui';
+import { DateTimePicker } from '@/components/organization/organization-operation-ui';
 
 import type { Event } from "@/types";
 import { parseLocalDateTime } from "@/lib/dateUtils";
