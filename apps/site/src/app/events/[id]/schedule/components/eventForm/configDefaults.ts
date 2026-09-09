@@ -19,14 +19,12 @@ export const derivePoolTeamCount = (
     maxTeams: unknown,
     poolCount: unknown,
 ): number | undefined => {
-    const maxTeamsNumber = normalizeNumber(maxTeams);
-    const poolCountNumber = normalizeNumber(poolCount);
-    const normalizedMaxTeams = maxTeamsNumber == null
-        ? null
-        : Math.max(2, Math.trunc(maxTeamsNumber));
-    const normalizedPoolCount = poolCountNumber == null
-        ? null
-        : Math.max(1, Math.trunc(poolCountNumber));
+    const normalizedMaxTeams = Number.isFinite(Number(maxTeams))
+        ? Math.max(2, Math.trunc(Number(maxTeams)))
+        : null;
+    const normalizedPoolCount = Number.isFinite(Number(poolCount))
+        ? Math.max(1, Math.trunc(Number(poolCount)))
+        : null;
     if (!normalizedMaxTeams || !normalizedPoolCount || normalizedMaxTeams % normalizedPoolCount !== 0) {
         return undefined;
     }
