@@ -1053,6 +1053,44 @@ describe('legacy repair admission with real contract validators', () => {
     expect(fixtureState.gatewayJobs.slice(0, 2).map((job) => JSON.stringify(job))).toEqual(parentSnapshots);
     expect(fixtureState.gatewayClaims.map((claim) => JSON.stringify(claim))).toEqual(claimSnapshots);
     expect(fixtureState.gatewayReceipts.map((receipt) => JSON.stringify(receipt))).toEqual(receiptSnapshots);
+    for (const suffix of ['softball', 'boomtown'] as const) {
+      const mappingJob = fixtureState.mappingJobs.find((job) => job.id === `mapping-retry-${suffix}`);
+      if (!mappingJob) throw new Error(`Mapping job for ${suffix} was not created.`);
+      const summary = mappingJob.resultSummary as Record<string, unknown>;
+      const history = summary.legacyRepairRetryHistory as Record<string, unknown>[];
+      const audit = history.find((entry) => entry.parentGatewayJobId === `gateway-parent-${suffix}`);
+      if (!audit) throw new Error(`Retry audit for ${suffix} was not created.`);
+      const auditReport = audit.reportSnapshot as Record<string, unknown>;
+      const auditRows = auditReport.rows as Record<string, unknown>[];
+      expect(auditReport.mode).toBe('APPLY');
+      expect(auditReport.reviewedReportHash).toBe(preview.reportHash);
+      expect(auditReport.writeCount).toBe(2);
+      expect(auditReport.appliedGatewayJobIds).toEqual(applied.appliedGatewayJobIds);
+      expect(auditRows.every((row) => (
+        row.outcome === 'APPLIED' && typeof row.childGatewayJobId === 'string'
+      ))).toBe(true);
+      expect(auditRows.map((row) => row.childGatewayJobId).sort()).toEqual(
+        [...applied.appliedGatewayJobIds].sort(),
+      );
+    }
+    completeRetryChild(fixtureState, 'softball');
+    const progressedMappingJob = fixtureState.mappingJobs.find((job) => job.id === 'mapping-retry-softball');
+    const progressedSource = fixtureState.sources.find((source) => source.id === 'source-retry-softball');
+    const previousMapping = fixtureState.mappings.find((mapping) => mapping.id === 'mapping-retry-softball');
+    if (!progressedMappingJob || !progressedSource || !previousMapping) {
+      throw new Error('Softball mapping progress rows were not created.');
+    }
+    previousMapping.isActive = false;
+    const successorMapping = {
+      ...previousMapping,
+      id: 'mapping-retry-softball-successor',
+      version: 2,
+      isActive: true,
+      validatedAt: new Date('2026-08-20T00:07:00Z'),
+    };
+    fixtureState.mappings.push(successorMapping);
+    progressedMappingJob.mappingId = successorMapping.id;
+    progressedSource.activeMappingId = successorMapping.id;
     fixtureState.roots[0].lifecycleGeneration = 2;
     const replay = await applyAffiliateLegacyRepairRetry({
       ...fixtureState.input,
@@ -1379,6 +1417,86 @@ describe('legacy repair admission with real contract validators', () => {
     });
     expect(report.selectedGatewayJobIds).toEqual([]);
     expect(report.rows[0].reasonCodes).toContain('MALFORMED_PARENT_LINEAGE');
+  });
+  it('holds pass-three retry when the incoming audit is replaced with its hash-equivalent preview', async () => {
+    const state = await retryFixtureWithAdmission();
+    const passTwoPreview = await previewAffiliateLegacyRepairRetry(state.input);
+    await applyAffiliateLegacyRepairRetry({
+      ...state.input,
+      operatorId: 'affiliate-gateway-operator',
+      expectedReportHash: passTwoPreview.reportHash,
+    });
+    const childId = completeRetryChild(state, 'softball');
+    const mappingJob = state.mappingJobs.find((candidate) => candidate.id === 'mapping-retry-softball');
+    if (!mappingJob) throw new Error('Softball mapping job was not created.');
+    const summary = mappingJob.resultSummary as Record<string, unknown>;
+    const history = summary.legacyRepairRetryHistory as Record<string, unknown>[];
+    const audit = history.find((entry) => entry.parentGatewayJobId === 'gateway-parent-softball');
+    if (!audit) throw new Error('Retry audit was not created.');
+    audit.reportSnapshot = passTwoPreview;
+    const report = await previewAffiliateLegacyRepairRetry({
+      ...state.input,
+      gatewayJobIds: [childId],
+    });
+    expect(report.selectedGatewayJobIds).toEqual([]);
+    expect(report.rows[0].reasonCodes).toContain('MALFORMED_PARENT_LINEAGE');
+  });
+  it('holds pass-three retry when an incoming audit claims the parent deployment', async () => {
+    const state = await retryFixtureWithAdmission();
+    const passTwoPreview = await previewAffiliateLegacyRepairRetry(state.input);
+    await applyAffiliateLegacyRepairRetry({
+      ...state.input,
+      operatorId: 'affiliate-gateway-operator',
+      expectedReportHash: passTwoPreview.reportHash,
+    });
+    const childId = completeRetryChild(state, 'softball');
+    const mappingJob = state.mappingJobs.find((candidate) => candidate.id === 'mapping-retry-softball');
+    const parentClaim = state.gatewayClaims.find((candidate) => candidate.id === 'claim-parent-softball');
+    if (!mappingJob || !parentClaim) throw new Error('Softball retry rows were not created.');
+    const summary = mappingJob.resultSummary as Record<string, unknown>;
+    const history = summary.legacyRepairRetryHistory as Record<string, unknown>[];
+    const audit = history.find((entry) => entry.parentGatewayJobId === 'gateway-parent-softball');
+    if (!audit) throw new Error('Retry audit was not created.');
+    const report = audit.reportSnapshot as Record<string, unknown>;
+    report.deploymentContractVersion = parentClaim.deploymentContractVersion;
+    report.deploymentContractHash = parentClaim.deploymentContractHash;
+    const reportHash = calculateAffiliateLegacyRepairRetryReportHash(
+      report as Parameters<typeof calculateAffiliateLegacyRepairRetryReportHash>[0],
+    );
+    report.reportHash = reportHash;
+    report.reviewedReportHash = reportHash;
+    audit.reportHash = reportHash;
+    const preview = await previewAffiliateLegacyRepairRetry({
+      ...state.input,
+      gatewayJobIds: [childId],
+    });
+    expect(preview.selectedGatewayJobIds).toEqual([]);
+    expect(preview.rows[0].reasonCodes).toContain('MALFORMED_PARENT_LINEAGE');
+  });
+  it('holds pass-three retry when the audited child and audit co-tamper its dedupe key', async () => {
+    const state = await retryFixtureWithAdmission();
+    const passTwoPreview = await previewAffiliateLegacyRepairRetry(state.input);
+    await applyAffiliateLegacyRepairRetry({
+      ...state.input,
+      operatorId: 'affiliate-gateway-operator',
+      expectedReportHash: passTwoPreview.reportHash,
+    });
+    const childId = completeRetryChild(state, 'softball');
+    const child = state.gatewayJobs.find((candidate) => candidate.id === childId);
+    const mappingJob = state.mappingJobs.find((candidate) => candidate.id === 'mapping-retry-softball');
+    if (!child || !mappingJob) throw new Error('Softball retry rows were not created.');
+    const summary = mappingJob.resultSummary as Record<string, unknown>;
+    const history = summary.legacyRepairRetryHistory as Record<string, unknown>[];
+    const audit = history.find((entry) => entry.parentGatewayJobId === 'gateway-parent-softball');
+    if (!audit) throw new Error('Retry audit was not created.');
+    child.dedupeKey = 'co-tampered-retry-dedupe';
+    audit.childDedupeKey = child.dedupeKey;
+    const preview = await previewAffiliateLegacyRepairRetry({
+      ...state.input,
+      gatewayJobIds: [childId],
+    });
+    expect(preview.selectedGatewayJobIds).toEqual([]);
+    expect(preview.rows[0].reasonCodes).toContain('MALFORMED_PARENT_LINEAGE');
   });
   it('rejects a retry chain whose ancestor resolves to a different root', async () => {
     const state = await retryFixtureWithAdmission();

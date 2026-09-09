@@ -3339,8 +3339,47 @@ const retryAuditMatchesEdge = (
   );
   const auditArtifactIds = stringArrayValue(audit.artifactIds);
   const expectedChildDedupeKey = retryDedupeKeyFor(parent.gatewayJob.id);
+  const reportRequestedGatewayJobIds = stringArrayValue(report.requestedGatewayJobIds);
+  const reportSelectedGatewayJobIds = stringArrayValue(report.selectedGatewayJobIds);
+  const reportAppliedGatewayJobIds = stringArrayValue(report.appliedGatewayJobIds);
+  const reportCounts = recordValue(report.counts);
+  const reportRowChildIds = reportRows.map((row) => row.childGatewayJobId);
+  const reportShapeValid = report.mode === 'APPLY'
+    && report.reportHash === reportHash
+    && report.reviewedReportHash === reportHash
+    && report.replayed === false
+    && stringValue(report.reason) !== null
+    && stringValue(report.reason) === stringValue(audit.reason)
+    && report.deploymentContractVersion !== parent.claim.deploymentContractVersion
+    && report.deploymentContractHash !== parent.claim.deploymentContractHash
+    && report.contractVersion === parent.claim.supplyContractVersion
+    && report.contractHash === parent.claim.supplyContractHash
+    && reportRequestedGatewayJobIds !== null
+    && reportSelectedGatewayJobIds !== null
+    && reportAppliedGatewayJobIds !== null
+    && sameAdmissionValue(reportRequestedGatewayJobIds, reportSelectedGatewayJobIds)
+    && sameAdmissionValue(reportRequestedGatewayJobIds, reportRows.map((row) => row.gatewayJobId))
+    && sameAdmissionValue(reportRequestedGatewayJobIds, reportWrites.map((write) => write.gatewayJobId))
+    && reportRows.length === reportRequestedGatewayJobIds.length
+    && reportWrites.length === reportRequestedGatewayJobIds.length
+    && reportCounts.total === reportRequestedGatewayJobIds.length
+    && reportCounts.eligible === reportRequestedGatewayJobIds.length
+    && reportCounts.held === 0
+    && reportCounts.selected === reportRequestedGatewayJobIds.length
+    && reportCounts.alreadyRetried === 0
+    && report.writeCount === reportRequestedGatewayJobIds.length
+    && reportAppliedGatewayJobIds.length === reportRequestedGatewayJobIds.length
+    && reportRows.every((row) => (
+      row.eligible === true
+      && row.alreadyRetried === false
+      && row.outcome === 'APPLIED'
+      && typeof row.childGatewayJobId === 'string'
+    ))
+    && sameAdmissionValue(reportAppliedGatewayJobIds, reportRowChildIds)
+    && stringValue(audit.operatorId) !== null;
   const expectedRootLifecycleGeneration = child.expectedLifecycleGeneration;
   return audit.kind === 'LEGACY_SPORT_REPAIR_RETRY'
+    && reportShapeValid
     && parent.gatewayJob.queue === 'AFFILIATE_MAPPING'
     && parent.gatewayJob.lane === 'MAPPING_PRODUCTION'
     && parent.claim.queue === 'AFFILIATE_MAPPING'
@@ -3367,10 +3406,11 @@ const retryAuditMatchesEdge = (
     && audit.rootId === childSubject.data.supplySourceId
     && audit.rootLifecycleGeneration === expectedRootLifecycleGeneration
     && audit.childGatewayJobId === child.id
+    && child.dedupeKey === expectedChildDedupeKey
     && audit.childDedupeKey === expectedChildDedupeKey
     && audit.intakeId === intake.id
-    && audit.sourceId === mappingJob.sourceId
-    && audit.mappingId === mappingJob.mappingId
+    && audit.mappingId === reportRow.mappingId
+    && audit.mappingId === reportWrite.mappingId
     && audit.evidenceRunId === parent.subject.repairContext.evidenceRunId
     && sameRepairContext(audit.repairContext, childSubject.data.repairContext)
     && sameRetryLineageContext(audit.repairContext, parent.subject.repairContext)
@@ -3395,12 +3435,12 @@ const retryAuditMatchesEdge = (
     && sameAdmissionValue(audit.manifest, child.evidenceManifestJson)
     && sameAdmissionValue(auditManifest.data.entries.map((entry) => entry.artifactId), reportWrite.artifactIds)
     && reportRow.gatewayJobId === parent.gatewayJob.id
+    && reportRow.childGatewayJobId === child.id
     && reportRow.parentClaimId === parent.claim.id
     && reportRow.mappingJobId === mappingJob.id
     && reportRow.intakeId === intake.id
     && reportRow.sourceKey === intake.sourceKey
     && reportRow.sourceId === mappingJob.sourceId
-    && reportRow.mappingId === mappingJob.mappingId
     && reportRow.rootId === childSubject.data.supplySourceId
     && reportRow.rootIdentityKey === root?.identityKey
     && reportRow.parentPass === parent.subject.pass
@@ -3418,12 +3458,10 @@ const retryAuditMatchesEdge = (
     && reportWrite.parentClaimGeneration === parent.claim.claimGeneration
     && reportWrite.parentLifecycleGeneration === parent.claim.lifecycleGeneration
     && reportWrite.parentClaimId === parent.claim.id
-    && reportWrite.mappingJobId === mappingJob.id
     && reportWrite.sourceKey === intake.sourceKey
     && reportWrite.rootIdentityKey === root.identityKey
     && reportWrite.intakeId === intake.id
     && reportWrite.sourceId === mappingJob.sourceId
-    && reportWrite.mappingId === mappingJob.mappingId
     && reportWrite.rootId === childSubject.data.supplySourceId
     && reportWrite.rootLifecycleGeneration === expectedRootLifecycleGeneration
     && reportWrite.parentPass === parent.subject.pass
@@ -4100,6 +4138,7 @@ const applyRetryPlan = async (
   reasonText: string,
   operatorId: string,
   requestedGatewayJobIds: readonly string[],
+  childGatewayJobId: string,
 ): Promise<string> => {
   const currentParent = await client.affiliateAgentGatewayJobs.findUnique({
     where: { id: plan.parent.gatewayJob.id },
@@ -4147,7 +4186,6 @@ const applyRetryPlan = async (
       `Retry dedupe key ${plan.write.gatewayDedupeKey} is already occupied.`,
     );
   }
-  const childGatewayJobId = createId();
   const retryAudit = {
     schemaVersion: AFFILIATE_LEGACY_REPAIR_ADMISSION_SCHEMA_VERSION,
     kind: 'LEGACY_SPORT_REPAIR_RETRY',
@@ -4295,6 +4333,7 @@ const retryReplayReport = async (
         || audit.schemaVersion !== first.schemaVersion
         || audit.reportHash !== first.reportHash
         || audit.reason !== first.reason
+        || audit.operatorId !== operatorId
         || !sameAdmissionValue(audit.requestedGatewayJobIds, first.requestedGatewayJobIds)
         || audit.parentGatewayJobId !== gatewayJobIds[index]
         || audit.parentClaimId !== parent?.claim.id
@@ -4503,35 +4542,36 @@ export const applyAffiliateLegacyRepairRetry = async (
         },
       );
     }
-    const childGatewayJobIds: string[] = [];
-    for (const plan of current.plans) {
-      childGatewayJobIds.push(await applyRetryPlan(
+    const childGatewayJobIds = current.plans.map(() => createId());
+    const childGatewayJobIdsByParent = new Map(
+      current.plans.map((plan, index) => [plan.write.gatewayJobId, childGatewayJobIds[index]] as const),
+    );
+    const appliedReport: AffiliateLegacyRepairRetryApplyReport = {
+      ...current.report,
+      mode: 'APPLY',
+      reviewedReportHash: expectedReportHash,
+      appliedGatewayJobIds: childGatewayJobIds,
+      replayed: false,
+      rows: current.report.rows.map((row) => {
+        const childGatewayJobId = childGatewayJobIdsByParent.get(row.gatewayJobId);
+        return childGatewayJobId
+          ? { ...row, childGatewayJobId, outcome: 'APPLIED' as const }
+          : row;
+      }),
+    };
+    for (let index = 0; index < current.plans.length; index += 1) {
+      await applyRetryPlan(
         transaction,
-        plan,
-        current.report,
+        current.plans[index],
+        appliedReport,
         expectedReportHash,
         reasonText,
         operatorId,
         gatewayJobIds,
-      ));
+        childGatewayJobIds[index],
+      );
     }
-    return {
-      ...current.report,
-      mode: 'APPLY',
-      reviewedReportHash: expectedReportHash,
-      writeCount: childGatewayJobIds.length,
-      appliedGatewayJobIds: childGatewayJobIds,
-      replayed: false,
-      rows: current.report.rows.map((row) => (
-        current.plans.some((plan) => plan.write.gatewayJobId === row.gatewayJobId)
-          ? {
-            ...row,
-            childGatewayJobId: childGatewayJobIds[current.plans.findIndex((plan) => plan.write.gatewayJobId === row.gatewayJobId)] ?? null,
-            outcome: 'APPLIED' as const,
-          }
-          : row
-      )),
-    };
+    return appliedReport;
   });
 };
 
