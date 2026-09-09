@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createId } from "@/lib/id";
 import { TimeSlotValidationError } from "@/lib/timeSlotAvailability";
+import { repeatingTimeSlotValidationResponse } from "@/server/repeatingTimeSlotValidationResponse";
 import { getRequestOrigin } from "@/lib/requestOrigin";
 import { requireSession } from "@/lib/permissions";
 import { parseSaveEventEditorCommand } from "@/contracts/eventEditor";
 import { loadEventEditorSnapshot } from "@/server/events/eventEditorSnapshot";
+import { attachEventEditorRevisionBinding } from "@/server/events/eventEditorRevisionBinding";
 import {
   EditorCapabilityError,
   EditorImmutableFieldError,
@@ -15,6 +17,7 @@ import {
   EditorScheduleIntentError,
   saveEventEditor,
 } from "@/server/events/eventEditorSave";
+import { eventRegistrationErrorResponse } from "@/server/events/eventRegistrationErrorResponse";
 import {
   EventScheduleMutationError,
   EventScheduleRevisionConflictError,
@@ -65,6 +68,8 @@ const errorResponse = (error: unknown) => {
       { status: 400 },
     );
   }
+  const registrationResponse = eventRegistrationErrorResponse(error);
+  if (registrationResponse) return registrationResponse;
   if (error instanceof EditorRevisionConflictError) {
     return NextResponse.json(
       {
@@ -109,6 +114,10 @@ const errorResponse = (error: unknown) => {
       { status },
     );
   }
+  const repeatingTimeSlotResponse = repeatingTimeSlotValidationResponse(error);
+  if (repeatingTimeSlotResponse) {
+    return repeatingTimeSlotResponse;
+  }
   if (error instanceof TimeSlotValidationError) {
     return NextResponse.json(
       { error: error.message, code: "INVALID_TIME_SLOT" },
@@ -152,7 +161,10 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
       { status: 404 },
     );
   try {
-    const snapshot = await loadEventEditorSnapshot(eventId, { actor: session });
+    const snapshot = await attachEventEditorRevisionBinding(
+      await loadEventEditorSnapshot(eventId, { actor: session }),
+      { actor: session },
+    );
     return NextResponse.json(snapshot, { status: 200 });
   } catch (error) {
     return errorResponse(error);
@@ -187,7 +199,13 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
           getRequestOrigin(request),
         ),
     });
-    return NextResponse.json(result, { status: 200 });
+    const resultWithBinding = {
+      ...result,
+      snapshot: await attachEventEditorRevisionBinding(result.snapshot, {
+        actor: session,
+      }),
+    };
+    return NextResponse.json(resultWithBinding, { status: 200 });
   } catch (error) {
     return errorResponse(error);
   }

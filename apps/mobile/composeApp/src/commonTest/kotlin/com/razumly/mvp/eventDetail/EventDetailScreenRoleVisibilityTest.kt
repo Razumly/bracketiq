@@ -13,9 +13,36 @@ import kotlinx.datetime.TimeZone
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.test.assertEquals
+import com.razumly.mvp.core.data.dataTypes.EventAuthorityCapabilities
 import kotlin.time.Instant
 
 class EventDetailScreenRoleVisibilityTest {
+    @Test
+    fun given_server_capability_matrix_when_rendering_external_events_then_management_follows_account_authority() {
+        val fixtures = listOf(
+            EventAuthorityCapabilities(viewerUserId = "viewer", canEdit = true, readOnly = false) to true,
+            EventAuthorityCapabilities(viewerUserId = "viewer", readOnlyReason = "MANAGEMENT_AUTHORITY_UNVERIFIED") to false,
+            EventAuthorityCapabilities(viewerUserId = "viewer", readOnlyReason = "NOT_AUTHORIZED") to false,
+            EventAuthorityCapabilities(readOnlyReason = "AUTHENTICATION_REQUIRED") to false,
+            EventAuthorityCapabilities(viewerUserId = "different-account", canEdit = true, readOnly = false) to false,
+        )
+        for (type in EventType.entries) for ((capabilities, permitted) in fixtures) {
+            val event = Event(id = "external", hostId = "viewer", eventType = type,
+                affiliateUrl = "https://organizer.example/register", capabilities = capabilities,
+                allowPaymentPlans = true, installmentCount = 2, includePlayoffs = type == EventType.LEAGUE)
+            val presentation = buildEventDetailAccessPresentation(
+                EventWithFullRelations(event, emptyList(), emptyList(), emptyList()), event, emptyList(),
+                UserData().copy(id = "viewer"), null, isHost = true, isEditingMatches = true,
+                authorityVerified = true,
+            )
+            assertEquals(permitted, presentation.canEditEventDetails)
+            assertEquals(permitted, presentation.canManageParticipantsFromDock)
+            assertEquals(permitted, presentation.canManageMatchEditingFromDock)
+            assertEquals(permitted, presentation.canDeleteEvent)
+        }
+    }
+
 
     @Test
     fun buildEventDetailAccessPresentation_hostOwnsManagementSurfaces() {
@@ -29,6 +56,7 @@ class EventDetailScreenRoleVisibilityTest {
         )
 
         val presentation = buildEventDetailAccessPresentation(
+                authorityVerified = true,
             selectedEvent = EventWithFullRelations(
                 event = event,
                 players = emptyList(),
@@ -63,6 +91,7 @@ class EventDetailScreenRoleVisibilityTest {
         )
 
         val presentation = buildEventDetailAccessPresentation(
+                authorityVerified = true,
             selectedEvent = EventWithFullRelations(
                 event = event,
                 players = emptyList(),

@@ -74,6 +74,89 @@ const isPlayoffMatch = (match: {
   )
 );
 
+const buildLeagueForSlot = (slot: TimeSlot, start: Date, end: Date, id: string) => {
+  const division = buildDivision();
+  const field = buildField(division);
+  const teams = buildTeams(2, division);
+  return new League({
+    id,
+    name: id,
+    start,
+    end,
+    maxParticipants: 2,
+    teamSignup: true,
+    eventType: 'LEAGUE',
+    teams,
+    divisions: [division],
+    fields: { [field.id]: field },
+    timeSlots: [slot],
+    noFixedEndDateTime: false,
+    matchDurationMinutes: 60,
+    gamesPerOpponent: 1,
+    includePlayoffs: false,
+    usesSets: false,
+    restTimeMinutes: 0,
+  });
+};
+
+describe('league scheduling (time slots)', () => {
+  it('places a match inside an overnight local-time slot', () => {
+    const slot = new TimeSlot({
+      id: 'slot_overnight_scheduler',
+      dayOfWeek: 0,
+      daysOfWeek: [0],
+      startDate: new Date('2026-03-02T05:00:00.000Z'),
+      endDate: new Date('2026-03-09T04:00:00.000Z'),
+      repeating: true,
+      startTimeMinutes: 22 * 60,
+      endTimeMinutes: 2 * 60,
+      field: 'field_1',
+      fieldIds: ['field_1'],
+      divisions: [],
+      timeZone: 'America/New_York',
+    });
+    const scheduled = scheduleEvent({
+      event: buildLeagueForSlot(
+        slot,
+        new Date('2026-03-02T20:00:00.000Z'),
+        new Date('2026-03-03T08:00:00.000Z'),
+        'league_overnight_scheduler',
+      ),
+    }, context);
+
+    expect(scheduled.matches).toHaveLength(1);
+    expect(scheduled.matches[0].start.toISOString()).toBe('2026-03-03T03:00:00.000Z');
+    expect(scheduled.matches[0].end.toISOString()).toBe('2026-03-03T04:00:00.000Z');
+  });
+
+  it('rejects a repeating slot whose overnight end falls in a daylight-saving gap', () => {
+    const slot = new TimeSlot({
+      id: 'slot_dst_gap_scheduler',
+      dayOfWeek: 5,
+      daysOfWeek: [5],
+      startDate: new Date('2026-03-07T05:00:00.000Z'),
+      endDate: new Date('2026-03-09T04:00:00.000Z'),
+      repeating: true,
+      startTimeMinutes: 22 * 60,
+      endTimeMinutes: 2 * 60,
+      field: 'field_1',
+      fieldIds: ['field_1'],
+      divisions: [],
+      timeZone: 'America/New_York',
+    });
+    const league = buildLeagueForSlot(
+      slot,
+      new Date('2026-03-07T20:00:00.000Z'),
+      new Date('2026-03-08T08:00:00.000Z'),
+      'league_dst_gap_scheduler',
+    );
+
+    expect(() => scheduleEvent({ event: league }, context)).toThrow(
+      /does not exist on 2026-03-08/,
+    );
+  });
+});
+
 describe('league scheduling (time slots)', () => {
   it('chooses an immediately available Resource before a later Time Slot', () => {
     const division = buildDivision();
@@ -2338,7 +2421,7 @@ describe('league scheduling (time slots)', () => {
         }),
       ],
       doTeamsOfficiate: true,
-      officialSchedulingMode: 'TEAM_STAFFING',
+      staffingPriority: 'TEAM_COVERAGE_REQUIRED',
       gamesPerOpponent: 1,
       includePlayoffs: true,
       playoffTeamCount: 8,

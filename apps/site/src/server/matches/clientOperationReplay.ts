@@ -42,6 +42,7 @@ const normalizeSequence = (value: unknown): number | null => {
 };
 
 const stableValue = (value: unknown): unknown => {
+  if (value instanceof Date) return value.toISOString();
   if (Array.isArray(value)) {
     return value.map(stableValue);
   }
@@ -242,10 +243,7 @@ export const claimMatchOperationReceipts = async (params: {
     return { replayed: false, operationIds };
   }
   const persisted = await loadReceipts(params.client, operationIds);
-  if (
-    persisted.length === descriptors.length &&
-    isExactReplay(persisted, descriptors, replayContext)
-  ) {
+  if (isExactReplay(persisted, descriptors, replayContext)) {
     return { replayed: true, operationIds };
   }
   throw new Response(

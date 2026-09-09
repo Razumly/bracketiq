@@ -497,7 +497,11 @@ export const buildSimpleSetupReviewModel = ({
             ownerPageId: 'schedule-location',
             rows: [
                 { label: 'Starts', value: formatLocalDateTime(eventData.start) },
-                { label: 'Ends', value: eventData.noFixedEndDateTime ? 'Set during match generation' : formatLocalDateTime(eventData.end) },
+                { label: 'Ends', value: eventData.noFixedEndDateTime
+                    ? eventData.eventType === 'WEEKLY_EVENT'
+                        ? 'No Planned End'
+                        : 'Set during match generation'
+                    : formatLocalDateTime(eventData.end) },
                 { label: 'Time zone', value: eventData.timeZone || 'Not specified' },
                 { label: 'Location', value: eventData.location?.trim() || 'Not specified' },
                 { label: 'Address', value: eventData.address?.trim() || 'Not specified' },

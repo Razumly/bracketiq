@@ -8,6 +8,7 @@ import androidx.room.useWriterConnection
 
 import androidx.room.TypeConverters
 import com.razumly.mvp.core.data.DatabaseService
+import com.razumly.mvp.core.data.util.Converters
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.CatalogCacheViewerEntry
 import com.razumly.mvp.core.data.dataTypes.CatalogQueryCacheEntry
@@ -21,6 +22,7 @@ import com.razumly.mvp.core.data.dataTypes.DiscountTargetCacheEntry
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventParticipantManagementCacheEntry
 import com.razumly.mvp.core.data.dataTypes.EventRegistrationCacheEntry
+import com.razumly.mvp.core.data.dataTypes.EventTimeSlotCacheEntry
 import com.razumly.mvp.core.data.dataTypes.EventTeamComplianceCacheEntry
 import com.razumly.mvp.core.data.dataTypes.EventUserComplianceCacheEntry
 import com.razumly.mvp.core.data.dataTypes.Field
@@ -44,6 +46,7 @@ import com.razumly.mvp.core.data.dataTypes.daos.EventComplianceDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventParticipantManagementDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventRegistrationDao
+import com.razumly.mvp.core.data.dataTypes.daos.EventTimeSlotDao
 import com.razumly.mvp.core.data.dataTypes.daos.FieldDao
 import com.razumly.mvp.core.data.dataTypes.daos.InviteDao
 import com.razumly.mvp.core.data.dataTypes.daos.MatchDao
@@ -54,9 +57,7 @@ import com.razumly.mvp.core.data.dataTypes.daos.PendingRentalOrderDao
 import com.razumly.mvp.core.data.dataTypes.daos.RefundRequestDao
 import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
 import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
-import com.razumly.mvp.core.data.util.Converters
-
-const val MVP_DATABASE_VERSION = 100
+const val MVP_DATABASE_VERSION = 108
 
 @Database(
     entities = [
@@ -86,6 +87,7 @@ const val MVP_DATABASE_VERSION = 100
         OrganizationCacheEntry::class,
         ProductCacheEntry::class,
         OrganizationReviewsCacheEntry::class,
+        EventTimeSlotCacheEntry::class,
         TimeSlotCacheEntry::class,
         CatalogCacheViewerEntry::class,
         CatalogQueryCacheEntry::class,
@@ -107,6 +109,7 @@ abstract class MVPDatabaseService : RoomDatabase(), DatabaseService {
     abstract override val getFieldDao: FieldDao
     abstract override val getUserDataDao: UserDataDao
     abstract override val getEventDao: EventDao
+    abstract override val getEventTimeSlotDao: EventTimeSlotDao
     abstract override val getEventRegistrationDao: EventRegistrationDao
     abstract override val getEventParticipantManagementDao: EventParticipantManagementDao
     abstract override val getEventComplianceDao: EventComplianceDao

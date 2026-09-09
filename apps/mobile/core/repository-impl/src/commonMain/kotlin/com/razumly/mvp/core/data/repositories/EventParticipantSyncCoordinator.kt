@@ -38,6 +38,40 @@ private data class EventParticipantCacheScope(
     val cacheSlotId: String,
     val cacheOccurrenceDate: String,
 )
+internal data class HydratedEventRelations(
+    val teams: List<Team>,
+    val users: List<UserData>,
+)
+
+internal class AcceptedMaintenanceRelationHydrationException(
+    val eventId: String,
+    val relationType: String,
+    val missingIds: List<String>,
+    cause: Throwable? = null,
+) : IllegalStateException(
+    "Accepted maintenance relation hydration failed for $relationType " +
+        "${missingIds.joinToString()}.",
+    cause,
+)
+
+
+internal fun Event.hasSameParticipantRelationIds(other: Event): Boolean {
+    fun List<String>.normalizedIds(): Set<String> = map(String::trim)
+        .filter(String::isNotBlank)
+        .toSet()
+
+    fun Event.normalizedOfficialIds(): Set<String> =
+        (officialIds + eventOfficials.map { official -> official.userId }).normalizedIds()
+
+    return id.trim() == other.id.trim() &&
+        teamIds.normalizedIds() == other.teamIds.normalizedIds() &&
+        userIds.normalizedIds() == other.userIds.normalizedIds() &&
+        freeAgentIds.normalizedIds() == other.freeAgentIds.normalizedIds() &&
+        waitListIds.normalizedIds() == other.waitListIds.normalizedIds() &&
+        assistantHostIds.normalizedIds() == other.assistantHostIds.normalizedIds() &&
+        normalizedOfficialIds() == other.normalizedOfficialIds() &&
+        hostId.trim() == other.hostId.trim()
+}
 
 private fun eventParticipantCacheScope(
     eventId: String,
@@ -296,17 +330,23 @@ internal class EventParticipantSyncCoordinator(
     suspend fun mergeParticipantsSnapshot(
         baseEvent: Event,
         snapshot: EventParticipantsSnapshotResponseDto,
+        protectedHistoryAuthoritative: Boolean = false,
+        completeEventProjection: Boolean = false,
     ): EventParticipantsSyncResult {
         snapshot.error?.takeIf(String::isNotBlank)?.let { error(it) }
         val divisionWarnings = snapshot.divisionWarnings
             .mapNotNull(EventParticipantDivisionWarningDto::toDomainWarningOrNull)
 
         if (snapshot.weeklySelectionRequired == true) {
-            val clearedEvent = baseEvent.copy(
-                teamIds = emptyList(),
-                userIds = emptyList(),
-                waitListIds = emptyList(),
-                freeAgentIds = emptyList(),
+            val clearedEvent = mergePersistedEventEditorLocks(
+                incoming = baseEvent.copy(
+                    teamIds = emptyList(),
+                    userIds = emptyList(),
+                    waitListIds = emptyList(),
+                    freeAgentIds = emptyList(),
+                ),
+                cached = roomStore.getEvent(baseEvent.id),
+                protectedHistoryAuthoritative = protectedHistoryAuthoritative,
             )
             databaseService.getEventDao.upsertEvent(clearedEvent)
             persistEventRelations(
@@ -329,11 +369,28 @@ internal class EventParticipantSyncCoordinator(
         val snapshotEvent = snapshot.event
             ?.toEventOrNull()
             ?.withCachedDivisionStateForPartialSnapshot(participantBaseEvent)
-        val mergedEvent = (snapshotEvent ?: participantBaseEvent).copy(
-            teamIds = normalizedParticipantIds(participantIds.teamIds),
-            userIds = normalizedParticipantIds(participantIds.userIds),
-            waitListIds = normalizedParticipantIds(participantIds.waitListIds),
-            freeAgentIds = normalizedParticipantIds(participantIds.freeAgentIds),
+            ?.let { incoming ->
+                if (completeEventProjection) incoming else {
+                    // Participant responses omit registration destination, provenance, and authority.
+                    val retained = latestCachedEvent ?: baseEvent
+                    incoming.copy(
+                        affiliateUrl = retained.affiliateUrl,
+                        sourceType = retained.sourceType,
+                        sourceId = retained.sourceId,
+                        sourceUrl = retained.sourceUrl,
+                        capabilities = retained.capabilities,
+                    )
+                }
+            }
+        val mergedEvent = mergePersistedEventEditorLocks(
+            incoming = (snapshotEvent ?: participantBaseEvent).copy(
+                teamIds = normalizedParticipantIds(participantIds.teamIds),
+                userIds = normalizedParticipantIds(participantIds.userIds),
+                waitListIds = normalizedParticipantIds(participantIds.waitListIds),
+                freeAgentIds = normalizedParticipantIds(participantIds.freeAgentIds),
+            ),
+            cached = latestCachedEvent,
+            protectedHistoryAuthoritative = protectedHistoryAuthoritative,
         )
         val teams = snapshot.teams.mapNotNull { dto -> dto.toTeamOrNull() }
         val users = snapshot.users.mapNotNull { dto -> dto.toUserDataOrNull() }
@@ -495,12 +552,76 @@ internal class EventParticipantSyncCoordinator(
         ).map { rows -> rows.map(EventUserComplianceCacheEntry::toComplianceUserSummary) }
     }
 
+    internal suspend fun hydrateAcceptedMaintenanceRelations(
+        event: Event,
+        preloadedTeams: List<Team> = emptyList(),
+        preloadedUsers: List<UserData> = emptyList(),
+    ): HydratedEventRelations = hydrateEventRelations(
+        event = event,
+        preloadedTeams = preloadedTeams,
+        preloadedUsers = preloadedUsers,
+        requireComplete = true,
+    )
+
+    suspend fun persistAcceptedMaintenanceRelations(
+        event: Event,
+        preloadedTeams: List<Team> = emptyList(),
+        preloadedUsers: List<UserData> = emptyList(),
+    ) {
+        val relations = hydrateAcceptedMaintenanceRelations(
+            event = event,
+            preloadedTeams = preloadedTeams,
+            preloadedUsers = preloadedUsers,
+        )
+        databaseService.withTransaction {
+            persistAcceptedMaintenanceRelationsInTransaction(
+                event = event,
+                relations = relations,
+            )
+        }
+    }
+
+    internal suspend fun persistAcceptedMaintenanceRelationsInTransaction(
+        event: Event,
+        relations: HydratedEventRelations,
+    ): Boolean {
+        val currentEvent = roomStore.getEvent(event.id)
+        if (currentEvent == null || !currentEvent.hasSameParticipantRelationIds(event)) {
+            return false
+        }
+        if (relations.teams.isNotEmpty()) {
+            databaseService.getTeamDao.upsertTeamsWithRelations(relations.teams)
+        }
+        if (relations.users.isNotEmpty()) {
+            databaseService.getUserDataDao.upsertUsersWithRelations(relations.users)
+        }
+        insertEventCrossReferences(
+            eventId = currentEvent.id,
+            players = relations.users,
+            teams = relations.teams,
+        )
+        return true
+    }
+
     suspend fun persistEventRelations(
         event: Event,
         allowWeeklyParticipantRoster: Boolean = false,
         preloadedTeams: List<Team> = emptyList(),
     ) {
         if (event.eventType == EventType.WEEKLY_EVENT && !allowWeeklyParticipantRoster) return
+        val relations = hydrateEventRelations(
+            event = event,
+            preloadedTeams = preloadedTeams,
+        )
+        insertEventCrossReferences(event.id, relations.users, relations.teams)
+    }
+
+    private suspend fun hydrateEventRelations(
+        event: Event,
+        preloadedTeams: List<Team>,
+        preloadedUsers: List<UserData> = emptyList(),
+        requireComplete: Boolean = false,
+    ): HydratedEventRelations {
         val teamIds = event.teamIds
             .map(String::trim)
             .filter(String::isNotBlank)
@@ -516,7 +637,25 @@ internal class EventParticipantSyncCoordinator(
                 .toMap()
             val missingTeamIds = teamIds.filter { teamId -> preloadedById[teamId.lowercase()] == null }
             val fetchedTeams = if (missingTeamIds.isNotEmpty()) {
-                teamRepository.getTeams(missingTeamIds).getOrThrow()
+                try {
+                    (
+                        if (requireComplete) {
+                            teamRepository.fetchTeams(missingTeamIds)
+                        } else {
+                            teamRepository.getTeams(missingTeamIds)
+                        }
+                    ).getOrThrow()
+                } catch (throwable: kotlinx.coroutines.CancellationException) {
+                    throw throwable
+                } catch (throwable: Throwable) {
+                    if (!requireComplete) throw throwable
+                    throw AcceptedMaintenanceRelationHydrationException(
+                        eventId = event.id,
+                        relationType = "team",
+                        missingIds = missingTeamIds,
+                        cause = throwable,
+                    )
+                }
             } else {
                 emptyList()
             }
@@ -528,6 +667,16 @@ internal class EventParticipantSyncCoordinator(
                         ?.let { teamId -> teamId to team }
                 }
                 .toMap()
+            val unresolvedTeamIds = teamIds.filter { teamId ->
+                teamsById[teamId.lowercase()] == null
+            }
+            if (requireComplete && unresolvedTeamIds.isNotEmpty()) {
+                throw AcceptedMaintenanceRelationHydrationException(
+                    eventId = event.id,
+                    relationType = "team",
+                    missingIds = unresolvedTeamIds,
+                )
+            }
             teamIds.mapNotNull { teamId -> teamsById[teamId.lowercase()] }
         } else {
             emptyList()
@@ -540,26 +689,75 @@ internal class EventParticipantSyncCoordinator(
                 event.waitListIds +
                 event.assistantHostIds +
                 event.officialIds +
+                event.eventOfficials.map { official -> official.userId } +
                 event.hostId +
                 teamPlayerIds
             )
-            .distinct()
+            .map(String::trim)
             .filter(String::isNotBlank)
-        val users = if (relatedUserIds.isNotEmpty()) {
-            userRepository.getUsers(
-                userIds = relatedUserIds,
-                visibilityContext = UserVisibilityContext(eventId = event.id),
-            ).getOrThrow()
+            .distinct()
+        val preloadedUserIds = preloadedUsers
+            .map { user -> user.id.trim() }
+            .filter(String::isNotBlank)
+            .map(String::lowercase)
+            .toSet()
+        val missingUserIds = relatedUserIds.filter { userId ->
+            userId.lowercase() !in preloadedUserIds
+        }
+        val fetchedUsers = if (missingUserIds.isNotEmpty()) {
+            try {
+                (
+                    if (requireComplete) {
+                        userRepository.fetchUsers(
+                            userIds = missingUserIds,
+                            visibilityContext = UserVisibilityContext(eventId = event.id),
+                        )
+                    } else {
+                        userRepository.getUsers(
+                            userIds = missingUserIds,
+                            visibilityContext = UserVisibilityContext(eventId = event.id),
+                        )
+                    }
+                ).getOrThrow()
+            } catch (throwable: kotlinx.coroutines.CancellationException) {
+                throw throwable
+            } catch (throwable: Throwable) {
+                if (!requireComplete) throw throwable
+                throw AcceptedMaintenanceRelationHydrationException(
+                    eventId = event.id,
+                    relationType = "user",
+                    missingIds = missingUserIds,
+                    cause = throwable,
+                )
+            }
         } else {
             emptyList()
         }
-        val relatedUsers = if (relatedUserIds.isNotEmpty()) {
-            val relatedUserIdSet = relatedUserIds.toSet()
-            users.filter { it.id in relatedUserIdSet }
-        } else {
-            emptyList()
+        val usersById = (preloadedUsers + fetchedUsers)
+            .mapNotNull { user ->
+                user.id.trim()
+                    .takeIf(String::isNotBlank)
+                    ?.lowercase()
+                    ?.let { userId -> userId to user }
+            }
+            .toMap()
+        val unresolvedUserIds = relatedUserIds.filter { userId ->
+            usersById[userId.lowercase()] == null
         }
-        insertEventCrossReferences(event.id, relatedUsers, teams)
+        if (requireComplete && unresolvedUserIds.isNotEmpty()) {
+            throw AcceptedMaintenanceRelationHydrationException(
+                eventId = event.id,
+                relationType = "user",
+                missingIds = unresolvedUserIds,
+            )
+        }
+        val relatedUsers = relatedUserIds.mapNotNull { userId ->
+            usersById[userId.lowercase()]
+        }
+        return HydratedEventRelations(
+            teams = teams,
+            users = relatedUsers,
+        )
     }
 
     private suspend fun replaceParticipantManagementSnapshot(

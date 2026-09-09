@@ -4,11 +4,23 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.EventEditorSaveOutcome
-import com.razumly.mvp.core.data.repositories.EventScheduleOutcome
+import com.razumly.mvp.core.data.repositories.EventEditorProposalStaleException
 import com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeDto
 import com.razumly.mvp.core.network.dto.EventEditorMatchProjectionDto
 import com.razumly.mvp.core.network.dto.EventEditorScheduleWarningDto
 import com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus
+import com.razumly.mvp.core.network.dto.EventApiDto
+import com.razumly.mvp.core.network.dto.EventEditorErrorDto
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceAcceptedResultDto
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceGraphDto
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceOperation
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceProposalDto
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceRejectedResultDto
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceResponseDto
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceResponseStatus
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceScheduleOutcomeDto
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceScheduleOutcomeStatus
+import com.razumly.mvp.core.network.dto.EventEditorRevisionBindingDto
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -152,212 +164,244 @@ class EventEditActionCoordinatorTest {
         )
     }
 
-    @Test
-    fun runScheduleEditAction_reschedules_with_refetch_and_standings_refresh() = runTest {
-        val coordinator = EventEditActionCoordinator()
-        val draft = Event(id = "event-1", name = "Draft")
-        val updated = draft.copy(name = "Updated")
-        val scheduled = updated.copy(state = "SCHEDULED")
-        val events = mutableListOf<String>()
-
-        val result = coordinator.runScheduleEditAction(
-            action = EventScheduleEditAction.RESCHEDULE,
-            prepareEventForUpdate = {
-                events += "prepare"
-                PreparedEventForUpdate(event = draft)
-            },
-            logPreparedFieldOwnership = { action, prepared ->
-                events += "log:$action:${prepared.event.id}"
-            },
-            updateEvent = { prepared ->
-                events += "update:${prepared.event.id}"
-                saveOutcome(updated)
-            },
-            scheduleEvent = { action, event ->
-                events += "schedule:${action.name}:${event.id}"
-                EventScheduleOutcome(event = scheduled)
-            },
-            refetchMatchesOfTournament = { eventId ->
-                events += "refetch:$eventId"
-            },
-            refreshLeagueStandingsAfterSchedule = { event ->
-                events += "standings:${event.id}"
-            },
-            showLoading = { message -> events += "show:$message" },
-            hideLoading = { events += "hide" },
-        )
-
-        val success = assertIs<EventScheduleEditResult.Success>(result)
-        assertEquals("Event rescheduled.", success.message)
-        assertEquals(scheduled, success.scheduledEvent)
-        assertEquals(
-            listOf(
-                "show:Rescheduling event...",
-                "prepare",
-                "log:reschedule:event-1",
-                "update:event-1",
-                "schedule:RESCHEDULE:event-1",
-                "refetch:event-1",
-                "standings:event-1",
-                "hide",
-            ),
-            events,
-        )
-    }
 
     @Test
-    fun runScheduleEditAction_uses_atomic_build_outcome_and_surfaces_warnings() = runTest {
-        val updated = Event(id = "event-1", name = "Updated", eventType = EventType.LEAGUE)
+    fun given_schedule_maintenance_when_proposal_is_created_then_it_stays_transient_until_acceptance() = runTest {
+        val proposal = maintenanceProposal(EventEditorMaintenanceOperation.BUILD)
         val events = mutableListOf<String>()
-        val result = EventEditActionCoordinator().runScheduleEditAction(
+        var operationIdCalls = 0
+
+        val result = EventEditActionCoordinator().runScheduleMaintenanceAction(
             action = EventScheduleEditAction.BUILD_SCHEDULE,
             prepareEventForUpdate = {
                 events += "prepare"
+                PreparedEventForUpdate(event = Event(id = "event-1"))
+            },
+            logPreparedFieldOwnership = { action, _ -> events += "log:$action" },
+            prepareSettings = { prepared ->
+                events += "update:${prepared.event.id}"
+                EventScheduleMaintenancePreparation(prepared.event, settingsSaved = true)
+            },
+            proposeMaintenance = { action, event ->
+                events += "propose:${action.maintenanceOperation}:${event.id}"
+                EventEditorMaintenanceResponseDto.Proposed(proposal)
+            },
+            refreshAcceptedSchedule = {
+                events += "refresh"
+                error("proposal must remain transient")
+            },
+            showLoading = {},
+            hideLoading = {},
+            newOperationId = {
+                operationIdCalls += 1
+                "acceptance-operation-1"
+            },
+        )
+
+        val proposed = assertIs<EventScheduleMaintenanceActionResult.Proposed>(result)
+        assertEquals(EventScheduleMaintenanceReviewPhase.PROPOSED, proposed.review.phase)
+        assertEquals("acceptance-operation-1", proposed.review.acceptanceOperationId)
+        assertEquals(true, proposed.review.includePlaceholderTeams)
+        assertEquals(1, operationIdCalls)
+        assertEquals(
+            listOf(
+                "prepare",
+                "log:build_schedule",
+                "update:event-1",
+                "propose:BUILD:event-1",
+            ),
+            events,
+        )
+    }
+
+    @Test
+    fun given_accepted_schedule_maintenance_when_refreshing_then_fresh_schedule_is_loaded_before_success() = runTest {
+        val updated = Event(id = "event-1", name = "Updated")
+        val scheduled = updated.copy(name = "Fresh schedule")
+        val proposal = maintenanceProposal(EventEditorMaintenanceOperation.COMPLETE)
+        val accepted = maintenanceAcceptedResult(
+            proposal = proposal,
+            warnings = listOf(
+                EventEditorScheduleWarningDto(
+                    code = "RESOURCE_LIMIT",
+                    message = "One resource limited concurrency.",
+                    restrictingFactor = "RESOURCE",
+                ),
+            ),
+        )
+        val events = mutableListOf<String>()
+
+        val result = EventEditActionCoordinator().runScheduleMaintenanceAction(
+            action = EventScheduleEditAction.RESCHEDULE,
+            prepareEventForUpdate = {
                 PreparedEventForUpdate(event = updated)
             },
             logPreparedFieldOwnership = { action, _ -> events += "log:$action" },
-            updateEvent = {
-                events += "save"
-                saveOutcome(
-                    event = updated,
-                    scheduleOutcome = EventEditorScheduleOutcomeDto(
-                        status = EventEditorScheduleOutcomeStatus.BUILT,
-                        matchCount = 1,
-                        matches = listOf(
-                            EventEditorMatchProjectionDto(
-                                id = "match-1",
-                                eventId = updated.id,
-                            ),
-                        ),
-                        warnings = listOf(
-                            EventEditorScheduleWarningDto(
-                                code = "LOCKED_MATCH_OUTSIDE_WINDOW",
-                                message = "A locked match was preserved.",
-                            ),
-                        ),
-                    ),
-                )
-            },
-            scheduleEvent = { _, _ -> error("must not schedule twice") },
-            refetchMatchesOfTournament = { eventId -> events += "refetch:$eventId" },
-            refreshLeagueStandingsAfterSchedule = { event -> events += "standings:${event.id}" },
-            showLoading = { events += "show" },
-            hideLoading = { events += "hide" },
-        )
-
-        val success = assertIs<EventScheduleEditResult.Success>(result)
-        assertEquals("Schedule built.\nA locked match was preserved.", success.message)
-        assertEquals(updated.id, success.scheduledEvent.id)
-        assertEquals(updated.name, success.scheduledEvent.name)
-        assertEquals(
-            listOf("show", "prepare", "log:build_schedule", "save", "refetch:event-1", "standings:event-1", "hide"),
-            events,
-        )
-    }
-
-    @Test
-    fun runScheduleEditAction_rebuilds_the_full_schedule_without_a_second_match_reset() = runTest {
-        val coordinator = EventEditActionCoordinator()
-        val draft = Event(id = "event-1", maxParticipants = 12)
-        val updated = draft.copy(name = "Updated")
-        val scheduled = updated.copy(state = "SCHEDULED")
-        val events = mutableListOf<String>()
-
-        val result = coordinator.runScheduleEditAction(
-            action = EventScheduleEditAction.REBUILD_SCHEDULE,
-            prepareEventForUpdate = {
-                events += "prepare"
-                PreparedEventForUpdate(event = draft)
-            },
-            logPreparedFieldOwnership = { action, prepared ->
-                events += "log:$action:${prepared.event.id}"
-            },
-            updateEvent = { prepared ->
-                events += "update:${prepared.event.id}"
-                saveOutcome(updated)
-            },
-            scheduleEvent = { action, event ->
-                events += "schedule:${action.name}:${event.id}"
-                EventScheduleOutcome(event = scheduled)
-            },
-            refetchMatchesOfTournament = { eventId ->
-                events += "refetch:$eventId"
-            },
-            refreshLeagueStandingsAfterSchedule = { event ->
-                events += "standings:${event.id}"
-            },
-            showLoading = { message -> events += "show:$message" },
-            hideLoading = { events += "hide" },
-        )
-
-        val success = assertIs<EventScheduleEditResult.Success>(result)
-        assertEquals("Schedule rebuilt.", success.message)
-        assertEquals(scheduled, success.scheduledEvent)
-        assertEquals(
-            listOf(
-                "show:Rebuilding schedule...",
-                "prepare",
-                "log:rebuild_schedule:event-1",
-                "update:event-1",
-                "schedule:REBUILD_SCHEDULE:event-1",
-                "refetch:event-1",
-                "standings:event-1",
-                "hide",
-            ),
-            events,
-        )
-    }
-
-    @Test
-    fun runScheduleEditAction_reports_schedule_failure_after_saving_settings_and_hides_loading() = runTest {
-        val coordinator = EventEditActionCoordinator()
-        val events = mutableListOf<String>()
-        val draft = Event(id = "event-1")
-        val updated = draft.copy(name = "Updated")
-        val failure = IllegalStateException("schedule failed")
-
-        val result = coordinator.runScheduleEditAction(
-            action = EventScheduleEditAction.REBUILD_WITHOUT_PLACEHOLDER_TEAMS,
-            prepareEventForUpdate = {
-                events += "prepare"
-                PreparedEventForUpdate(event = draft)
-            },
-            logPreparedFieldOwnership = { action, _ ->
-                events += "log:$action"
-            },
-            updateEvent = {
+            prepareSettings = {
                 events += "update"
-                saveOutcome(updated)
+                EventScheduleMaintenancePreparation(updated, settingsSaved = true)
             },
-            scheduleEvent = { action, event ->
-                events += "schedule:${action.name}:${event.id}"
-                throw failure
+            proposeMaintenance = { _, _ ->
+                EventEditorMaintenanceResponseDto.Accepted(accepted)
             },
-            refetchMatchesOfTournament = { eventId ->
-                events += "refetch:$eventId"
+            refreshAcceptedSchedule = { eventId ->
+                events += "refresh:$eventId"
+                scheduled
             },
-            refreshLeagueStandingsAfterSchedule = { event ->
-                events += "standings:${event.id}"
-            },
-            showLoading = { message -> events += "show:$message" },
-            hideLoading = { events += "hide" },
+            showLoading = {},
+            hideLoading = {},
+            newOperationId = { error("accepted response must not allocate a review operation") },
         )
 
-        val error = assertIs<EventScheduleEditResult.Failure>(result)
-        assertEquals(failure, error.throwable)
-        assertEquals("Failed to rebuild without placeholder teams.", error.fallbackMessage)
-        assertEquals(true, error.settingsSaved)
-        assertEquals(
-            listOf(
-                "show:Rebuilding without placeholder teams...",
-                "prepare",
-                "log:rebuild_without_placeholders",
-                "update",
-                "schedule:REBUILD_WITHOUT_PLACEHOLDER_TEAMS:event-1",
-                "hide",
-            ),
-            events,
+        val success = assertIs<EventScheduleMaintenanceActionResult.Accepted>(result)
+        assertEquals(scheduled, success.scheduledEvent)
+        assertEquals("Schedule completed.\nOne resource limited concurrency.", success.message)
+        assertEquals(listOf("log:complete_schedule", "update", "refresh:event-1"), events)
+    }
+
+    @Test
+    fun given_accepted_proposal_when_schedule_refresh_fails_then_event_is_not_rolled_back() = runTest {
+        val updated = Event(id = "event-1", name = "Updated")
+        val proposal = maintenanceProposal(EventEditorMaintenanceOperation.COMPLETE)
+        val accepted = maintenanceAcceptedResult(proposal)
+        var rollbackCalls = 0
+
+        val result = EventEditActionCoordinator().runScheduleMaintenanceAction(
+            action = EventScheduleEditAction.RESCHEDULE,
+            prepareEventForUpdate = { PreparedEventForUpdate(event = updated) },
+            logPreparedFieldOwnership = { _, _ -> },
+            prepareSettings = { EventScheduleMaintenancePreparation(updated, settingsSaved = true) },
+            proposeMaintenance = { _, _ ->
+                EventEditorMaintenanceResponseDto.Accepted(accepted)
+            },
+            rollbackEvent = {
+                rollbackCalls += 1
+                true
+            },
+            refreshAcceptedSchedule = { error("schedule refresh failed") },
+            showLoading = {},
+            hideLoading = {},
+            newOperationId = { error("accepted response must not allocate a review operation") },
         )
+
+        val failure = assertIs<EventScheduleMaintenanceActionResult.Failure>(result)
+        assertEquals(0, rollbackCalls)
+        assertEquals(false, failure.settingsSaved)
+    }
+
+    @Test
+    fun given_rejected_schedule_maintenance_when_handled_then_success_is_not_reported() = runTest {
+        val proposal = maintenanceProposal(EventEditorMaintenanceOperation.REBUILD)
+        var refreshCalls = 0
+
+        val result = EventEditActionCoordinator().runScheduleMaintenanceAction(
+            action = EventScheduleEditAction.REBUILD_SCHEDULE,
+            prepareEventForUpdate = { PreparedEventForUpdate(event = Event(id = "event-1")) },
+            logPreparedFieldOwnership = { _, _ -> },
+            prepareSettings = { prepared -> EventScheduleMaintenancePreparation(prepared.event, settingsSaved = true) },
+            proposeMaintenance = { _, _ ->
+                EventEditorMaintenanceResponseDto.Rejected(maintenanceRejectedResult(proposal))
+            },
+            rollbackEvent = { true },
+            refreshAcceptedSchedule = {
+                refreshCalls += 1
+                error("rejected proposal must not refresh")
+            },
+            showLoading = {},
+            hideLoading = {},
+            newOperationId = { "unused" },
+        )
+
+        val rejected = assertIs<EventScheduleMaintenanceActionResult.Rejected>(result)
+        assertEquals("The schedule proposal was rejected. Request a new proposal.", rejected.message)
+        assertEquals(0, refreshCalls)
+    }
+
+    @Test
+    fun given_stale_schedule_maintenance_when_handled_then_success_is_not_reported() = runTest {
+        val stale = EventEditorProposalStaleException(
+            statusCode = 409,
+            url = "http://example.test/api/events/event-1/schedule",
+            payload = EventEditorErrorDto(
+                error = "The schedule changed while you were editing.",
+                code = "EDITOR_MAINTENANCE_STALE",
+            ),
+            responseBody = null,
+        )
+
+        val result = EventEditActionCoordinator().runScheduleMaintenanceAction(
+            action = EventScheduleEditAction.RESCHEDULE,
+            prepareEventForUpdate = { PreparedEventForUpdate(event = Event(id = "event-1")) },
+            logPreparedFieldOwnership = { _, _ -> },
+            prepareSettings = { prepared -> EventScheduleMaintenancePreparation(prepared.event, settingsSaved = true) },
+            proposeMaintenance = { _, _ -> throw stale },
+            rollbackEvent = { true },
+            refreshAcceptedSchedule = { error("stale proposal must not refresh") },
+            showLoading = {},
+            hideLoading = {},
+            newOperationId = { "unused" },
+        )
+
+        val failure = assertIs<EventScheduleMaintenanceActionResult.Failure>(result)
+        assertEquals(stale, failure.throwable)
+        assertEquals(false, failure.settingsSaved)
+        assertEquals(false, failure.rollbackFailed)
+    }
+
+    @Test
+    fun given_stale_schedule_maintenance_when_event_restore_fails_then_reports_terminal_failure() = runTest {
+        val stale = EventEditorProposalStaleException(
+            statusCode = 409,
+            url = "http://example.test/api/events/event-1/schedule",
+            payload = EventEditorErrorDto(
+                error = "The schedule changed while you were editing.",
+                code = "EDITOR_MAINTENANCE_STALE",
+            ),
+            responseBody = null,
+        )
+
+        val result = EventEditActionCoordinator().runScheduleMaintenanceAction(
+            action = EventScheduleEditAction.RESCHEDULE,
+            prepareEventForUpdate = { PreparedEventForUpdate(event = Event(id = "event-1")) },
+            logPreparedFieldOwnership = { _, _ -> },
+            prepareSettings = { prepared -> EventScheduleMaintenancePreparation(prepared.event, settingsSaved = true) },
+            proposeMaintenance = { _, _ -> throw stale },
+            rollbackEvent = { false },
+            refreshAcceptedSchedule = { error("stale proposal must not refresh") },
+            showLoading = {},
+            hideLoading = {},
+            newOperationId = { "unused" },
+        )
+
+        val failure = assertIs<EventScheduleMaintenanceActionResult.Failure>(result)
+        assertEquals(true, failure.settingsSaved)
+        assertEquals(true, failure.rollbackFailed)
+        assertEquals(
+            "Schedule maintenance failed and the Event changes could not be restored.",
+            failure.throwable.message,
+        )
+    }
+
+    @Test
+    fun given_placeholder_free_schedule_maintenance_when_retried_then_the_intent_is_preserved() = runTest {
+        val proposal = maintenanceProposal(EventEditorMaintenanceOperation.REBUILD)
+
+        val result = EventEditActionCoordinator().runScheduleMaintenanceAction(
+            action = EventScheduleEditAction.REBUILD_WITHOUT_PLACEHOLDER_TEAMS,
+            prepareEventForUpdate = { PreparedEventForUpdate(event = Event(id = "event-1")) },
+            logPreparedFieldOwnership = { _, _ -> },
+            prepareSettings = { prepared -> EventScheduleMaintenancePreparation(prepared.event, settingsSaved = true) },
+            proposeMaintenance = { _, _ ->
+                EventEditorMaintenanceResponseDto.Proposed(proposal)
+            },
+            refreshAcceptedSchedule = { error("proposal must remain transient") },
+            showLoading = {},
+            hideLoading = {},
+            newOperationId = { "acceptance-operation-1" },
+        )
+
+        val proposed = assertIs<EventScheduleMaintenanceActionResult.Proposed>(result)
+        assertEquals(false, proposed.review.includePlaceholderTeams)
     }
 
     @Test
@@ -463,3 +507,74 @@ class EventEditActionCoordinatorTest {
         )
     }
 }
+
+private fun maintenanceProposal(
+    operation: EventEditorMaintenanceOperation,
+): EventEditorMaintenanceProposalDto {
+    val matches = listOf(
+        EventEditorMatchProjectionDto(
+            id = "match-1",
+            matchId = 1,
+            eventId = "event-1",
+            placementState = "PLACED",
+            fieldId = "field-1",
+        ),
+    )
+    return EventEditorMaintenanceProposalDto(
+        status = EventEditorMaintenanceResponseStatus.PROPOSED,
+        contractVersion = 3,
+        eventId = "event-1",
+        operation = operation,
+        operationId = "maintenance-operation-1",
+        proposalRevision = "proposal-revision-1",
+        revisionBinding = EventEditorRevisionBindingDto(
+            editorRevision = "editor-revision-1",
+            scheduleRevision = "schedule-revision-1",
+            availabilityRevision = "availability-revision-1",
+        ),
+        graph = EventEditorMaintenanceGraphDto(
+            event = EventApiDto(id = "event-1", eventType = "LEAGUE"),
+            matches = matches,
+        ),
+        protectedMatchIds = listOf("match-protected"),
+        scheduleOutcome = EventEditorMaintenanceScheduleOutcomeDto(
+            status = EventEditorMaintenanceScheduleOutcomeStatus.COMPLETE,
+            isComplete = true,
+            matchCount = 1,
+            placedMatchCount = 1,
+            unplacedMatchCount = 0,
+            matches = matches,
+            unscheduledMatches = emptyList(),
+            affectedCompetitionPhases = emptyList(),
+            warnings = emptyList(),
+        ),
+    )
+}
+
+private fun maintenanceAcceptedResult(
+    proposal: EventEditorMaintenanceProposalDto,
+    warnings: List<EventEditorScheduleWarningDto> = emptyList(),
+): EventEditorMaintenanceAcceptedResultDto = EventEditorMaintenanceAcceptedResultDto(
+    status = EventEditorMaintenanceResponseStatus.ACCEPTED,
+    contractVersion = proposal.contractVersion,
+    eventId = proposal.eventId,
+    operation = proposal.operation,
+    operationId = proposal.operationId,
+    proposalRevision = proposal.proposalRevision,
+    revisionBinding = proposal.revisionBinding,
+    graph = proposal.graph,
+    protectedMatchIds = proposal.protectedMatchIds,
+    scheduleOutcome = proposal.scheduleOutcome.copy(warnings = warnings),
+    acceptanceOperationId = "acceptance-operation-1",
+)
+
+private fun maintenanceRejectedResult(
+    proposal: EventEditorMaintenanceProposalDto,
+): EventEditorMaintenanceRejectedResultDto = EventEditorMaintenanceRejectedResultDto(
+    status = EventEditorMaintenanceResponseStatus.REJECTED,
+    contractVersion = proposal.contractVersion,
+    eventId = proposal.eventId,
+    operation = proposal.operation,
+    operationId = proposal.operationId,
+    proposalRevision = proposal.proposalRevision,
+)

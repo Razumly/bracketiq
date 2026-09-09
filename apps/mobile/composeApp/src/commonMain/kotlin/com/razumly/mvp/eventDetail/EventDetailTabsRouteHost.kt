@@ -122,6 +122,7 @@ internal fun EventDetailTabsRouteHost(
     state: EventDetailTabsRouteState,
     actions: EventDetailTabsRouteActions,
     modifier: Modifier = Modifier,
+    scheduleActions: @Composable () -> Unit = {},
 ) {
     val availableTabs = remember(
         state.hasBracketView,
@@ -541,5 +542,6 @@ internal fun EventDetailTabsRouteHost(
             onShowDetails = actions.onShowDetails,
         ),
         modifier = modifier,
+        scheduleActions = scheduleActions,
     )
 }

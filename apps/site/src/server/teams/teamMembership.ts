@@ -1520,6 +1520,36 @@ const normalizeNonNegativeInt = (value: unknown): number => {
   return Math.max(0, Math.trunc(numeric));
 };
 
+const loadPhasePlaceholderDivisionIds = async (params: {
+  client: PrismaLike;
+  eventId: string;
+  entryDivisionId: string | null;
+  requestedPlaceholderDivisionIds: readonly string[];
+}): Promise<string[]> => {
+  if (params.requestedPlaceholderDivisionIds.length || !params.entryDivisionId) {
+    return [];
+  }
+  if (typeof params.client.eventDivisionPhaseSources?.findMany !== 'function') {
+    return [];
+  }
+  const rows: Array<{ phaseDivisionId?: unknown; phase?: unknown }> =
+    await params.client.eventDivisionPhaseSources.findMany({
+      where: {
+        eventId: params.eventId,
+        entryDivisionId: params.entryDivisionId,
+      },
+      select: {
+        phaseDivisionId: true,
+        phase: true,
+      },
+    });
+  return normalizeIdList(
+    rows
+      .filter((row) => String(row.phase ?? '').trim().toUpperCase() !== 'PLAYOFF')
+      .map((row) => row.phaseDivisionId),
+  );
+};
+
 export const claimOrCreateEventTeamSnapshot = async (params: {
   tx: PrismaLike;
   eventId: string;
@@ -1593,8 +1623,15 @@ export const claimOrCreateEventTeamSnapshot = async (params: {
         }) as EventTeamRow[]) ?? [])
         .filter((row) => normalizeId(row.parentTeamId) === canonicalTeamIdentityId))
       : [];
+  const requestedPlaceholderDivisionIds = normalizeIdList(params.placeholderDivisionIds);
+  const phasePlaceholderDivisionIds = await loadPhasePlaceholderDivisionIds({
+    client: params.tx,
+    eventId: params.eventId,
+    entryDivisionId: targetDivisionId,
+    requestedPlaceholderDivisionIds,
+  });
   const placeholderDivisionIdSet = new Set(
-    normalizeIdList(params.placeholderDivisionIds)
+    [...requestedPlaceholderDivisionIds, ...phasePlaceholderDivisionIds]
       .map((divisionId) => divisionId.toLowerCase()),
   );
   const existingDivisionId = normalizeId(existingRegisteredEventTeam?.division);
@@ -1603,6 +1640,7 @@ export const claimOrCreateEventTeamSnapshot = async (params: {
     existingRegisteredEventTeam
     && (
       (targetDivisionId && existingDivisionId === targetDivisionId)
+      || (existingDivisionId && placeholderDivisionIdSet.has(existingDivisionId.toLowerCase()))
       || (!targetDivisionId && targetDivisionTypeId && existingDivisionTypeId === targetDivisionTypeId)
     ),
   );
@@ -1746,6 +1784,11 @@ export const claimOrCreateEventTeamSnapshot = async (params: {
   const parentTeamId = normalizeId(existingRegisteredEventTeam?.parentTeamId)
     ?? canonicalTeamIdentityId
     ?? params.canonicalTeamId;
+  const shouldPreserveExistingDivision = Boolean(
+    existingRegisteredEventTeam
+    && targetMatchesExistingDivision
+    && existingDivisionId,
+  );
   const teamData = {
     eventId: params.eventId,
     kind: 'REGISTERED',
@@ -1754,6 +1797,7 @@ export const claimOrCreateEventTeamSnapshot = async (params: {
     division: explicitEventTeamId
       ? matchingPlaceholderDivisionId
       : (shouldPreservePlaceholderDivision ? matchingPlaceholderDivisionId : null)
+        ?? (shouldPreserveExistingDivision ? existingDivisionId : null)
         ?? normalizeId(params.divisionId)
         ?? normalizeId((canonicalTeam as any).division)
         ?? null,

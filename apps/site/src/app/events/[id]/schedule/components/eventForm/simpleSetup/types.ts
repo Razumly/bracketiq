@@ -61,7 +61,6 @@ export interface EventSetupResolverInput {
 
 export interface EventSetupCapabilities {
     isExternal: boolean;
-    isManaged: boolean;
     isTryout: boolean;
     isLeague: boolean;
     isTournament: boolean;

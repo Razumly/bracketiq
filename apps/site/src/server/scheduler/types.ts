@@ -20,14 +20,11 @@ import {
 } from '@/lib/dateUtils';
 import {
   isStaffingPriority,
-  normalizeStaffingPriority,
   type MatchOfficialAssignment,
-  type OfficialSchedulingMode,
   type StaffingPriority,
 } from '@/server/officials/config';
 export type {
   MatchOfficialAssignment,
-  OfficialSchedulingMode,
   StaffingPriority,
 } from '@/server/officials/config';
 
@@ -922,7 +919,6 @@ export class Tournament {
   teamCheckInOpenMinutesBefore: number;
   allowMatchRosterEdits: boolean;
   allowTemporaryMatchPlayers: boolean;
-  officialSchedulingMode: OfficialSchedulingMode;
   staffingPriority: StaffingPriority;
   officialPositions: EventOfficialPosition[];
   eventOfficials: EventOfficial[];
@@ -1008,7 +1004,6 @@ export class Tournament {
     teamCheckInOpenMinutesBefore?: number;
     allowMatchRosterEdits?: boolean;
     allowTemporaryMatchPlayers?: boolean;
-    officialSchedulingMode?: OfficialSchedulingMode;
     staffingPriority?: StaffingPriority | null;
     officialPositions?: EventOfficialPosition[];
     eventOfficials?: EventOfficial[];
@@ -1087,15 +1082,10 @@ export class Tournament {
     this.rating = params.rating ?? null;
     this.minAge = params.minAge ?? null;
     this.maxAge = params.maxAge ?? null;
-    this.officialSchedulingMode = params.officialSchedulingMode ?? 'SCHEDULE';
-    const hasCanonicalStaffingPriority = isStaffingPriority(params.staffingPriority);
-    this.staffingPriority = normalizeStaffingPriority(
-      params.staffingPriority,
-      this.officialSchedulingMode,
-    );
-    this.doTeamsOfficiate = hasCanonicalStaffingPriority
-      ? Boolean(params.doTeamsOfficiate)
-      : this.officialSchedulingMode === 'TEAM_STAFFING' || Boolean(params.doTeamsOfficiate);
+    this.staffingPriority = isStaffingPriority(params.staffingPriority)
+      ? params.staffingPriority
+      : 'BEST_AVAILABLE_COVERAGE';
+    this.doTeamsOfficiate = Boolean(params.doTeamsOfficiate);
     this.teamOfficialsMaySwap = this.doTeamsOfficiate ? Boolean(params.teamOfficialsMaySwap) : false;
     this.teamCheckInMode = this.teamSignup ? params.teamCheckInMode ?? 'OFF' : 'OFF';
     this.teamCheckInOpenMinutesBefore = typeof params.teamCheckInOpenMinutesBefore === 'number' && Number.isFinite(params.teamCheckInOpenMinutesBefore)

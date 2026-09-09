@@ -1,0 +1,5809 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "commands": {
+      "type": "object",
+      "properties": {
+        "draft": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "create": {
+          "type": "object",
+          "properties": {
+            "contractVersion": {
+              "$ref": "#/$defs/__schema32"
+            },
+            "createOperationId": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "expectedRevisions": {
+              "$ref": "#/$defs/__schema33"
+            },
+            "draft": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "completion": {
+              "$ref": "#/$defs/__schema34"
+            },
+            "hasScheduleProposalSupport": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "contractVersion",
+            "createOperationId",
+            "expectedRevisions",
+            "draft",
+            "completion"
+          ],
+          "additionalProperties": false
+        },
+        "save": {
+          "type": "object",
+          "properties": {
+            "contractVersion": {
+              "$ref": "#/$defs/__schema32"
+            },
+            "editorRevision": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "staffRevision": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "draft": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "scheduleTransition": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "mode": {
+                      "type": "string",
+                      "const": "PRESERVE"
+                    }
+                  },
+                  "required": [
+                    "mode"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "mode": {
+                      "type": "string",
+                      "const": "RECONCILE"
+                    },
+                    "expectedScheduleRevision": {
+                      "$ref": "#/$defs/__schema4"
+                    }
+                  },
+                  "required": [
+                    "mode",
+                    "expectedScheduleRevision"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "required": [
+            "contractVersion",
+            "editorRevision",
+            "staffRevision",
+            "draft",
+            "scheduleTransition"
+          ],
+          "additionalProperties": false
+        },
+        "accept": {
+          "type": "object",
+          "properties": {
+            "contractVersion": {
+              "$ref": "#/$defs/__schema32"
+            },
+            "createOperationId": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "proposalRevision": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "draft": {
+              "$ref": "#/$defs/__schema0"
+            }
+          },
+          "required": [
+            "contractVersion",
+            "createOperationId",
+            "proposalRevision",
+            "draft"
+          ],
+          "additionalProperties": false
+        },
+        "acceptPartial": {
+          "type": "object",
+          "properties": {
+            "contractVersion": {
+              "$ref": "#/$defs/__schema32"
+            },
+            "createOperationId": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "proposalRevision": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "acceptanceMode": {
+              "type": "string",
+              "const": "PARTIAL"
+            },
+            "acceptanceOperationId": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "draft": {
+              "$ref": "#/$defs/__schema0"
+            }
+          },
+          "required": [
+            "contractVersion",
+            "createOperationId",
+            "proposalRevision",
+            "acceptanceMode",
+            "acceptanceOperationId",
+            "draft"
+          ],
+          "additionalProperties": false
+        },
+        "reject": {
+          "type": "object",
+          "properties": {
+            "contractVersion": {
+              "$ref": "#/$defs/__schema32"
+            },
+            "createOperationId": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "proposalRevision": {
+              "$ref": "#/$defs/__schema4"
+            }
+          },
+          "required": [
+            "contractVersion",
+            "createOperationId",
+            "proposalRevision"
+          ],
+          "additionalProperties": false
+        },
+        "maintenance": {
+          "type": "object",
+          "properties": {
+            "contractVersion": {
+              "$ref": "#/$defs/__schema32"
+            },
+            "eventId": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "operation": {
+              "$ref": "#/$defs/__schema35"
+            },
+            "operationId": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "expectedRevisions": {
+              "$ref": "#/$defs/__schema36"
+            },
+            "participantCount": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "includePlaceholderTeams": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "contractVersion",
+            "eventId",
+            "operation",
+            "operationId"
+          ],
+          "additionalProperties": false
+        },
+        "acceptMaintenance": {
+          "type": "object",
+          "properties": {
+            "contractVersion": {
+              "$ref": "#/$defs/__schema32"
+            },
+            "eventId": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "operation": {
+              "$ref": "#/$defs/__schema35"
+            },
+            "operationId": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "proposalRevision": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "acceptanceOperationId": {
+              "$ref": "#/$defs/__schema4"
+            }
+          },
+          "required": [
+            "contractVersion",
+            "eventId",
+            "operation",
+            "operationId",
+            "proposalRevision",
+            "acceptanceOperationId"
+          ],
+          "additionalProperties": false
+        },
+        "rejectMaintenance": {
+          "type": "object",
+          "properties": {
+            "contractVersion": {
+              "$ref": "#/$defs/__schema32"
+            },
+            "eventId": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "operation": {
+              "$ref": "#/$defs/__schema35"
+            },
+            "operationId": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "proposalRevision": {
+              "$ref": "#/$defs/__schema4"
+            }
+          },
+          "required": [
+            "contractVersion",
+            "eventId",
+            "operation",
+            "operationId",
+            "proposalRevision"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "draft",
+        "create",
+        "save",
+        "accept",
+        "acceptPartial",
+        "reject",
+        "maintenance",
+        "acceptMaintenance",
+        "rejectMaintenance"
+      ],
+      "additionalProperties": false
+    },
+    "results": {
+      "type": "object",
+      "properties": {
+        "saved": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "$ref": "#/$defs/__schema37"
+            },
+            "snapshot": {
+              "$ref": "#/$defs/__schema38"
+            },
+            "questionIdMap": {
+              "$ref": "#/$defs/__schema40"
+            },
+            "staffEmailDelivery": {
+              "$ref": "#/$defs/__schema41"
+            },
+            "scheduleOutcome": {
+              "$ref": "#/$defs/__schema42"
+            },
+            "graph": {
+              "$ref": "#/$defs/__schema49"
+            },
+            "acceptanceOperationId": {
+              "$ref": "#/$defs/__schema58"
+            }
+          },
+          "required": [
+            "status",
+            "snapshot",
+            "questionIdMap",
+            "staffEmailDelivery",
+            "scheduleOutcome"
+          ],
+          "additionalProperties": false
+        },
+        "error": {
+          "type": "object",
+          "properties": {
+            "error": {
+              "type": "string"
+            },
+            "code": {
+              "type": "string",
+              "enum": [
+                "INVALID_EDITOR_COMMAND",
+                "EDITOR_REVISION_CONFLICT",
+                "STAFF_REVISION_CONFLICT",
+                "INVALID_EDITOR_INPUT",
+                "INVALID_EVENT_REGISTRATION_UNIT",
+                "INVALID_EVENT_REGISTRATION_DIVISION",
+                "EVENT_REGISTRATION_CAPACITY_EXCEEDED",
+                "EVENT_REGISTRATION_STRUCTURE_LOCKED",
+                "EDITOR_PERMISSION_DENIED",
+                "EDITOR_IMMUTABLE_FIELD",
+                "EDITOR_NOT_FOUND",
+                "EDITOR_CAPABILITY_REQUIRED",
+                "EDITOR_SAVE_FAILED",
+                "CREATE_OPERATION_PAYLOAD_MISMATCH",
+                "CREATE_OPERATION_CONFLICT",
+                "EDITOR_SCHEDULE_INTENT_REQUIRED",
+                "EDITOR_SCHEDULE_REVISION_CONFLICT",
+                "EDITOR_PROTECTED_MATCH_HISTORY",
+                "EDITOR_SCHEDULE_UNSUPPORTED",
+                "EDITOR_SCHEDULE_INPUT_INVALID",
+                "EDITOR_SCHEDULE_FAILED",
+                "EDITOR_PROPOSAL_INVALID",
+                "EDITOR_PROPOSAL_STALE",
+                "EDITOR_PROPOSAL_NOT_FOUND",
+                "EDITOR_MAINTENANCE_INVALID",
+                "EDITOR_MAINTENANCE_NOT_FOUND",
+                "EDITOR_MAINTENANCE_REJECTED",
+                "EDITOR_MAINTENANCE_STALE",
+                "EDITOR_MAINTENANCE_ACCEPTANCE_CONFLICT",
+                "EDITOR_MAINTENANCE_UNAUTHORIZED",
+                "INVALID_TIME_SLOT"
+              ]
+            },
+            "field": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "editorRevision": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "staffRevision": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "scheduleRevision": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "slotIds": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema4"
+              }
+            },
+            "occurrenceDate": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "createOperationId": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "divisionId": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "matchCount": {
+              "type": "number"
+            },
+            "capacity": {
+              "type": "number"
+            },
+            "participantCount": {
+              "type": "number"
+            },
+            "requestId": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "details": {}
+          },
+          "required": [
+            "error",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        "schedule": {
+          "$ref": "#/$defs/__schema42"
+        },
+        "maintenanceRejected": {
+          "$ref": "#/$defs/__schema59"
+        },
+        "created": {
+          "$ref": "#/$defs/__schema60"
+        },
+        "createProposal": {
+          "$ref": "#/$defs/__schema62"
+        },
+        "maintenanceProposal": {
+          "$ref": "#/$defs/__schema63"
+        },
+        "maintenanceAccepted": {
+          "$ref": "#/$defs/__schema66"
+        },
+        "partialAccepted": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "$ref": "#/$defs/__schema37"
+            },
+            "snapshot": {
+              "$ref": "#/$defs/__schema38"
+            },
+            "questionIdMap": {
+              "$ref": "#/$defs/__schema40"
+            },
+            "staffEmailDelivery": {
+              "$ref": "#/$defs/__schema41"
+            },
+            "scheduleOutcome": {
+              "$ref": "#/$defs/__schema48"
+            },
+            "graph": {
+              "$ref": "#/$defs/__schema49"
+            },
+            "acceptanceOperationId": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "createOperationId": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "editorRevision": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "staffRevision": {
+              "$ref": "#/$defs/__schema61"
+            },
+            "scheduleRevision": {
+              "$ref": "#/$defs/__schema4"
+            }
+          },
+          "required": [
+            "status",
+            "snapshot",
+            "questionIdMap",
+            "staffEmailDelivery",
+            "scheduleOutcome",
+            "acceptanceOperationId",
+            "createOperationId",
+            "editorRevision",
+            "staffRevision",
+            "scheduleRevision"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "saved",
+        "error",
+        "schedule",
+        "maintenanceRejected",
+        "created",
+        "createProposal",
+        "maintenanceProposal",
+        "maintenanceAccepted",
+        "partialAccepted"
+      ],
+      "additionalProperties": false
+    },
+    "snapshot": {
+      "$ref": "#/$defs/__schema38"
+    },
+    "createResponse": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/__schema60"
+        },
+        {
+          "$ref": "#/$defs/__schema62"
+        }
+      ]
+    },
+    "maintenanceResponse": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/__schema63"
+        },
+        {
+          "$ref": "#/$defs/__schema66"
+        },
+        {
+          "$ref": "#/$defs/__schema59"
+        }
+      ]
+    }
+  },
+  "required": [
+    "commands",
+    "results",
+    "snapshot",
+    "createResponse",
+    "maintenanceResponse"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "__schema0": {
+      "type": "object",
+      "properties": {
+        "basics": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": {
+              "$ref": "#/$defs/__schema1"
+            },
+            "eventType": {
+              "$ref": "#/$defs/__schema2"
+            },
+            "sportIds": {
+              "$ref": "#/$defs/__schema3"
+            },
+            "start": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "timeZone": {
+              "$ref": "#/$defs/__schema6"
+            },
+            "location": {
+              "$ref": "#/$defs/__schema7"
+            },
+            "address": {
+              "$ref": "#/$defs/__schema8"
+            },
+            "coordinates": {
+              "$ref": "#/$defs/__schema9"
+            },
+            "affiliateUrl": {
+              "$ref": "#/$defs/__schema10"
+            },
+            "parentEvent": {
+              "$ref": "#/$defs/__schema11"
+            },
+            "organizationId": {
+              "$ref": "#/$defs/__schema11"
+            },
+            "hostId": {
+              "$ref": "#/$defs/__schema11"
+            },
+            "state": {
+              "$ref": "#/$defs/__schema12"
+            },
+            "imageId": {
+              "$ref": "#/$defs/__schema11"
+            },
+            "tags": {
+              "$ref": "#/$defs/__schema13"
+            }
+          },
+          "required": [
+            "name",
+            "description",
+            "eventType",
+            "sportIds",
+            "start",
+            "timeZone",
+            "location",
+            "address",
+            "coordinates",
+            "affiliateUrl",
+            "parentEvent",
+            "organizationId",
+            "hostId",
+            "state",
+            "imageId",
+            "tags"
+          ],
+          "additionalProperties": false
+        },
+        "participation": {
+          "$ref": "#/$defs/__schema14"
+        },
+        "registration": {
+          "$ref": "#/$defs/__schema15"
+        },
+        "competition": {
+          "$ref": "#/$defs/__schema22"
+        },
+        "schedule": {
+          "$ref": "#/$defs/__schema28"
+        },
+        "resources": {
+          "$ref": "#/$defs/__schema30"
+        },
+        "staff": {
+          "$ref": "#/$defs/__schema31"
+        }
+      },
+      "required": [
+        "basics",
+        "participation",
+        "registration",
+        "competition",
+        "schedule",
+        "resources",
+        "staff"
+      ],
+      "additionalProperties": false
+    },
+    "__schema1": {
+      "type": "string"
+    },
+    "__schema2": {
+      "type": "string",
+      "minLength": 1
+    },
+    "__schema3": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/__schema4"
+      }
+    },
+    "__schema4": {
+      "type": "string",
+      "minLength": 1
+    },
+    "__schema5": {
+      "type": "string",
+      "minLength": 1
+    },
+    "__schema6": {
+      "type": "string",
+      "minLength": 1
+    },
+    "__schema7": {
+      "type": "string"
+    },
+    "__schema8": {
+      "type": "string"
+    },
+    "__schema9": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
+    "__schema10": {
+      "type": "string"
+    },
+    "__schema11": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/__schema4"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "__schema12": {
+      "type": "string",
+      "minLength": 1
+    },
+    "__schema13": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/__schema4"
+          },
+          "$id": {
+            "$ref": "#/$defs/__schema4"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "__schema14": {
+      "type": "object",
+      "properties": {
+        "teamSignup": {
+          "type": "boolean"
+        },
+        "singleDivision": {
+          "type": "boolean"
+        },
+        "registrationByDivisionType": {
+          "type": "boolean"
+        },
+        "teamSizeLimit": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "maxParticipants": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "minAge": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "maxAge": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cancellationRefundHours": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "registrationCutoffHours": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "allowTeamSplitDefault": {
+          "type": "boolean"
+        },
+        "waitListIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "freeAgentIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema4"
+          }
+        }
+      },
+      "required": [
+        "teamSignup",
+        "singleDivision",
+        "registrationByDivisionType",
+        "teamSizeLimit",
+        "maxParticipants",
+        "minAge",
+        "maxAge",
+        "cancellationRefundHours",
+        "registrationCutoffHours",
+        "allowTeamSplitDefault",
+        "waitListIds",
+        "freeAgentIds"
+      ],
+      "additionalProperties": false
+    },
+    "__schema15": {
+      "type": "object",
+      "properties": {
+        "payment": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "FREE",
+                "ONLINE",
+                "MANUAL"
+              ]
+            },
+            "priceCents": {
+              "$ref": "#/$defs/__schema16"
+            },
+            "taxHandling": {
+              "type": "string",
+              "minLength": 1
+            },
+            "organizerManualTaxRateBps": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "manualPaymentInstructions": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "manualPaymentLinks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/__schema4"
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string",
+                    "format": "uri"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "allowPaymentPlans": {
+              "type": "boolean"
+            },
+            "installmentCount": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "installmentDueDates": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema5"
+              }
+            },
+            "installmentDueRelativeDays": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema17"
+              }
+            },
+            "installmentAmounts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema16"
+              }
+            }
+          },
+          "required": [
+            "mode",
+            "priceCents",
+            "taxHandling",
+            "organizerManualTaxRateBps",
+            "manualPaymentInstructions",
+            "manualPaymentLinks",
+            "allowPaymentPlans",
+            "installmentCount",
+            "installmentDueDates",
+            "installmentDueRelativeDays",
+            "installmentAmounts"
+          ],
+          "additionalProperties": false
+        },
+        "questions": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "prompt": {
+                    "$ref": "#/$defs/__schema18"
+                  },
+                  "answerType": {
+                    "$ref": "#/$defs/__schema19"
+                  },
+                  "required": {
+                    "$ref": "#/$defs/__schema20"
+                  },
+                  "sortOrder": {
+                    "$ref": "#/$defs/__schema21"
+                  },
+                  "id": {
+                    "$ref": "#/$defs/__schema4"
+                  }
+                },
+                "required": [
+                  "prompt",
+                  "answerType",
+                  "required",
+                  "sortOrder",
+                  "id"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "prompt": {
+                    "$ref": "#/$defs/__schema18"
+                  },
+                  "answerType": {
+                    "$ref": "#/$defs/__schema19"
+                  },
+                  "required": {
+                    "$ref": "#/$defs/__schema20"
+                  },
+                  "sortOrder": {
+                    "$ref": "#/$defs/__schema21"
+                  },
+                  "clientId": {
+                    "$ref": "#/$defs/__schema4"
+                  }
+                },
+                "required": [
+                  "prompt",
+                  "answerType",
+                  "required",
+                  "sortOrder",
+                  "clientId"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "requiredDocumentIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema4"
+          }
+        }
+      },
+      "required": [
+        "payment",
+        "questions",
+        "requiredDocumentIds"
+      ],
+      "additionalProperties": false
+    },
+    "__schema16": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "__schema17": {
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991
+    },
+    "__schema18": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "__schema19": {
+      "type": "string",
+      "enum": [
+        "TEXT",
+        "LONG_TEXT"
+      ]
+    },
+    "__schema20": {
+      "type": "boolean"
+    },
+    "__schema21": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "__schema22": {
+      "type": "object",
+      "properties": {
+        "divisionIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "divisionDetails": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema23"
+          }
+        },
+        "playoffDivisionDetails": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema23"
+          }
+        },
+        "divisionFieldIds": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/__schema4"
+            }
+          }
+        },
+        "winnerSetCount": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "loserSetCount": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "doubleElimination": {
+          "type": "boolean"
+        },
+        "includePlayoffs": {
+          "type": "boolean"
+        },
+        "splitLeaguePlayoffDivisions": {
+          "type": "boolean"
+        },
+        "playoffTeamCount": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pointsToVictory": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema17"
+          }
+        },
+        "winnerBracketPointsToVictory": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema17"
+          }
+        },
+        "loserBracketPointsToVictory": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema17"
+          }
+        },
+        "usesSets": {
+          "type": "boolean"
+        },
+        "setsPerMatch": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "setDurationMinutes": {
+          "anyOf": [
+            {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "restTimeMinutes": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "matchDurationMinutes": {
+          "$ref": "#/$defs/__schema26"
+        },
+        "gamesPerOpponent": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "matchRulesOverride": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/__schema27"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "leagueScoringConfig": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/__schema27"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "divisionIds",
+        "divisionDetails",
+        "playoffDivisionDetails",
+        "divisionFieldIds",
+        "winnerSetCount",
+        "loserSetCount",
+        "doubleElimination",
+        "includePlayoffs",
+        "splitLeaguePlayoffDivisions",
+        "playoffTeamCount",
+        "pointsToVictory",
+        "winnerBracketPointsToVictory",
+        "loserBracketPointsToVictory",
+        "usesSets",
+        "setsPerMatch",
+        "setDurationMinutes",
+        "restTimeMinutes",
+        "gamesPerOpponent",
+        "matchRulesOverride",
+        "leagueScoringConfig"
+      ],
+      "additionalProperties": false
+    },
+    "__schema23": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "sourceDivisionId": {
+          "$ref": "#/$defs/__schema24"
+        },
+        "key": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "LEAGUE",
+            "PLAYOFF"
+          ]
+        },
+        "isSystemGenerated": {
+          "$ref": "#/$defs/__schema25"
+        },
+        "poolPlay": {
+          "$ref": "#/$defs/__schema25"
+        },
+        "divisionTypeId": {
+          "type": "string"
+        },
+        "skillDivisionTypeId": {
+          "type": "string"
+        },
+        "ageDivisionTypeId": {
+          "type": "string"
+        },
+        "divisionTypeName": {
+          "type": "string"
+        },
+        "ratingType": {
+          "type": "string"
+        },
+        "gender": {
+          "type": "string"
+        },
+        "price": {
+          "$ref": "#/$defs/__schema26"
+        },
+        "maxParticipants": {
+          "$ref": "#/$defs/__schema26"
+        },
+        "playoffTeamCount": {
+          "$ref": "#/$defs/__schema26"
+        },
+        "poolCount": {
+          "$ref": "#/$defs/__schema26"
+        },
+        "poolTeamCount": {
+          "$ref": "#/$defs/__schema26"
+        },
+        "phaseSettings": {
+          "$ref": "#/$defs/__schema27"
+        },
+        "playoffPlacementDivisionIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "standingsOverrides": {
+          "anyOf": [
+            {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "number"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "playoffConfig": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/__schema27"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gamesPerOpponent": {
+          "$ref": "#/$defs/__schema26"
+        },
+        "restTimeMinutes": {
+          "$ref": "#/$defs/__schema26"
+        },
+        "usesSets": {
+          "$ref": "#/$defs/__schema25"
+        },
+        "matchDurationMinutes": {
+          "$ref": "#/$defs/__schema26"
+        },
+        "setDurationMinutes": {
+          "$ref": "#/$defs/__schema26"
+        },
+        "setsPerMatch": {
+          "$ref": "#/$defs/__schema26"
+        },
+        "pointsToVictory": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "standingsConfirmedAt": {
+          "$ref": "#/$defs/__schema24"
+        },
+        "standingsConfirmedBy": {
+          "$ref": "#/$defs/__schema24"
+        },
+        "allowPaymentPlans": {
+          "$ref": "#/$defs/__schema25"
+        },
+        "installmentCount": {
+          "$ref": "#/$defs/__schema26"
+        },
+        "installmentDueDates": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "installmentDueRelativeDays": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "installmentAmounts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema16"
+          }
+        },
+        "ageCutoffDate": {
+          "$ref": "#/$defs/__schema24"
+        },
+        "ageCutoffLabel": {
+          "$ref": "#/$defs/__schema24"
+        },
+        "ageCutoffSource": {
+          "$ref": "#/$defs/__schema24"
+        },
+        "fieldIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "teamIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema4"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "key",
+        "name",
+        "kind",
+        "divisionTypeId",
+        "skillDivisionTypeId",
+        "ageDivisionTypeId",
+        "divisionTypeName",
+        "ratingType",
+        "fieldIds"
+      ],
+      "additionalProperties": false
+    },
+    "__schema24": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "__schema25": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "__schema26": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "__schema27": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {}
+    },
+    "__schema28": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "FIXED_END"
+            },
+            "endConstraint": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "isAutomatedScheduling": {
+              "default": true,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "mode",
+            "endConstraint",
+            "isAutomatedScheduling"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "GENERATED_END"
+            },
+            "endConstraint": {
+              "type": "null"
+            },
+            "generatedScheduleEnd": {
+              "$ref": "#/$defs/__schema29"
+            },
+            "isAutomatedScheduling": {
+              "default": true,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "mode",
+            "endConstraint",
+            "isAutomatedScheduling"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "__schema29": {
+      "anyOf": [
+        {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {}
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "__schema30": {
+      "type": "object",
+      "properties": {
+        "fieldIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "$id": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "name": {
+                "type": "string"
+              },
+              "location": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "address": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "lat": {
+                "$ref": "#/$defs/__schema26"
+              },
+              "long": {
+                "$ref": "#/$defs/__schema26"
+              },
+              "heading": {
+                "$ref": "#/$defs/__schema26"
+              },
+              "inUse": {
+                "$ref": "#/$defs/__schema25"
+              },
+              "rentalSlotIds": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/__schema4"
+                }
+              },
+              "sportIds": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/__schema4"
+                }
+              },
+              "createdBy": {
+                "$ref": "#/$defs/__schema24"
+              },
+              "archivedAt": {
+                "$ref": "#/$defs/__schema24"
+              },
+              "archivedByUserId": {
+                "$ref": "#/$defs/__schema24"
+              },
+              "archiveReason": {
+                "$ref": "#/$defs/__schema24"
+              },
+              "organizationId": {
+                "$ref": "#/$defs/__schema24"
+              },
+              "facilityId": {
+                "$ref": "#/$defs/__schema24"
+              },
+              "latitude": {
+                "$ref": "#/$defs/__schema26"
+              },
+              "longitude": {
+                "$ref": "#/$defs/__schema26"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "timeSlotIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "timeSlots": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "$id": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "eventId": {
+                "$ref": "#/$defs/__schema24"
+              },
+              "archivedAt": {
+                "$ref": "#/$defs/__schema24"
+              },
+              "archivedByUserId": {
+                "$ref": "#/$defs/__schema24"
+              },
+              "archiveReason": {
+                "$ref": "#/$defs/__schema24"
+              },
+              "dayOfWeek": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "daysOfWeek": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "startTimeMinutes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "endTimeMinutes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "startDate": {
+                "$ref": "#/$defs/__schema24"
+              },
+              "endDate": {
+                "$ref": "#/$defs/__schema24"
+              },
+              "start": {
+                "$ref": "#/$defs/__schema24"
+              },
+              "end": {
+                "$ref": "#/$defs/__schema24"
+              },
+              "timeZone": {
+                "type": "string"
+              },
+              "scheduledFieldId": {
+                "$ref": "#/$defs/__schema24"
+              },
+              "scheduledFieldIds": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/__schema4"
+                }
+              },
+              "fieldId": {
+                "$ref": "#/$defs/__schema24"
+              },
+              "fieldIds": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/__schema4"
+                }
+              },
+              "division": {
+                "$ref": "#/$defs/__schema24"
+              },
+              "divisions": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/__schema4"
+                }
+              },
+              "divisionKeys": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/__schema4"
+                }
+              },
+              "requiredTemplateIds": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/__schema4"
+                }
+              },
+              "hostRequiredTemplateIds": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/__schema4"
+                }
+              },
+              "repeating": {
+                "$ref": "#/$defs/__schema25"
+              },
+              "price": {
+                "$ref": "#/$defs/__schema26"
+              },
+              "taxHandling": {
+                "type": "string"
+              },
+              "sourceType": {
+                "$ref": "#/$defs/__schema24"
+              },
+              "rentalBookingId": {
+                "$ref": "#/$defs/__schema24"
+              },
+              "rentalBookingItemId": {
+                "$ref": "#/$defs/__schema24"
+              },
+              "rentalLocked": {
+                "$ref": "#/$defs/__schema25"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "requiredTemplateIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "immutableFieldIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "sourceTemplateId": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "rentalBookingId": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "rentalBookingItemId": {
+          "$ref": "#/$defs/__schema11"
+        }
+      },
+      "required": [
+        "fieldIds",
+        "fields",
+        "timeSlotIds",
+        "timeSlots",
+        "requiredTemplateIds",
+        "immutableFieldIds",
+        "rentalBookingId",
+        "rentalBookingItemId"
+      ],
+      "additionalProperties": false
+    },
+    "__schema31": {
+      "type": "object",
+      "properties": {
+        "staffingPriority": {
+          "type": "string",
+          "enum": [
+            "FULL_COVERAGE_REQUIRED",
+            "TEAM_COVERAGE_REQUIRED",
+            "OFFICIAL_COVERAGE_REQUIRED",
+            "BEST_AVAILABLE_COVERAGE",
+            "FULL_COVERAGE_WITH_CONFLICTS_ALLOWED"
+          ]
+        },
+        "doTeamsOfficiate": {
+          "type": "boolean"
+        },
+        "teamOfficialsMaySwap": {
+          "type": "boolean"
+        },
+        "teamCheckInMode": {
+          "type": "string",
+          "enum": [
+            "OFF",
+            "EVENT",
+            "MATCH"
+          ]
+        },
+        "teamCheckInOpenMinutesBefore": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "allowMatchRosterEdits": {
+          "type": "boolean"
+        },
+        "allowTemporaryMatchPlayers": {
+          "type": "boolean"
+        },
+        "autoCreatePointMatchIncidents": {
+          "type": "boolean"
+        },
+        "officialIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "officialPositions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "name": {
+                "type": "string"
+              },
+              "count": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "order": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "count",
+              "order"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "eventOfficials": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "userId": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "positionIds": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/__schema4"
+                }
+              },
+              "fieldIds": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/__schema4"
+                }
+              },
+              "isActive": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "userId",
+              "positionIds",
+              "fieldIds",
+              "isActive"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "assistantHostIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "pendingInvites": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "createdAt": {
+                "$ref": "#/$defs/__schema29"
+              },
+              "updatedAt": {
+                "$ref": "#/$defs/__schema29"
+              },
+              "sentAt": {
+                "$ref": "#/$defs/__schema29"
+              },
+              "email": {
+                "type": "string",
+                "format": "email",
+                "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+              },
+              "firstName": {
+                "$ref": "#/$defs/__schema24"
+              },
+              "lastName": {
+                "$ref": "#/$defs/__schema24"
+              },
+              "roles": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "OFFICIAL",
+                    "ASSISTANT_HOST"
+                  ]
+                }
+              },
+              "staffTypes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "resolvedUserId": {
+                "$ref": "#/$defs/__schema24"
+              },
+              "userId": {
+                "$ref": "#/$defs/__schema24"
+              },
+              "type": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "eventId": {
+                "$ref": "#/$defs/__schema24"
+              },
+              "organizationId": {
+                "$ref": "#/$defs/__schema24"
+              },
+              "teamId": {
+                "$ref": "#/$defs/__schema24"
+              },
+              "createdBy": {
+                "$ref": "#/$defs/__schema24"
+              }
+            },
+            "required": [
+              "email"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "staffingPriority",
+        "doTeamsOfficiate",
+        "teamOfficialsMaySwap",
+        "teamCheckInMode",
+        "teamCheckInOpenMinutesBefore",
+        "allowMatchRosterEdits",
+        "allowTemporaryMatchPlayers",
+        "autoCreatePointMatchIncidents",
+        "officialIds",
+        "officialPositions",
+        "eventOfficials",
+        "assistantHostIds",
+        "pendingInvites"
+      ],
+      "additionalProperties": false
+    },
+    "__schema32": {
+      "anyOf": [
+        {
+          "type": "number",
+          "const": 5
+        },
+        {
+          "type": "number",
+          "const": 4
+        },
+        {
+          "type": "number",
+          "const": 3
+        }
+      ]
+    },
+    "__schema33": {
+      "type": "object",
+      "properties": {
+        "editorRevision": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "staffRevision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scheduleRevision": {
+          "$ref": "#/$defs/__schema4"
+        }
+      },
+      "required": [
+        "editorRevision",
+        "staffRevision",
+        "scheduleRevision"
+      ],
+      "additionalProperties": false
+    },
+    "__schema34": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "CREATE_ONLY",
+            "CREATE_AND_BUILD_SCHEDULE"
+          ]
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "additionalProperties": false
+    },
+    "__schema35": {
+      "type": "string",
+      "enum": [
+        "BUILD",
+        "COMPLETE",
+        "REBUILD"
+      ]
+    },
+    "__schema36": {
+      "type": "object",
+      "properties": {
+        "editorRevision": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "staffRevision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scheduleRevision": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "fieldRevisions": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "timeSlotRevisions": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "rentalBookingRevision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/__schema4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rentalBookingRevisions": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "rentalBookingItemRevisions": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "availabilityRevision": {
+          "$ref": "#/$defs/__schema4"
+        }
+      },
+      "required": [
+        "editorRevision",
+        "staffRevision",
+        "scheduleRevision",
+        "fieldRevisions",
+        "timeSlotRevisions",
+        "rentalBookingRevision",
+        "rentalBookingRevisions",
+        "rentalBookingItemRevisions",
+        "availabilityRevision"
+      ],
+      "additionalProperties": false
+    },
+    "__schema37": {
+      "type": "string",
+      "const": "SAVED"
+    },
+    "__schema38": {
+      "type": "object",
+      "properties": {
+        "contractVersion": {
+          "$ref": "#/$defs/__schema32"
+        },
+        "draft": {
+          "type": "object",
+          "properties": {
+            "basics": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "description": {
+                  "$ref": "#/$defs/__schema1"
+                },
+                "eventType": {
+                  "$ref": "#/$defs/__schema2"
+                },
+                "sportIds": {
+                  "$ref": "#/$defs/__schema3"
+                },
+                "start": {
+                  "$ref": "#/$defs/__schema5"
+                },
+                "timeZone": {
+                  "$ref": "#/$defs/__schema6"
+                },
+                "location": {
+                  "$ref": "#/$defs/__schema7"
+                },
+                "address": {
+                  "$ref": "#/$defs/__schema8"
+                },
+                "coordinates": {
+                  "$ref": "#/$defs/__schema9"
+                },
+                "affiliateUrl": {
+                  "$ref": "#/$defs/__schema10"
+                },
+                "parentEvent": {
+                  "$ref": "#/$defs/__schema11"
+                },
+                "organizationId": {
+                  "$ref": "#/$defs/__schema11"
+                },
+                "hostId": {
+                  "$ref": "#/$defs/__schema11"
+                },
+                "state": {
+                  "$ref": "#/$defs/__schema12"
+                },
+                "imageId": {
+                  "$ref": "#/$defs/__schema11"
+                },
+                "tags": {
+                  "$ref": "#/$defs/__schema13"
+                }
+              },
+              "required": [
+                "name",
+                "description",
+                "eventType",
+                "sportIds",
+                "start",
+                "timeZone",
+                "location",
+                "address",
+                "coordinates",
+                "affiliateUrl",
+                "parentEvent",
+                "organizationId",
+                "hostId",
+                "state",
+                "imageId",
+                "tags"
+              ],
+              "additionalProperties": false
+            },
+            "participation": {
+              "$ref": "#/$defs/__schema14"
+            },
+            "registration": {
+              "$ref": "#/$defs/__schema15"
+            },
+            "competition": {
+              "$ref": "#/$defs/__schema22"
+            },
+            "schedule": {
+              "$ref": "#/$defs/__schema28"
+            },
+            "resources": {
+              "$ref": "#/$defs/__schema30"
+            },
+            "staff": {
+              "$ref": "#/$defs/__schema31"
+            }
+          },
+          "required": [
+            "basics",
+            "participation",
+            "registration",
+            "competition",
+            "schedule",
+            "resources",
+            "staff"
+          ],
+          "additionalProperties": false
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "CREATE",
+            "EDIT"
+          ]
+        },
+        "eventId": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "editorRevision": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "staffRevision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "capabilities": {
+          "type": "object",
+          "properties": {
+            "viewerUserId": {
+              "$ref": "#/$defs/__schema11"
+            },
+            "organizationOwnershipStatus": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "canUseOnlinePayments": {
+              "type": "boolean"
+            },
+            "canManageStaff": {
+              "type": "boolean"
+            },
+            "canEdit": {
+              "type": "boolean"
+            },
+            "canDelegateHost": {
+              "type": "boolean"
+            },
+            "readOnly": {
+              "type": "boolean"
+            },
+            "readOnlyReason": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "AUTHENTICATION_REQUIRED",
+                    "MANAGEMENT_AUTHORITY_UNVERIFIED",
+                    "NOT_AUTHORIZED"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "managementAuthority": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "ORGANIZATION"
+                    },
+                    "organizationId": {
+                      "$ref": "#/$defs/__schema4"
+                    },
+                    "ownerUserId": {
+                      "$ref": "#/$defs/__schema4"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "organizationId",
+                    "ownerUserId"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "eventHostId": {
+              "$ref": "#/$defs/__schema11"
+            },
+            "viewerIsEventHost": {
+              "type": "boolean"
+            },
+            "supportsTeamStaffing": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "canUseOnlinePayments",
+            "canManageStaff",
+            "canEdit",
+            "canDelegateHost",
+            "readOnly",
+            "readOnlyReason",
+            "managementAuthority",
+            "eventHostId",
+            "viewerIsEventHost",
+            "supportsTeamStaffing"
+          ],
+          "additionalProperties": false
+        },
+        "provenance": {
+          "type": "object",
+          "properties": {
+            "sourceType": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "sourceId": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "sourceUrl": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "sourceType",
+            "sourceId",
+            "sourceUrl"
+          ],
+          "additionalProperties": false
+        },
+        "catalogs": {
+          "type": "object",
+          "properties": {
+            "sports": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema27"
+              }
+            },
+            "organizations": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema27"
+              }
+            },
+            "fields": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema27"
+              }
+            },
+            "templates": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema27"
+              }
+            }
+          },
+          "required": [
+            "sports",
+            "organizations",
+            "fields",
+            "templates"
+          ],
+          "additionalProperties": false
+        },
+        "immutable": {
+          "type": "object",
+          "properties": {
+            "fieldNames": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "rental": {
+              "type": "boolean"
+            },
+            "template": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "fieldNames",
+            "rental",
+            "template"
+          ],
+          "additionalProperties": false
+        },
+        "scheduleState": {
+          "type": "object",
+          "properties": {
+            "sourceType": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "matchCount": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "matchDemand": {
+              "$ref": "#/$defs/__schema39"
+            },
+            "availableMaintenanceOperations": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema35"
+              }
+            },
+            "revision": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "hasProtectedHistory": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "sourceType",
+            "matchCount",
+            "availableMaintenanceOperations",
+            "revision",
+            "hasProtectedHistory"
+          ],
+          "additionalProperties": false
+        },
+        "revisionBinding": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/__schema36"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "draft",
+        "mode",
+        "eventId",
+        "editorRevision",
+        "staffRevision",
+        "capabilities",
+        "catalogs",
+        "immutable",
+        "scheduleState"
+      ],
+      "additionalProperties": false
+    },
+    "__schema39": {
+      "type": "object",
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "byDivision": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "byPhase": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "placed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "unplaced": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "total",
+        "byDivision",
+        "byPhase",
+        "placed",
+        "unplaced"
+      ],
+      "additionalProperties": false
+    },
+    "__schema40": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/__schema4"
+      }
+    },
+    "__schema41": {
+      "type": "string",
+      "enum": [
+        "QUEUED",
+        "FAILED",
+        "NOT_REQUESTED"
+      ]
+    },
+    "__schema42": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "NOT_REQUESTED"
+            },
+            "matchCount": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "matches": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema43"
+              }
+            },
+            "diagnostics": {
+              "$ref": "#/$defs/__schema44"
+            },
+            "warnings": {
+              "type": "array",
+              "items": {
+                "not": {}
+              }
+            }
+          },
+          "required": [
+            "status",
+            "matchCount",
+            "warnings"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "BUILT",
+                "REBUILT"
+              ]
+            },
+            "matchCount": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "matches": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema43"
+              }
+            },
+            "diagnostics": {
+              "$ref": "#/$defs/__schema44"
+            },
+            "warnings": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema47"
+              }
+            }
+          },
+          "required": [
+            "status",
+            "matchCount",
+            "matches",
+            "warnings"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "DELETED"
+            },
+            "matchCount": {
+              "type": "number",
+              "const": 0
+            },
+            "matches": {
+              "type": "array",
+              "items": {
+                "not": {}
+              }
+            },
+            "diagnostics": {
+              "not": {}
+            },
+            "warnings": {
+              "type": "array",
+              "items": {
+                "not": {}
+              }
+            }
+          },
+          "required": [
+            "status",
+            "matchCount",
+            "matches",
+            "warnings"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/__schema48"
+        }
+      ]
+    },
+    "__schema43": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "matchId": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "eventId": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "start": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/__schema5"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "end": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/__schema5"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "placementState": {
+          "type": "string",
+          "enum": [
+            "PLACED",
+            "UNPLACED"
+          ]
+        },
+        "phase": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sourceDivisionId": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "phaseDivisionId": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "division": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "fieldId": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "team1Id": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "team2Id": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "team1Seed": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "team2Seed": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resultStatus": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resultType": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "actualStart": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/__schema5"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "actualEnd": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/__schema5"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "statusReason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "winnerEventTeamId": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "matchRulesSnapshot": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/__schema27"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resolvedMatchRules": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/__schema27"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "segments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema27"
+          }
+        },
+        "incidents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema27"
+          }
+        },
+        "officialId": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "officialIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema27"
+          }
+        },
+        "teamOfficialId": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "team1Points": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "team2Points": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "losersBracket": {
+          "type": "boolean"
+        },
+        "winnerNextMatchId": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "loserNextMatchId": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "previousLeftId": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "previousRightId": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "side": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "officialCheckedIn": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "matchId",
+        "eventId",
+        "start",
+        "end",
+        "locked",
+        "placementState",
+        "phase",
+        "sourceDivisionId",
+        "phaseDivisionId",
+        "division",
+        "fieldId",
+        "team1Id",
+        "team2Id",
+        "team1Seed",
+        "team2Seed",
+        "status",
+        "resultStatus",
+        "resultType",
+        "actualStart",
+        "actualEnd",
+        "statusReason",
+        "winnerEventTeamId",
+        "matchRulesSnapshot",
+        "resolvedMatchRules",
+        "segments",
+        "incidents",
+        "officialId",
+        "officialIds",
+        "teamOfficialId",
+        "team1Points",
+        "team2Points",
+        "losersBracket",
+        "winnerNextMatchId",
+        "loserNextMatchId",
+        "previousLeftId",
+        "previousRightId",
+        "side",
+        "officialCheckedIn"
+      ],
+      "additionalProperties": false
+    },
+    "__schema44": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "matchDemand": {
+          "$ref": "#/$defs/__schema39"
+        },
+        "estimatedCapacity": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "estimatedCapacityIsUpperBound": {
+          "type": "boolean",
+          "const": true
+        },
+        "minimumDeficitMatches": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "searchComplete": {
+          "type": "boolean"
+        },
+        "restrictingFactors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "factor": {
+                "$ref": "#/$defs/__schema45"
+              },
+              "confidence": {
+                "type": "string",
+                "enum": [
+                  "PROVEN_GLOBAL_BOUND",
+                  "PROVEN_FOR_ATTEMPT",
+                  "OBSERVED"
+                ]
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1
+              },
+              "evidence": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/__schema46"
+                }
+              }
+            },
+            "required": [
+              "factor",
+              "confidence",
+              "message",
+              "evidence"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "remedies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "ADD_OR_EXTEND_TIME_SLOTS",
+                  "ADD_ELIGIBLE_OFFICIALS",
+                  "REVIEW_RESOURCE_ELIGIBILITY"
+                ]
+              },
+              "factor": {
+                "$ref": "#/$defs/__schema45"
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1
+              },
+              "evidence": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/__schema46"
+                }
+              }
+            },
+            "required": [
+              "code",
+              "factor",
+              "message",
+              "evidence"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "message",
+        "matchDemand",
+        "estimatedCapacity",
+        "estimatedCapacityIsUpperBound",
+        "minimumDeficitMatches",
+        "searchComplete",
+        "restrictingFactors",
+        "remedies"
+      ],
+      "additionalProperties": false
+    },
+    "__schema45": {
+      "type": "string",
+      "enum": [
+        "RESOURCE",
+        "PLAYING_TEAM",
+        "TEAM_DUTY",
+        "NAMED_OFFICIAL_POSITION",
+        "DIVISION_ORDER",
+        "ELIGIBILITY",
+        "FRAGMENTED_WINDOWS",
+        "DEPENDENCY",
+        "UNKNOWN"
+      ]
+    },
+    "__schema46": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "CAPACITY_BOUND",
+            "PLACEMENT_SEARCH",
+            "OFFICIAL_MATCHING"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "matchIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "resourceIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "divisionIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "teamIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "dependencyIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "officialIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "timeSlotIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "intervals": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "start": {
+                "$ref": "#/$defs/__schema5"
+              },
+              "end": {
+                "$ref": "#/$defs/__schema5"
+              }
+            },
+            "required": [
+              "start",
+              "end"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "demand": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "capacity": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "deficit": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "candidateCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "__schema47": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "matchIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "restrictingFactor": {
+          "type": "string",
+          "enum": [
+            "RESOURCE",
+            "PLAYING_TEAM",
+            "TEAM_DUTY",
+            "NAMED_OFFICIAL_POSITION",
+            "DIVISION_ORDER",
+            "ELIGIBILITY",
+            "FRAGMENTED_WINDOWS",
+            "DEPENDENCY",
+            "UNKNOWN"
+          ]
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "__schema48": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "const": "PARTIAL"
+        },
+        "isComplete": {
+          "type": "boolean",
+          "const": false
+        },
+        "matchCount": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "placedMatchCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "unplacedMatchCount": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "matches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema43"
+          }
+        },
+        "unscheduledMatches": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "matchId": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "phaseDivisionId": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "phase": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sourceDivisionId": {
+                "$ref": "#/$defs/__schema11"
+              }
+            },
+            "required": [
+              "id",
+              "matchId",
+              "phaseDivisionId",
+              "phase",
+              "sourceDivisionId"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "affectedCompetitionPhases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "phase": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sourceDivisionId": {
+                "$ref": "#/$defs/__schema11"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "phase",
+              "sourceDivisionId"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "diagnostics": {
+          "$ref": "#/$defs/__schema44"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema47"
+          }
+        }
+      },
+      "required": [
+        "status",
+        "isComplete",
+        "matchCount",
+        "placedMatchCount",
+        "unplacedMatchCount",
+        "matches",
+        "unscheduledMatches",
+        "affectedCompetitionPhases",
+        "warnings"
+      ],
+      "additionalProperties": false
+    },
+    "__schema49": {
+      "$ref": "#/$defs/__schema50"
+    },
+    "__schema50": {
+      "type": "object",
+      "properties": {
+        "event": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "name": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "start": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "end": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "location": {
+              "type": "string"
+            },
+            "coordinates": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "price": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "minAge": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxAge": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "rating": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "imageId": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "hostId": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "noFixedEndDateTime": {
+              "type": "boolean"
+            },
+            "scheduleEndConstraint": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/__schema5"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "generatedScheduleEnd": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/__schema5"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "state": {
+              "type": "string"
+            },
+            "maxParticipants": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "teamSizeLimit": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "restTimeMinutes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "teamSignup": {
+              "type": "boolean"
+            },
+            "singleDivision": {
+              "type": "boolean"
+            },
+            "waitListIds": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema4"
+              }
+            },
+            "freeAgentIds": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema4"
+              }
+            },
+            "teamIds": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema4"
+              }
+            },
+            "userIds": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema4"
+              }
+            },
+            "fieldIds": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema4"
+              }
+            },
+            "timeSlotIds": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema4"
+              }
+            },
+            "officialIds": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema4"
+              }
+            },
+            "staffingPriority": {
+              "type": "string"
+            },
+            "officialPositions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema51"
+              }
+            },
+            "eventOfficials": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/__schema4"
+                  },
+                  "userId": {
+                    "$ref": "#/$defs/__schema4"
+                  },
+                  "positionIds": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/__schema4"
+                    }
+                  },
+                  "fieldIds": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/__schema4"
+                    }
+                  },
+                  "isActive": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "id",
+                  "userId",
+                  "positionIds",
+                  "fieldIds",
+                  "isActive"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "matchRulesOverride": {
+              "anyOf": [
+                {},
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "autoCreatePointMatchIncidents": {
+              "type": "boolean"
+            },
+            "resolvedMatchRules": {
+              "anyOf": [
+                {},
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "cancellationRefundHours": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "registrationCutoffHours": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "seedColor": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "eventType": {
+              "type": "string"
+            },
+            "sportIds": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema4"
+              }
+            },
+            "leagueScoringConfigId": {
+              "$ref": "#/$defs/__schema11"
+            },
+            "organizationId": {
+              "$ref": "#/$defs/__schema11"
+            },
+            "requiredTemplateIds": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema4"
+              }
+            },
+            "allowPaymentPlans": {
+              "type": "boolean"
+            },
+            "installmentCount": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "installmentDueDates": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema5"
+              }
+            },
+            "installmentDueRelativeDays": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              }
+            },
+            "installmentAmounts": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            },
+            "allowTeamSplitDefault": {
+              "type": "boolean"
+            },
+            "splitLeaguePlayoffDivisions": {
+              "type": "boolean"
+            },
+            "divisions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema4"
+              }
+            },
+            "divisionDetails": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema52"
+              }
+            },
+            "playoffDivisionDetails": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema52"
+              }
+            },
+            "fields": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema53"
+              }
+            },
+            "teams": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema54"
+              }
+            },
+            "timeSlots": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/__schema4"
+                  },
+                  "dayOfWeek": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 6
+                  },
+                  "daysOfWeek": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 6
+                    }
+                  },
+                  "startDate": {
+                    "$ref": "#/$defs/__schema5"
+                  },
+                  "endDate": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/__schema5"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "repeating": {
+                    "type": "boolean"
+                  },
+                  "startTimeMinutes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "endTimeMinutes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "price": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "scheduledFieldId": {
+                    "$ref": "#/$defs/__schema11"
+                  },
+                  "scheduledFieldIds": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/__schema4"
+                    }
+                  },
+                  "divisions": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/__schema4"
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "dayOfWeek",
+                  "daysOfWeek",
+                  "endDate",
+                  "repeating",
+                  "startTimeMinutes",
+                  "endTimeMinutes",
+                  "price",
+                  "scheduledFieldId",
+                  "scheduledFieldIds",
+                  "divisions"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "officials": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema55"
+              }
+            },
+            "doubleElimination": {
+              "type": "boolean"
+            },
+            "winnerSetCount": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "loserSetCount": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "winnerBracketPointsToVictory": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            },
+            "loserBracketPointsToVictory": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            },
+            "prize": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "fieldCount": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "matches": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema56"
+              }
+            },
+            "usesSets": {
+              "type": "boolean"
+            },
+            "matchDurationMinutes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "setDurationMinutes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "setsPerMatch": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "doTeamsOfficiate": {
+              "type": "boolean"
+            },
+            "teamOfficialsMaySwap": {
+              "type": "boolean"
+            },
+            "teamCheckInMode": {
+              "type": "string"
+            },
+            "teamCheckInOpenMinutesBefore": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "allowMatchRosterEdits": {
+              "type": "boolean"
+            },
+            "allowTemporaryMatchPlayers": {
+              "type": "boolean"
+            },
+            "gamesPerOpponent": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "includePlayoffs": {
+              "type": "boolean"
+            },
+            "playoffTeamCount": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "pointsToVictory": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "description",
+            "start",
+            "end",
+            "location",
+            "coordinates",
+            "price",
+            "minAge",
+            "maxAge",
+            "rating",
+            "imageId",
+            "hostId",
+            "noFixedEndDateTime",
+            "scheduleEndConstraint",
+            "generatedScheduleEnd",
+            "state",
+            "maxParticipants",
+            "teamSizeLimit",
+            "restTimeMinutes",
+            "teamSignup",
+            "singleDivision",
+            "waitListIds",
+            "freeAgentIds",
+            "teamIds",
+            "userIds",
+            "fieldIds",
+            "timeSlotIds",
+            "officialIds",
+            "staffingPriority",
+            "officialPositions",
+            "eventOfficials",
+            "matchRulesOverride",
+            "autoCreatePointMatchIncidents",
+            "resolvedMatchRules",
+            "cancellationRefundHours",
+            "registrationCutoffHours",
+            "seedColor",
+            "eventType",
+            "sportIds",
+            "leagueScoringConfigId",
+            "organizationId",
+            "requiredTemplateIds",
+            "allowPaymentPlans",
+            "installmentCount",
+            "installmentDueDates",
+            "installmentDueRelativeDays",
+            "installmentAmounts",
+            "allowTeamSplitDefault",
+            "splitLeaguePlayoffDivisions",
+            "divisions",
+            "divisionDetails",
+            "playoffDivisionDetails",
+            "fields",
+            "teams",
+            "timeSlots",
+            "officials"
+          ],
+          "additionalProperties": false
+        },
+        "matches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema56"
+          }
+        }
+      },
+      "required": [
+        "event",
+        "matches"
+      ],
+      "additionalProperties": false
+    },
+    "__schema51": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "name": {
+          "type": "string"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "order": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "count",
+        "order"
+      ],
+      "additionalProperties": false
+    },
+    "__schema52": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "phase": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sourceDivisionId": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "isSystemGenerated": {
+          "type": "boolean"
+        },
+        "phaseSettings": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "matchRulesOverride": {
+                "anyOf": [
+                  {},
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "autoCreatePointMatchIncidents": {
+                "type": "boolean"
+              },
+              "segmentLengthMinutes": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "segmentBreakMinutes": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "doTeamsOfficiate": {
+                "type": "boolean"
+              },
+              "officialPositions": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/__schema51"
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "teamIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "playoffTeamCount": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "playoffPlacementDivisionIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "standingsOverrides": {
+          "anyOf": [
+            {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "number"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "standingsConfirmedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/__schema5"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "standingsConfirmedBy": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "playoffConfig": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "doubleElimination": {
+                  "type": "boolean"
+                },
+                "winnerSetCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "loserSetCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "winnerBracketPointsToVictory": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  }
+                },
+                "loserBracketPointsToVictory": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  }
+                },
+                "prize": {
+                  "type": "string"
+                },
+                "fieldCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "restTimeMinutes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "matchDurationMinutes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "setDurationMinutes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "doubleElimination",
+                "winnerSetCount",
+                "loserSetCount",
+                "winnerBracketPointsToVictory",
+                "loserBracketPointsToVictory",
+                "prize",
+                "fieldCount",
+                "restTimeMinutes"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "leagueConfig": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "gamesPerOpponent": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "includePlayoffs": {
+                  "type": "boolean"
+                },
+                "playoffTeamCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "usesSets": {
+                  "type": "boolean"
+                },
+                "matchDurationMinutes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "setDurationMinutes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "setsPerMatch": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "pointsToVictory": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  }
+                },
+                "restTimeMinutes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "kind",
+        "role",
+        "phase",
+        "sourceDivisionId",
+        "isSystemGenerated",
+        "phaseSettings",
+        "teamIds",
+        "playoffTeamCount",
+        "playoffPlacementDivisionIds",
+        "standingsOverrides",
+        "standingsConfirmedAt",
+        "standingsConfirmedBy",
+        "playoffConfig",
+        "leagueConfig"
+      ],
+      "additionalProperties": false
+    },
+    "__schema53": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "organizationId": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "divisions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "organizationId",
+        "divisions",
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "__schema54": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "captainId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "division": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "playerIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "players": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema55"
+          }
+        },
+        "playerRegistrations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "teamId": {
+                "$ref": "#/$defs/__schema11"
+              },
+              "userId": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "status": {
+                "type": "string"
+              },
+              "jerseyNumber": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "position": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "isCaptain": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "teamId",
+              "userId",
+              "status",
+              "jerseyNumber",
+              "position",
+              "isCaptain"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "id",
+        "captainId",
+        "division",
+        "kind",
+        "name",
+        "playerIds",
+        "players",
+        "playerRegistrations"
+      ],
+      "additionalProperties": false
+    },
+    "__schema55": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "firstName": {
+          "type": "string"
+        },
+        "lastName": {
+          "type": "string"
+        },
+        "userName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "firstName",
+        "lastName",
+        "userName"
+      ],
+      "additionalProperties": false
+    },
+    "__schema56": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "matchId": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "eventId": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "start": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/__schema5"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "end": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/__schema5"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "placementState": {
+          "type": "string",
+          "enum": [
+            "PLACED",
+            "UNPLACED"
+          ]
+        },
+        "phase": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sourceDivisionId": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "phaseDivisionId": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "division": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "fieldId": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "team1Id": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "team2Id": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "team1Seed": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "team2Seed": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resultStatus": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resultType": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "actualStart": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/__schema5"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "actualEnd": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/__schema5"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "statusReason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "winnerEventTeamId": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "segments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "eventId": {
+                "$ref": "#/$defs/__schema11"
+              },
+              "matchId": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "sequence": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "status": {
+                "type": "string"
+              },
+              "scores": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "number"
+                }
+              },
+              "winnerEventTeamId": {
+                "$ref": "#/$defs/__schema11"
+              },
+              "startedAt": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/__schema5"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "endedAt": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/__schema5"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "resultType": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "statusReason": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "metadata": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "createdAt": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/__schema5"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "updatedAt": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/__schema5"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "matchId",
+              "sequence",
+              "status",
+              "scores"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "incidents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "eventId": {
+                "$ref": "#/$defs/__schema11"
+              },
+              "matchId": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "segmentId": {
+                "$ref": "#/$defs/__schema11"
+              },
+              "eventTeamId": {
+                "$ref": "#/$defs/__schema11"
+              },
+              "eventRegistrationId": {
+                "$ref": "#/$defs/__schema11"
+              },
+              "participantUserId": {
+                "$ref": "#/$defs/__schema11"
+              },
+              "officialUserId": {
+                "$ref": "#/$defs/__schema11"
+              },
+              "incidentType": {
+                "type": "string"
+              },
+              "sequence": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "minute": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "clock": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "clockSeconds": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "linkedPointDelta": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "note": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "metadata": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "createdAt": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/__schema5"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "updatedAt": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/__schema5"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "matchId",
+              "incidentType",
+              "sequence"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "officialIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema57"
+          }
+        },
+        "officialAssignments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema57"
+          }
+        },
+        "teamOfficialId": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "teamOfficialSeed": {
+          "type": "null"
+        },
+        "matchRulesSnapshot": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resolvedMatchRules": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "team1Points": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "team2Points": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "losersBracket": {
+          "type": "boolean"
+        },
+        "winnerNextMatchId": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "loserNextMatchId": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "previousLeftId": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "previousRightId": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "side": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "officialCheckedIn": {
+          "type": "boolean"
+        },
+        "team1": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/__schema54"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "team2": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/__schema54"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "teamOfficial": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/__schema54"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "official": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/__schema55"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "field": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/__schema53"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "matchId",
+        "eventId",
+        "start",
+        "end",
+        "locked",
+        "placementState",
+        "phase",
+        "sourceDivisionId",
+        "phaseDivisionId",
+        "division",
+        "fieldId",
+        "team1Id",
+        "team2Id",
+        "team1Seed",
+        "team2Seed",
+        "status",
+        "resultStatus",
+        "resultType",
+        "actualStart",
+        "actualEnd",
+        "statusReason",
+        "winnerEventTeamId",
+        "segments",
+        "incidents",
+        "officialIds",
+        "officialAssignments",
+        "teamOfficialId",
+        "teamOfficialSeed",
+        "matchRulesSnapshot",
+        "resolvedMatchRules",
+        "team1Points",
+        "team2Points",
+        "losersBracket",
+        "winnerNextMatchId",
+        "loserNextMatchId",
+        "previousLeftId",
+        "previousRightId",
+        "side",
+        "officialCheckedIn",
+        "team1",
+        "team2",
+        "teamOfficial",
+        "official",
+        "field"
+      ],
+      "additionalProperties": false
+    },
+    "__schema57": {
+      "type": "object",
+      "properties": {
+        "positionId": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "slotIndex": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "holderType": {
+          "type": "string"
+        },
+        "userId": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "eventOfficialId": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "checkedIn": {
+          "type": "boolean"
+        },
+        "hasConflict": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "positionId",
+        "slotIndex",
+        "holderType",
+        "userId",
+        "eventOfficialId",
+        "checkedIn",
+        "hasConflict"
+      ],
+      "additionalProperties": false
+    },
+    "__schema58": {
+      "$ref": "#/$defs/__schema4"
+    },
+    "__schema59": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "const": "REJECTED"
+        },
+        "contractVersion": {
+          "$ref": "#/$defs/__schema32"
+        },
+        "eventId": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "operation": {
+          "$ref": "#/$defs/__schema35"
+        },
+        "operationId": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "proposalRevision": {
+          "$ref": "#/$defs/__schema4"
+        }
+      },
+      "required": [
+        "status",
+        "contractVersion",
+        "eventId",
+        "operation",
+        "operationId",
+        "proposalRevision"
+      ],
+      "additionalProperties": false
+    },
+    "__schema60": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/__schema37"
+        },
+        "snapshot": {
+          "$ref": "#/$defs/__schema38"
+        },
+        "questionIdMap": {
+          "$ref": "#/$defs/__schema40"
+        },
+        "staffEmailDelivery": {
+          "$ref": "#/$defs/__schema41"
+        },
+        "scheduleOutcome": {
+          "$ref": "#/$defs/__schema42"
+        },
+        "graph": {
+          "$ref": "#/$defs/__schema49"
+        },
+        "acceptanceOperationId": {
+          "$ref": "#/$defs/__schema58"
+        },
+        "createOperationId": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "editorRevision": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "staffRevision": {
+          "$ref": "#/$defs/__schema61"
+        },
+        "scheduleRevision": {
+          "$ref": "#/$defs/__schema4"
+        }
+      },
+      "required": [
+        "status",
+        "snapshot",
+        "questionIdMap",
+        "staffEmailDelivery",
+        "scheduleOutcome",
+        "createOperationId",
+        "editorRevision",
+        "staffRevision",
+        "scheduleRevision"
+      ],
+      "additionalProperties": false
+    },
+    "__schema61": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "__schema62": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "const": "PROPOSED"
+        },
+        "createOperationId": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "eventId": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "proposalRevision": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "expectedRevisions": {
+          "$ref": "#/$defs/__schema33"
+        },
+        "completion": {
+          "$ref": "#/$defs/__schema34"
+        },
+        "snapshot": {
+          "$ref": "#/$defs/__schema38"
+        },
+        "revisionBinding": {
+          "$ref": "#/$defs/__schema36"
+        },
+        "scheduleOutcome": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "BUILT"
+                },
+                "matchCount": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "matches": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/__schema43"
+                  }
+                },
+                "diagnostics": {
+                  "$ref": "#/$defs/__schema44"
+                },
+                "warnings": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/__schema47"
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "matchCount",
+                "matches",
+                "warnings"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "$ref": "#/$defs/__schema48"
+            }
+          ]
+        },
+        "graph": {
+          "$ref": "#/$defs/__schema50"
+        }
+      },
+      "required": [
+        "status",
+        "createOperationId",
+        "eventId",
+        "proposalRevision",
+        "expectedRevisions",
+        "completion",
+        "snapshot",
+        "revisionBinding",
+        "scheduleOutcome",
+        "graph"
+      ],
+      "additionalProperties": false
+    },
+    "__schema63": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "const": "PROPOSED"
+        },
+        "contractVersion": {
+          "$ref": "#/$defs/__schema32"
+        },
+        "eventId": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "operation": {
+          "$ref": "#/$defs/__schema35"
+        },
+        "operationId": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "proposalRevision": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "revisionBinding": {
+          "$ref": "#/$defs/__schema36"
+        },
+        "graph": {
+          "$ref": "#/$defs/__schema50"
+        },
+        "protectedMatchIds": {
+          "$ref": "#/$defs/__schema64"
+        },
+        "scheduleOutcome": {
+          "$ref": "#/$defs/__schema65"
+        }
+      },
+      "required": [
+        "status",
+        "contractVersion",
+        "eventId",
+        "operation",
+        "operationId",
+        "proposalRevision",
+        "revisionBinding",
+        "graph",
+        "protectedMatchIds",
+        "scheduleOutcome"
+      ],
+      "additionalProperties": false
+    },
+    "__schema64": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/__schema4"
+      }
+    },
+    "__schema65": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "COMPLETE"
+            },
+            "isComplete": {
+              "type": "boolean",
+              "const": true
+            },
+            "matchCount": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "placedMatchCount": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "unplacedMatchCount": {
+              "type": "number",
+              "const": 0
+            },
+            "matches": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema43"
+              }
+            },
+            "unscheduledMatches": {
+              "type": "array",
+              "items": {
+                "not": {}
+              }
+            },
+            "affectedCompetitionPhases": {
+              "type": "array",
+              "items": {
+                "not": {}
+              }
+            },
+            "diagnostics": {
+              "$ref": "#/$defs/__schema44"
+            },
+            "warnings": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema47"
+              }
+            }
+          },
+          "required": [
+            "status",
+            "isComplete",
+            "matchCount",
+            "placedMatchCount",
+            "unplacedMatchCount",
+            "matches",
+            "unscheduledMatches",
+            "affectedCompetitionPhases",
+            "warnings"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "INCOMPLETE"
+            },
+            "isComplete": {
+              "type": "boolean",
+              "const": false
+            },
+            "matchCount": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "placedMatchCount": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "unplacedMatchCount": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "matches": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema43"
+              }
+            },
+            "unscheduledMatches": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/__schema4"
+                  },
+                  "matchId": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "phaseDivisionId": {
+                    "$ref": "#/$defs/__schema4"
+                  },
+                  "phase": {
+                    "type": "string"
+                  },
+                  "sourceDivisionId": {
+                    "$ref": "#/$defs/__schema11"
+                  }
+                },
+                "required": [
+                  "id",
+                  "matchId",
+                  "phaseDivisionId",
+                  "phase",
+                  "sourceDivisionId"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "affectedCompetitionPhases": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/__schema4"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "phase": {
+                    "type": "string"
+                  },
+                  "sourceDivisionId": {
+                    "$ref": "#/$defs/__schema11"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "phase",
+                  "sourceDivisionId"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "diagnostics": {
+              "$ref": "#/$defs/__schema44"
+            },
+            "warnings": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema47"
+              }
+            }
+          },
+          "required": [
+            "status",
+            "isComplete",
+            "matchCount",
+            "placedMatchCount",
+            "unplacedMatchCount",
+            "matches",
+            "unscheduledMatches",
+            "affectedCompetitionPhases",
+            "warnings"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "__schema66": {
+      "type": "object",
+      "properties": {
+        "contractVersion": {
+          "$ref": "#/$defs/__schema32"
+        },
+        "eventId": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "operation": {
+          "$ref": "#/$defs/__schema35"
+        },
+        "operationId": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "proposalRevision": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "revisionBinding": {
+          "$ref": "#/$defs/__schema36"
+        },
+        "graph": {
+          "$ref": "#/$defs/__schema50"
+        },
+        "protectedMatchIds": {
+          "$ref": "#/$defs/__schema64"
+        },
+        "scheduleOutcome": {
+          "$ref": "#/$defs/__schema65"
+        },
+        "status": {
+          "type": "string",
+          "const": "ACCEPTED"
+        },
+        "acceptanceOperationId": {
+          "$ref": "#/$defs/__schema4"
+        }
+      },
+      "required": [
+        "contractVersion",
+        "eventId",
+        "operation",
+        "operationId",
+        "proposalRevision",
+        "revisionBinding",
+        "graph",
+        "protectedMatchIds",
+        "scheduleOutcome",
+        "status",
+        "acceptanceOperationId"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

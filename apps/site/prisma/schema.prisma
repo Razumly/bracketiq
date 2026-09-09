@@ -183,7 +183,6 @@ enum EventsEventTypeEnum {
   LEAGUE
   WEEKLY_EVENT
   TRYOUT
-  AFFILIATE
 }
 
 enum OrganizationFeatureEnum {
@@ -220,12 +219,6 @@ enum RegistrationPaymentModeEnum {
   MANUAL
 }
 
-enum EventsOfficialSchedulingModeEnum {
-  STAFFING
-  TEAM_STAFFING
-  SCHEDULE
-  OFF
-}
 
 enum StaffingPriorityEnum {
   FULL_COVERAGE_REQUIRED
@@ -918,7 +911,8 @@ model MatchOperationReceipts {
 }
 
 // Durable receipts for idempotent event-editor creates. Rows are retained so
-// delayed retries cannot create a second event after the original response is lost.
+// delayed retries cannot create a second event after the original response is
+// lost. A pending proposal reserves the Event ID but does not create the Event.
 model EventEditorCreateOperations {
   createOperationId String   @id
   actorUserId       String
@@ -926,11 +920,39 @@ model EventEditorCreateOperations {
   eventId           String   @unique
   responseStatus    Int      @default(201)
   responseJson      Json?
+  proposalJson      Json?
+  proposalRevision  String?
+  proposalStatus    String   @default("NONE")
   emailDelivery     String   @default("NOT_REQUESTED")
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
   @@index([actorUserId, createdAt])
+  @@index([proposalStatus, updatedAt])
+}
+
+// Existing-Event schedule proposals. Unlike create operations, maintenance
+// operations are not unique per Event: an Event can be built, completed, and
+// rebuilt over its lifetime.
+model EventEditorMaintenanceOperations {
+  operationId          String   @id
+  eventId              String
+  actorUserId          String
+  operation            String
+  requestHash          String
+  requestJson          Json
+  proposalRevision     String?
+  revisionBindingJson  Json?
+  proposalJson         Json?
+  status               String   @default("PROPOSED")
+  acceptanceOperationId String?
+  acceptedResponseJson Json?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([eventId, createdAt])
+  @@index([eventId, operation])
+  @@index([status, updatedAt])
 }
 
 model Divisions {
@@ -3328,6 +3350,7 @@ model Events {
   hostId                        String?
   assistantHostIds              String[]                         @default([])
   noFixedEndDateTime            Boolean                          @default(true)
+  automatedScheduling           Boolean                          @default(true)
   price                         Int
   registrationPaymentMode       RegistrationPaymentModeEnum      @default(ONLINE)
   manualPaymentLinks            Json                             @default("[]")
@@ -3364,7 +3387,6 @@ model Events {
   parentEvent                   String?
   autoCancellation              Boolean?
   eventType                     EventsEventTypeEnum?
-  officialSchedulingMode        EventsOfficialSchedulingModeEnum @default(SCHEDULE)
   staffingPriority              StaffingPriorityEnum             @default(BEST_AVAILABLE_COVERAGE)
   doTeamsOfficiate              Boolean?
   teamOfficialsMaySwap          Boolean?
@@ -3731,7 +3753,6 @@ model EventTemplates {
   restTimeMinutes                Int?
   pointsToVictory                Int[]                            @default([])
   sportIds                       String[]                         @default([])
-  officialSchedulingMode         EventsOfficialSchedulingModeEnum @default(SCHEDULE)
   staffingPriority               StaffingPriorityEnum             @default(BEST_AVAILABLE_COVERAGE)
   doTeamsOfficiate               Boolean?
   teamOfficialsMaySwap           Boolean?
@@ -4132,6 +4153,8 @@ model EventRegistrations {
   registrantType           EventRegistrationsRegistrantTypeEnum
   rosterRole               EventRegistrationsRosterRoleEnum     @default(PARTICIPANT)
   status                   EventRegistrationsStatusEnum
+  paymentResolutionReason  String?
+  acceptedAt               DateTime?
   eventTeamId              String?
   sourceTeamRegistrationId String?
   slotId                   String?

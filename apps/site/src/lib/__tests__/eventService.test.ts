@@ -78,19 +78,6 @@ describe('eventService', () => {
     expect(event).not.toHaveProperty('officialSchedulingMode');
   });
 
-  it('maps a legacy stored staffing mode to canonical output without exposing the mode', async () => {
-    apiRequestMock.mockResolvedValue({
-      ...canonicalEventRow,
-      staffingPriority: null,
-      officialSchedulingMode: 'TEAM_STAFFING',
-    });
-
-    const event = await eventService.getEvent('evt_1');
-
-    expect(event?.staffingPriority).toBe('TEAM_COVERAGE_REQUIRED');
-    expect(event?.doTeamsOfficiate).toBe(true);
-    expect(event).not.toHaveProperty('officialSchedulingMode');
-  });
 
   it('preserves rental booking metadata for overlap-only field blockers', async () => {
     apiRequestMock.mockResolvedValue({
@@ -212,44 +199,124 @@ describe('eventService', () => {
     }));
   });
 
-  it('uses the extended timeout when reconciling an event schedule', async () => {
+  it('uses the extended timeout and exact v3 fields for maintenance proposals', async () => {
     apiRequestMock.mockResolvedValue({
-      preview: false,
-      event: { ...baseEventRow, id: 'evt_1' },
-      matches: [],
+      status: 'PROPOSED',
+      contractVersion: 3,
+      eventId: 'evt_1',
+      operation: 'BUILD',
+      operationId: 'operation-1',
+      proposalRevision: 'proposal-1',
+      revisionBinding: {},
+      graph: { event: {}, matches: [] },
+      protectedMatchIds: [],
+      scheduleOutcome: {
+        status: 'COMPLETE',
+        isComplete: true,
+        matchCount: 1,
+        placedMatchCount: 1,
+        unplacedMatchCount: 0,
+        matches: [],
+        unscheduledMatches: [],
+        affectedCompetitionPhases: [],
+        warnings: [],
+      },
     });
 
-    await eventService.reconcileEventSchedule('evt_1');
-
-    expect(apiRequestMock).toHaveBeenCalledWith(
-      '/api/events/evt_1/schedule',
-      expect.objectContaining({
-        method: 'POST',
-        timeoutMs: 60_000,
-      }),
-    );
-  });
-
-  it('sends revision and no-placeholder options when requested', async () => {
-    apiRequestMock.mockResolvedValue({
-      preview: false,
-      event: { ...baseEventRow, id: 'evt_1' },
-      matches: [],
-    });
-
-    await eventService.reconcileEventSchedule('evt_1', {
-      expectedScheduleRevision: 'schedule-revision-1',
+    await eventService.proposeEventScheduleMaintenance({
+      contractVersion: 3,
+      eventId: 'evt_1',
+      operation: 'BUILD',
+      operationId: 'operation-1',
+      participantCount: 10,
       includePlaceholderTeams: false,
     });
 
     expect(apiRequestMock).toHaveBeenCalledWith(
       '/api/events/evt_1/schedule',
-      expect.objectContaining({
-        body: expect.objectContaining({
-          expectedScheduleRevision: 'schedule-revision-1',
+      {
+        method: 'POST',
+        body: {
+          contractVersion: 3,
+          eventId: 'evt_1',
+          operation: 'BUILD',
+          operationId: 'operation-1',
+          participantCount: 10,
           includePlaceholderTeams: false,
-        }),
-      }),
+        },
+        timeoutMs: 60_000,
+      },
+    );
+  });
+
+  it('accepts a stored maintenance proposal with only the exact identity fields', async () => {
+    apiRequestMock.mockResolvedValue({
+      status: 'ACCEPTED',
+      contractVersion: 3,
+      eventId: 'evt_1',
+      operation: 'REBUILD',
+      operationId: 'operation-1',
+      proposalRevision: 'proposal-1',
+      acceptanceOperationId: 'acceptance-1',
+    });
+
+    await eventService.acceptEventScheduleMaintenanceProposal({
+      contractVersion: 3,
+      eventId: 'evt_1',
+      operation: 'REBUILD',
+      operationId: 'operation-1',
+      proposalRevision: 'proposal-1',
+      acceptanceOperationId: 'acceptance-1',
+    });
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      '/api/events/evt_1/schedule',
+      {
+        method: 'PUT',
+        body: {
+          contractVersion: 3,
+          eventId: 'evt_1',
+          operation: 'REBUILD',
+          operationId: 'operation-1',
+          proposalRevision: 'proposal-1',
+          acceptanceOperationId: 'acceptance-1',
+        },
+        timeoutMs: 60_000,
+      },
+    );
+  });
+
+  it('rejects a stored maintenance proposal with the exact identity fields', async () => {
+    apiRequestMock.mockResolvedValue({
+      status: 'REJECTED',
+      contractVersion: 3,
+      eventId: 'evt_1',
+      operation: 'COMPLETE',
+      operationId: 'operation-1',
+      proposalRevision: 'proposal-1',
+    });
+
+    await eventService.rejectEventScheduleMaintenanceProposal({
+      contractVersion: 3,
+      eventId: 'evt_1',
+      operation: 'COMPLETE',
+      operationId: 'operation-1',
+      proposalRevision: 'proposal-1',
+    });
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      '/api/events/evt_1/schedule',
+      {
+        method: 'DELETE',
+        body: {
+          contractVersion: 3,
+          eventId: 'evt_1',
+          operation: 'COMPLETE',
+          operationId: 'operation-1',
+          proposalRevision: 'proposal-1',
+        },
+        timeoutMs: 60_000,
+      },
     );
   });
 
@@ -472,6 +539,39 @@ describe('eventService', () => {
     expect(event?.matchRulesOverride).toEqual(matchRulesOverride);
     expect(event?.autoCreatePointMatchIncidents).toBe(true);
     expect(event?.resolvedMatchRules).toEqual(resolvedMatchRules);
+  });
+  it('preserves persisted match placement state through event relation hydration', async () => {
+    apiRequestMock.mockResolvedValue({
+      ...baseEventRow,
+      eventType: 'TOURNAMENT',
+      divisionDetails: [
+        { id: 'phase-final', name: 'Final', phase: 'FINAL' },
+      ],
+      matches: [
+        {
+          id: 'match-unplaced',
+          placementState: 'UNPLACED',
+          phaseDivisionId: 'phase-final',
+          phase: 'FINAL',
+          start: null,
+          end: null,
+          fieldId: null,
+          team1Points: [],
+          team2Points: [],
+        },
+      ],
+    });
+
+    const event = await eventService.getEventWithRelations('evt_1');
+
+    expect(event?.matches).toEqual([
+      expect.objectContaining({
+        $id: 'match-unplaced',
+        placementState: 'UNPLACED',
+        phaseDivisionId: 'phase-final',
+        phase: 'FINAL',
+      }),
+    ]);
   });
 
   it('fetches event detail bootstrap with auto manage and hydrates relations from the payload', async () => {

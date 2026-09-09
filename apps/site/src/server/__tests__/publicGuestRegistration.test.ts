@@ -1,15 +1,26 @@
 /** @jest-environment node */
 
-jest.mock('@/lib/prisma', () => ({ prisma: {} }));
+const prismaMock = {
+  events: {
+    findUnique: jest.fn(),
+  },
+};
+const getPublicOrganizationBySlugMock = jest.fn();
+
+jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 jest.mock('@/server/inviteUsers', () => ({
   ensureAuthUserAndUserDataByEmail: jest.fn(),
 }));
 jest.mock('@/server/publicOrganizationCatalog', () => ({
-  getPublicOrganizationBySlug: jest.fn(),
+  getPublicOrganizationBySlug: (...args: unknown[]) => getPublicOrganizationBySlugMock(...args),
 }));
 
 import { ensureAuthUserAndUserDataByEmail } from '@/server/inviteUsers';
-import { ensureGuestChildUserData, ensureGuestParentIdentity } from '@/server/publicGuestRegistration';
+import {
+  assertPublicWidgetEvent,
+  ensureGuestChildUserData,
+  ensureGuestParentIdentity,
+} from '@/server/publicGuestRegistration';
 
 describe('public guest registration helpers', () => {
   it('creates child UserData without creating email-backed sensitive data', async () => {
@@ -62,5 +73,34 @@ describe('public guest registration helpers', () => {
       lastName: 'Name',
     }, new Date())).rejects.toMatchObject({ status: 409 });
     expect(ensureAuthUserAndUserDataByEmail).not.toHaveBeenCalled();
+  });
+
+  it('rejects archived weekly parents while allowing active weekly parents', async () => {
+    const organization = { id: 'org_1', slug: 'summit' };
+    getPublicOrganizationBySlugMock.mockResolvedValue(organization);
+
+    const archivedWeeklyParent = {
+      id: 'weekly_archived',
+      organizationId: 'org_1',
+      state: 'PUBLISHED',
+      eventType: 'WEEKLY_EVENT',
+      parentEvent: null,
+      archivedAt: new Date('2026-08-01T00:00:00.000Z'),
+    };
+    prismaMock.events.findUnique.mockResolvedValueOnce(archivedWeeklyParent);
+
+    await expect(assertPublicWidgetEvent('summit', archivedWeeklyParent.id)).resolves.toBeNull();
+
+    const activeWeeklyParent = {
+      ...archivedWeeklyParent,
+      id: 'weekly_active',
+      archivedAt: null,
+    };
+    prismaMock.events.findUnique.mockResolvedValueOnce(activeWeeklyParent);
+
+    await expect(assertPublicWidgetEvent('summit', activeWeeklyParent.id)).resolves.toEqual({
+      organization,
+      event: activeWeeklyParent,
+    });
   });
 });

@@ -1,21 +1,25 @@
-import { buildFacilityCalendarFeed, buildFacilityCalendarSummary, buildFieldCalendarEvents } from '../fieldCalendar';
-import type { Field, Match } from '@/types';
-import { createSport } from '@/types/defaults';
+import {
+  buildFacilityCalendarFeed,
+  buildFacilityCalendarSummary,
+  buildFieldCalendarEvents,
+} from "../fieldCalendar";
+import type { Field, Match } from "@/types";
+import { createSport } from "@/types/defaults";
 
-describe('buildFieldCalendarEvents', () => {
+describe("buildFieldCalendarEvents", () => {
   const baseField: Field = {
-    $id: 'field_1',
-    name: 'Court Alpha',
-    location: '',
+    $id: "field_1",
+    name: "Court Alpha",
+    location: "",
     lat: 0,
     long: 0,
   } as Field;
 
-  it('creates calendar entries for matches with start and end times', () => {
+  it("creates calendar entries for matches with start and end times", () => {
     const match: Match = {
-      $id: '68e9abb4003907d62b83',
-      start: '2025-10-12T00:00:00.000+00:00',
-      end: '2025-10-12T01:00:00.000+00:00',
+      $id: "68e9abb4003907d62b83",
+      start: "2025-10-12T00:00:00.000+00:00",
+      end: "2025-10-12T01:00:00.000+00:00",
       losersBracket: false,
       matchId: 1,
       team1Seed: undefined,
@@ -28,17 +32,17 @@ describe('buildFieldCalendarEvents', () => {
       loserNextMatchId: undefined,
       field: baseField,
       event: {
-        $id: '68e81149002bcfc961a1',
-        name: 'Pickup Night',
-        description: '',
-        start: '2025-10-12T00:00:00.000+00:00',
-        end: '2025-10-12T02:00:00.000+00:00',
-        location: '',
+        $id: "68e81149002bcfc961a1",
+        name: "Pickup Night",
+        description: "",
+        start: "2025-10-12T00:00:00.000+00:00",
+        end: "2025-10-12T02:00:00.000+00:00",
+        location: "",
         coordinates: [0, 0],
         price: 0,
-        imageId: '',
-        hostId: 'host_1',
-        state: 'PUBLISHED',
+        imageId: "",
+        hostId: "host_1",
+        state: "PUBLISHED",
         maxParticipants: 0,
         teamSizeLimit: 0,
         teamSignup: false,
@@ -48,11 +52,11 @@ describe('buildFieldCalendarEvents', () => {
         seedColor: 0,
         cancellationRefundHours: null,
         registrationCutoffHours: 0,
-        eventType: 'EVENT',
-        sport: createSport({ $id: 'volleyball', name: 'Volleyball' }),
+        eventType: "EVENT",
+        sport: createSport({ $id: "volleyball", name: "Volleyball" }),
         divisions: [],
         attendees: 0,
-        category: 'Volleyball',
+        category: "Volleyball",
       } as any,
     } as Match;
 
@@ -64,16 +68,20 @@ describe('buildFieldCalendarEvents', () => {
       } as Field,
     ]);
 
-    const matchEntry = entries.find((entry) => entry.metaType === 'booked');
+    const matchEntry = entries.find((entry) => entry.metaType === "booked");
     expect(matchEntry).toBeDefined();
-    expect(matchEntry?.start.toISOString()).toBe(new Date(match.start).toISOString());
-    expect(matchEntry?.end.toISOString()).toBe(new Date(match.end as string).toISOString());
+    expect(matchEntry?.start.toISOString()).toBe(
+      new Date(match.start).toISOString(),
+    );
+    expect(matchEntry?.end.toISOString()).toBe(
+      new Date(match.end as string).toISOString(),
+    );
   });
 
-  it('falls back to a default duration when match end time is missing', () => {
+  it("falls back to a default duration when match end time is missing", () => {
     const matchWithoutEnd = {
-      $id: 'match_2',
-      start: '2025-10-13T05:00:00.000+00:00',
+      $id: "match_2",
+      start: "2025-10-13T05:00:00.000+00:00",
       losersBracket: false,
       matchId: 2,
       team1Seed: undefined,
@@ -96,7 +104,7 @@ describe('buildFieldCalendarEvents', () => {
       } as Field,
     ]);
 
-    const matchEntry = entries.find((entry) => entry.metaType === 'booked');
+    const matchEntry = entries.find((entry) => entry.metaType === "booked");
     expect(matchEntry).toBeDefined();
     const expectedStart = new Date(matchWithoutEnd.start);
     expect(matchEntry?.start.toISOString()).toBe(expectedStart.toISOString());
@@ -104,60 +112,230 @@ describe('buildFieldCalendarEvents', () => {
     expect(matchEntry?.end.toISOString()).toBe(expectedEnd.toISOString());
   });
 
-  it('summarizes rentable inventory, utilization, revenue per court-hour, and conflicts by facility', () => {
+  it("resolves overnight repeating rental entries with the shared slot interval", () => {
+    const entries = buildFieldCalendarEvents(
+      [
+        {
+          ...baseField,
+          rentalSlots: [
+            {
+              $id: "rental_overnight",
+              dayOfWeek: 0,
+              daysOfWeek: [0],
+              startDate: "2026-03-02T00:00:00.000Z",
+              endDate: "2026-03-09T00:00:00.000Z",
+              startTimeMinutes: 22 * 60,
+              endTimeMinutes: 2 * 60,
+              timeZone: "UTC",
+              repeating: true,
+              scheduledFieldId: "field_1",
+              scheduledFieldIds: ["field_1"],
+            },
+          ],
+          events: [],
+          matches: [],
+        } as unknown as Field,
+      ],
+      {
+        start: new Date("2026-03-02T00:00:00.000Z"),
+        end: new Date("2026-03-03T00:00:00.000Z"),
+      },
+    );
+
+    const rentalEntry = entries.find((entry) => entry.metaType === "rental");
+    expect(rentalEntry).toBeDefined();
+    expect(rentalEntry?.start.toISOString()).toBe("2026-03-02T22:00:00.000Z");
+    expect(rentalEntry?.end.toISOString()).toBe("2026-03-03T02:00:00.000Z");
+  });
+
+  it("reports invalid repeating rental slots as calendar diagnostics", () => {
+    const fields = [
+      {
+        ...baseField,
+        rentalSlots: [
+          {
+            $id: "rental_invalid_zone",
+            dayOfWeek: 0,
+            daysOfWeek: [0],
+            startDate: "2026-03-02T00:00:00.000Z",
+            endDate: "2026-03-09T00:00:00.000Z",
+            startTimeMinutes: 9 * 60,
+            endTimeMinutes: 10 * 60,
+            timeZone: "Invalid/Zone",
+            repeating: true,
+            scheduledFieldId: "field_1",
+            scheduledFieldIds: ["field_1"],
+          },
+        ],
+        events: [],
+        matches: [],
+      } as unknown as Field,
+    ];
     const range = {
-      start: new Date('2026-03-10T00:00:00.000Z'),
-      end: new Date('2026-03-11T00:00:00.000Z'),
+      start: new Date("2026-03-02T00:00:00.000Z"),
+      end: new Date("2026-03-03T00:00:00.000Z"),
+    };
+    const diagnostics: Array<{ code: string; message: string }> = [];
+
+    expect(buildFieldCalendarEvents(fields, range, diagnostics)).toEqual([]);
+    expect(diagnostics).toEqual([
+      expect.objectContaining({
+        code: "INVALID_REPEATING_TIME_SLOT",
+        message: 'Repeating Time Slot has an invalid time zone "Invalid/Zone".',
+      }),
+    ]);
+
+    const feed = buildFacilityCalendarFeed(fields, range);
+    expect(feed.summary.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "INVALID_REPEATING_TIME_SLOT",
+        fieldId: "field_1",
+      }),
+    ]);
+  });
+
+  it("includes one-time slots in field calendar occupancy for slot-based events", () => {
+    const range = {
+      start: new Date("2026-03-10T00:00:00.000Z"),
+      end: new Date("2026-03-11T00:00:00.000Z"),
     };
     const fields = [
       {
         ...baseField,
-        $id: 'field_1',
-        name: 'Court 1',
-        facilityId: 'facility_river_city',
+        events: [
+          {
+            $id: "event-mixed",
+            eventType: "LEAGUE",
+            start: "2026-03-10T00:00:00.000Z",
+            end: "2026-03-11T00:00:00.000Z",
+            timeSlots: [
+              {
+                $id: "slot-one-time",
+                repeating: false,
+                startDate: "2026-03-10T10:00:00.000Z",
+                endDate: "2026-03-10T12:00:00.000Z",
+                timeZone: "UTC",
+                scheduledFieldId: "field_1",
+                scheduledFieldIds: ["field_1"],
+              },
+            ],
+          },
+        ],
+        matches: [],
+      } as unknown as Field,
+    ];
+
+    const entries = buildFieldCalendarEvents(fields, range);
+    const entry = entries.find(
+      (candidate) => candidate.id === "field-booked-one-time-field_1-event-mixed-slot-one-time",
+    );
+
+    expect(entry).toEqual(expect.objectContaining({
+      start: new Date("2026-03-10T10:00:00.000Z"),
+      end: new Date("2026-03-10T12:00:00.000Z"),
+      resourceId: "field_1",
+    }));
+  });
+
+  it("reports invalid repeating event slots as calendar diagnostics", () => {
+    const fields = [
+      {
+        ...baseField,
+        events: [
+          {
+            $id: "event-invalid-slot",
+            eventType: "LEAGUE",
+            timeSlots: [
+              {
+                $id: "slot-invalid-gap",
+                repeating: true,
+                daysOfWeek: [6],
+                startDate: "2026-03-08T05:00:00.000Z",
+                endDate: "2026-03-09T04:00:00.000Z",
+                startTimeMinutes: 2 * 60 + 30,
+                endTimeMinutes: 4 * 60,
+                timeZone: "America/New_York",
+                scheduledFieldId: "field_1",
+                scheduledFieldIds: ["field_1"],
+              },
+            ],
+          },
+        ],
+        matches: [],
+      } as unknown as Field,
+    ];
+    const diagnostics: Array<{ code: string; message: string }> = [];
+
+    expect(buildFieldCalendarEvents(
+      fields,
+      {
+        start: new Date("2026-03-08T00:00:00.000Z"),
+        end: new Date("2026-03-09T00:00:00.000Z"),
+      },
+      diagnostics,
+    )).toEqual([]);
+    expect(diagnostics).toEqual([
+      expect.objectContaining({
+        code: "REPEATING_TIME_SLOT_TIME_GAP",
+        message: expect.stringContaining("2026-03-08"),
+      }),
+    ]);
+  });
+
+  it("summarizes rentable inventory, utilization, revenue per court-hour, and conflicts by facility", () => {
+    const range = {
+      start: new Date("2026-03-10T00:00:00.000Z"),
+      end: new Date("2026-03-11T00:00:00.000Z"),
+    };
+    const fields = [
+      {
+        ...baseField,
+        $id: "field_1",
+        name: "Court 1",
+        facilityId: "facility_river_city",
         facility: {
-          $id: 'facility_river_city',
-          name: 'River City Sports Complex',
+          $id: "facility_river_city",
+          name: "River City Sports Complex",
         },
         rentalSlots: [
           {
-            $id: 'slot_1',
+            $id: "slot_1",
             repeating: false,
-            startDate: '2026-03-10T10:00:00.000Z',
-            endDate: '2026-03-10T12:00:00.000Z',
-            scheduledFieldId: 'field_1',
-            scheduledFieldIds: ['field_1'],
+            startDate: "2026-03-10T10:00:00.000Z",
+            endDate: "2026-03-10T12:00:00.000Z",
+            scheduledFieldId: "field_1",
+            scheduledFieldIds: ["field_1"],
             price: 5000,
           },
         ],
         events: [
           {
-            $id: 'event_1',
-            name: 'League night',
-            eventType: 'EVENT',
-            start: '2026-03-10T10:30:00.000Z',
-            end: '2026-03-10T11:30:00.000Z',
+            $id: "event_1",
+            name: "League night",
+            eventType: "EVENT",
+            start: "2026-03-10T10:30:00.000Z",
+            end: "2026-03-10T11:30:00.000Z",
           },
         ],
         matches: [],
       },
       {
         ...baseField,
-        $id: 'field_2',
-        name: 'Court 2',
-        facilityId: 'facility_river_city',
+        $id: "field_2",
+        name: "Court 2",
+        facilityId: "facility_river_city",
         facility: {
-          $id: 'facility_river_city',
-          name: 'River City Sports Complex',
+          $id: "facility_river_city",
+          name: "River City Sports Complex",
         },
         rentalSlots: [
           {
-            $id: 'slot_2',
+            $id: "slot_2",
             repeating: false,
-            startDate: '2026-03-10T12:00:00.000Z',
-            endDate: '2026-03-10T14:00:00.000Z',
-            scheduledFieldId: 'field_2',
-            scheduledFieldIds: ['field_2'],
+            startDate: "2026-03-10T12:00:00.000Z",
+            endDate: "2026-03-10T14:00:00.000Z",
+            scheduledFieldId: "field_2",
+            scheduledFieldIds: ["field_2"],
             price: 3000,
           },
         ],
@@ -178,103 +356,107 @@ describe('buildFieldCalendarEvents', () => {
     expect(summary.potentialRevenueCents).toBe(16000);
     expect(summary.revenuePerCourtHourCents).toBe(4000);
     expect(summary.facilities).toHaveLength(1);
-    expect(summary.facilities[0]).toEqual(expect.objectContaining({
-      facilityId: 'facility_river_city',
-      facilityName: 'River City Sports Complex',
-      utilizationPercent: 25,
-      openInventoryHours: 3,
-      conflictCount: 1,
-    }));
-    expect(summary.conflicts[0]).toEqual(expect.objectContaining({
-      fieldId: 'field_1',
-      fieldName: 'River City Sports Complex - Court 1',
-      bookingTitle: 'League night',
-      hours: 1,
-    }));
+    expect(summary.facilities[0]).toEqual(
+      expect.objectContaining({
+        facilityId: "facility_river_city",
+        facilityName: "River City Sports Complex",
+        utilizationPercent: 25,
+        openInventoryHours: 3,
+        conflictCount: 1,
+      }),
+    );
+    expect(summary.conflicts[0]).toEqual(
+      expect.objectContaining({
+        fieldId: "field_1",
+        fieldName: "River City Sports Complex - Court 1",
+        bookingTitle: "League night",
+        hours: 1,
+      }),
+    );
   });
 
-  it('builds one facility calendar feed across rentals, events, games, maintenance, staff, officials, and conflicts', () => {
+  it("builds one facility calendar feed across rentals, events, games, maintenance, staff, officials, and conflicts", () => {
     const range = {
-      start: new Date('2026-03-10T00:00:00.000Z'),
-      end: new Date('2026-03-11T00:00:00.000Z'),
+      start: new Date("2026-03-10T00:00:00.000Z"),
+      end: new Date("2026-03-11T00:00:00.000Z"),
     };
     const field = {
       ...baseField,
-      $id: 'field_1',
-      name: 'Court 1',
-      facilityId: 'facility_river_city',
+      $id: "field_1",
+      name: "Court 1",
+      facilityId: "facility_river_city",
       facility: {
-        $id: 'facility_river_city',
-        name: 'River City Sports Complex',
+        $id: "facility_river_city",
+        name: "River City Sports Complex",
       },
       rentalSlots: [
         {
-          $id: 'slot_1',
+          $id: "slot_1",
           repeating: false,
-          startDate: '2026-03-10T10:00:00.000Z',
-          endDate: '2026-03-10T12:00:00.000Z',
-          scheduledFieldId: 'field_1',
-          scheduledFieldIds: ['field_1'],
+          startDate: "2026-03-10T10:00:00.000Z",
+          endDate: "2026-03-10T12:00:00.000Z",
+          scheduledFieldId: "field_1",
+          scheduledFieldIds: ["field_1"],
           price: 5000,
         },
       ],
       events: [
         {
-          $id: 'event_1',
-          name: 'League night',
-          eventType: 'EVENT',
-          start: '2026-03-10T10:30:00.000Z',
-          end: '2026-03-10T11:30:00.000Z',
+          $id: "event_1",
+          name: "League night",
+          eventType: "EVENT",
+          start: "2026-03-10T10:30:00.000Z",
+          end: "2026-03-10T11:30:00.000Z",
           eventOfficials: [
             {
-              id: 'event_official_1',
-              userId: 'official_1',
-              positionIds: ['r1'],
-              fieldIds: ['field_1'],
+              id: "event_official_1",
+              userId: "official_1",
+              positionIds: ["r1"],
+              fieldIds: ["field_1"],
               isActive: true,
             },
           ],
           staffAssignments: [
             {
-              id: 'event_staff_1',
-              userId: 'staff_user_1',
-              staffMemberId: 'staff_member_1',
-              role: 'Facility lead',
-              plannedStart: '2026-03-10T10:00:00.000Z',
-              plannedEnd: '2026-03-10T12:00:00.000Z',
-              status: 'PLANNED',
+              id: "event_staff_1",
+              userId: "staff_user_1",
+              staffMemberId: "staff_member_1",
+              role: "Facility lead",
+              plannedStart: "2026-03-10T10:00:00.000Z",
+              plannedEnd: "2026-03-10T12:00:00.000Z",
+              status: "PLANNED",
             },
           ],
         },
       ],
       matches: [
         {
-          $id: 'match_1',
+          $id: "match_1",
           matchId: 4,
-          eventId: 'event_1',
-          fieldId: 'field_1',
-          start: '2026-03-10T13:00:00.000Z',
-          end: '2026-03-10T14:00:00.000Z',
+          eventId: "event_1",
+          fieldId: "field_1",
+          start: "2026-03-10T13:00:00.000Z",
+          end: "2026-03-10T14:00:00.000Z",
           team1Points: [],
           team2Points: [],
           officialIds: [
             {
-              userId: 'official_2',
-              positionId: 'r2',
-              positionIds: ['r2'],
+              userId: "official_2",
+              positionId: "r2",
+              positionIds: ["r2"],
               slotIndex: 0,
-              holderType: 'OFFICIAL',
+              holderType: "OFFICIAL",
             },
           ],
         },
       ],
       maintenanceBlocks: [
         {
-          id: 'maintenance_1',
-          title: 'Net repair',
-          start: '2026-03-10T15:00:00.000Z',
-          end: '2026-03-10T16:00:00.000Z',
-          status: 'PLANNED',
+          id: "maintenance_1",
+          title: "Net repair",
+          start: "2026-03-10T15:00:00.000Z",
+          end: "2026-03-10T16:00:00.000Z",
+          status: "PLANNED",
         },
       ],
     } as unknown as Field;
@@ -282,90 +464,104 @@ describe('buildFieldCalendarEvents', () => {
     const feed = buildFacilityCalendarFeed([field], range);
     const itemTypes = feed.items.map((item) => item.type);
 
-    expect(itemTypes).toEqual(expect.arrayContaining([
-      'rental',
-      'event',
-      'game',
-      'maintenance_block',
-      'staff_assignment',
-      'official_assignment',
-      'conflict',
-    ]));
-    expect(feed.summary.conflictCount).toBe(1);
-    expect(feed.items.find((item) => item.type === 'conflict')).toEqual(expect.objectContaining({
-      unresolved: true,
-      status: 'UNRESOLVED',
-      fieldId: 'field_1',
-      facilityId: 'facility_river_city',
-    }));
-    expect(feed.items.find((item) => item.type === 'staff_assignment')).toEqual(expect.objectContaining({
-      title: 'Facility lead',
-      userId: 'staff_user_1',
-      staffMemberId: 'staff_member_1',
-    }));
-    expect(feed.items.filter((item) => item.type === 'official_assignment').map((item) => item.userId)).toEqual(
-      expect.arrayContaining(['official_1', 'official_2']),
+    expect(itemTypes).toEqual(
+      expect.arrayContaining([
+        "rental",
+        "event",
+        "game",
+        "maintenance_block",
+        "staff_assignment",
+        "official_assignment",
+        "conflict",
+      ]),
     );
-    expect(feed.items.find((item) => item.type === 'maintenance_block')).toEqual(expect.objectContaining({
-      title: 'Net repair',
-      status: 'PLANNED',
-    }));
+    expect(feed.summary.conflictCount).toBe(1);
+    expect(feed.items.find((item) => item.type === "conflict")).toEqual(
+      expect.objectContaining({
+        unresolved: true,
+        status: "UNRESOLVED",
+        fieldId: "field_1",
+        facilityId: "facility_river_city",
+      }),
+    );
+    expect(feed.items.find((item) => item.type === "staff_assignment")).toEqual(
+      expect.objectContaining({
+        title: "Facility lead",
+        userId: "staff_user_1",
+        staffMemberId: "staff_member_1",
+      }),
+    );
+    expect(
+      feed.items
+        .filter((item) => item.type === "official_assignment")
+        .map((item) => item.userId),
+    ).toEqual(expect.arrayContaining(["official_1", "official_2"]));
+    expect(
+      feed.items.find((item) => item.type === "maintenance_block"),
+    ).toEqual(
+      expect.objectContaining({
+        title: "Net repair",
+        status: "PLANNED",
+      }),
+    );
   });
 
-  it('classifies standalone rental bookings as rental reservations in the facility feed', () => {
+  it("classifies standalone rental bookings as rental reservations in the facility feed", () => {
     const range = {
-      start: new Date('2026-03-10T00:00:00.000Z'),
-      end: new Date('2026-03-11T00:00:00.000Z'),
+      start: new Date("2026-03-10T00:00:00.000Z"),
+      end: new Date("2026-03-11T00:00:00.000Z"),
     };
     const field = {
       ...baseField,
-      $id: 'field_1',
-      name: 'Court 1',
-      facilityId: 'facility_river_city',
+      $id: "field_1",
+      name: "Court 1",
+      facilityId: "facility_river_city",
       facility: {
-        $id: 'facility_river_city',
-        name: 'River City Sports Complex',
+        $id: "facility_river_city",
+        name: "River City Sports Complex",
       },
       rentalSlots: [
         {
-          $id: 'slot_1',
+          $id: "slot_1",
           repeating: false,
-          startDate: '2026-03-10T10:00:00.000Z',
-          endDate: '2026-03-10T12:00:00.000Z',
-          scheduledFieldId: 'field_1',
-          scheduledFieldIds: ['field_1'],
+          startDate: "2026-03-10T10:00:00.000Z",
+          endDate: "2026-03-10T12:00:00.000Z",
+          scheduledFieldId: "field_1",
+          scheduledFieldIds: ["field_1"],
           price: 5000,
         },
       ],
       events: [
         {
-          $id: 'rental-booking-item-booking_item_1',
-          name: 'Rental',
-          eventType: 'EVENT',
-          start: '2026-03-10T10:30:00.000Z',
-          end: '2026-03-10T11:30:00.000Z',
-          sourceType: 'RENTAL_BOOKING',
-          sourceId: 'booking_1',
-          rentalBookingId: 'booking_1',
-          rentalBookingItemId: 'booking_item_1',
+          $id: "rental-booking-item-booking_item_1",
+          name: "Rental",
+          eventType: "EVENT",
+          start: "2026-03-10T10:30:00.000Z",
+          end: "2026-03-10T11:30:00.000Z",
+          sourceType: "RENTAL_BOOKING",
+          sourceId: "booking_1",
+          rentalBookingId: "booking_1",
+          rentalBookingItemId: "booking_item_1",
         },
       ],
       matches: [],
     } as unknown as Field;
 
     const feed = buildFacilityCalendarFeed([field], range);
-    const rentalItems = feed.items.filter((item) => item.type === 'rental');
+    const rentalItems = feed.items.filter((item) => item.type === "rental");
 
-    expect(rentalItems).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        title: 'Rental slot',
-        sourceId: 'slot_1',
-      }),
-      expect.objectContaining({
-        title: 'Rental reservation',
-        sourceId: 'booking_1',
-      }),
-    ]));
+    expect(rentalItems).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          title: "Rental slot",
+          sourceId: "slot_1",
+        }),
+        expect.objectContaining({
+          title: "Rental reservation",
+          sourceId: "booking_1",
+        }),
+      ]),
+    );
     expect(feed.summary.bookedInventoryHours).toBe(1);
     expect(feed.summary.conflictCount).toBe(1);
   });

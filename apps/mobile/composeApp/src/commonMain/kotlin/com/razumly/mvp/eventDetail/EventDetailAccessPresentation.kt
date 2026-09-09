@@ -4,7 +4,6 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
-import com.razumly.mvp.core.data.dataTypes.canManageEventsForViewer
 import com.razumly.mvp.core.data.dataTypes.isDraftLikeState
 import com.razumly.mvp.core.data.dataTypes.isPrivateState
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
@@ -44,10 +43,13 @@ internal fun buildEventDetailAccessPresentation(
     currentUserManagedEventTeamId: String?,
     isHost: Boolean,
     isEditingMatches: Boolean,
+    authorityVerified: Boolean,
 ): EventDetailAccessPresentation {
     val event = selectedEvent.event
+    val isArchivedEvent = event.isArchived()
     val isTemplateEvent = event.state.equals("TEMPLATE", ignoreCase = true)
-    val canShowQrCode = !isTemplateEvent &&
+    val canShowQrCode = !isArchivedEvent &&
+        !isTemplateEvent &&
         !event.isDraftLikeState() &&
         !event.isPrivateState()
     val eventType = event.eventType
@@ -68,26 +70,18 @@ internal fun buildEventDetailAccessPresentation(
         currentUserId = currentUser.id,
         event = event,
     )
-    val isOrganizationManager = selectedEvent.organization?.canManageEventsForViewer(currentUserId) == true
-    val canManageTemplate = isHost || isAssistantHost || isOrganizationManager
-    val canEditEventDetails = canEditEventDetailsOnMobile(
-        event = event,
-        isHost = isHost,
-        canManageTemplate = canManageTemplate,
-    )
-    val canDeleteEvent = if (isTemplateEvent) canManageTemplate else isHost
-    val showCreateTemplateFromCurrentEvent = isHost && !isTemplateEvent
-    val canManageLeagueStandings = currentUserId.isNotBlank() && (
-        event.hostId.trim() == currentUserId ||
-            event.assistantHostIds.any { assistantHostId -> assistantHostId.trim() == currentUserId }
-        )
+    val canManageTemplate = authorityVerified && !isArchivedEvent && canManageEventForUser(event, currentUser, selectedEvent.organization)
+    val canEditEventDetails = canManageTemplate
+    val canDeleteEvent = canManageTemplate && (isTemplateEvent || event.capabilities != null || isHost)
+    val showCreateTemplateFromCurrentEvent = canManageTemplate && isHost && !isTemplateEvent
+    val canManageLeagueStandings = canManageTemplate
     val showOfficialsPanel = canViewOfficialsPanel(
         currentUserId = currentUser.id,
         event = event,
         organization = selectedEvent.organization,
     )
-    val selectedSport = sports.firstOrNull { it.id == editedEvent.sportIds.firstOrNull() }
-    val standingsSport = sports.firstOrNull { it.id == event.sportIds.firstOrNull() }
+    val selectedSport = sports.firstOrNull { sport -> sport.id == editedEvent.sportIds.firstOrNull() }
+    val standingsSport = sports.firstOrNull { sport -> sport.id == event.sportIds.firstOrNull() }
     val showStandingsDrawColumn = resolveLeagueStandingsSupportsDraw(
         event = event,
         sport = standingsSport,

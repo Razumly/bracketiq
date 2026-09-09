@@ -19,6 +19,7 @@ const prismaMock = {
   },
   eventRegistrations: {
     findMany: jest.fn(),
+    findFirst: jest.fn(),
   },
   matches: {
     findMany: jest.fn(),
@@ -101,6 +102,7 @@ describe("event template privacy routes", () => {
     prismaMock.userData.findUnique.mockReset();
     prismaMock.teams.findMany.mockReset();
     prismaMock.eventRegistrations.findMany.mockReset();
+    prismaMock.eventRegistrations.findFirst.mockReset();
     prismaMock.matches.findMany.mockReset();
     prismaMock.timeSlots.findMany.mockReset();
     prismaMock.fields.findFirst.mockReset();
@@ -120,6 +122,7 @@ describe("event template privacy routes", () => {
     prismaMock.userData.findUnique.mockResolvedValue({ hiddenEventIds: [] });
     prismaMock.divisions.findMany.mockResolvedValue([]);
     prismaMock.teams.findMany.mockResolvedValue([]);
+    prismaMock.eventRegistrations.findFirst.mockResolvedValue(null);
     prismaMock.eventRegistrations.findMany.mockResolvedValue([]);
     prismaMock.staffMembers.findUnique.mockResolvedValue(null);
     prismaMock.organizationRoles.findFirst.mockResolvedValue(null);
@@ -296,8 +299,7 @@ describe("event template privacy routes", () => {
       hostId: "host_1",
       end: null,
       noFixedEndDateTime: true,
-      staffingPriority: null,
-      officialSchedulingMode: "STAFFING",
+      staffingPriority: "OFFICIAL_COVERAGE_REQUIRED",
     });
 
     const res = await eventGet(
@@ -317,7 +319,6 @@ describe("event template privacy routes", () => {
       }),
     );
     expect(payload).not.toHaveProperty("$id");
-    expect(payload).toHaveProperty("officialSchedulingMode", "STAFFING");
   });
 
   it("projects an anonymous published Event through the public allowlist", async () => {
@@ -325,6 +326,10 @@ describe("event template privacy routes", () => {
       id: "event_1",
       name: "Public Event",
       state: "PUBLISHED",
+      sourceType: "AFFILIATE_IMPORT",
+      sourceId: "private-source-id",
+      sourceUrl: "https://partner.example/source",
+      affiliateUrl: "https://partner.example/register",
       hostId: "host_1",
       assistantHostIds: ["assistant_1"],
       manualPaymentInstructions: "Send payment to private@example.com",
@@ -356,6 +361,10 @@ describe("event template privacy routes", () => {
     expect(payload).not.toHaveProperty("staffInvites");
     expect(payload).not.toHaveProperty("manualPaymentInstructions");
     expect(payload).not.toHaveProperty("manualPaymentLinks");
+    expect(payload.sourceType).toBe("AFFILIATE_IMPORT");
+    expect(payload).not.toHaveProperty("sourceId");
+    expect(payload.sourceUrl).toBeUndefined();
+    expect(JSON.stringify(payload)).not.toContain("partner.example");
     expect(prismaMock.invites.findMany).not.toHaveBeenCalled();
   });
 
@@ -392,6 +401,51 @@ describe("event template privacy routes", () => {
     expect(payload.staffInvites).toEqual([
       expect.objectContaining({ id: "invite_1", email: "staff@example.com" }),
     ]);
+  });
+  it("projects structural lock state for an editor and omits it for a public viewer", async () => {
+    const event = {
+      id: "event_1",
+      name: "Locked Event",
+      state: "PUBLISHED",
+      hostId: "host_1",
+      eventType: "LEAGUE",
+      teamSignup: true,
+      assistantHostIds: [],
+      organizationId: null,
+    };
+    getOptionalSessionMock.mockResolvedValueOnce({
+      userId: "host_1",
+      isAdmin: false,
+    });
+    prismaMock.events.findUnique.mockResolvedValue(event);
+    prismaMock.eventRegistrations.findFirst.mockResolvedValue({ id: "registration_1" });
+    prismaMock.matches.findMany.mockResolvedValue([
+      { id: "match_1", status: "STARTED" },
+    ]);
+
+    const managedResponse = await eventGet(
+      new NextRequest("http://localhost/api/events/event_1"),
+      { params: Promise.resolve({ eventId: "event_1" }) },
+    );
+    const managedPayload = await managedResponse.json();
+
+    expect(managedResponse.status).toBe(200);
+    expect(managedPayload).toEqual(expect.objectContaining({
+      eventTypeLocked: true,
+      registrationUnitLocked: true,
+      eventTypeHasProtectedHistory: true,
+    }));
+
+    const publicResponse = await eventGet(
+      new NextRequest("http://localhost/api/events/event_1"),
+      { params: Promise.resolve({ eventId: "event_1" }) },
+    );
+    const publicPayload = await publicResponse.json();
+
+    expect(publicResponse.status).toBe(200);
+    expect(publicPayload).not.toHaveProperty("eventTypeLocked");
+    expect(publicPayload).not.toHaveProperty("registrationUnitLocked");
+    expect(publicPayload).not.toHaveProperty("eventTypeHasProtectedHistory");
   });
 
   it("allows reading a private event when requester is host", async () => {
@@ -931,17 +985,23 @@ describe("event template privacy routes", () => {
     prismaMock.eventRegistrations.findMany.mockResolvedValueOnce([
       {
         eventId: "event_1",
+        registrantId: "team_1",
         registrantType: "TEAM",
         rosterRole: "PARTICIPANT",
         slotId: null,
+        status: "ACTIVE",
+        acceptedAt: new Date("2026-06-01T00:00:00.000Z"),
         occurrenceDate: null,
       },
       {
         eventId: "event_1",
+        registrantId: "team_2",
         registrantType: "TEAM",
         rosterRole: "PARTICIPANT",
         slotId: null,
         occurrenceDate: null,
+        status: "ACTIVE",
+        acceptedAt: new Date("2026-06-01T00:00:00.000Z"),
       },
     ]);
 
@@ -1077,17 +1137,23 @@ describe("event template privacy routes", () => {
     prismaMock.eventRegistrations.findMany.mockResolvedValueOnce([
       {
         eventId: "event_2",
+        registrantId: "team_1",
         registrantType: "TEAM",
         rosterRole: "PARTICIPANT",
         slotId: null,
+        status: "ACTIVE",
+        acceptedAt: new Date("2026-06-01T00:00:00.000Z"),
         occurrenceDate: null,
       },
       {
         eventId: "event_2",
+        registrantId: "team_2",
         registrantType: "TEAM",
         rosterRole: "PARTICIPANT",
         slotId: null,
         occurrenceDate: null,
+        status: "ACTIVE",
+        acceptedAt: new Date("2026-06-01T00:00:00.000Z"),
       },
     ]);
 
@@ -1144,9 +1210,10 @@ describe("event template privacy routes", () => {
       const andClauses = Array.isArray(callArgs?.where?.AND)
         ? callArgs.where.AND
         : [];
-      const dateFloorClause = andClauses.find(
-        (clause: any) => clause?.start?.gte instanceof Date,
-      );
+      const dateFloorClause = andClauses
+        .flatMap((clause: any) => clause?.OR ?? [])
+        .find((clause: any) => clause?.eventType?.not === "WEEKLY_EVENT"
+          && clause?.start?.gte instanceof Date);
       const startGte = dateFloorClause?.start?.gte as Date | undefined;
       const expectedStart = new Date(
         new Date().getFullYear(),
@@ -1223,9 +1290,10 @@ describe("event template privacy routes", () => {
     const andClauses = Array.isArray(callArgs?.where?.AND)
       ? callArgs.where.AND
       : [];
-    const dateFloorClause = andClauses.find(
-      (clause: any) => clause?.start?.gte instanceof Date,
-    );
+    const dateFloorClause = andClauses
+      .flatMap((clause: any) => clause?.OR ?? [])
+      .find((clause: any) => clause?.eventType?.not === "WEEKLY_EVENT"
+        && clause?.start?.gte instanceof Date);
     const startGte = dateFloorClause?.start?.gte;
     expect(startGte).toBeInstanceOf(Date);
     expect(startGte.getHours()).toBe(0);

@@ -39,12 +39,12 @@ export const useEventFormInvariantSynchronization = ({
             setValue('eventType', 'EVENT', { shouldDirty: true, shouldValidate: true });
         }
     }, [eventData.eventType, isRentalCreateFlow, setValue]);
-
     useEffect(() => {
-        if (eventData.eventType === 'WEEKLY_EVENT' && eventData.noFixedEndDateTime) {
+        if (eventData.eventType === 'TRYOUT' && eventData.noFixedEndDateTime) {
             setValue('noFixedEndDateTime', false, { shouldDirty: true, shouldValidate: true });
         }
     }, [eventData.eventType, eventData.noFixedEndDateTime, setValue]);
+
 
     useEffect(() => {
         const requiresTeamSignup = eventData.eventType === 'LEAGUE'

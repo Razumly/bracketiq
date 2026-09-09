@@ -230,6 +230,61 @@ describe("SimpleSetupPlanningPage operations plan", () => {
     );
     expect(onNoFixedEndDateTimeChange).toHaveBeenCalledWith(true);
   });
+
+  it("preserves generated end-date mode when automated scheduling is disabled", () => {
+    const onNoFixedEndDateTimeChange = jest.fn();
+    const leagueCapabilities = resolveEventSetupCapabilities({
+      eventType: "LEAGUE",
+      isExternalRegistration: false,
+      singleDivision: true,
+      teamSignup: true,
+      includePlayoffs: false,
+      includePoolPlay: false,
+      splitLeaguePlayoffDivisions: false,
+      hasImmutableRentalResources: false,
+      choices,
+    });
+    const DisabledAutomationHarness = () => {
+      const form = useForm<EventFormValues>({
+        defaultValues: {
+          eventType: "LEAGUE",
+          noFixedEndDateTime: true,
+          isAutomatedScheduling: true,
+        } as EventFormValues,
+      });
+      return (
+        <SimpleSetupPlanningPage
+          pageId="format"
+          control={form.control}
+          eventData={form.getValues()}
+          eventTypeOptions={[]}
+          capabilities={leagueCapabilities}
+          choices={choices}
+          includePlayoffs={false}
+          hasStripeAccount={false}
+          connectingStripe={false}
+          onChoicesChange={jest.fn()}
+          onEventTypeChange={jest.fn()}
+          onExternalRegistrationChange={jest.fn()}
+          onSingleDivisionChange={jest.fn()}
+          onIncludePlayoffsChange={jest.fn()}
+          onIncludePoolPlayChange={jest.fn()}
+          onSplitLeaguePlayoffDivisionsChange={jest.fn()}
+          onNoFixedEndDateTimeChange={onNoFixedEndDateTimeChange}
+          onConnectStripe={jest.fn()}
+          onRegistrationPaymentModeChange={jest.fn()}
+          isImmutableField={() => false}
+        />
+      );
+    };
+
+    renderWithMantine(<DisabledAutomationHarness />);
+
+    fireEvent.click(screen.getByLabelText("Automated Scheduling"));
+
+    expect(onNoFixedEndDateTimeChange).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Set end date during match generation")).toBeChecked();
+  });
 });
 
 describe("SimpleSetupPlanningPage Weekly Event schedule plan", () => {

@@ -83,8 +83,12 @@ export const SimpleSetupScheduleLocationPage = ({
     setFieldNamesCollapsed,
     showScheduleConfig,
   } = sectionsController;
-  const { handleEndChange, handleSelectedAddressChange, handleStartChange } =
-    configurationActions;
+  const {
+    handleEndChange,
+    handleNoFixedEndDateTimeChange,
+    handleSelectedAddressChange,
+    handleStartChange,
+  } = configurationActions;
   const {
     handleAddSlot,
     handleAutoResolveSlotConflict,
@@ -151,10 +155,10 @@ export const SimpleSetupScheduleLocationPage = ({
           isImmutableField={isImmutableField}
           onStartChange={handleStartChange}
           onEndChange={handleEndChange}
-          onNoFixedEndDateTimeChange={() => undefined}
+          onNoFixedEndDateTimeChange={handleNoFixedEndDateTimeChange}
           showScheduleControls
           showRegistrationControls={false}
-          showGeneratedEndDateControl={false}
+          showGeneratedEndDateControl={eventData.eventType === "WEEKLY_EVENT"}
         />
       </div>
 

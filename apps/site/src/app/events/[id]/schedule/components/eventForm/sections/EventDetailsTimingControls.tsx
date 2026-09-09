@@ -1,5 +1,5 @@
 import type { ComponentProps } from "react";
-import { Controller, type Control } from "react-hook-form";
+import { Controller, useWatch, type Control } from "react-hook-form";
 import { Checkbox, NumberInput, Stack } from "@mantine/core";
 import { DateTimePicker } from "@mantine/dates";
 
@@ -52,12 +52,43 @@ export const EventDetailsTimingControls = ({
   showRegistrationControls = true,
   showGeneratedEndDateControl = true,
 }: EventDetailsTimingControlsProps) => {
-  const generatedEndDateDisabled =
-    eventType === "WEEKLY_EVENT" || isImmutableField("noFixedEndDateTime");
-
+  const generatedEndDateDisabled = isImmutableField("noFixedEndDateTime");
+  const isAutomatedScheduling = useWatch({
+    control,
+    name: "isAutomatedScheduling",
+  });
+  const showAutomatedSchedulingControl =
+    showScheduleControls && (eventType === "LEAGUE" || eventType === "TOURNAMENT");
+  const isAutomatedSchedulingDisablesScheduleConstruction =
+    eventType === "LEAGUE" || eventType === "TOURNAMENT";
+  const showScheduleConstructionControls =
+    showScheduleControls &&
+    (!isAutomatedSchedulingDisablesScheduleConstruction ||
+      isAutomatedScheduling !== false);
   return (
     <>
-      {showScheduleControls ? (
+      {showAutomatedSchedulingControl ? (
+        <div className="md:col-span-2">
+          <Controller
+            name="isAutomatedScheduling"
+            control={control}
+            render={({ field }) => (
+              <Checkbox
+                label="Automated Scheduling"
+                description="Build the match schedule from the event setup when you create it."
+                checked={Boolean(field.value)}
+                disabled={isImmutableField("isAutomatedScheduling")}
+                onChange={(event) => {
+                  if (isImmutableField("isAutomatedScheduling")) return;
+                  const checked = event.currentTarget.checked;
+                  field.onChange(checked);
+                }}
+              />
+            )}
+          />
+        </div>
+      ) : null}
+      {showScheduleConstructionControls ? (
         <div className="md:col-span-2">
           <Controller
             name="start"
@@ -91,7 +122,11 @@ export const EventDetailsTimingControls = ({
       ) : null}
       {showScheduleControls ? (
         <AnimatedSection
-          in={eventType === "EVENT" || supportsNoFixedEndDateTime}
+          in={
+            eventType === "EVENT" ||
+            eventType === "TRYOUT" ||
+            supportsNoFixedEndDateTime
+          }
           collapseClassName="md:col-span-2"
         >
           <Controller
@@ -124,18 +159,24 @@ export const EventDetailsTimingControls = ({
                     error={fieldState.error?.message as string | undefined}
                   />
                 ) : null}
-                {supportsNoFixedEndDateTime && showGeneratedEndDateControl ? (
+                {supportsNoFixedEndDateTime
+                  && (showScheduleConstructionControls || noFixedEndDateTime)
+                  && showGeneratedEndDateControl ? (
                   <div className="space-y-1">
                     <Checkbox
                       size="xs"
-                      label="Set the end date during match generation"
-                      description="Use an open scheduling window now. The generated match schedule will determine the event end date."
-                      checked={
+                      label={
                         eventType === "WEEKLY_EVENT"
-                          ? false
-                          : noFixedEndDateTime
+                          ? "No Planned End"
+                          : "Set the end date during match generation"
                       }
-                      disabled={generatedEndDateDisabled}
+                      description={
+                        eventType === "WEEKLY_EVENT"
+                          ? "Keep this Weekly Event open-ended. Clear this option to set a Planned End."
+                          : "Use an open scheduling window now. The generated match schedule will determine the event end date."
+                      }
+                      checked={noFixedEndDateTime}
+                      disabled={generatedEndDateDisabled || (!showScheduleConstructionControls && !noFixedEndDateTime)}
                       onChange={(event) => {
                         if (generatedEndDateDisabled) return;
                         onNoFixedEndDateTimeChange(event.currentTarget.checked);

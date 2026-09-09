@@ -63,6 +63,7 @@ export const ModelName = {
   MatchIncidents: 'MatchIncidents',
   MatchOperationReceipts: 'MatchOperationReceipts',
   EventEditorCreateOperations: 'EventEditorCreateOperations',
+  EventEditorMaintenanceOperations: 'EventEditorMaintenanceOperations',
   Divisions: 'Divisions',
   EventDivisionPhaseSources: 'EventDivisionPhaseSources',
   EventDivisionPhaseParticipants: 'EventDivisionPhaseParticipants',
@@ -454,12 +455,35 @@ export const EventEditorCreateOperationsScalarFieldEnum = {
   eventId: 'eventId',
   responseStatus: 'responseStatus',
   responseJson: 'responseJson',
+  proposalJson: 'proposalJson',
+  proposalRevision: 'proposalRevision',
+  proposalStatus: 'proposalStatus',
   emailDelivery: 'emailDelivery',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
 } as const
 
 export type EventEditorCreateOperationsScalarFieldEnum = (typeof EventEditorCreateOperationsScalarFieldEnum)[keyof typeof EventEditorCreateOperationsScalarFieldEnum]
+
+
+export const EventEditorMaintenanceOperationsScalarFieldEnum = {
+  operationId: 'operationId',
+  eventId: 'eventId',
+  actorUserId: 'actorUserId',
+  operation: 'operation',
+  requestHash: 'requestHash',
+  requestJson: 'requestJson',
+  proposalRevision: 'proposalRevision',
+  revisionBindingJson: 'revisionBindingJson',
+  proposalJson: 'proposalJson',
+  status: 'status',
+  acceptanceOperationId: 'acceptanceOperationId',
+  acceptedResponseJson: 'acceptedResponseJson',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type EventEditorMaintenanceOperationsScalarFieldEnum = (typeof EventEditorMaintenanceOperationsScalarFieldEnum)[keyof typeof EventEditorMaintenanceOperationsScalarFieldEnum]
 
 
 export const DivisionsScalarFieldEnum = {
@@ -2630,6 +2654,7 @@ export const EventsScalarFieldEnum = {
   hostId: 'hostId',
   assistantHostIds: 'assistantHostIds',
   noFixedEndDateTime: 'noFixedEndDateTime',
+  automatedScheduling: 'automatedScheduling',
   price: 'price',
   registrationPaymentMode: 'registrationPaymentMode',
   manualPaymentLinks: 'manualPaymentLinks',
@@ -2666,7 +2691,6 @@ export const EventsScalarFieldEnum = {
   parentEvent: 'parentEvent',
   autoCancellation: 'autoCancellation',
   eventType: 'eventType',
-  officialSchedulingMode: 'officialSchedulingMode',
   staffingPriority: 'staffingPriority',
   doTeamsOfficiate: 'doTeamsOfficiate',
   teamOfficialsMaySwap: 'teamOfficialsMaySwap',
@@ -3017,7 +3041,6 @@ export const EventTemplatesScalarFieldEnum = {
   restTimeMinutes: 'restTimeMinutes',
   pointsToVictory: 'pointsToVictory',
   sportIds: 'sportIds',
-  officialSchedulingMode: 'officialSchedulingMode',
   staffingPriority: 'staffingPriority',
   doTeamsOfficiate: 'doTeamsOfficiate',
   teamOfficialsMaySwap: 'teamOfficialsMaySwap',
@@ -3406,6 +3429,8 @@ export const EventRegistrationsScalarFieldEnum = {
   registrantType: 'registrantType',
   rosterRole: 'rosterRole',
   status: 'status',
+  paymentResolutionReason: 'paymentResolutionReason',
+  acceptedAt: 'acceptedAt',
   eventTeamId: 'eventTeamId',
   sourceTeamRegistrationId: 'sourceTeamRegistrationId',
   slotId: 'slotId',

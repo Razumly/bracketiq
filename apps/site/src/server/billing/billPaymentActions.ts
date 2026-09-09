@@ -1,11 +1,15 @@
 import Stripe from 'stripe';
 import crypto from 'crypto';
 import { prisma } from '@/lib/prisma';
+import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { extractStripePaymentIntentId } from '@/lib/stripeClientSecret';
 import { buildRefundCreateParamsForPaymentIntent } from '@/lib/stripeConnectAccounts';
 import type { AuthContext } from '@/lib/permissions';
 import { canManageEvent, canManageOrganization } from '@/server/accessControl';
-import { acquireEventLockAndLoadStructure } from '@/server/events/eventRegistrations';
+import {
+  acquireEventLockAndLoadStructure,
+  transitionEventRegistrationStatus,
+} from '@/server/events/eventRegistrations';
 import {
   buildTeamRegistrationId,
   cancelPendingTeamRegistration,
@@ -18,12 +22,15 @@ type BillActionRow = {
   organizationId: string | null;
   eventId: string | null;
   sourceType?: string | null;
+  parentBillId?: string | null;
   sourceId?: string | null;
   totalAmountCents: number;
   status: 'OPEN' | 'PENDING' | 'PAID' | 'OVERDUE' | 'CANCELLED' | null;
   paymentPlanEnabled: boolean | null;
   lineItems: unknown;
 };
+
+type BillActionClient = PrismaClient | Prisma.TransactionClient;
 
 type BillPaymentActionRow = {
   id: string;
@@ -118,6 +125,7 @@ export const loadBillForAction = async (billId: string) => (
       eventId: true,
       sourceType: true,
       sourceId: true,
+      parentBillId: true,
       totalAmountCents: true,
       status: true,
       paymentPlanEnabled: true,
@@ -138,6 +146,7 @@ export const loadBillPaymentForAction = async (billId: string, billPaymentId: st
         eventId: true,
         sourceType: true,
         sourceId: true,
+        parentBillId: true,
         totalAmountCents: true,
         status: true,
         paymentPlanEnabled: true,
@@ -276,29 +285,47 @@ export const canAdministerBillPayment = async (
   return false;
 };
 
-export const reconcileBillForPendingPayment = async (billId: string, now: Date) => {
-  const bill = await prisma.bills.findUnique({
+export const reconcileBillForPendingPayment = async (
+  billId: string,
+  now: Date,
+  client: BillActionClient = prisma,
+) => {
+  const bill = await client.bills.findUnique({
     where: { id: billId },
     select: {
       id: true,
+      parentBillId: true,
       totalAmountCents: true,
       status: true,
     },
   });
   if (!bill) return null;
 
-  const payments = await prisma.billPayments.findMany({
-    where: { billId },
-    orderBy: { sequence: 'asc' },
-    select: {
-      amountCents: true,
-      status: true,
-      paidAmountCents: true,
-      dueDate: true,
-    },
-  });
+  const [payments, childBills] = await Promise.all([
+    client.billPayments.findMany({
+      where: { billId },
+      orderBy: { sequence: 'asc' },
+      select: {
+        amountCents: true,
+        status: true,
+        paidAmountCents: true,
+        dueDate: true,
+      },
+    }),
+    client.bills.findMany({
+      where: { parentBillId: billId },
+      select: { paidAmountCents: true },
+    }),
+  ]);
 
-  const paidAmountCents = Math.min(bill.totalAmountCents, sumPaid(payments));
+  const childPaidAmountCents = childBills.reduce(
+    (total, child) => total + (child.paidAmountCents ?? 0),
+    0,
+  );
+  const paidAmountCents = Math.min(
+    bill.totalAmountCents,
+    sumPaid(payments) + childPaidAmountCents,
+  );
   const processingPayment = payments.find((payment) => payment.status === 'PROCESSING') ?? null;
   const failedPayment = payments.find((payment) => payment.status === 'FAILED' || payment.status === 'DISPUTED') ?? null;
   const pendingPayment = payments.find((payment) => payment.status === 'PENDING' || payment.status === null) ?? null;
@@ -311,7 +338,7 @@ export const reconcileBillForPendingPayment = async (billId: string, now: Date) 
         ? 'CANCELLED'
         : 'OPEN';
 
-  return prisma.bills.update({
+  return client.bills.update({
     where: { id: billId },
     data: {
       paidAmountCents,
@@ -351,48 +378,67 @@ export const markBillPaymentProcessingForAction = async ({
     throw new Error('Payment intent does not match this bill payment.');
   }
 
-  const transition = await prisma.billPayments.updateMany({
-    where: {
-      id: payment.id,
-      OR: [{ status: 'PENDING' }, { status: 'FAILED' }, { status: null }],
-    } as any,
-    data: {
-      status: 'PROCESSING',
-      paymentIntentId,
-      payerUserId: payment.payerUserId ?? userId,
-      paidAmountCents: 0,
-      paidAt: null,
-      updatedAt: now,
-    },
-  });
-  if (transition.count !== 1) {
-    throw new Error('Bill payment is no longer available. Refresh and try again.');
-  }
-
-  const reconciledBill = await reconcileBillForPendingPayment(bill.id, now);
-  const registrationId = bill.sourceId;
-  const registrationEventId = bill.eventId;
-  if (
-    bill.sourceType === 'EVENT_REGISTRATION'
-    && registrationId
-    && registrationEventId
-    && typeof (prisma as any).eventRegistrations?.updateMany === 'function'
-  ) {
-    await prisma.$transaction(async (tx) => {
-      await acquireEventLockAndLoadStructure(tx, registrationEventId);
-      await tx.eventRegistrations.updateMany({
-        where: {
-          id: registrationId,
-          status: { in: ['PENDING', 'STARTED'] as any[] },
-        },
-        data: {
-          status: reconciledBill?.status === 'PAID' ? 'ACTIVE' as any : 'PENDING' as any,
-          updatedAt: now,
-        },
-      });
+  const reconciledBill = await prisma.$transaction(async (tx) => {
+    const lockedRegistrationEvent = bill.eventId
+      ? await acquireEventLockAndLoadStructure(tx, bill.eventId)
+      : null;
+    const transition = await tx.billPayments.updateMany({
+      where: {
+        id: payment.id,
+        OR: [{ status: 'PENDING' }, { status: 'FAILED' }, { status: null }],
+      } as any,
+      data: {
+        status: 'PROCESSING',
+        paymentIntentId,
+        payerUserId: payment.payerUserId ?? userId,
+        paidAmountCents: 0,
+        paidAt: null,
+        updatedAt: now,
+      },
     });
-  }
+    if (transition.count !== 1) {
+      throw new Error('Bill payment is no longer available. Refresh and try again.');
+    }
 
+    const reconciledBill = await reconcileBillForPendingPayment(bill.id, now, tx);
+    const reconciledParentBill = reconciledBill?.parentBillId
+      ? await reconcileBillForPendingPayment(reconciledBill.parentBillId, now, tx)
+      : null;
+    const registrationBillStatus = reconciledParentBill?.status ?? reconciledBill?.status;
+    const registrationId = bill.sourceId;
+    const registrationEventId = bill.eventId;
+    if (
+      bill.sourceType === 'EVENT_REGISTRATION'
+      && registrationId
+      && registrationEventId
+      && typeof tx.eventRegistrations.updateMany === 'function'
+    ) {
+      const nextRegistrationStatus = registrationBillStatus === 'PAID' ? 'ACTIVE' : 'PENDING';
+      const event = lockedRegistrationEvent
+        ?? await acquireEventLockAndLoadStructure(tx, registrationEventId);
+      if (nextRegistrationStatus === 'ACTIVE') {
+        await transitionEventRegistrationStatus({
+          registrationId,
+          eventId: registrationEventId,
+          status: 'ACTIVE',
+          event,
+        }, tx);
+      } else {
+        await tx.eventRegistrations.updateMany({
+          where: {
+            id: registrationId,
+            status: { in: ['PENDING', 'STARTED'] },
+          },
+          data: {
+            status: nextRegistrationStatus,
+            updatedAt: now,
+          },
+        });
+      }
+    }
+
+    return reconciledBill;
+  });
   return reconciledBill;
 };
 

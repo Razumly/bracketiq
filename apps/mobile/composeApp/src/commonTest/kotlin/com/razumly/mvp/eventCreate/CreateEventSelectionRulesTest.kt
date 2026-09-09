@@ -18,6 +18,7 @@ class CreateEventSelectionRulesTest {
         val end = Instant.fromEpochMilliseconds(2_000L)
         val draft = Event(
             eventType = EventType.LEAGUE,
+            isAutomatedScheduling = true,
             teamSignup = false,
             singleDivision = false,
             noFixedEndDateTime = true,
@@ -44,11 +45,29 @@ class CreateEventSelectionRulesTest {
     }
 
     @Test
+    fun given_league_with_generated_end_when_automated_scheduling_is_disabled_then_selection_rules_preserve_policy_and_end() {
+        val end = Instant.fromEpochMilliseconds(2_000L)
+        val draft = Event(
+            eventType = EventType.LEAGUE,
+            isAutomatedScheduling = false,
+            noFixedEndDateTime = true,
+            end = end,
+        )
+
+        val updated = draft.applyCreateSelectionRules()
+
+        assertFalse(updated.isAutomatedScheduling)
+        assertTrue(updated.noFixedEndDateTime)
+        assertEquals(end, updated.end)
+    }
+
+    @Test
     fun tournament_selection_enforces_team_signup_and_mobile_defaults() {
         val start = Instant.fromEpochMilliseconds(5_000L)
         val end = Instant.fromEpochMilliseconds(8_000L)
         val draft = Event(
             eventType = EventType.TOURNAMENT,
+            isAutomatedScheduling = true,
             teamSignup = false,
             singleDivision = false,
             noFixedEndDateTime = true,
@@ -64,6 +83,25 @@ class CreateEventSelectionRulesTest {
         assertTrue(updated.noFixedEndDateTime)
         assertFalse(updated.allowPaymentPlans == true)
         assertEquals(3, updated.maxParticipants)
+        assertEquals(end, updated.end)
+    }
+
+    @Test
+    fun given_tournament_with_generated_end_when_automated_scheduling_is_disabled_then_selection_rules_preserve_policy_and_end() {
+        val start = Instant.fromEpochMilliseconds(5_000L)
+        val end = Instant.fromEpochMilliseconds(8_000L)
+        val draft = Event(
+            eventType = EventType.TOURNAMENT,
+            isAutomatedScheduling = false,
+            noFixedEndDateTime = true,
+            start = start,
+            end = end,
+        )
+
+        val updated = draft.applyCreateSelectionRules()
+
+        assertFalse(updated.isAutomatedScheduling)
+        assertTrue(updated.noFixedEndDateTime)
         assertEquals(end, updated.end)
     }
 
@@ -85,6 +123,7 @@ class CreateEventSelectionRulesTest {
             eventType = EventType.EVENT,
             teamSignup = false,
             singleDivision = false,
+            noFixedEndDateTime = true,
             start = start,
             end = end,
         )
@@ -122,7 +161,7 @@ class CreateEventSelectionRulesTest {
         assertEquals(EventType.WEEKLY_EVENT, updated.eventType)
         assertFalse(updated.teamSignup)
         assertFalse(updated.singleDivision)
-        assertFalse(updated.noFixedEndDateTime)
+        assertTrue(updated.noFixedEndDateTime)
         assertTrue(updated.allowPaymentPlans == true)
         assertEquals(2, updated.installmentCount)
         assertEquals(listOf(-1, 0), updated.installmentDueRelativeDays)
@@ -171,5 +210,21 @@ class CreateEventSelectionRulesTest {
                 nextSimplePageId = null,
             ),
         )
+    }
+
+    @Test
+    fun tryout_selection_enforces_individual_fixed_end_and_clears_automation() {
+        val updated = Event(
+            eventType = EventType.TRYOUT,
+            teamSignup = true,
+            singleDivision = true,
+            isAutomatedScheduling = true,
+            noFixedEndDateTime = true,
+        ).applyCreateSelectionRules()
+
+        assertFalse(updated.teamSignup)
+        assertFalse(updated.isAutomatedScheduling)
+        assertFalse(updated.noFixedEndDateTime)
+        assertFalse(updated.singleDivision)
     }
 }

@@ -155,7 +155,7 @@ export const StaffManagementPanel = ({
 }: StaffManagementPanelProps) => (
     <>
         {staffNameError ? <Text c="red" size="sm">{staffNameError}</Text> : null}
-        {showDedicatedOfficials ? <TeamOfficiatingControls
+        {eventData.eventType !== 'TRYOUT' ? <TeamOfficiatingControls
             control={control}
             doTeamsOfficiate={Boolean(eventData.doTeamsOfficiate)}
             onTeamsOfficiateChange={onTeamsOfficiateChange}
@@ -166,7 +166,7 @@ export const StaffManagementPanel = ({
             allowMatchRosterEdits={Boolean(eventData.allowMatchRosterEdits)}
             onRosterEditsChange={onRosterEditsChange}
         /> : null}
-        <StaffOfficialPositionEditor
+        {eventData.eventType !== 'TRYOUT' ? <StaffOfficialPositionEditor
             staffingPriority={eventData.staffingPriority}
             officialPositions={eventData.officialPositions || []}
             sportDefaultPositionCount={sportDefaultPositionCount}
@@ -178,11 +178,8 @@ export const StaffManagementPanel = ({
             onAddPosition={onAddPosition}
             onUpdatePosition={onUpdatePosition}
             onRemovePosition={onRemovePosition}
-            showPositions={
-                showCustomOfficialPositions
-                && eventData.staffingPriority !== 'TEAM_COVERAGE_REQUIRED'
-            }
-        />
+            showPositions={showCustomOfficialPositions}
+        /> : null}
 
         {showStaffAssignments || showDedicatedOfficials ? isOrganizationHostedEvent ? (
             <StaffOrganizationRosterPicker

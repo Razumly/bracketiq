@@ -78,6 +78,35 @@ class MvpApiClientTest {
     }
 
     @Test
+    fun app_version_isolation_probe_uses_named_typed_contract() = runTest {
+        val tokenStore = InMemoryAuthTokenStore("abc")
+        val engine = MockEngine { request ->
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("/api/app-version", request.url.encodedPath)
+            assertEquals("ANDROID", request.url.parameters["platform"])
+            assertEquals("0.0.0", request.url.parameters["versionName"])
+            assertEquals("0", request.url.parameters["buildNumber"])
+            assertEquals("1", request.url.parameters["mvpTestIsolation"])
+            assertEquals("Bearer abc", request.headers[HttpHeaders.Authorization])
+            respond(
+                content = """{"updateAvailable":false,"updateRequired":false,"latestVersion":null,"releases":[],"outboundProvidersDisabled":true,"databaseUrlHash":"hash"}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val response = api.getAppVersionIsolationProbe()
+
+        assertEquals(true, response.outboundProvidersDisabled)
+        assertEquals("hash", response.databaseUrlHash)
+    }
+
+    @Test
     fun postNoResponse_with_body_attaches_bearer_token_when_present() = runTest {
         val tokenStore = InMemoryAuthTokenStore("abc")
 

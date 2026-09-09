@@ -11,10 +11,10 @@ class EventCardMetadataTest {
     fun buildNativeEventCardMetadata_formatsOneCanonicalDivisionAndSkillLevel() {
         val metadata = buildNativeEventCardMetadata(
             Event(
-                divisions = listOf("open"),
+                divisions = listOf("open_division"),
                 divisionDetails = listOf(
                     DivisionDetail(
-                        id = "open",
+                        id = "open_division",
                         name = "Open",
                         skillDivisionTypeName = "Advanced",
                     ),

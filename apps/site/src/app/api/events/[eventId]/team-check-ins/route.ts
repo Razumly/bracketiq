@@ -8,6 +8,7 @@ import {
   checkInTeam,
   loadTeamCheckIns,
 } from '@/server/matches/teamCheckIns';
+import { acquireEventLock } from '@/server/repositories/locks';
 
 export const dynamic = 'force-dynamic';
 
@@ -149,6 +150,7 @@ export async function POST(
     });
     const canCheckInAnyTeam = accessEvent ? await canViewCheckIns(session, accessEvent) : false;
     const checkIn = await prisma.$transaction(async (tx) => {
+      await acquireEventLock(tx, eventId);
       const event = await tx.events.findUnique({
         where: { id: eventId },
         select: {

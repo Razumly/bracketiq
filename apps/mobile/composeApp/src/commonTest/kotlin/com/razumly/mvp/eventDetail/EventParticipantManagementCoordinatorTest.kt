@@ -411,7 +411,8 @@ class EventParticipantManagementCoordinatorTest {
             teamId = " team-1 ",
             billPaymentId = " payment-1 ",
             amountCents = 500,
-            refundPayment = { eventId, teamId, billPaymentId, amountCents ->
+            occurrence = null,
+            refundPayment = { eventId, teamId, billPaymentId, amountCents, _ ->
                 events += "refund:$eventId:$teamId:$billPaymentId:$amountCents"
                 Result.success(Unit)
             },

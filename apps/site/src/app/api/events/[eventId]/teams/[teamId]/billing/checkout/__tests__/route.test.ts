@@ -128,6 +128,8 @@ describe('POST /api/events/[eventId]/teams/[teamId]/billing/checkout', () => {
         eventAmountCents: 5000,
         divisionId: 'open',
         label: 'Event registration - Open',
+        slotId: 'slot_1',
+        occurrenceDate: '2026-05-19',
       }),
       {
         params: Promise.resolve({ eventId: 'event_1', teamId: 'team_1' }),
@@ -136,6 +138,11 @@ describe('POST /api/events/[eventId]/teams/[teamId]/billing/checkout', () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
+    expect(getEventParticipantIdsForEventMock).toHaveBeenCalledWith(
+      'event_1',
+      prismaMock,
+      { slotId: 'slot_1', occurrenceDate: '2026-05-19' },
+    );
     expect(payload).toEqual(expect.objectContaining({
       checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_1',
       amountCents: 5000,
@@ -166,6 +173,8 @@ describe('POST /api/events/[eventId]/teams/[teamId]/billing/checkout', () => {
             amount_cents: '5000',
             total_charge_cents: '5000',
             division_id: 'open',
+            slot_id: 'slot_1',
+            occurrence_date: '2026-05-19',
           }),
           transfer_data: {
             destination: 'acct_123',

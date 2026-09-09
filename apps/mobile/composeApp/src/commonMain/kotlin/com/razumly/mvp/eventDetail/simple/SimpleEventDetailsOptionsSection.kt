@@ -1,5 +1,6 @@
 package com.razumly.mvp.eventDetail
 
+import com.razumly.mvp.core.data.dataTypes.isAffiliateEvent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -27,6 +28,8 @@ import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.enums.displayLabel
+import com.razumly.mvp.core.data.dataTypes.enums.isScheduleConstructionAutomationType
+import com.razumly.mvp.core.data.dataTypes.showsGeneratedEndDateControl
 import com.razumly.mvp.eventCreate.mobileCreateEventTypes
 
 internal data class SimpleEventDetailsOptionsState(
@@ -36,12 +39,16 @@ internal data class SimpleEventDetailsOptionsState(
     val eventTypeLocked: Boolean = false,
     val eventTypeHasProtectedHistory: Boolean = false,
     val teamSignupLocked: Boolean = false,
+    val automatedSchedulingLocked: Boolean = false,
+    val tryoutAvailable: Boolean = false,
+    val preserveSelectedTryout: Boolean = false,
 )
 
 internal data class SimpleEventDetailsOptionsActions(
     val onEventTypeSelected: (EventType) -> Unit,
     val onTeamRegistrationChange: (Boolean) -> Unit,
     val onMultipleDivisionsChange: (Boolean) -> Unit,
+    val onAutomatedSchedulingChange: (Boolean) -> Unit,
     val onNoFixedEndDateChange: (Boolean) -> Unit,
     val onPlayoffsOrPoolPlayChange: (Boolean) -> Unit,
     val onDoubleEliminationChange: (Boolean) -> Unit,
@@ -73,6 +80,8 @@ internal fun LazyListScope.simpleEventDetailsOptionsSection(
             )
             EventTypeGrid(
                 selectedType = state.editEvent.eventType,
+                tryoutAvailable = state.tryoutAvailable,
+                preserveSelectedTryout = state.preserveSelectedTryout,
                 enabled = !state.eventTypeLocked,
                 onSelected = actions.onEventTypeSelected,
             )
@@ -114,22 +123,39 @@ internal fun LazyListScope.simpleEventDetailsOptionsSection(
             }
 
             OptionsCategory(title = "Schedule & competition") {
-                val supportsGeneratedEndDate = state.editEvent.eventType == EventType.LEAGUE ||
-                    state.editEvent.eventType == EventType.TOURNAMENT
-                val showsGeneratedEndDate = supportsGeneratedEndDate ||
-                    state.editEvent.eventType == EventType.WEEKLY_EVENT
-                if (showsGeneratedEndDate) {
+                val supportsAutomatedScheduling =
+                    state.editEvent.eventType.isScheduleConstructionAutomationType()
+                if (supportsAutomatedScheduling) {
                     OptionCheckboxRow(
-                        checked = supportsGeneratedEndDate && state.editEvent.noFixedEndDateTime,
-                        label = "Set end date during match generation",
-                        description = "The generated match schedule will determine the event end date.",
-                        enabled = supportsGeneratedEndDate,
+                        checked = state.editEvent.isAutomatedScheduling,
+                        label = "Automated Scheduling",
+                        description = if (state.automatedSchedulingLocked) {
+                            "Automated Scheduling is locked for this event."
+                        } else {
+                            "Build the match schedule when the event is created."
+                        },
+                        enabled = !state.automatedSchedulingLocked,
+                        onCheckedChange = actions.onAutomatedSchedulingChange,
+                    )
+                }
+                val supportsGeneratedEndDate =
+                    state.editEvent.eventType == EventType.WEEKLY_EVENT ||
+                        (
+                            state.editEvent.isAutomatedScheduling &&
+                                state.editEvent.eventType.isScheduleConstructionAutomationType()
+                            )
+                val showsGeneratedEndDate = state.editEvent.showsGeneratedEndDateControl()
+                if (showsGeneratedEndDate) {
+                    val copy = generatedEndDateCopy(state.editEvent.eventType)
+                    OptionCheckboxRow(
+                        checked = state.editEvent.noFixedEndDateTime,
+                        label = copy.label,
+                        description = copy.description,
+                        enabled = supportsGeneratedEndDate || state.editEvent.noFixedEndDateTime,
                         onCheckedChange = actions.onNoFixedEndDateChange,
                     )
                 }
-                if (state.editEvent.eventType == EventType.LEAGUE ||
-                    state.editEvent.eventType == EventType.TOURNAMENT
-                ) {
+                if (state.editEvent.eventType.isScheduleConstructionAutomationType()) {
                     OptionCheckboxRow(
                         checked = state.editEvent.includePlayoffs,
                         label = if (state.editEvent.eventType == EventType.TOURNAMENT) {
@@ -155,43 +181,45 @@ internal fun LazyListScope.simpleEventDetailsOptionsSection(
                 }
             }
 
-            OptionsCategory(title = "Registration & payments") {
-                OptionCheckboxRow(
-                    checked = state.paidRegistrationEnabled,
-                    label = "Paid registration",
-                    description = "Show price inputs for the event or each division.",
-                    onCheckedChange = actions.onPaidRegistrationChange,
-                )
-                val manualPaymentsEnabled = state.editEvent.registrationPaymentMode == "MANUAL"
-                OptionCheckboxRow(
-                    checked = manualPaymentsEnabled,
-                    label = "Collect payments manually",
-                    description = "Provide Venmo, PayPal, cash, or other host payment instructions.",
-                    enabled = state.paidRegistrationEnabled,
-                    onCheckedChange = actions.onManualPaymentsChange,
-                )
-                OptionCheckboxRow(
-                    checked = state.editEvent.cancellationRefundHours != null,
-                    label = "Automatic refunds",
-                    description = if (manualPaymentsEnabled) {
-                        "Manual payments must be refunded directly by the host."
-                    } else {
-                        "Refund eligible online payments automatically."
-                    },
-                    enabled = state.paidRegistrationEnabled && !manualPaymentsEnabled,
-                    onCheckedChange = actions.onAutomaticRefundsChange,
-                )
-                OptionCheckboxRow(
-                    checked = state.editEvent.allowPaymentPlans == true,
-                    label = "Payment plans",
-                    description = if (!state.hostHasAccount) {
-                        "Finish payment account setup before enabling installments."
-                    } else {
-                        "Split online registration into scheduled installments."
-                    },
-                    enabled = state.paidRegistrationEnabled && !manualPaymentsEnabled && state.hostHasAccount,
-                    onCheckedChange = actions.onPaymentPlansChange,
-                )
+            if (!state.editEvent.isAffiliateEvent()) {
+                OptionsCategory(title = "Registration & payments") {
+                    OptionCheckboxRow(
+                        checked = state.paidRegistrationEnabled,
+                        label = "Paid registration",
+                        description = "Show price inputs for the event or each division.",
+                        onCheckedChange = actions.onPaidRegistrationChange,
+                    )
+                    val manualPaymentsEnabled = state.editEvent.registrationPaymentMode == "MANUAL"
+                    OptionCheckboxRow(
+                        checked = manualPaymentsEnabled,
+                        label = "Collect payments manually",
+                        description = "Provide Venmo, PayPal, cash, or other host payment instructions.",
+                        enabled = state.paidRegistrationEnabled,
+                        onCheckedChange = actions.onManualPaymentsChange,
+                    )
+                    OptionCheckboxRow(
+                        checked = state.editEvent.cancellationRefundHours != null,
+                        label = "Automatic refunds",
+                        description = if (manualPaymentsEnabled) {
+                            "Manual payments must be refunded directly by the host."
+                        } else {
+                            "Refund eligible online payments automatically."
+                        },
+                        enabled = state.paidRegistrationEnabled && !manualPaymentsEnabled,
+                        onCheckedChange = actions.onAutomaticRefundsChange,
+                    )
+                    OptionCheckboxRow(
+                        checked = state.editEvent.allowPaymentPlans == true,
+                        label = "Payment plans",
+                        description = if (!state.hostHasAccount) {
+                            "Finish payment account setup before enabling installments."
+                        } else {
+                            "Split online registration into scheduled installments."
+                        },
+                        enabled = state.paidRegistrationEnabled && !manualPaymentsEnabled && state.hostHasAccount,
+                        onCheckedChange = actions.onPaymentPlansChange,
+                    )
+                }
             }
 
             if (state.editEvent.teamSignup) {
@@ -232,11 +260,19 @@ internal fun LazyListScope.simpleEventDetailsOptionsSection(
 @Composable
 private fun EventTypeGrid(
     selectedType: EventType,
+    tryoutAvailable: Boolean,
+    preserveSelectedTryout: Boolean,
     enabled: Boolean = true,
     onSelected: (EventType) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        mobileCreateEventTypes().chunked(2).forEach { eventTypes ->
+        val eventTypes = (
+            mobileCreateEventTypes(tryoutAvailable) +
+                selectedType.takeIf { preserveSelectedTryout && it == EventType.TRYOUT }
+                    ?.let(::listOf)
+                    .orEmpty()
+            ).distinct()
+        eventTypes.chunked(2).forEach { eventTypes ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),

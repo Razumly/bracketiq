@@ -24,7 +24,7 @@ describe('loadEventFinanceSummary', () => {
         findMany: jest.fn().mockResolvedValue([]),
       },
       eventRegistrations: {
-        count: jest.fn().mockResolvedValue(0),
+        findMany: jest.fn().mockResolvedValue([]),
       },
       eventStaffAssignments: {
         findMany: jest.fn().mockResolvedValue([

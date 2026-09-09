@@ -46,6 +46,28 @@ class EventDetailsMatchRulesTest {
     }
 
     @Test
+    fun new_event_type_picker_includes_tryout() {
+        val options = selectableMobileEventTypes(
+            isNewEvent = true,
+            rentalTimeLocked = false,
+            currentEventType = EventType.EVENT,
+        )
+
+        assertTrue(EventType.TRYOUT in options)
+    }
+    @Test
+    fun new_event_type_picker_hides_tryout_without_organization_capability() {
+        val options = selectableMobileEventTypes(
+            isNewEvent = true,
+            rentalTimeLocked = false,
+            currentEventType = EventType.EVENT,
+            tryoutAvailable = false,
+        )
+
+        assertFalse(EventType.TRYOUT in options)
+    }
+
+    @Test
     fun given_baseball_selected_without_server_template_when_resolving_rules_then_baseball_defaults_replace_stale_rules() {
         val event = Event(
             sportIds = listOf("Baseball"),

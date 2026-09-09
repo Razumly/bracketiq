@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/prisma';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
-import { extractDivisionTokenFromId } from '@/lib/divisionTypes';
+import { buildEventDivisionId, extractDivisionTokenFromId } from '@/lib/divisionTypes';
 import {
   isWeeklyParentEvent,
   resolveWeeklyOccurrence,
@@ -9,6 +9,7 @@ import {
 import { isTournamentPoolPlayEnabled } from '@/server/events/tournamentPools';
 import { withDerivedCanonicalTeamIds } from '@/server/teams/teamMembership';
 import { acquireEventLock } from '@/server/repositories/locks';
+import type { EventRegistrationPaymentResolutionReason } from '@/contracts/eventParticipants';
 
 type PrismaLike = PrismaClient | Prisma.TransactionClient;
 
@@ -23,6 +24,16 @@ export type RegistrationLifecycleStatus =
   | 'CANCELLED'
   | 'CONSENTFAILED';
 
+export const normalizeEventRegistrationPaymentResolutionReason = (
+  value: unknown,
+): EventRegistrationPaymentResolutionReason | null => (
+  value === 'capacity_exceeded' || value === 'invalid_registration_unit'
+    ? value
+    : null
+);
+
+export const ACCEPTED_EVENT_REGISTRATION_STATUSES = ['ACTIVE', 'BLOCKED'] as const;
+
 type EventLike = {
   id: string;
   eventType?: unknown;
@@ -35,7 +46,12 @@ type EventLike = {
   timeSlotIds?: unknown;
 };
 
-type RegistrationRow = {
+type EventSnapshotLike = EventLike & {
+  start: Date;
+  end: Date | null;
+};
+
+export type RegistrationRow = {
   id: string;
   eventId: string;
   registrantId: string;
@@ -43,6 +59,7 @@ type RegistrationRow = {
   registrantType: RegistrationRegistrantType;
   rosterRole: RegistrationRosterRole | null;
   status: RegistrationLifecycleStatus | null;
+  acceptedAt: Date | null;
   eventTeamId: string | null;
   sourceTeamRegistrationId: string | null;
   ageAtEvent: number | null;
@@ -59,6 +76,7 @@ type RegistrationRow = {
   occurrenceDate: string | null;
   createdAt: Date | null;
   updatedAt: Date | null;
+  paymentResolutionReason: EventRegistrationPaymentResolutionReason | null;
 };
 
 export type EventParticipantEntry = {
@@ -77,6 +95,8 @@ export type EventParticipantEntry = {
   occurrenceDate: string | null;
   createdAt: string | null;
   updatedAt: string | null;
+  paymentResolutionReason: EventRegistrationPaymentResolutionReason | null;
+
 };
 
 export type EventParticipantDivisionIds = {
@@ -134,12 +154,33 @@ export type EventParticipantSnapshot = {
 
 export const JOINED_EVENT_PARTICIPANT_STATUSES = ['PENDING', 'ACTIVE', 'BLOCKED'] as const;
 const DISPLAY_MEMBER_STATUSES = new Set<RegistrationLifecycleStatus>(JOINED_EVENT_PARTICIPANT_STATUSES);
+const ACCEPTED_EVENT_REGISTRATION_STATUS_SET = new Set<RegistrationLifecycleStatus>(
+  ACCEPTED_EVENT_REGISTRATION_STATUSES,
+);
 
 export type EventRegistrationStructure = {
   id: string;
   eventType: string | null;
   teamSignup: boolean | null;
+  maxParticipants?: number | null;
+  singleDivision?: boolean | null;
+  divisionIds?: string[];
+  archivedAt?: Date | null;
+  parentEvent?: string | null;
+  start?: Date;
+  end?: Date | null;
+  timeSlotIds?: string[] | null;
 };
+
+export class EventRegistrationOccurrenceChangedError extends Error {
+  readonly code = 'EVENT_WEEKLY_OCCURRENCE_CHANGED';
+  readonly status = 409;
+
+  constructor(message = 'The selected weekly occurrence changed. Reload and try again.') {
+    super(message);
+    this.name = 'EventRegistrationOccurrenceChangedError';
+  }
+}
 
 export class EventConfigurationChangedError extends Error {
   readonly code = 'EVENT_CONFIGURATION_CHANGED';
@@ -150,6 +191,90 @@ export class EventConfigurationChangedError extends Error {
     this.name = 'EventConfigurationChangedError';
   }
 }
+export class EventRegistrationArchivedError extends Error {
+  readonly code = 'EVENT_REGISTRATION_EVENT_ARCHIVED';
+  readonly status = 409;
+
+  constructor() {
+    super('This weekly event is archived and no longer accepts registration changes.');
+    this.name = 'EventRegistrationArchivedError';
+  }
+}
+
+export class EventRegistrationCapacityError extends Error {
+  readonly code = 'EVENT_REGISTRATION_CAPACITY_EXCEEDED';
+  readonly status = 409;
+  readonly capacity: number;
+  readonly participantCount: number;
+
+  constructor(capacity: number, participantCount: number) {
+    super(`This event has reached its registration capacity of ${capacity}.`);
+    this.name = 'EventRegistrationCapacityError';
+    this.capacity = capacity;
+    this.participantCount = participantCount;
+  }
+}
+export class EventRegistrationDivisionError extends Error {
+  readonly code = 'INVALID_EVENT_REGISTRATION_DIVISION';
+  readonly status = 400;
+  readonly divisionId: string | null;
+  readonly matchCount: number;
+
+  constructor(divisionId: string | null, matchCount: number) {
+    super(
+      divisionId
+        ? 'Selected registration division is not one active Entry Division for this event.'
+        : 'A registration division is required for each participant registration.',
+    );
+    this.name = 'EventRegistrationDivisionError';
+    this.divisionId = divisionId;
+    this.matchCount = matchCount;
+  }
+}
+export class EventRegistrationStructureLockedError extends Error {
+  readonly code = 'EVENT_REGISTRATION_STRUCTURE_LOCKED';
+  readonly status = 409;
+  readonly fieldName: 'eventType' | 'teamSignup';
+
+  constructor(fieldName: 'eventType' | 'teamSignup') {
+    super(
+      fieldName === 'eventType'
+        ? 'Event Type cannot change after accepted registration or protected match history.'
+        : 'Registration Unit cannot change after accepted registration or protected match history.',
+    );
+    this.name = 'EventRegistrationStructureLockedError';
+    this.fieldName = fieldName;
+  }
+}
+
+export class EventRegistrationUnitError extends Error {
+  readonly code = 'INVALID_EVENT_REGISTRATION_UNIT';
+  readonly status = 400;
+  readonly eventType: string | null;
+  readonly teamSignup: boolean;
+
+  constructor(
+    eventType: unknown,
+    teamSignup: unknown,
+    messageTeamSignup?: boolean,
+  ) {
+    const normalizedEventType = normalizeEventTypeForRegistration(eventType);
+    const normalizedTeamSignup = Boolean(teamSignup);
+    const expectedTeamSignup = messageTeamSignup ?? (
+      normalizedEventType === 'LEAGUE' || normalizedEventType === 'TOURNAMENT'
+        ? true
+        : normalizedEventType !== 'TRYOUT' && normalizedTeamSignup
+    );
+    super(
+      expectedTeamSignup
+        ? `${normalizedEventType ?? 'This event'} events require team registration.`
+        : `${normalizedEventType ?? 'This event'} events require individual registration.`,
+    );
+    this.name = 'EventRegistrationUnitError';
+    this.eventType = normalizedEventType;
+    this.teamSignup = normalizedTeamSignup;
+  }
+}
 
 const normalizeEventTypeForRegistration = (value: unknown): string | null => {
   if (typeof value !== 'string') {
@@ -158,11 +283,36 @@ const normalizeEventTypeForRegistration = (value: unknown): string | null => {
   const normalized = value.trim().toUpperCase();
   return normalized.length ? normalized : null;
 };
+const isArchivedWeeklyParentRecord = (event: {
+  eventType?: unknown;
+  parentEvent?: unknown;
+  archivedAt?: unknown;
+} | null | undefined): boolean => (
+  normalizeEventTypeForRegistration(event?.eventType) === 'WEEKLY_EVENT' &&
+  !normalizeId(event?.parentEvent) &&
+  Boolean(event?.archivedAt)
+);
 
+
+export const assertEventTypeRegistrationUnit = (
+  eventType: unknown,
+  teamSignup: unknown,
+): void => {
+  const normalizedEventType = normalizeEventTypeForRegistration(eventType);
+  const normalizedTeamSignup = Boolean(teamSignup);
+  const requiresTeam = normalizedEventType === 'LEAGUE' || normalizedEventType === 'TOURNAMENT';
+  const requiresIndividual = normalizedEventType === 'TRYOUT';
+  if ((requiresTeam && !normalizedTeamSignup) || (requiresIndividual && normalizedTeamSignup)) {
+    throw new EventRegistrationUnitError(normalizedEventType, normalizedTeamSignup);
+  }
+};
 export const acquireEventLockAndLoadStructure = async (
   client: PrismaLike,
   eventId: string,
   expected?: Partial<Pick<EventRegistrationStructure, 'eventType' | 'teamSignup'>>,
+  options?: {
+    allowArchivedWeeklyReservation?: boolean;
+  },
 ): Promise<EventRegistrationStructure> => {
   await acquireEventLock(client, eventId);
   const event = await client.events.findUnique({
@@ -171,11 +321,46 @@ export const acquireEventLockAndLoadStructure = async (
       id: true,
       eventType: true,
       teamSignup: true,
+      maxParticipants: true,
+      singleDivision: true,
+      parentEvent: true,
+      archivedAt: true,
+      start: true,
+      end: true,
+      timeSlotIds: true,
     },
   });
   if (!event) {
     throw Object.assign(new Error('Event not found.'), { status: 404 });
   }
+
+  const parentEventId = normalizeId(event.parentEvent);
+  let parentEvent: {
+    id: string;
+    eventType: unknown;
+    parentEvent: unknown;
+    archivedAt: unknown;
+  } | null = null;
+  if (parentEventId) {
+    await acquireEventLock(client, parentEventId);
+    parentEvent = await client.events.findUnique({
+      where: { id: parentEventId },
+      select: {
+        id: true,
+        eventType: true,
+        parentEvent: true,
+        archivedAt: true,
+      },
+    });
+  }
+  const archivedWeeklyEvent = (
+    isArchivedWeeklyParentRecord(event) || isArchivedWeeklyParentRecord(parentEvent)
+  );
+  if (archivedWeeklyEvent && !options?.allowArchivedWeeklyReservation) {
+    throw new EventRegistrationArchivedError();
+  }
+
+  assertEventTypeRegistrationUnit(event.eventType, event.teamSignup);
 
   const expectedEventType = expected && Object.prototype.hasOwnProperty.call(expected, 'eventType')
     ? normalizeEventTypeForRegistration(expected.eventType)
@@ -190,14 +375,35 @@ export const acquireEventLockAndLoadStructure = async (
     throw new EventConfigurationChangedError();
   }
 
+  const activeEntryDivisionRows = await client.divisions.findMany({
+    where: {
+      eventId,
+      scope: 'EVENT',
+      role: 'ENTRY',
+      status: 'ACTIVE',
+    },
+    select: { id: true },
+  });
+  const divisionIds = normalizeIdList(activeEntryDivisionRows.map((row) => row.id));
+  const effectiveArchivedAt = archivedWeeklyEvent
+    ? event.archivedAt ?? (
+      parentEvent?.archivedAt instanceof Date ? parentEvent.archivedAt : null
+    )
+    : event.archivedAt ?? null;
   return {
     id: event.id,
     eventType: normalizeEventTypeForRegistration(event.eventType),
     teamSignup: event.teamSignup ?? null,
+    maxParticipants: event.maxParticipants ?? null,
+    singleDivision: event.singleDivision ?? null,
+    divisionIds,
+    archivedAt: effectiveArchivedAt,
+    parentEvent: normalizeId(event.parentEvent),
+    start: event.start,
+    end: event.end,
+    timeSlotIds: normalizeIdList(event.timeSlotIds),
   };
 };
-const CAPACITY_HOLDING_STATUSES = new Set<RegistrationLifecycleStatus>(['STARTED', ...JOINED_EVENT_PARTICIPANT_STATUSES]);
-
 export const hasJoinedEventParticipant = async (
   eventId: string,
   client: PrismaLike = prisma,
@@ -208,12 +414,30 @@ export const hasJoinedEventParticipant = async (
     where: {
       eventId: normalizedEventId,
       rosterRole: 'PARTICIPANT',
-      status: { in: [...JOINED_EVENT_PARTICIPANT_STATUSES] },
+      AND: [
+        {
+          OR: [
+            { acceptedAt: { not: null } },
+            { status: { in: [...ACCEPTED_EVENT_REGISTRATION_STATUSES] } },
+          ],
+        },
+        {
+          OR: [
+            { registrantType: 'TEAM' },
+            {
+              registrantType: { in: ['SELF', 'CHILD'] },
+              eventTeamId: null,
+              sourceTeamRegistrationId: null,
+            },
+          ],
+        },
+      ],
     },
     select: { id: true },
   });
   return Boolean(row);
 };
+
 const normalizeId = (value: unknown): string | null => {
   if (typeof value !== 'string') {
     return null;
@@ -270,7 +494,6 @@ const normalizeLifecycleStatus = (value: unknown): RegistrationLifecycleStatus =
   }
   return 'STARTED';
 };
-
 const positiveInt = (value: unknown): number | null => {
   const numeric = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(numeric) || numeric <= 0) {
@@ -285,6 +508,9 @@ const toEntry = (row: RegistrationRow): EventParticipantEntry => ({
   registrantType: row.registrantType,
   rosterRole: normalizeRosterRole(row.rosterRole),
   status: normalizeLifecycleStatus(row.status),
+  paymentResolutionReason: normalizeEventRegistrationPaymentResolutionReason(
+    row.paymentResolutionReason,
+  ),
   parentId: normalizeId(row.parentId),
   divisionId: normalizeId(row.divisionId),
   divisionTypeId: normalizeId(row.divisionTypeId),
@@ -301,11 +527,31 @@ const isRegisteredLifecycleStatus = (value: unknown): boolean => (
   DISPLAY_MEMBER_STATUSES.has(normalizeLifecycleStatus(value))
 );
 
-const isRegisteredParticipant = (row: RegistrationRow): boolean => (
-  normalizeRosterRole(row.rosterRole) === 'PARTICIPANT'
-  && isRegisteredLifecycleStatus(row.status)
+const isTeamRosterRegistration = (
+  row: Pick<RegistrationRow, 'registrantType' | 'eventTeamId' | 'sourceTeamRegistrationId'>,
+): boolean => (
+  row.registrantType !== 'TEAM'
+  && Boolean(normalizeId(row.eventTeamId) || normalizeId(row.sourceTeamRegistrationId))
 );
 
+export const isAcceptedParticipantRegistration = (
+  row: Pick<
+    RegistrationRow,
+    'rosterRole' | 'status' | 'acceptedAt' | 'registrantType' | 'eventTeamId' | 'sourceTeamRegistrationId'
+  >,
+): boolean => (
+  normalizeRosterRole(row.rosterRole) === 'PARTICIPANT'
+  && !isTeamRosterRegistration(row)
+  && (
+    row.acceptedAt != null
+    || ACCEPTED_EVENT_REGISTRATION_STATUS_SET.has(normalizeLifecycleStatus(row.status))
+  )
+);
+
+const isRegisteredParticipant = (row: RegistrationRow): boolean => (
+  isAcceptedParticipantRegistration(row)
+  && ACCEPTED_EVENT_REGISTRATION_STATUS_SET.has(normalizeLifecycleStatus(row.status))
+);
 const isPlaceholderTeamRow = (row?: { kind?: unknown } | null): boolean => (
   String(row?.kind ?? '').trim().toUpperCase() === 'PLACEHOLDER'
 );
@@ -346,9 +592,81 @@ const loadPlaceholderTeamIdKeys = async (
   );
 };
 
-const isCapacityHoldingParticipant = (row: RegistrationRow): boolean => {
-  return normalizeRosterRole(row.rosterRole) === 'PARTICIPANT'
-    && CAPACITY_HOLDING_STATUSES.has(normalizeLifecycleStatus(row.status));
+export const isRegistrationCapacityEntry = (
+  row: Pick<
+    RegistrationRow,
+    'rosterRole' | 'status' | 'acceptedAt' | 'registrantType' | 'eventTeamId' | 'sourceTeamRegistrationId'
+  >,
+): boolean => (
+  isAcceptedParticipantRegistration(row)
+  && ACCEPTED_EVENT_REGISTRATION_STATUS_SET.has(normalizeLifecycleStatus(row.status))
+);
+
+type RegistrationCapacityIdentityRow = Pick<
+  RegistrationRow,
+  | 'id'
+  | 'registrantId'
+  | 'parentId'
+  | 'registrantType'
+  | 'rosterRole'
+  | 'status'
+  | 'acceptedAt'
+  | 'eventTeamId'
+  | 'sourceTeamRegistrationId'
+>;
+
+export const registrationUnitIdentityKey = (
+  event: { teamSignup?: unknown },
+  row: Pick<
+    RegistrationCapacityIdentityRow,
+    'registrantId' | 'parentId' | 'registrantType' | 'eventTeamId' | 'sourceTeamRegistrationId'
+  >,
+): string | null => {
+  if (isTeamRosterRegistration(row)) {
+    return null;
+  }
+  const isTeamUnit = row.registrantType === 'TEAM'
+    || Boolean(normalizeId(row.eventTeamId) || normalizeId(row.sourceTeamRegistrationId));
+  if (Boolean(event.teamSignup)) {
+    if (!isTeamUnit) {
+      return null;
+    }
+    const teamId = normalizeIdKey(row.parentId)
+      ?? normalizeIdKey(row.eventTeamId)
+      ?? normalizeIdKey(row.sourceTeamRegistrationId)
+      ?? normalizeIdKey(row.registrantId);
+    return teamId ? `TEAM:${teamId}` : null;
+  }
+  if (isTeamUnit || (row.registrantType !== 'SELF' && row.registrantType !== 'CHILD')) {
+    return null;
+  }
+  const userId = normalizeIdKey(row.registrantId);
+  return userId ? `USER:${userId}` : null;
+};
+
+export const registrationCapacityIdentityKey = (
+  event: { teamSignup?: unknown },
+  row: RegistrationCapacityIdentityRow,
+): string | null => {
+  if (!isRegistrationCapacityEntry(row)) {
+    return null;
+  }
+  return registrationUnitIdentityKey(event, row);
+};
+
+export const dedupeRegistrationCapacityRows = <T extends RegistrationCapacityIdentityRow>(
+  event: { teamSignup?: unknown },
+  rows: T[],
+): T[] => {
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    const identity = registrationCapacityIdentityKey(event, row);
+    if (!identity || seen.has(identity)) {
+      return false;
+    }
+    seen.add(identity);
+    return true;
+  });
 };
 
 const isDisplayableRole = (row: RegistrationRow, role: RegistrationRosterRole): boolean => (
@@ -376,6 +694,7 @@ const registrationSelect = {
   registrantType: true,
   rosterRole: true,
   status: true,
+  acceptedAt: true,
   eventTeamId: true,
   sourceTeamRegistrationId: true,
   ageAtEvent: true,
@@ -392,6 +711,7 @@ const registrationSelect = {
   occurrenceDate: true,
   createdAt: true,
   updatedAt: true,
+  paymentResolutionReason: true,
 } as const;
 
 const participantDivisionSelect = {
@@ -431,6 +751,44 @@ const registerUniqueDivisionReference = (
   }
 };
 
+type EventCapacityDivisionRow = {
+  eventId?: string | null;
+  id: string;
+  key: string | null;
+  kind: string | null;
+  maxParticipants: number | null;
+};
+
+const capacityFromDivisionRows = (
+  event: EventLike,
+  divisionIds: string[] | undefined,
+  divisionRows: EventCapacityDivisionRow[],
+): number | null => {
+  const fallbackCapacity = positiveInt(event.maxParticipants);
+  const scopedDivisionIds = normalizeIdList(divisionIds);
+  const leagueRows = divisionRows.filter(
+    (row) => String(row.kind ?? 'LEAGUE').toUpperCase() !== 'PLAYOFF',
+  );
+  if (!leagueRows.length) {
+    return fallbackCapacity;
+  }
+
+  if (Boolean(event.singleDivision)) {
+    const preferredIds = scopedDivisionIds.map((divisionId) => divisionId.toLowerCase());
+    const preferred = leagueRows.find((row) => {
+      const aliases = resolveDivisionAliases(row.id).concat(resolveDivisionAliases(row.key));
+      return aliases.some((alias) => preferredIds.includes(alias));
+    }) ?? leagueRows[0];
+    return positiveInt(preferred?.maxParticipants);
+  }
+
+  const summedCapacity = leagueRows.reduce(
+    (sum, row) => sum + (positiveInt(row.maxParticipants) ?? 0),
+    0,
+  );
+  return summedCapacity > 0 ? summedCapacity : null;
+};
+
 const eventCapacityForDivisions = async (
   params: {
     event: EventLike;
@@ -465,29 +823,59 @@ const eventCapacityForDivisions = async (
           ],
         },
     select: {
+      eventId: true,
       id: true,
       key: true,
       kind: true,
       maxParticipants: true,
     },
+  }) as EventCapacityDivisionRow[];
+
+  return capacityFromDivisionRows(params.event, params.divisionIds, divisionRows);
+};
+
+const eventCapacitiesForEvents = async (
+  events: EventLike[],
+  client: PrismaLike = prisma,
+): Promise<Map<string, number | null>> => {
+  const eventIds = normalizeIdList(events.map((event) => event.id));
+  if (!eventIds.length) {
+    return new Map();
+  }
+
+  const divisionRows = await client.divisions.findMany({
+    where: {
+      eventId: { in: eventIds },
+      role: 'ENTRY',
+      status: 'ACTIVE',
+      OR: [
+        { kind: 'LEAGUE' as any },
+        { kind: null },
+      ],
+    },
+    select: {
+      eventId: true,
+      id: true,
+      key: true,
+      kind: true,
+      maxParticipants: true,
+    },
+  }) as EventCapacityDivisionRow[];
+  const rowsByEventId = new Map<string, EventCapacityDivisionRow[]>();
+  divisionRows.forEach((row) => {
+    const eventId = normalizeId(row.eventId);
+    if (!eventId) {
+      return;
+    }
+    const rows = rowsByEventId.get(eventId) ?? [];
+    rows.push(row);
+    rowsByEventId.set(eventId, rows);
   });
 
-  const leagueRows = divisionRows.filter((row) => String(row.kind ?? 'LEAGUE').toUpperCase() !== 'PLAYOFF');
-  if (!leagueRows.length) {
-    return fallbackCapacity;
-  }
-
-  if (Boolean(params.event.singleDivision)) {
-    const preferredIds = scopedDivisionIds.map((divisionId) => divisionId.toLowerCase());
-    const preferred = leagueRows.find((row) => {
-      const aliases = resolveDivisionAliases(row.id).concat(resolveDivisionAliases(row.key));
-      return aliases.some((alias) => preferredIds.includes(alias));
-    }) ?? leagueRows[0];
-    return positiveInt(preferred?.maxParticipants);
-  }
-
-  const summedCapacity = leagueRows.reduce((sum, row) => sum + (positiveInt(row.maxParticipants) ?? 0), 0);
-  return summedCapacity > 0 ? summedCapacity : null;
+  return new Map(events.map((event) => [
+    event.id,
+    capacityFromDivisionRows(event, undefined, rowsByEventId.get(event.id) ?? []),
+  ]));
 };
 
 export const buildEventRegistrationId = (params: {
@@ -531,7 +919,7 @@ export const findEventRegistration = async (params: {
   }) as Promise<RegistrationRow | null>;
 };
 
-export const upsertEventRegistration = async (params: {
+export type EventRegistrationWriteParams = {
   eventId: string;
   registrantType: RegistrationRegistrantType;
   registrantId: string;
@@ -552,13 +940,338 @@ export const upsertEventRegistration = async (params: {
   consentDocumentId?: string | null;
   consentStatus?: string | null;
   occurrence?: WeeklyOccurrenceInput | null;
-}, client: PrismaLike = prisma) => {
+};
+
+const isTeamRegistrationUnit = (
+  params: Pick<EventRegistrationWriteParams, 'registrantType' | 'eventTeamId' | 'sourceTeamRegistrationId'>,
+): boolean => (
+  params.registrantType === 'TEAM'
+  || Boolean(normalizeId(params.eventTeamId) || normalizeId(params.sourceTeamRegistrationId))
+);
+
+export const assertEventRegistrationUnit = (
+  event: EventRegistrationStructure,
+  params: Pick<
+    EventRegistrationWriteParams,
+    'registrantType' | 'rosterRole' | 'eventTeamId' | 'sourceTeamRegistrationId'
+  >,
+): void => {
+  if (params.rosterRole !== 'PARTICIPANT') {
+    return;
+  }
+  assertEventTypeRegistrationUnit(event.eventType, event.teamSignup);
+  const normalizedEventType = normalizeEventTypeForRegistration(event.eventType);
+  const requiresTeam = normalizedEventType === 'LEAGUE'
+    || normalizedEventType === 'TOURNAMENT'
+    || Boolean(event.teamSignup);
+  if (requiresTeam !== isTeamRegistrationUnit(params)) {
+    throw new EventRegistrationUnitError(event.eventType, event.teamSignup, requiresTeam);
+  }
+};
+const resolveParticipantEntryDivision = async (
+  params: EventRegistrationWriteParams,
+  event: EventRegistrationStructure,
+  client: PrismaLike,
+): Promise<EventRegistrationWriteParams> => {
+  if (params.rosterRole !== 'PARTICIPANT') {
+    return params;
+  }
+
+  const divisionDelegate = (client as any).divisions;
+  if (typeof divisionDelegate?.findMany !== 'function') {
+    return params;
+  }
+
+  const requestedDivisionId = normalizeId(params.divisionId);
+  const rows = await divisionDelegate.findMany({
+    where: {
+      eventId: params.eventId,
+      role: 'ENTRY',
+      status: 'ACTIVE',
+    },
+    select: {
+      id: true,
+      key: true,
+      divisionTypeId: true,
+    },
+  }) as Array<{
+    id?: unknown;
+    key?: unknown;
+    divisionTypeId?: unknown;
+  }>;
+  const activeRows = Array.isArray(rows) ? rows : [];
+  const requestedAliases = requestedDivisionId
+    ? new Set(resolveDivisionAliases(requestedDivisionId))
+    : null;
+  const matches = requestedAliases
+    ? activeRows.filter((row) => {
+      const aliases = resolveDivisionAliases(normalizeId(row.id))
+        .concat(resolveDivisionAliases(normalizeId(row.key)));
+      return aliases.some((alias) => requestedAliases.has(alias));
+    })
+    : activeRows;
+
+  if (activeRows.length > 0) {
+    if (matches.length !== 1) {
+      throw new EventRegistrationDivisionError(requestedDivisionId, matches.length);
+    }
+    const matchedDivision = matches[0];
+    const resolvedDivisionId = normalizeId(matchedDivision?.id);
+    if (!resolvedDivisionId) {
+      throw new EventRegistrationDivisionError(requestedDivisionId, 0);
+    }
+    const resolvedDivisionTypeId = normalizeId(matchedDivision?.divisionTypeId);
+    const resolvedDivisionTypeKey = normalizeId(matchedDivision?.key);
+    return {
+      ...params,
+      divisionId: resolvedDivisionId,
+      ...(resolvedDivisionTypeId
+        ? { divisionTypeId: resolvedDivisionTypeId }
+        : {}),
+      ...(resolvedDivisionTypeKey
+        ? { divisionTypeKey: resolvedDivisionTypeKey }
+        : {}),
+    };
+  }
+
+  const legacyDivisionIds = normalizeIdList(event.divisionIds);
+  const legacyCandidates = requestedAliases
+    ? legacyDivisionIds.filter((divisionId) => (
+      resolveDivisionAliases(divisionId).some((alias) => requestedAliases.has(alias))
+    ))
+    : legacyDivisionIds;
+  const canonicalCandidates = Array.from(new Set(
+    legacyCandidates
+      .map((divisionId) => extractDivisionTokenFromId(divisionId) ?? divisionId)
+      .filter((divisionId): divisionId is string => Boolean(divisionId)),
+  ));
+  if (!canonicalCandidates.length && (
+    !requestedAliases
+    || requestedAliases.has('open')
+  )) {
+    canonicalCandidates.push('open');
+  }
+  if (canonicalCandidates.length !== 1) {
+    throw new EventRegistrationDivisionError(requestedDivisionId, canonicalCandidates.length);
+  }
+
+  const divisionTypeKey = canonicalCandidates[0];
+  const resolvedDivisionId = buildEventDivisionId(params.eventId, divisionTypeKey);
+  if (typeof divisionDelegate.upsert === 'function') {
+    await divisionDelegate.upsert({
+      where: { id: resolvedDivisionId },
+      create: {
+        id: resolvedDivisionId,
+        eventId: params.eventId,
+        key: divisionTypeKey,
+        name: divisionTypeKey,
+        role: 'ENTRY',
+        phase: null,
+        kind: 'LEAGUE',
+        isSystemGenerated: true,
+        status: 'ACTIVE',
+      },
+      update: {
+        eventId: params.eventId,
+        key: divisionTypeKey,
+        role: 'ENTRY',
+        status: 'ACTIVE',
+      },
+    });
+  }
+
+  return {
+    ...params,
+    divisionId: resolvedDivisionId,
+    divisionTypeKey: params.divisionTypeKey ?? divisionTypeKey,
+  };
+};
+
+const assertRegistrationCapacity = async (
+  event: EventRegistrationStructure,
+  params: EventRegistrationWriteParams,
+  registrationId: string,
+  acceptedAt: Date,
+  client: PrismaLike,
+): Promise<void> => {
+  if (
+    params.rosterRole !== 'PARTICIPANT'
+    || !ACCEPTED_EVENT_REGISTRATION_STATUS_SET.has(normalizeLifecycleStatus(params.status))
+  ) {
+    return;
+  }
+
+  const registrationDelegate = (client as any).eventRegistrations;
+  if (typeof registrationDelegate?.findMany !== 'function') {
+    return;
+  }
+  const divisionDelegate = (client as any).divisions;
+  const selectedDivisionInput = normalizeId(params.divisionId);
+  let targetDivisionAliases: Set<string> | null = selectedDivisionInput
+    ? new Set(resolveDivisionAliases(selectedDivisionInput))
+    : null;
+  let capacity = positiveInt(event.maxParticipants);
+  if (typeof divisionDelegate?.findMany === 'function') {
+    if (selectedDivisionInput) {
+      const divisionRows = await divisionDelegate.findMany({
+        where: {
+          eventId: params.eventId,
+          role: 'ENTRY',
+          status: 'ACTIVE',
+        },
+        select: {
+          id: true,
+          key: true,
+          kind: true,
+          maxParticipants: true,
+        },
+      });
+      const selectedDivision = (Array.isArray(divisionRows) ? divisionRows : []).find((row) => {
+        if (String(row.kind ?? '').trim().toUpperCase() === 'PLAYOFF') {
+          return false;
+        }
+        const aliases = resolveDivisionAliases(row.id)
+          .concat(resolveDivisionAliases(row.key));
+        return aliases.some((alias) => targetDivisionAliases?.has(alias));
+      });
+      if (selectedDivision) {
+        targetDivisionAliases = new Set([
+          ...(targetDivisionAliases ?? []),
+          ...resolveDivisionAliases(selectedDivision.id),
+          ...resolveDivisionAliases(selectedDivision.key),
+        ]);
+        capacity = positiveInt(selectedDivision.maxParticipants) ?? capacity;
+      }
+    } else {
+      capacity = await eventCapacityForDivisions({ event }, client);
+    }
+  }
+  if (capacity === null) {
+    return;
+  }
+
+  const rows = await registrationDelegate.findMany({
+    where: {
+      eventId: params.eventId,
+      rosterRole: 'PARTICIPANT',
+      status: { in: [...ACCEPTED_EVENT_REGISTRATION_STATUSES] },
+    },
+    select: {
+      id: true,
+      rosterRole: true,
+      status: true,
+      acceptedAt: true,
+      registrantId: true,
+      parentId: true,
+      registrantType: true,
+      eventTeamId: true,
+      sourceTeamRegistrationId: true,
+      slotId: true,
+      occurrenceDate: true,
+      divisionId: true,
+    },
+  });
+
+  const targetSlotId = normalizeId(params.occurrence?.slotId);
+  const targetOccurrenceDate = normalizeId(params.occurrence?.occurrenceDate);
+  const isTargetOccurrence = (row: {
+    slotId?: unknown;
+    occurrenceDate?: unknown;
+    divisionId?: unknown;
+  }): boolean => {
+    if (
+      normalizeId(row.slotId) !== targetSlotId
+      || normalizeId(row.occurrenceDate) !== targetOccurrenceDate
+    ) {
+      return false;
+    }
+    if (!targetDivisionAliases) {
+      return true;
+    }
+    return resolveDivisionAliases(normalizeId(row.divisionId))
+      .some((alias) => targetDivisionAliases?.has(alias));
+  };
+  const allRows = Array.isArray(rows) ? rows : [];
+  const targetRows = allRows.filter(isTargetOccurrence);
+  const candidate: RegistrationCapacityIdentityRow = {
+    id: registrationId,
+    registrantId: params.registrantId,
+    parentId: normalizeId(params.parentId),
+    rosterRole: params.rosterRole,
+    status: params.status,
+    acceptedAt,
+    registrantType: params.registrantType,
+    eventTeamId: normalizeId(params.eventTeamId),
+    sourceTeamRegistrationId: normalizeId(params.sourceTeamRegistrationId),
+  };
+  const projectedRows = targetRows
+    .filter((row) => row.id !== registrationId)
+    .concat(candidate);
+  const projectedParticipantCount = dedupeRegistrationCapacityRows(
+    event,
+    projectedRows,
+  ).length;
+  if (projectedParticipantCount > capacity) {
+    throw new EventRegistrationCapacityError(capacity, projectedParticipantCount);
+  }
+};
+const resolveLockedWeeklyOccurrence = async (
+  params: Pick<EventRegistrationWriteParams, 'occurrence'>,
+  event: EventRegistrationStructure,
+  client: PrismaLike,
+  allowArchivedEvent = false,
+): Promise<WeeklyOccurrenceInput | null> => {
   const occurrence = params.occurrence
     ? {
       slotId: normalizeId(params.occurrence.slotId),
       occurrenceDate: normalizeId(params.occurrence.occurrenceDate),
     }
     : null;
+  if (!isWeeklyParentEvent(event)) {
+    return occurrence;
+  }
+  if (!occurrence) {
+    throw new EventRegistrationOccurrenceChangedError(
+      'A weekly registration must include a selected occurrence.',
+    );
+  }
+  if (
+    !(event.start instanceof Date) ||
+    Number.isNaN(event.start.getTime()) ||
+    !(event.end === null || event.end === undefined || event.end instanceof Date) ||
+    !Array.isArray(event.timeSlotIds)
+  ) {
+    throw new EventRegistrationOccurrenceChangedError();
+  }
+  const resolved = await resolveWeeklyOccurrence({
+    event: {
+      id: event.id,
+      start: event.start,
+      end: event.end ?? null,
+      eventType: event.eventType,
+      parentEvent: event.parentEvent ?? null,
+      timeSlotIds: event.timeSlotIds,
+      archivedAt: event.archivedAt ?? null,
+    },
+    occurrence,
+    allowArchivedEvent,
+  }, client);
+  if (!resolved.ok) {
+    throw new EventRegistrationOccurrenceChangedError(resolved.error);
+  }
+  return {
+    slotId: resolved.value.slotId,
+    occurrenceDate: resolved.value.occurrenceDate,
+  };
+};
+
+
+const upsertEventRegistrationWithinTransaction = async (
+  params: EventRegistrationWriteParams,
+  client: PrismaLike,
+): Promise<RegistrationRow> => {
+  const event = await acquireEventLockAndLoadStructure(client, params.eventId);
+  const occurrence = await resolveLockedWeeklyOccurrence(params, event, client);
   const registrationId = normalizeId(params.registrationId) ?? buildEventRegistrationId({
     eventId: params.eventId,
     registrantType: params.registrantType,
@@ -566,70 +1279,285 @@ export const upsertEventRegistration = async (params: {
     slotId: occurrence?.slotId ?? null,
     occurrenceDate: occurrence?.occurrenceDate ?? null,
   });
+  const resolvedParams = await resolveParticipantEntryDivision(
+    { ...params, occurrence },
+    event,
+    client,
+  );
+  assertEventRegistrationUnit(event, resolvedParams);
   const now = new Date();
+  const acceptedRegistration =
+    resolvedParams.rosterRole === 'PARTICIPANT'
+    && ACCEPTED_EVENT_REGISTRATION_STATUS_SET.has(
+      normalizeLifecycleStatus(resolvedParams.status),
+    );
+  await assertRegistrationCapacity(event, resolvedParams, registrationId, now, client);
 
   return client.eventRegistrations.upsert({
     where: { id: registrationId },
     create: {
       id: registrationId,
-      eventId: params.eventId,
-      registrantId: params.registrantId,
-      parentId: normalizeId(params.parentId),
-      registrantType: params.registrantType,
-      rosterRole: params.rosterRole,
-      status: params.status,
-      eventTeamId: normalizeId(params.eventTeamId),
-      sourceTeamRegistrationId: normalizeId(params.sourceTeamRegistrationId),
+      eventId: resolvedParams.eventId,
+      registrantId: resolvedParams.registrantId,
+      parentId: normalizeId(resolvedParams.parentId),
+      registrantType: resolvedParams.registrantType,
+      rosterRole: resolvedParams.rosterRole,
+      status: resolvedParams.status,
+      acceptedAt: acceptedRegistration ? now : null,
+      eventTeamId: normalizeId(resolvedParams.eventTeamId),
+      sourceTeamRegistrationId: normalizeId(resolvedParams.sourceTeamRegistrationId),
       slotId: occurrence?.slotId ?? null,
       occurrenceDate: occurrence?.occurrenceDate ?? null,
-      ageAtEvent: params.ageAtEvent ?? null,
-      divisionId: normalizeId(params.divisionId),
-      divisionTypeId: normalizeId(params.divisionTypeId),
-      divisionTypeKey: normalizeId(params.divisionTypeKey),
-      jerseyNumber: normalizeId(params.jerseyNumber),
-      position: normalizeId(params.position),
-      isCaptain: params.isCaptain ?? false,
-      consentDocumentId: normalizeId(params.consentDocumentId),
-      consentStatus: normalizeId(params.consentStatus),
-      createdBy: params.createdBy,
+      ageAtEvent: resolvedParams.ageAtEvent ?? null,
+      divisionId: normalizeId(resolvedParams.divisionId),
+      divisionTypeId: normalizeId(resolvedParams.divisionTypeId),
+      divisionTypeKey: normalizeId(resolvedParams.divisionTypeKey),
+      jerseyNumber: normalizeId(resolvedParams.jerseyNumber),
+      position: normalizeId(resolvedParams.position),
+      isCaptain: resolvedParams.isCaptain ?? false,
+      consentDocumentId: normalizeId(resolvedParams.consentDocumentId),
+      consentStatus: normalizeId(resolvedParams.consentStatus),
+      createdBy: resolvedParams.createdBy,
       createdAt: now,
       updatedAt: now,
     },
     update: {
-      parentId: normalizeId(params.parentId),
-      rosterRole: params.rosterRole,
-      status: params.status,
-      eventTeamId: normalizeId(params.eventTeamId),
-      sourceTeamRegistrationId: normalizeId(params.sourceTeamRegistrationId),
+      parentId: normalizeId(resolvedParams.parentId),
+      rosterRole: resolvedParams.rosterRole,
+      status: resolvedParams.status,
+      ...(acceptedRegistration ? { acceptedAt: now } : {}),
+      eventTeamId: normalizeId(resolvedParams.eventTeamId),
+      sourceTeamRegistrationId: normalizeId(resolvedParams.sourceTeamRegistrationId),
       slotId: occurrence?.slotId ?? null,
       occurrenceDate: occurrence?.occurrenceDate ?? null,
-      ageAtEvent: params.ageAtEvent ?? null,
-      divisionId: normalizeId(params.divisionId),
-      divisionTypeId: normalizeId(params.divisionTypeId),
-      divisionTypeKey: normalizeId(params.divisionTypeKey),
-      jerseyNumber: normalizeId(params.jerseyNumber),
-      position: normalizeId(params.position),
-      isCaptain: params.isCaptain ?? false,
-      consentDocumentId: normalizeId(params.consentDocumentId),
-      consentStatus: normalizeId(params.consentStatus),
+      ageAtEvent: resolvedParams.ageAtEvent ?? null,
+      divisionId: normalizeId(resolvedParams.divisionId),
+      divisionTypeId: normalizeId(resolvedParams.divisionTypeId),
+      divisionTypeKey: normalizeId(resolvedParams.divisionTypeKey),
+      jerseyNumber: normalizeId(resolvedParams.jerseyNumber),
+      position: normalizeId(resolvedParams.position),
+      isCaptain: resolvedParams.isCaptain ?? false,
+      consentDocumentId: normalizeId(resolvedParams.consentDocumentId),
+      consentStatus: normalizeId(resolvedParams.consentStatus),
       updatedAt: now,
     },
     select: registrationSelect,
   }) as Promise<RegistrationRow>;
 };
 
-export const deleteEventRegistration = async (params: {
+export const upsertEventRegistration = async (
+  params: EventRegistrationWriteParams,
+  client: PrismaLike = prisma,
+): Promise<RegistrationRow> => {
+  const transaction = (client as any).$transaction;
+  if (typeof transaction === 'function') {
+    return transaction.call(client, (tx: PrismaLike) => (
+      upsertEventRegistrationWithinTransaction(params, tx)
+    ));
+  }
+  return upsertEventRegistrationWithinTransaction(params, client);
+};
+export type EventRegistrationStatusTransition = {
+  registrationId: string;
+  eventId?: string;
+  status: RegistrationLifecycleStatus;
+  consentDocumentId?: string | null;
+  consentStatus?: string | null;
+  current?: RegistrationRow;
+  fallbackCurrent?: RegistrationRow;
+  event?: EventRegistrationStructure;
+  allowArchivedWeeklyReservation?: boolean;
+  create?: Omit<EventRegistrationWriteParams, 'registrationId' | 'status'>;
+};
+
+const transitionEventRegistrationStatusWithinTransaction = async (
+  params: EventRegistrationStatusTransition,
+  client: PrismaLike,
+): Promise<RegistrationRow> => {
+  const findUnique = client.eventRegistrations.findUnique;
+  const loadedCurrent = typeof findUnique === 'function'
+    ? await findUnique.call(client.eventRegistrations, {
+      where: { id: params.registrationId },
+      select: registrationSelect,
+    }) as RegistrationRow | null
+    : null;
+  const current = params.current ?? (
+    loadedCurrent
+    && loadedCurrent.eventId
+    && loadedCurrent.registrantId
+    && loadedCurrent.registrantType
+      ? loadedCurrent
+      : params.fallbackCurrent ?? null
+  );
+  if (!current && !params.create) {
+    throw new Error('Event registration not found.');
+  }
+  const eventId = params.eventId ?? current?.eventId ?? params.create?.eventId;
+  if (!eventId) {
+    throw new Error('Event registration event is required.');
+  }
+  const baseWriteParams: EventRegistrationWriteParams = current
+    ? {
+      eventId,
+      registrationId: current.id,
+      registrantType: current.registrantType,
+      registrantId: current.registrantId,
+      parentId: current.parentId,
+      rosterRole: current.rosterRole ?? 'PARTICIPANT',
+      status: params.status,
+      eventTeamId: current.eventTeamId,
+      sourceTeamRegistrationId: current.sourceTeamRegistrationId,
+      ageAtEvent: current.ageAtEvent,
+      divisionId: current.divisionId,
+      divisionTypeId: current.divisionTypeId,
+      divisionTypeKey: current.divisionTypeKey,
+      jerseyNumber: current.jerseyNumber,
+      position: current.position,
+      isCaptain: current.isCaptain,
+      consentDocumentId: current.consentDocumentId,
+      consentStatus: current.consentStatus,
+      createdBy: current.createdBy,
+      occurrence: current.slotId && current.occurrenceDate
+        ? { slotId: current.slotId, occurrenceDate: current.occurrenceDate }
+        : null,
+    }
+    : {
+      ...params.create!,
+      registrationId: params.registrationId,
+      status: params.status,
+    };
+  const allowArchivedWeeklyReservation = params.allowArchivedWeeklyReservation === true;
+  const event = typeof (client as any).events?.findUnique === 'function'
+    ? await acquireEventLockAndLoadStructure(
+      client,
+      eventId,
+      undefined,
+      { allowArchivedWeeklyReservation },
+    )
+    : params.event ?? await acquireEventLockAndLoadStructure(
+      client,
+      eventId,
+      undefined,
+      { allowArchivedWeeklyReservation },
+    );
+  const lockedOccurrence = await resolveLockedWeeklyOccurrence(
+    baseWriteParams,
+    event,
+    client,
+    allowArchivedWeeklyReservation,
+  );
+  const writeParams = await resolveParticipantEntryDivision(
+    { ...baseWriteParams, occurrence: lockedOccurrence },
+    event,
+    client,
+  );
+  assertEventRegistrationUnit(event, writeParams);
+  const now = new Date();
+  const acceptedRegistration = (
+    writeParams.rosterRole === 'PARTICIPANT'
+    && ACCEPTED_EVENT_REGISTRATION_STATUS_SET.has(normalizeLifecycleStatus(writeParams.status))
+  );
+  await assertRegistrationCapacity(event, writeParams, params.registrationId, now, client);
+  if (current) {
+    return client.eventRegistrations.update({
+      where: { id: current.id },
+      data: {
+        status: params.status,
+        divisionId: normalizeId(writeParams.divisionId),
+        ...(acceptedRegistration ? { acceptedAt: now } : {}),
+        ...(params.consentDocumentId !== undefined
+          ? { consentDocumentId: normalizeId(params.consentDocumentId) }
+          : {}),
+        ...(params.consentStatus !== undefined
+          ? { consentStatus: normalizeId(params.consentStatus) }
+          : {}),
+        updatedAt: now,
+      },
+      select: registrationSelect,
+    }) as Promise<RegistrationRow>;
+  }
+  return client.eventRegistrations.create({
+    data: {
+      id: params.registrationId,
+      eventId: writeParams.eventId,
+      registrantId: writeParams.registrantId,
+      parentId: normalizeId(writeParams.parentId),
+      registrantType: writeParams.registrantType,
+      rosterRole: writeParams.rosterRole,
+      status: writeParams.status,
+      acceptedAt: acceptedRegistration ? now : null,
+      eventTeamId: normalizeId(writeParams.eventTeamId),
+      sourceTeamRegistrationId: normalizeId(writeParams.sourceTeamRegistrationId),
+      slotId: writeParams.occurrence?.slotId ?? null,
+      occurrenceDate: writeParams.occurrence?.occurrenceDate ?? null,
+      ageAtEvent: writeParams.ageAtEvent ?? null,
+      divisionId: normalizeId(writeParams.divisionId),
+      divisionTypeId: normalizeId(writeParams.divisionTypeId),
+      divisionTypeKey: normalizeId(writeParams.divisionTypeKey),
+      jerseyNumber: normalizeId(writeParams.jerseyNumber),
+      position: normalizeId(writeParams.position),
+      isCaptain: writeParams.isCaptain ?? false,
+      consentDocumentId: normalizeId(
+        params.consentDocumentId !== undefined
+          ? params.consentDocumentId
+          : writeParams.consentDocumentId,
+      ),
+      consentStatus: normalizeId(
+        params.consentStatus !== undefined
+          ? params.consentStatus
+          : writeParams.consentStatus,
+      ),
+      createdBy: writeParams.createdBy,
+      createdAt: now,
+      updatedAt: now,
+    },
+    select: registrationSelect,
+  }) as Promise<RegistrationRow>;
+};
+
+export const transitionEventRegistrationStatus = async (
+  params: EventRegistrationStatusTransition,
+  client: PrismaLike = prisma,
+): Promise<RegistrationRow> => {
+  const transaction = (client as any).$transaction;
+  if (typeof transaction === 'function') {
+    return transaction.call(client, (tx: PrismaLike) => (
+      transitionEventRegistrationStatusWithinTransaction(params, tx)
+    ));
+  }
+  return transitionEventRegistrationStatusWithinTransaction(params, client);
+};
+
+type EventRegistrationDeleteParams = {
   eventId: string;
   registrantType: RegistrationRegistrantType;
   registrantId: string;
   occurrence?: WeeklyOccurrenceInput | null;
-}, client: PrismaLike = prisma) => {
+  allowArchivedWeeklyReservation?: boolean;
+};
+
+const deleteEventRegistrationWithinTransaction = async (
+  params: EventRegistrationDeleteParams,
+  client: PrismaLike,
+): Promise<void> => {
+  const event = await acquireEventLockAndLoadStructure(
+    client,
+    params.eventId,
+    undefined,
+    { allowArchivedWeeklyReservation: params.allowArchivedWeeklyReservation === true },
+  );
+  const occurrence = await resolveLockedWeeklyOccurrence(
+    { occurrence: params.occurrence },
+    event,
+    client,
+    params.allowArchivedWeeklyReservation === true,
+  );
   const registrationId = buildEventRegistrationId({
     eventId: params.eventId,
     registrantType: params.registrantType,
     registrantId: params.registrantId,
-    slotId: params.occurrence?.slotId ?? null,
-    occurrenceDate: params.occurrence?.occurrenceDate ?? null,
+    slotId: occurrence?.slotId ?? null,
+    occurrenceDate: occurrence?.occurrenceDate ?? null,
   });
   await client.eventRegistrations.updateMany({
     where: { id: registrationId },
@@ -638,6 +1566,20 @@ export const deleteEventRegistration = async (params: {
       updatedAt: new Date(),
     },
   });
+};
+
+export const deleteEventRegistration = async (
+  params: EventRegistrationDeleteParams,
+  client: PrismaLike = prisma,
+): Promise<void> => {
+  const transaction = (client as any).$transaction;
+  if (typeof transaction === 'function') {
+    await transaction.call(client, (tx: PrismaLike) => (
+      deleteEventRegistrationWithinTransaction(params, tx)
+    ));
+    return;
+  }
+  await deleteEventRegistrationWithinTransaction(params, client);
 };
 
 export const syncDivisionTeamMembershipFromRegistrations = async (
@@ -805,7 +1747,7 @@ export const syncDivisionTeamMembershipFromRegistrations = async (
 };
 
 export const buildEventParticipantSnapshot = async (params: {
-  event: EventLike;
+  event: EventSnapshotLike;
   occurrence?: WeeklyOccurrenceInput | null;
   includeRegistrations?: boolean;
 }, client: PrismaLike = prisma): Promise<EventParticipantSnapshot> => {
@@ -998,9 +1940,10 @@ export const buildEventParticipantSnapshot = async (params: {
   );
   const waitlistEntries = registrations.filter((row) => isDisplayableRole(row, 'WAITLIST'));
   const freeAgentEntries = registrations.filter((row) => isDisplayableRole(row, 'FREE_AGENT'));
-  const participantCount = Boolean(params.event.teamSignup)
-    ? participantEntries.filter((row) => row.registrantType === 'TEAM').length
-    : participantEntries.filter((row) => row.registrantType === 'SELF' || row.registrantType === 'CHILD').length;
+  const participantCount = dedupeRegistrationCapacityRows(
+    params.event,
+    participantEntries,
+  ).length;
 
   const participantCapacity = await eventCapacityForDivisions({
     event: params.event,
@@ -1222,7 +2165,10 @@ export const buildEventParticipantSnapshot = async (params: {
   };
 };
 
-export const reserveCapacityRows = (rows: RegistrationRow[]): number => rows.filter(isCapacityHoldingParticipant).length;
+export const reserveCapacityRows = (
+  event: Pick<EventLike, 'teamSignup'>,
+  rows: RegistrationRow[],
+): number => dedupeRegistrationCapacityRows(event, rows).length;
 
 export const getEventParticipantIds = async (
   eventIds: string[],
@@ -1251,8 +2197,11 @@ export const getEventParticipantIds = async (
       eventId: true,
       registrantId: true,
       eventTeamId: true,
+      sourceTeamRegistrationId: true,
       registrantType: true,
       rosterRole: true,
+      status: true,
+      acceptedAt: true,
       createdAt: true,
       id: true,
     },
@@ -1273,9 +2222,7 @@ export const getEventParticipantIds = async (
   rows.forEach((row) => {
     const eventId = normalizeId(row.eventId);
     const registrantId = normalizeId(row.registrantId);
-    if (!eventId || !registrantId) {
-      return;
-    }
+    const role = normalizeRosterRole(row.rosterRole);
     if (
       row.registrantType === 'TEAM'
       && (
@@ -1285,8 +2232,10 @@ export const getEventParticipantIds = async (
     ) {
       return;
     }
+    if (!eventId || !registrantId) {
+      return;
+    }
     const ids = response.get(eventId) ?? emptyParticipantIds();
-    const role = normalizeRosterRole(row.rosterRole);
     if (role === 'PARTICIPANT') {
       if (row.registrantType === 'TEAM') {
         pushUnique(ids.teamIds, registrantId);
@@ -1351,11 +2300,16 @@ export const getEventParticipantAggregates = async (
       status: { in: Array.from(DISPLAY_MEMBER_STATUSES) },
     },
     select: {
+      id: true,
       eventId: true,
       registrantId: true,
+      parentId: true,
       eventTeamId: true,
+      sourceTeamRegistrationId: true,
       registrantType: true,
       rosterRole: true,
+      status: true,
+      acceptedAt: true,
       slotId: true,
       occurrenceDate: true,
     },
@@ -1369,23 +2323,13 @@ export const getEventParticipantAggregates = async (
     client,
   );
 
+  const seenCapacityIdentities = new Map<string, Set<string>>();
   registrations.forEach((row) => {
-    if (normalizeRosterRole(row.rosterRole) !== 'PARTICIPANT') {
-      return;
-    }
     if (normalizeId(row.slotId) || normalizeId(row.occurrenceDate)) {
       return;
     }
     const event = eventMap.get(row.eventId);
     if (!event || isWeeklyParentEvent(event)) {
-      return;
-    }
-
-    const aggregate = response.get(row.eventId) ?? { participantCount: 0, participantCapacity: null };
-    const shouldCount = Boolean(event.teamSignup)
-      ? row.registrantType === 'TEAM'
-      : row.registrantType === 'SELF' || row.registrantType === 'CHILD';
-    if (!shouldCount) {
       return;
     }
     if (
@@ -1398,21 +2342,27 @@ export const getEventParticipantAggregates = async (
     ) {
       return;
     }
+    const identity = registrationCapacityIdentityKey(event, row);
+    if (!identity) {
+      return;
+    }
+    const eventIdentities = seenCapacityIdentities.get(row.eventId) ?? new Set<string>();
+    if (eventIdentities.has(identity)) {
+      return;
+    }
+    eventIdentities.add(identity);
+    seenCapacityIdentities.set(row.eventId, eventIdentities);
+    const aggregate = response.get(row.eventId) ?? { participantCount: 0, participantCapacity: null };
     aggregate.participantCount = (aggregate.participantCount ?? 0) + 1;
     response.set(row.eventId, aggregate);
   });
 
-  const capacities = await Promise.all(
-    nonWeeklyIds.map(async (eventId) => {
-      const event = eventMap.get(eventId)!;
-      return {
-        eventId,
-        capacity: await eventCapacityForDivisions({ event }, client),
-      };
-    }),
+  const capacities = await eventCapacitiesForEvents(
+    nonWeeklyIds.map((eventId) => eventMap.get(eventId)!),
+    client,
   );
 
-  capacities.forEach(({ eventId, capacity }) => {
+  capacities.forEach((capacity, eventId) => {
     const current = response.get(eventId) ?? { participantCount: 0, participantCapacity: null };
     current.participantCapacity = capacity;
     response.set(eventId, current);

@@ -1279,6 +1279,44 @@ class MatchRepositoryHttpTest {
     }
 
     @Test
+    fun given_confirmed_protected_deletion_when_submitted_then_existing_site_confirmation_field_is_sent() = runTest {
+        var capturedBody = ""
+        val engine = MockEngine { request ->
+            assertEquals(HttpMethod.Patch, request.method)
+            assertEquals("/api/events/event_1/matches", request.url.encodedPath)
+            capturedBody = (request.body as OutgoingContent.ByteArrayContent).bytes().decodeToString()
+            respond(
+                content = """{"matches":[],"created":{},"deleted":["protected_match"]}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        try {
+            val matchDao = MatchRepositoryHttp_FakeMatchDao(
+                listOf(MatchMVP(id = "protected_match", matchId = 1, eventId = "event_1")),
+            )
+            val repository = MatchRepository(
+                api = MvpApiClient(http, "http://example.test", MatchRepositoryHttp_InMemoryAuthTokenStore()),
+                databaseService = MatchRepositoryHttp_FakeDatabaseService(matchDao),
+                autoSyncOperations = false,
+            )
+            val result = repository.updateMatchesBulk(
+                matches = emptyList(),
+                deletes = listOf("protected_match"),
+                confirmation = "DELETE_PROTECTED_MATCH_HISTORY",
+            )
+            assertTrue(result.isSuccess)
+            val body = jsonMVP.parseToJsonElement(capturedBody).jsonObject
+            assertEquals(JsonPrimitive("DELETE_PROTECTED_MATCH_HISTORY"), body["confirmation"])
+            assertEquals(JsonArray(listOf(JsonPrimitive("protected_match"))), body["deletes"])
+            assertEquals(null, matchDao.getMatchById("protected_match"))
+        } finally {
+            http.close()
+        }
+    }
+
+    @Test
     fun updateMatchesBulkPersistsUnconfirmedZeroScoreAndClearsFinalization() = runTest {
         var capturedBody = ""
         val engine = MockEngine { request ->

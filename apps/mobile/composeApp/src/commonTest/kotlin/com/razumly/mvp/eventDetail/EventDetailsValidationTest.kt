@@ -54,6 +54,65 @@ class EventDetailsValidationTest {
         assertFalse(result.isLeagueSlotsValid)
         assertTrue("Add at least one weekly repeating timeslot." in result.validationErrors)
     }
+    @Test
+    fun new_source_backed_tryout_does_not_require_local_divisions_or_capacities() {
+        val event = Event(
+            name = "Summer tryout",
+            eventType = EventType.TRYOUT,
+            teamSignup = false,
+            singleDivision = false,
+            sportIds = listOf("sport-1"),
+            start = kotlinx.datetime.Instant.parse("2026-06-15T17:00:00Z"),
+            end = kotlinx.datetime.Instant.parse("2026-06-15T19:00:00Z"),
+            location = "Main Courts",
+            coordinates = listOf(-122.0, 37.0),
+            imageId = "image-1",
+        )
+
+        val result = computeEventValidationResult(
+            editEvent = event,
+            isNewEvent = true,
+            fieldCount = 0,
+            leagueTimeSlots = emptyList(),
+            leagueSlotErrors = emptyMap(),
+            slotEditorEnabled = false,
+            divisionDetailsForSettings = emptyList(),
+            isColorLoaded = true,
+            scheduleTimeLocked = false,
+        )
+
+        assertTrue(result.isMaxParticipantsValid)
+        assertTrue(result.isSkillLevelValid)
+        assertTrue(result.isValid)
+    }
+
+    @Test
+    fun given_unscheduled_league_when_event_is_validated_then_resources_and_timeslots_are_optional() {
+        val event = baseLeagueEvent(maxParticipants = 2).copy(
+            sportIds = listOf("sport-1"),
+            isAutomatedScheduling = false,
+            noFixedEndDateTime = false,
+            start = kotlinx.datetime.Instant.parse("2026-04-13T12:00:00Z"),
+            end = kotlinx.datetime.Instant.parse("2026-04-13T15:00:00Z"),
+        )
+
+        val result = computeEventValidationResult(
+            editEvent = event,
+            isNewEvent = true,
+            fieldCount = 0,
+            leagueTimeSlots = emptyList(),
+            leagueSlotErrors = emptyMap(),
+            slotEditorEnabled = false,
+            divisionDetailsForSettings = emptyList(),
+            isColorLoaded = true,
+            scheduleTimeLocked = false,
+            requiresPositiveRegistrationPrice = false,
+        )
+
+        assertTrue(result.isFieldCountValid)
+        assertTrue(result.isLeagueSlotsValid)
+        assertTrue(result.isValid)
+    }
 
     @Test
     fun online_event_edits_require_a_confirmed_price_quote_when_registration_is_paid() {
@@ -418,7 +477,7 @@ class EventDetailsValidationTest {
     }
 
     @Test
-    fun given_divisions_with_different_identities_and_the_same_name_then_validation_fails() {
+    fun given_divisions_with_different_identities_when_names_match_then_validation_fails() {
         val first = DivisionDetail(
             id = "event-1__division__open",
             name = "Open",
@@ -456,7 +515,7 @@ class EventDetailsValidationTest {
     }
 
     @Test
-    fun given_a_generated_phase_with_its_source_name_then_name_validation_succeeds() {
+    fun given_generated_phase_with_source_name_when_validating_names_then_validation_succeeds() {
         val source = DivisionDetail(
             id = "event-1__division__open",
             name = "Open",

@@ -396,6 +396,7 @@ export const ModelName = {
   MatchIncidents: 'MatchIncidents',
   MatchOperationReceipts: 'MatchOperationReceipts',
   EventEditorCreateOperations: 'EventEditorCreateOperations',
+  EventEditorMaintenanceOperations: 'EventEditorMaintenanceOperations',
   Divisions: 'Divisions',
   EventDivisionPhaseSources: 'EventDivisionPhaseSources',
   EventDivisionPhaseParticipants: 'EventDivisionPhaseParticipants',
@@ -535,7 +536,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "appReleases" | "fields" | "facilities" | "matches" | "matchSegments" | "broadcastOverlays" | "broadcastOverlayStates" | "broadcastOverlayActions" | "broadcastOverlayAccessTokens" | "matchIncidents" | "matchOperationReceipts" | "eventEditorCreateOperations" | "divisions" | "eventDivisionPhaseSources" | "eventDivisionPhaseParticipants" | "userData" | "userNotifications" | "sensitiveUserData" | "authMfaChallenges" | "invites" | "teamInviteEventSyncs" | "staffMembers" | "organizationRoles" | "organizationRolePermissions" | "organizationRoleCompensationRates" | "staffCompensationRates" | "eventStaffAssignments" | "staffScheduleAssignments" | "teamStaffLaborEntries" | "financialLineItems" | "staffPayRun" | "staffPayRunItem" | "eventOfficials" | "teamCheckIns" | "matchRosterEntries" | "teams" | "canonicalTeams" | "teamRegistrations" | "registrationQuestions" | "registrationQuestionResponses" | "teamJoinRequests" | "teamStaffAssignments" | "eventTeamStaffAssignments" | "messages" | "chatGroup" | "moderationReport" | "aiConversationPointer" | "aiPendingConfirmation" | "pushDeviceTarget" | "lockFiles" | "paymentIntents" | "bills" | "billPayments" | "billPaymentProofs" | "rentalBookings" | "rentalBookingItems" | "affiliateScrapeSources" | "affiliateScrapeMappings" | "affiliateScrapeRuns" | "affiliateSourceIntakes" | "affiliateSourceIntakePages" | "affiliateSourceIntakeRuns" | "affiliateSourceIntakeArtifacts" | "affiliateSourceDiscoveryCampaigns" | "affiliateAgentGatewayJobs" | "affiliateAgentGatewayClaims" | "affiliateAgentGatewayArtifacts" | "affiliateAgentGatewayOperationReceipts" | "affiliateAgentGatewayEvents" | "affiliateOperationalAlerts" | "affiliateOperationalAlertDeliveries" | "affiliateCoverageAgentJobs" | "affiliateCoverageCities" | "affiliateCoverageCells" | "affiliateCoverageCellAssessments" | "affiliateSourceDiscoveryQueryExecutions" | "affiliateSourceDiscoveryRuns" | "affiliateSourceDiscoveryResults" | "affiliateSourceDomainPolicies" | "affiliateSourceMappingJobs" | "affiliateApprovalJobs" | "affiliateImportCandidates" | "affiliateSupplySources" | "affiliateSupplyContractManifests" | "affiliateSupplyLifecycleTransitions" | "affiliateSupplyReconciliationRuns" | "affiliateAgentWorkerHealth" | "affiliateSupplyTargets" | "affiliateReplenishmentDemands" | "affiliateReplenishmentWaves" | "eventTags" | "eventTagAssignments" | "organizationTags" | "organizationTagAssignments" | "refundRequests" | "discounts" | "discountCodes" | "discountCodeRedemptions" | "discountCodeReservations" | "organizationAccountingConnections" | "accountingSyncRecords" | "organizationFinanceCategoryAccountingMappings" | "stripeAccounts" | "events" | "organizations" | "organizationReviews" | "organizationDomains" | "organizationClaims" | "organizationClaimEvidence" | "organizationClaimEvents" | "organizationReviewResponses" | "products" | "subscriptions" | "timeSlots" | "leagueScoringConfigs" | "eventTemplates" | "eventTemplateResources" | "eventTemplateTimeSlots" | "eventTemplateRentalResourceHints" | "eventTemplateLeagueScoringConfigs" | "sports" | "documentRequirements" | "templateDocuments" | "templateProviderQuarantines" | "signedDocuments" | "documentSubjects" | "documentRequirementSatisfactions" | "documentRequirementSatisfactionEvidence" | "documentEvidenceAuditEvents" | "boldSignWebhookEvents" | "boldSignSyncOperations" | "parentChildLinks" | "eventRegistrations" | "authUser" | "feedbackSubmissions" | "file"
+    modelProps: "appReleases" | "fields" | "facilities" | "matches" | "matchSegments" | "broadcastOverlays" | "broadcastOverlayStates" | "broadcastOverlayActions" | "broadcastOverlayAccessTokens" | "matchIncidents" | "matchOperationReceipts" | "eventEditorCreateOperations" | "eventEditorMaintenanceOperations" | "divisions" | "eventDivisionPhaseSources" | "eventDivisionPhaseParticipants" | "userData" | "userNotifications" | "sensitiveUserData" | "authMfaChallenges" | "invites" | "teamInviteEventSyncs" | "staffMembers" | "organizationRoles" | "organizationRolePermissions" | "organizationRoleCompensationRates" | "staffCompensationRates" | "eventStaffAssignments" | "staffScheduleAssignments" | "teamStaffLaborEntries" | "financialLineItems" | "staffPayRun" | "staffPayRunItem" | "eventOfficials" | "teamCheckIns" | "matchRosterEntries" | "teams" | "canonicalTeams" | "teamRegistrations" | "registrationQuestions" | "registrationQuestionResponses" | "teamJoinRequests" | "teamStaffAssignments" | "eventTeamStaffAssignments" | "messages" | "chatGroup" | "moderationReport" | "aiConversationPointer" | "aiPendingConfirmation" | "pushDeviceTarget" | "lockFiles" | "paymentIntents" | "bills" | "billPayments" | "billPaymentProofs" | "rentalBookings" | "rentalBookingItems" | "affiliateScrapeSources" | "affiliateScrapeMappings" | "affiliateScrapeRuns" | "affiliateSourceIntakes" | "affiliateSourceIntakePages" | "affiliateSourceIntakeRuns" | "affiliateSourceIntakeArtifacts" | "affiliateSourceDiscoveryCampaigns" | "affiliateAgentGatewayJobs" | "affiliateAgentGatewayClaims" | "affiliateAgentGatewayArtifacts" | "affiliateAgentGatewayOperationReceipts" | "affiliateAgentGatewayEvents" | "affiliateOperationalAlerts" | "affiliateOperationalAlertDeliveries" | "affiliateCoverageAgentJobs" | "affiliateCoverageCities" | "affiliateCoverageCells" | "affiliateCoverageCellAssessments" | "affiliateSourceDiscoveryQueryExecutions" | "affiliateSourceDiscoveryRuns" | "affiliateSourceDiscoveryResults" | "affiliateSourceDomainPolicies" | "affiliateSourceMappingJobs" | "affiliateApprovalJobs" | "affiliateImportCandidates" | "affiliateSupplySources" | "affiliateSupplyContractManifests" | "affiliateSupplyLifecycleTransitions" | "affiliateSupplyReconciliationRuns" | "affiliateAgentWorkerHealth" | "affiliateSupplyTargets" | "affiliateReplenishmentDemands" | "affiliateReplenishmentWaves" | "eventTags" | "eventTagAssignments" | "organizationTags" | "organizationTagAssignments" | "refundRequests" | "discounts" | "discountCodes" | "discountCodeRedemptions" | "discountCodeReservations" | "organizationAccountingConnections" | "accountingSyncRecords" | "organizationFinanceCategoryAccountingMappings" | "stripeAccounts" | "events" | "organizations" | "organizationReviews" | "organizationDomains" | "organizationClaims" | "organizationClaimEvidence" | "organizationClaimEvents" | "organizationReviewResponses" | "products" | "subscriptions" | "timeSlots" | "leagueScoringConfigs" | "eventTemplates" | "eventTemplateResources" | "eventTemplateTimeSlots" | "eventTemplateRentalResourceHints" | "eventTemplateLeagueScoringConfigs" | "sports" | "documentRequirements" | "templateDocuments" | "templateProviderQuarantines" | "signedDocuments" | "documentSubjects" | "documentRequirementSatisfactions" | "documentRequirementSatisfactionEvidence" | "documentEvidenceAuditEvents" | "boldSignWebhookEvents" | "boldSignSyncOperations" | "parentChildLinks" | "eventRegistrations" | "authUser" | "feedbackSubmissions" | "file"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -1424,6 +1425,80 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         count: {
           args: Prisma.EventEditorCreateOperationsCountArgs<ExtArgs>
           result: runtime.Types.Utils.Optional<Prisma.EventEditorCreateOperationsCountAggregateOutputType> | number
+        }
+      }
+    }
+    EventEditorMaintenanceOperations: {
+      payload: Prisma.$EventEditorMaintenanceOperationsPayload<ExtArgs>
+      fields: Prisma.EventEditorMaintenanceOperationsFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.EventEditorMaintenanceOperationsFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventEditorMaintenanceOperationsPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.EventEditorMaintenanceOperationsFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventEditorMaintenanceOperationsPayload>
+        }
+        findFirst: {
+          args: Prisma.EventEditorMaintenanceOperationsFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventEditorMaintenanceOperationsPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.EventEditorMaintenanceOperationsFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventEditorMaintenanceOperationsPayload>
+        }
+        findMany: {
+          args: Prisma.EventEditorMaintenanceOperationsFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventEditorMaintenanceOperationsPayload>[]
+        }
+        create: {
+          args: Prisma.EventEditorMaintenanceOperationsCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventEditorMaintenanceOperationsPayload>
+        }
+        createMany: {
+          args: Prisma.EventEditorMaintenanceOperationsCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.EventEditorMaintenanceOperationsCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventEditorMaintenanceOperationsPayload>[]
+        }
+        delete: {
+          args: Prisma.EventEditorMaintenanceOperationsDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventEditorMaintenanceOperationsPayload>
+        }
+        update: {
+          args: Prisma.EventEditorMaintenanceOperationsUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventEditorMaintenanceOperationsPayload>
+        }
+        deleteMany: {
+          args: Prisma.EventEditorMaintenanceOperationsDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.EventEditorMaintenanceOperationsUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.EventEditorMaintenanceOperationsUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventEditorMaintenanceOperationsPayload>[]
+        }
+        upsert: {
+          args: Prisma.EventEditorMaintenanceOperationsUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventEditorMaintenanceOperationsPayload>
+        }
+        aggregate: {
+          args: Prisma.EventEditorMaintenanceOperationsAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateEventEditorMaintenanceOperations>
+        }
+        groupBy: {
+          args: Prisma.EventEditorMaintenanceOperationsGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.EventEditorMaintenanceOperationsGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.EventEditorMaintenanceOperationsCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.EventEditorMaintenanceOperationsCountAggregateOutputType> | number
         }
       }
     }
@@ -10891,12 +10966,35 @@ export const EventEditorCreateOperationsScalarFieldEnum = {
   eventId: 'eventId',
   responseStatus: 'responseStatus',
   responseJson: 'responseJson',
+  proposalJson: 'proposalJson',
+  proposalRevision: 'proposalRevision',
+  proposalStatus: 'proposalStatus',
   emailDelivery: 'emailDelivery',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
 } as const
 
 export type EventEditorCreateOperationsScalarFieldEnum = (typeof EventEditorCreateOperationsScalarFieldEnum)[keyof typeof EventEditorCreateOperationsScalarFieldEnum]
+
+
+export const EventEditorMaintenanceOperationsScalarFieldEnum = {
+  operationId: 'operationId',
+  eventId: 'eventId',
+  actorUserId: 'actorUserId',
+  operation: 'operation',
+  requestHash: 'requestHash',
+  requestJson: 'requestJson',
+  proposalRevision: 'proposalRevision',
+  revisionBindingJson: 'revisionBindingJson',
+  proposalJson: 'proposalJson',
+  status: 'status',
+  acceptanceOperationId: 'acceptanceOperationId',
+  acceptedResponseJson: 'acceptedResponseJson',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type EventEditorMaintenanceOperationsScalarFieldEnum = (typeof EventEditorMaintenanceOperationsScalarFieldEnum)[keyof typeof EventEditorMaintenanceOperationsScalarFieldEnum]
 
 
 export const DivisionsScalarFieldEnum = {
@@ -13067,6 +13165,7 @@ export const EventsScalarFieldEnum = {
   hostId: 'hostId',
   assistantHostIds: 'assistantHostIds',
   noFixedEndDateTime: 'noFixedEndDateTime',
+  automatedScheduling: 'automatedScheduling',
   price: 'price',
   registrationPaymentMode: 'registrationPaymentMode',
   manualPaymentLinks: 'manualPaymentLinks',
@@ -13103,7 +13202,6 @@ export const EventsScalarFieldEnum = {
   parentEvent: 'parentEvent',
   autoCancellation: 'autoCancellation',
   eventType: 'eventType',
-  officialSchedulingMode: 'officialSchedulingMode',
   staffingPriority: 'staffingPriority',
   doTeamsOfficiate: 'doTeamsOfficiate',
   teamOfficialsMaySwap: 'teamOfficialsMaySwap',
@@ -13454,7 +13552,6 @@ export const EventTemplatesScalarFieldEnum = {
   restTimeMinutes: 'restTimeMinutes',
   pointsToVictory: 'pointsToVictory',
   sportIds: 'sportIds',
-  officialSchedulingMode: 'officialSchedulingMode',
   staffingPriority: 'staffingPriority',
   doTeamsOfficiate: 'doTeamsOfficiate',
   teamOfficialsMaySwap: 'teamOfficialsMaySwap',
@@ -13843,6 +13940,8 @@ export const EventRegistrationsScalarFieldEnum = {
   registrantType: 'registrantType',
   rosterRole: 'rosterRole',
   status: 'status',
+  paymentResolutionReason: 'paymentResolutionReason',
+  acceptedAt: 'acceptedAt',
   eventTeamId: 'eventTeamId',
   sourceTeamRegistrationId: 'sourceTeamRegistrationId',
   slotId: 'slotId',
@@ -14906,20 +15005,6 @@ export type ListEnumEventsEventTypeEnumFieldRefInput<$PrismaModel> = FieldRefInp
 
 
 /**
- * Reference to a field of type 'EventsOfficialSchedulingModeEnum'
- */
-export type EnumEventsOfficialSchedulingModeEnumFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'EventsOfficialSchedulingModeEnum'>
-
-
-
-/**
- * Reference to a field of type 'EventsOfficialSchedulingModeEnum[]'
- */
-export type ListEnumEventsOfficialSchedulingModeEnumFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'EventsOfficialSchedulingModeEnum[]'>
-
-
-
-/**
  * Reference to a field of type 'StaffingPriorityEnum'
  */
 export type EnumStaffingPriorityEnumFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'StaffingPriorityEnum'>
@@ -15474,6 +15559,7 @@ export type GlobalOmitConfig = {
   matchIncidents?: Prisma.MatchIncidentsOmit
   matchOperationReceipts?: Prisma.MatchOperationReceiptsOmit
   eventEditorCreateOperations?: Prisma.EventEditorCreateOperationsOmit
+  eventEditorMaintenanceOperations?: Prisma.EventEditorMaintenanceOperationsOmit
   divisions?: Prisma.DivisionsOmit
   eventDivisionPhaseSources?: Prisma.EventDivisionPhaseSourcesOmit
   eventDivisionPhaseParticipants?: Prisma.EventDivisionPhaseParticipantsOmit

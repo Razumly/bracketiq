@@ -21,7 +21,7 @@ const prismaMock = {
 const requireSessionMock = jest.fn();
 const canManageEventMock = jest.fn();
 const acquireEventLockMock = jest.fn();
-
+const acquireFieldLocksMock = jest.fn();
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 jest.mock('@/lib/permissions', () => ({ requireSession: requireSessionMock }));
 jest.mock('@/server/accessControl', () => ({
@@ -29,6 +29,7 @@ jest.mock('@/server/accessControl', () => ({
 }));
 jest.mock('@/server/repositories/locks', () => ({
   acquireEventLock: (...args: unknown[]) => acquireEventLockMock(...args),
+  acquireFieldLocks: (...args: unknown[]) => acquireFieldLocksMock(...args),
 }));
 
 import { PATCH } from '@/app/api/events/[eventId]/time-slots/route';
@@ -61,6 +62,13 @@ beforeEach(() => {
     {
       id: 'slot_existing',
       repeating: true,
+      dayOfWeek: 0,
+      daysOfWeek: [0],
+      startDate: new Date('2026-08-10T00:00:00.000Z'),
+      endDate: new Date('2026-08-10T00:00:00.000Z'),
+      startTimeMinutes: 9 * 60,
+      endTimeMinutes: 10 * 60,
+      timeZone: 'UTC',
       scheduledFieldId: 'resource_1',
       scheduledFieldIds: ['resource_1'],
       divisions: [],
@@ -68,6 +76,13 @@ beforeEach(() => {
     {
       id: 'slot_new',
       repeating: true,
+      dayOfWeek: 0,
+      daysOfWeek: [0],
+      startDate: new Date('2026-08-10T00:00:00.000Z'),
+      endDate: new Date('2026-08-10T00:00:00.000Z'),
+      startTimeMinutes: 11 * 60,
+      endTimeMinutes: 12 * 60,
+      timeZone: 'UTC',
       scheduledFieldId: 'resource_1',
       scheduledFieldIds: ['resource_1'],
       divisions: [],

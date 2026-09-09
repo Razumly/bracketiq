@@ -1,4 +1,4 @@
-import { advisoryLockId } from '@/server/repositories/locks';
+import { acquireFieldLocks, advisoryLockId } from '@/server/repositories/locks';
 import {
   EventFieldConflictError,
   assertNoEventFieldSchedulingConflicts,
@@ -288,10 +288,7 @@ export const reserveRentalCheckoutWindowLocks = async ({
   return client.$transaction(async (tx: PrismaLike) => {
     const userLockId = advisoryLockId(`rental-checkout-user:${userId}`);
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${userLockId})`;
-    for (const fieldId of fieldIds) {
-      const fieldLockId = advisoryLockId(`rental-checkout-field:${fieldId}`);
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${fieldLockId})`;
-    }
+    await acquireFieldLocks(tx, fieldIds);
 
     for (const window of desiredWindows) {
       try {

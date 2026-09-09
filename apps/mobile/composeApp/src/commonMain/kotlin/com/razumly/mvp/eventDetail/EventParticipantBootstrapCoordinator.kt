@@ -142,6 +142,7 @@ internal class EventParticipantBootstrapCoordinator(
     fun managedBootstrapTargetFlow(
         currentUser: StateFlow<UserData>,
         eventOrganization: StateFlow<Organization?>,
+        authorityVerified: StateFlow<Boolean>,
         canManage: (Event, UserData, Organization?) -> Boolean,
     ): Flow<ParticipantManagementRoomTarget?> =
         combine(
@@ -149,11 +150,12 @@ internal class EventParticipantBootstrapCoordinator(
             currentUser,
             eventOrganization,
             weeklyOccurrenceCoordinator.selectedWeeklyOccurrence,
-        ) { event, user, organization, occurrenceState ->
+            authorityVerified,
+        ) { event, user, organization, occurrenceState, verified ->
             participantManagementRoomTarget(
                 event = event,
                 occurrence = occurrenceState.toOccurrenceSelection(),
-            )?.takeIf { canManage(event, user, organization) }
+            )?.takeIf { verified && canManage(event, user, organization) }
         }.distinctUntilChanged()
 
     fun applyLocalState(localState: ParticipantManagementLocalState) {
@@ -161,6 +163,16 @@ internal class EventParticipantBootstrapCoordinator(
     }
 
     suspend fun refreshManagedBootstrap(target: ParticipantManagementRoomTarget?) {
+        if (target != null) {
+            while (eventDetailHydrationJob?.isActive == true) {
+                eventDetailHydrationJob?.join()
+            }
+            val currentTarget = participantManagementRoomTarget(
+                selectedEvent.value,
+                weeklyOccurrenceCoordinator.currentSelection(),
+            )
+            if (target != currentTarget || !effects.canManageParticipantData(selectedEvent.value)) return
+        }
         if (!participantManagementCoordinator.beginManagedDetailBootstrap(target)) return
         val bootstrapTarget = target ?: return
         try {
@@ -193,9 +205,9 @@ internal class EventParticipantBootstrapCoordinator(
         )
     }
 
-    fun onSelectedEventChanged(isWeeklyParent: Boolean) {
+    fun onSelectedEventChanged(eventId: String, isWeeklyParent: Boolean) {
         weeklyOccurrenceSummaryPrefetchJob?.cancel()
-        weeklyOccurrenceCoordinator.handleSelectedEventChanged(isWeeklyParent)
+        weeklyOccurrenceCoordinator.handleSelectedEventChanged(eventId, isWeeklyParent)
     }
 
     fun applyParticipantSyncResult(result: EventParticipantsSyncResult) {
@@ -323,13 +335,7 @@ internal class EventParticipantBootstrapCoordinator(
         ) ?: return
         val occurrence = weeklyOccurrenceCoordinator.currentSelection()
 
-        // Mark synchronously before launching so the managed-detail observer cannot
-        // start an identical bootstrap while mobile hydration is still being scheduled.
-        markManagedBootstrapRequested(
-            event = event,
-            occurrence = occurrence,
-            manage = effects.canManageParticipantData(event),
-        )
+        clearManagedBootstrapRequestIfCurrent(event, occurrence)
         eventDetailHydrationJob?.cancel()
         eventDetailHydrationJob = scope.launch {
             detailHydrationCoordinator.hydrateMobileEventDetail(
@@ -344,7 +350,14 @@ internal class EventParticipantBootstrapCoordinator(
                 applyParticipantSyncResult = ::applyParticipantSyncResult,
                 applySelectedOccurrenceParticipantSummary = weeklyOccurrenceCoordinator::applySelectedOccurrenceParticipantSummary,
                 refreshParticipantManagementSnapshotIfNeeded = ::refreshParticipantManagementSnapshotIfNeeded,
-                refreshParticipantComplianceIfNeeded = ::refreshParticipantComplianceIfNeeded,
+                refreshParticipantComplianceIfNeeded = { refreshed ->
+                    refreshParticipantComplianceIfNeeded(refreshed)
+                    markManagedBootstrapRequested(
+                        event = refreshed,
+                        occurrence = occurrence,
+                        manage = effects.canManageParticipantData(refreshed),
+                    )
+                },
                 setParticipantLoading = participantManagementCoordinator::setEventTeamsAndParticipantsLoading,
                 setMatchesLoading = effects.setMatchesLoading,
                 showDetails = effects.showDetails,

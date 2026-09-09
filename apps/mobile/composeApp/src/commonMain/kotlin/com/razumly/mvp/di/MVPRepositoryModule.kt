@@ -1,5 +1,6 @@
 package com.razumly.mvp.di
 
+import com.razumly.mvp.KmpPushNotificationGateway
 import com.razumly.mvp.chat.data.ChatGroupRepository
 import com.razumly.mvp.chat.data.IChatGroupRepository
 import com.razumly.mvp.chat.data.IMessageRepository
@@ -14,6 +15,7 @@ import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.IImagesRepository
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
+import com.razumly.mvp.core.data.repositories.PushNotificationGateway
 import com.razumly.mvp.core.data.repositories.ISportsRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
@@ -28,6 +30,7 @@ import org.koin.dsl.bind
 import org.koin.dsl.module
 
 val MVPRepositoryModule = module {
+    single<PushNotificationGateway> { KmpPushNotificationGateway() }
     single {
         EventRepository(get(), get(), get(), get(), get())
     } bind IEventRepository::class
@@ -49,6 +52,7 @@ val MVPRepositoryModule = module {
             get(),
             get(),
             get(),
+            pushNotificationGateway = get(),
             // Resolve lazily: ChatGroupRepository uses TeamRepository, which
             // already depends on this push repository.
             chatGroupRepositoryProvider = { get() },

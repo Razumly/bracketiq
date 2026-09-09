@@ -13,19 +13,21 @@ import {
   upsertRegistrationQuestionResponse,
 } from '@/server/registrationQuestions';
 import {
-  EventConfigurationChangedError,
   acquireEventLockAndLoadStructure,
   findEventRegistration,
   upsertEventRegistration,
 } from '@/server/events/eventRegistrations';
+import { eventRegistrationErrorResponse } from '@/server/events/eventRegistrationErrorResponse';
 import {
   requireVerifiedEmailForEventRegistrationIfPaid,
   resolveEventRegistrationPriceCents,
 } from '@/server/paidRegistrationGate';
 import {
-  isWeeklyParentEvent,
+  isActiveWeeklyParentEvent,
+  isArchivedWeeklyParentEvent,
   isWeeklyOccurrenceJoinClosed,
   resolveWeeklyOccurrence,
+  WEEKLY_EVENT_ARCHIVED_ERROR,
   WEEKLY_OCCURRENCE_JOIN_CLOSED_ERROR,
 } from '@/server/events/weeklyOccurrences';
 import { sendEventRegistrationHostNotification } from '@/server/registrationHostNotifications';
@@ -55,6 +57,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
     select: {
       id: true,
       start: true,
+      end: true,
+      archivedAt: true,
       minAge: true,
       maxAge: true,
       sportIds: true,
@@ -72,9 +76,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
   if (!event) {
     return NextResponse.json({ error: 'Event not found' }, { status: 404 });
   }
+  if (isArchivedWeeklyParentEvent(event)) {
+    return NextResponse.json({ error: WEEKLY_EVENT_ARCHIVED_ERROR }, { status: 409 });
+  }
 
   const hasOccurrenceInput = Boolean(parsed.data.slotId || parsed.data.occurrenceDate);
-  const occurrence = isWeeklyParentEvent(event)
+  const occurrence = isActiveWeeklyParentEvent(event)
     ? await resolveWeeklyOccurrence({
       event,
       occurrence: parsed.data,
@@ -83,7 +90,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
   if (occurrence && !occurrence.ok) {
     return NextResponse.json({ error: occurrence.error }, { status: 400 });
   }
-  if (!isWeeklyParentEvent(event) && hasOccurrenceInput) {
+  if (!isActiveWeeklyParentEvent(event) && hasOccurrenceInput) {
     return NextResponse.json({ error: 'Weekly occurrence selection is only valid for weekly events.' }, { status: 400 });
   }
   const resolvedOccurrence = occurrence?.ok ? occurrence.value : null;
@@ -263,15 +270,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
       });
       return { registration, existing: false };
     });
-  } catch (error) {
-    if (error instanceof EventConfigurationChangedError) {
-      return NextResponse.json(
-        { error: error.message, code: error.code },
-        { status: error.status },
-      );
+    } catch (error) {
+      const registrationResponse = eventRegistrationErrorResponse(error);
+      if (registrationResponse) return registrationResponse;
+      throw error;
     }
-    throw error;
-  }
 
   const registration = registrationResult.registration;
   if (registrationResult.existing) {

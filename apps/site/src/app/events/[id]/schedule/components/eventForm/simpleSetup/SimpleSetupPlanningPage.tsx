@@ -116,6 +116,11 @@ export const SimpleSetupPlanningPage = ({
 
   const teamChoiceDisabled = !capabilities.canChooseTeamRegistration;
   const divisionChoiceDisabled = !capabilities.canChooseDivisionMode;
+  const isAutomatedSchedulingDisablesScheduleConstruction =
+    eventData.eventType === "LEAGUE" || eventData.eventType === "TOURNAMENT";
+  const showScheduleConstructionControls =
+    !isAutomatedSchedulingDisablesScheduleConstruction ||
+    eventData.isAutomatedScheduling !== false;
   const availableScheduleStyleOptions = scheduleStyleOptions.filter((option) =>
     isScheduleStyleAllowedForEventType(eventData.eventType, option.value),
   );
@@ -394,40 +399,61 @@ export const SimpleSetupPlanningPage = ({
             </Text>
           ) : null}
         </div>
-        <Radio.Group
-          label="Schedule style"
-          value={choices.scheduleStyle}
-          onChange={(value) =>
-            onChoicesChange({
-              scheduleStyle: value as EventSetupChoices["scheduleStyle"],
-            })
-          }
-        >
-          <SimpleGrid cols={{ base: 1, md: 2 }} spacing="lg" mt="sm">
-            {availableScheduleStyleOptions.map((option) => (
-              <label
-                key={option.value}
-                className="flex cursor-pointer items-start gap-3"
-              >
-                <Radio
-                  value={option.value}
-                  aria-label={option.label}
-                  disabled={!capabilities.usesInternalSchedule}
-                  mt={2}
-                />
-                <div className="min-w-0">
-                  <Text fw={600} size="sm">
-                    {option.label}
-                  </Text>
-                  <Text c="dimmed" mt={2} size="sm">
-                    {option.description}
-                  </Text>
-                </div>
-              </label>
-            ))}
-          </SimpleGrid>
-        </Radio.Group>
         {capabilities.isLeague || capabilities.isTournament ? (
+          <Controller
+            name="isAutomatedScheduling"
+            control={control}
+            render={({ field }) => (
+              <Checkbox
+                label="Automated Scheduling"
+                description="Build the match schedule from the event setup when you create it."
+                checked={Boolean(field.value)}
+                disabled={isImmutableField("isAutomatedScheduling")}
+                onChange={(event) => {
+                  if (isImmutableField("isAutomatedScheduling")) return;
+                  const checked = event.currentTarget.checked;
+                  field.onChange(checked);
+                }}
+              />
+            )}
+          />
+        ) : null}
+        {showScheduleConstructionControls ? (
+          <Radio.Group
+            label="Schedule style"
+            value={choices.scheduleStyle}
+            onChange={(value) =>
+              onChoicesChange({
+                scheduleStyle: value as EventSetupChoices["scheduleStyle"],
+              })
+            }
+          >
+            <SimpleGrid cols={{ base: 1, md: 2 }} spacing="lg" mt="sm">
+              {availableScheduleStyleOptions.map((option) => (
+                <label
+                  key={option.value}
+                  className="flex cursor-pointer items-start gap-3"
+                >
+                  <Radio
+                    value={option.value}
+                    aria-label={option.label}
+                    disabled={!capabilities.usesInternalSchedule}
+                    mt={2}
+                  />
+                  <div className="min-w-0">
+                    <Text fw={600} size="sm">
+                      {option.label}
+                    </Text>
+                    <Text c="dimmed" mt={2} size="sm">
+                      {option.description}
+                    </Text>
+                  </div>
+                </label>
+              ))}
+            </SimpleGrid>
+          </Radio.Group>
+        ) : null}
+        {(capabilities.isLeague || capabilities.isTournament) ? (
           <Controller
             name="noFixedEndDateTime"
             control={control}
@@ -436,9 +462,15 @@ export const SimpleSetupPlanningPage = ({
                 label="Set end date during match generation"
                 description="The generated match schedule will determine the event end date."
                 checked={Boolean(field.value)}
-                disabled={isImmutableField("noFixedEndDateTime")}
+                disabled={
+                  (!showScheduleConstructionControls && !field.value)
+                  || isImmutableField("noFixedEndDateTime")
+                }
                 onChange={(event) => {
-                  if (isImmutableField("noFixedEndDateTime")) return;
+                  if (
+                    (!showScheduleConstructionControls && !field.value)
+                    || isImmutableField("noFixedEndDateTime")
+                  ) return;
                   onNoFixedEndDateTimeChange(event.currentTarget.checked);
                 }}
               />

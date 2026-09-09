@@ -723,7 +723,6 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
       hasImmutableFields,
       immutableFields,
       immutableTimeSlotsFromDefaults,
-      isAffiliateEvent,
       isCreateMode,
       isEditMode,
       open,
@@ -777,6 +776,7 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
       clearErrors,
       eventEnd: eventData.end,
       eventId: eventData.$id,
+      hasNoFixedEventEnd: eventData.noFixedEndDateTime,
       eventStart: eventData.start,
       eventSupportsScheduleSlots,
       eventTimeZone: eventData.timeZone,
@@ -787,7 +787,6 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
       hasImmutableTimeSlots,
       immutableFields,
       immutableTimeSlots,
-      isAffiliateEvent,
       isEditMode,
       leagueSlots,
       parentEvent: eventData.parentEvent,
@@ -930,7 +929,6 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
       clearLeagueSlotErrors,
       eventData,
       getValues,
-      isAffiliateEvent,
       leagueData,
       selectedSport: selectedSportForOfficials,
       setEventData,
@@ -989,7 +987,7 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
       [isRentalCreateFlow, resolvedOrganizationId],
     );
     const supportsNoFixedEndDateTime =
-      !isAffiliateEvent &&
+      eventData.eventType !== 'TRYOUT' &&
       supportsScheduleSlotsForEvent(eventData.eventType, eventData.parentEvent);
     useEventFormInvariantSynchronization({
       eventData,
@@ -1395,10 +1393,7 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
           resolvedUpdates.scheduleStyle === "FIXED_WINDOW" &&
           !isImmutableField("noFixedEndDateTime")
         ) {
-          setValue("noFixedEndDateTime", false, {
-            shouldDirty: true,
-            shouldValidate: true,
-          });
+          configurationActions.handleNoFixedEndDateTimeChange(false);
         }
         if (resolvedUpdates.useRequiredDocuments === false) {
           setValue("requiredTemplateIds", [], {
@@ -1476,6 +1471,7 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
         }));
       },
       [
+        configurationActions,
         eventData,
         isImmutableField,
         registrationQuestionDrafts.length,
@@ -1484,26 +1480,6 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
         simpleSetupChoices.scheduleStyle,
       ],
     );
-
-    useEffect(() => {
-      if (
-        setupMode === "SIMPLE" &&
-        simpleSetupChoices.scheduleStyle === "FIXED_WINDOW" &&
-        eventData.noFixedEndDateTime &&
-        !isImmutableField("noFixedEndDateTime")
-      ) {
-        setValue("noFixedEndDateTime", false, {
-          shouldDirty: true,
-          shouldValidate: true,
-        });
-      }
-    }, [
-      eventData.noFixedEndDateTime,
-      isImmutableField,
-      setValue,
-      setupMode,
-      simpleSetupChoices.scheduleStyle,
-    ]);
 
     const validateSimpleSetupPage = useCallback(
       async (pageId: EventSetupPageId): Promise<boolean> => {

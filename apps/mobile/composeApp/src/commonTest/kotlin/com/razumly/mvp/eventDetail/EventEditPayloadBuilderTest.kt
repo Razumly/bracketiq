@@ -13,7 +13,7 @@ import kotlin.time.Instant
 
 class EventEditPayloadBuilderTest {
     @Test
-    fun prepareForUpdate_clears_generated_end_date_mode_for_weekly_events() {
+    fun prepareForUpdate_preserves_generated_end_date_mode_for_weekly_events() {
         val event = leagueEvent(
             eventType = EventType.WEEKLY_EVENT,
             fieldIds = emptyList(),
@@ -30,11 +30,11 @@ class EventEditPayloadBuilderTest {
             ),
         )
 
-        assertEquals(false, result.prepared.event.noFixedEndDateTime)
+        assertEquals(true, result.prepared.event.noFixedEndDateTime)
     }
 
     @Test
-    fun prepareForUpdate_preserves_selected_rental_fields_and_returns_only_custom_field_drafts() {
+    fun prepareForUpdate_preserves_selected_rental_fields_in_the_complete_command_collection() {
         val event = leagueEvent(
             divisions = listOf("division-a"),
             fieldIds = emptyList(),
@@ -64,7 +64,8 @@ class EventEditPayloadBuilderTest {
         )
 
         assertEquals(listOf("rental-field-1", "custom-field-1"), result.prepared.event.fieldIds)
-        assertEquals(listOf("custom-field-1"), result.prepared.fields?.map(Field::id))
+        assertEquals(listOf("rental-field-1", "custom-field-1"), result.prepared.fields?.map(Field::id))
+        assertEquals(rentalField, result.prepared.fields?.first())
         assertEquals(listOf("rental-field-1", "custom-field-1"), result.editableFields?.map(Field::id))
         assertEquals(listOf(1, 2), result.editableFields?.map(Field::fieldNumber))
         assertEquals(LeagueScoringConfigDTO(pointsForWin = 3), result.prepared.leagueScoringConfig)
@@ -206,6 +207,45 @@ class EventEditPayloadBuilderTest {
         assertEquals("field-1", preparedSlot.scheduledFieldId)
         assertEquals(listOf("field-1"), preparedSlot.scheduledFieldIds)
     }
+    @Test
+    fun prepareForUpdate_persists_tryout_fields_and_updates_non_repeating_slot_bounds() {
+        val previousEvent = leagueEvent(eventType = EventType.TRYOUT)
+        val updatedEvent = previousEvent.copy(
+            start = Instant.parse("2026-04-20T13:00:00Z"),
+            end = Instant.parse("2026-04-20T15:00:00Z"),
+        )
+        val previousSlot = slot(
+            id = "slot-1",
+            repeating = false,
+            startDate = previousEvent.start,
+            endDate = previousEvent.end,
+        )
+        val syncedSlot = syncEditableLeagueSlotBoundaries(
+            previousEvent,
+            updatedEvent,
+            listOf(previousSlot),
+        ).single()
+
+        assertEquals(updatedEvent.start, syncedSlot.startDate)
+        assertEquals(updatedEvent.end, syncedSlot.endDate)
+
+        val result = EventEditPayloadBuilder.prepareForUpdate(
+            EventEditPayloadInput(
+                editedEvent = updatedEvent,
+                editableFields = listOf(field(id = "field-1")),
+                editableLeagueTimeSlots = listOf(syncedSlot),
+                selectedRentalFields = emptyList(),
+                leagueScoringConfig = LeagueScoringConfigDTO(),
+                originalEventStart = previousEvent.start,
+            ),
+        )
+
+        val preparedSlot = assertNotNull(result.prepared.timeSlots).single()
+        assertEquals(updatedEvent.start, preparedSlot.startDate)
+        assertEquals(updatedEvent.end, preparedSlot.endDate)
+        assertEquals(listOf("field-1"), result.prepared.event.fieldIds)
+    }
+
 
     @Test
     fun buildLeagueSlotDrafts_preserves_multiple_weekdays_for_repeating_weekly_slots() {
@@ -236,7 +276,7 @@ class EventEditPayloadBuilderTest {
     }
 
     @Test
-    fun buildLeagueSlotDrafts_drops_slots_without_valid_fields_or_valid_time_bounds() {
+    fun given_invalid_fields_or_bounds_when_building_league_slot_drafts_then_drops_slots() {
         val event = leagueEvent(
             divisions = listOf("open"),
             fieldIds = listOf("field-1"),
@@ -269,7 +309,7 @@ class EventEditPayloadBuilderTest {
             editableLeagueTimeSlots = listOf(missingField, invalidRepeatingTime, invalidNonRepeatingTime),
         )
 
-        assertEquals(emptyList(), result)
+        assertEquals(listOf("invalid-repeating"), result.map(TimeSlot::id))
     }
 
     private fun leagueEvent(

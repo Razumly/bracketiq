@@ -83,6 +83,32 @@ const createDeferred = <T,>() => {
   });
   return { promise, resolve, reject };
 };
+const buildServerFieldConflict = (slotKey = 'slot_1') => ({
+  slotKey,
+  fieldId: 'field_1',
+  kind: 'ONE_TIME_EVENT',
+  start: '2026-04-20T09:00:00.000Z',
+  end: '2026-04-20T17:00:00.000Z',
+  source: {
+    id: 'event_blocking_1',
+    eventId: 'event_blocking_1',
+    parentId: 'event_blocking_1',
+    kind: 'ONE_TIME_EVENT',
+    eventType: 'EVENT',
+    eventStart: '2026-04-20T09:00:00.000Z',
+    eventEnd: '2026-04-20T17:00:00.000Z',
+    eventTimeZone: 'UTC',
+    noFixedEndDateTime: false,
+    repeating: false,
+    startDate: '2026-04-20T09:00:00.000Z',
+    endDate: '2026-04-20T17:00:00.000Z',
+    timeZone: 'UTC',
+    startTimeMinutes: 540,
+    endTimeMinutes: 1020,
+    daysOfWeek: [],
+    scheduledFieldIds: ['field_1'],
+  },
+});
 
 jest.mock('@mantine/core', () => {
   const actual = jest.requireActual('@mantine/core');
@@ -337,7 +363,7 @@ jest.mock('@/lib/eventService', () => ({
   eventService: {
     getEventWithRelations: jest.fn().mockResolvedValue(null),
     getEventsForFieldInRange: jest.fn().mockResolvedValue([]),
-    getBlockingForFieldInRange: jest.fn().mockResolvedValue([]),
+    getFieldSchedulingConflicts: jest.fn().mockResolvedValue({ conflicts: [] }),
   },
 }));
 
@@ -390,7 +416,7 @@ describe('EventForm dirty state', () => {
     mockUseSportsState = buildMockUseSportsState();
     (eventService.getEventWithRelations as jest.Mock).mockResolvedValue(null);
     (eventService.getEventsForFieldInRange as jest.Mock).mockResolvedValue([]);
-    (eventService.getBlockingForFieldInRange as jest.Mock).mockResolvedValue([]);
+    (eventService.getFieldSchedulingConflicts as jest.Mock).mockResolvedValue({ conflicts: [] });
     (userService.getUsersByIds as jest.Mock).mockResolvedValue([]);
     (userService.searchUsers as jest.Mock).mockResolvedValue([]);
     (userService.lookupEmailMembership as jest.Mock).mockResolvedValue([]);
@@ -1009,6 +1035,25 @@ describe('EventForm dirty state', () => {
       fireEvent.click(within(progress).getByRole('button', { name: 'Staff & Operations: Available' }));
       expect(await screen.findByLabelText('Staffing Priority')).toHaveValue('OFFICIAL_COVERAGE_REQUIRED');
       expect(screen.queryByRole('heading', { name: 'Official Positions' })).not.toBeInTheDocument();
+      const teamDuties = screen.getByRole('switch', { name: /Teams provide officials/i });
+      expect(teamDuties).toBeChecked();
+      fireEvent.click(teamDuties);
+      await waitFor(() => {
+        expect(getEditorDraft(formRef).staff.doTeamsOfficiate).toBe(false);
+      });
+      fireEvent.change(screen.getByLabelText('Staffing Priority'), {
+        target: { value: 'BEST_AVAILABLE_COVERAGE' },
+      });
+      await waitFor(() => {
+        expect(getEditorDraft(formRef).staff).toEqual(expect.objectContaining({
+          staffingPriority: 'BEST_AVAILABLE_COVERAGE',
+          doTeamsOfficiate: false,
+          teamOfficialsMaySwap: false,
+          officialIds: [],
+          eventOfficials: [],
+          officialPositions: [{ id: 'position_r1', name: 'R1', count: 2, order: 0 }],
+        }));
+      });
     } finally {
       confirmSpy.mockRestore();
     }
@@ -1144,7 +1189,7 @@ describe('EventForm dirty state', () => {
       initialSetupMode: 'SIMPLE',
     });
 
-    expect(screen.getByRole('radiogroup', { name: 'Schedule style' })).toBeInTheDocument();
+    expect(await screen.findByRole('radiogroup', { name: 'Schedule style' })).toBeInTheDocument();
     expect(screen.getByText('Use one non-repeating timeslot that always matches the event start and end.')).toBeInTheDocument();
     expect(screen.getByText('Use the same selected weekdays and times each week during the event.')).toBeInTheDocument();
     expect(screen.getByText('Add individual dates and times that do not repeat.')).toBeInTheDocument();
@@ -1262,6 +1307,35 @@ describe('EventForm dirty state', () => {
     expect(screen.queryByRole('heading', { name: 'Event Details' })).not.toBeInTheDocument();
   });
 
+  it.each(['SIMPLE', 'ADVANCED'] as const)('preserves operations when External Registration changes in %s Setup', async (initialSetupMode) => {
+    const formRef = React.createRef<EventFormHandle>();
+    renderForm(jest.fn(), formRef, {
+      eventType: 'LEAGUE',
+      teamSignup: true,
+      doTeamsOfficiate: true,
+      teamOfficialsMaySwap: true,
+      staffingPriority: 'TEAM_COVERAGE_REQUIRED',
+      matchRulesOverride: { scoringModel: 'POINTS_ONLY' },
+    }, null, { isCreateMode: true, initialSetupMode });
+
+    fireEvent.click(screen.getByLabelText('External registration'));
+    if (initialSetupMode === 'SIMPLE') {
+      fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    }
+    fireEvent.change(await screen.findByPlaceholderText('https://example.com/event'), {
+      target: { value: 'https://partner.example/register' },
+    });
+    const draft = formRef.current!.captureCurrentEventConfiguration().draft;
+    expect(draft.basics).toMatchObject({ eventType: 'LEAGUE', affiliateUrl: 'https://partner.example/register' });
+    expect(draft.participation.teamSignup).toBe(true);
+    expect(draft.staff).toMatchObject({
+      doTeamsOfficiate: true,
+      teamOfficialsMaySwap: true,
+      staffingPriority: 'TEAM_COVERAGE_REQUIRED',
+    });
+    expect(draft.competition.matchRulesOverride).toEqual({ scoringModel: 'POINTS_ONLY' });
+  });
+
   it('preserves the event draft when switching from Simple to Advanced Setup', async () => {
     renderForm(jest.fn(), undefined, {}, null, {
       isCreateMode: true,
@@ -1366,6 +1440,7 @@ describe('EventForm dirty state', () => {
 
     fireEvent.click(screen.getByLabelText('Advanced Setup'));
     const cashAppInput = await screen.findByLabelText('Cash App username');
+    await waitFor(() => expect(cashAppInput).toHaveValue('$camka14'));
     fireEvent.change(cashAppInput, { target: { value: '' } });
     await waitFor(() => expect(screen.getByLabelText('Cash App username')).toHaveValue(''));
     fireEvent.change(screen.getByLabelText('Cash App username'), { target: { value: '$' } });
@@ -1456,7 +1531,14 @@ describe('EventForm dirty state', () => {
 
     await waitFor(() => {
       expect(getLegacyDraft(formRef).divisionDetails?.[0]?.price).toBe(3500);
+      expect(getEditorDraft(formRef).staff).toEqual(expect.objectContaining({
+        doTeamsOfficiate: false,
+        staffingPriority: 'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED',
+      }));
     });
+    expect(screen.queryByRole('switch', { name: /Teams provide officials/i })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Staffing Priority')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Official Positions' })).not.toBeInTheDocument();
   });
 
   it('allows event payment plan totals to drive price instead of matching the existing price', async () => {
@@ -1655,7 +1737,7 @@ describe('EventForm dirty state', () => {
 
     await waitForStableDirtyState(onDirtyStateChange, false);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Start Date & Time' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start Date & Time' }));
 
     await waitForStableDirtyState(onDirtyStateChange, true);
   });
@@ -1686,7 +1768,7 @@ describe('EventForm dirty state', () => {
     expect(screen.queryByLabelText('Official scheduling mode')).not.toBeInTheDocument();
   });
 
-  it('preserves team policy and named positions when priority changes hide and restore them', async () => {
+  it('preserves team policy and named positions while priority changes', async () => {
     const onDirtyStateChange = jest.fn();
     const formRef = React.createRef<EventFormHandle>();
     renderForm(onDirtyStateChange, formRef, {
@@ -1706,7 +1788,7 @@ describe('EventForm dirty state', () => {
     });
 
     await waitForStableDirtyState(onDirtyStateChange, true);
-    expect(screen.queryByRole('heading', { name: 'Official Positions' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Official Positions' })).toBeInTheDocument();
     expect(screen.getByRole('switch', { name: /Teams provide officials/i })).toBeChecked();
     expect(getLegacyDraft(formRef)).toEqual(expect.objectContaining({
       staffingPriority: 'TEAM_COVERAGE_REQUIRED',
@@ -2146,8 +2228,7 @@ describe('EventForm dirty state', () => {
 
   it('does not mark edit mode dirty when timeslot conflict checks update slot metadata', async () => {
     const onDirtyStateChange = jest.fn();
-    (eventService.getBlockingForFieldInRange as jest.Mock).mockResolvedValue([]);
-
+    (eventService.getFieldSchedulingConflicts as jest.Mock).mockResolvedValue({ conflicts: [] });
     renderForm(onDirtyStateChange, undefined, {
       state: 'UNPUBLISHED',
       eventType: 'LEAGUE',
@@ -2174,7 +2255,7 @@ describe('EventForm dirty state', () => {
     });
 
     await waitFor(() => {
-      expect(eventService.getBlockingForFieldInRange).toHaveBeenCalled();
+      expect(eventService.getFieldSchedulingConflicts).toHaveBeenCalled();
     });
 
     await waitForStableDirtyState(onDirtyStateChange, false);
@@ -2214,18 +2295,11 @@ describe('EventForm dirty state', () => {
     const onDirtyStateChange = jest.fn();
     const formRef = React.createRef<EventFormHandle>();
     mockDateTimePickerValuesByLabel['Start Date & Time'] = '2026-05-04T09:00:00';
-    (eventService.getBlockingForFieldInRange as jest.Mock).mockResolvedValue({
-      events: [
-        {
-          $id: 'event_blocking_1',
-          name: 'TEST DOC',
-          eventType: 'EVENT',
-          start: '2026-04-20T09:00:00',
-          end: '2026-04-20T17:00:00',
-        },
-      ],
-      rentalSlots: [],
-    });
+    (eventService.getFieldSchedulingConflicts as jest.Mock).mockImplementation((payload: any) => (
+      String(payload?.eventStart ?? '').startsWith('2026-04-20')
+        ? Promise.resolve({ conflicts: [buildServerFieldConflict()] })
+        : Promise.resolve({ conflicts: [] })
+    ));
 
     renderForm(onDirtyStateChange, formRef, {
       state: 'UNPUBLISHED',
@@ -2270,11 +2344,11 @@ describe('EventForm dirty state', () => {
   });
 
   it('ignores a late slot-conflict response after the event schedule changes', async () => {
-    const firstRequest = createDeferred<{ events: any[]; rentalSlots: any[] }>();
-    const secondRequest = createDeferred<{ events: any[]; rentalSlots: any[] }>();
+    const firstRequest = createDeferred<{ conflicts: any[] }>();
+    const secondRequest = createDeferred<{ conflicts: any[] }>();
     let requestCount = 0;
     mockDateTimePickerValuesByLabel['Start Date & Time'] = '2026-05-04T09:00:00';
-    (eventService.getBlockingForFieldInRange as jest.Mock).mockImplementation(() => {
+    (eventService.getFieldSchedulingConflicts as jest.Mock).mockImplementation(() => {
       requestCount += 1;
       return requestCount === 1 ? firstRequest.promise : secondRequest.promise;
     });
@@ -2305,17 +2379,17 @@ describe('EventForm dirty state', () => {
     });
 
     await waitFor(() => {
-      expect(eventService.getBlockingForFieldInRange).toHaveBeenCalledTimes(1);
+      expect(eventService.getFieldSchedulingConflicts).toHaveBeenCalledTimes(1);
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Start Date & Time' }));
 
     await waitFor(() => {
-      expect(eventService.getBlockingForFieldInRange).toHaveBeenCalledTimes(2);
+      expect(eventService.getFieldSchedulingConflicts).toHaveBeenCalledTimes(2);
     });
 
     await act(async () => {
-      secondRequest.resolve({ events: [], rentalSlots: [] });
+      secondRequest.resolve({ conflicts: [] });
       await secondRequest.promise;
     });
     await waitFor(() => {
@@ -2323,16 +2397,7 @@ describe('EventForm dirty state', () => {
     });
 
     await act(async () => {
-      firstRequest.resolve({
-        events: [{
-          $id: 'stale_blocking_event',
-          name: 'Stale blocking event',
-          eventType: 'EVENT',
-          start: '2026-04-20T09:00:00',
-          end: '2026-04-20T17:00:00',
-        }],
-        rentalSlots: [],
-      });
+      firstRequest.resolve({ conflicts: [buildServerFieldConflict()] });
       await firstRequest.promise;
     });
 
@@ -2342,31 +2407,8 @@ describe('EventForm dirty state', () => {
   it('keeps external timeslot field conflicts as warnings during validation', async () => {
     const onDirtyStateChange = jest.fn();
     const formRef = React.createRef<EventFormHandle>();
-    (eventService.getBlockingForFieldInRange as jest.Mock).mockResolvedValue({
-      events: [
-        {
-          $id: 'event_blocking_1',
-          name: 'Conflicting League',
-          eventType: 'LEAGUE',
-          start: '2026-04-20T09:00:00',
-          end: '2026-06-01T17:00:00',
-          timeSlots: [
-            {
-              $id: 'blocking_slot_1',
-              scheduledFieldId: 'field_1',
-              scheduledFieldIds: ['field_1'],
-              dayOfWeek: 0,
-              daysOfWeek: [0],
-              startTimeMinutes: 9 * 60,
-              endTimeMinutes: 21 * 60,
-              repeating: true,
-              startDate: '2026-04-20T09:00:00',
-              endDate: '2026-06-01T17:00:00',
-            },
-          ],
-        },
-      ],
-      rentalSlots: [],
+    (eventService.getFieldSchedulingConflicts as jest.Mock).mockResolvedValue({
+      conflicts: [buildServerFieldConflict()],
     });
 
     renderForm(onDirtyStateChange, formRef, {
@@ -2410,25 +2452,21 @@ describe('EventForm dirty state', () => {
     expect(screen.getByText(/Timeslot court conflicts are warnings/i)).toBeInTheDocument();
   });
 
-  it('does not treat rental slots as external timeslot field conflicts', async () => {
+  it('reports rental booking conflicts as external timeslot warnings', async () => {
     const onDirtyStateChange = jest.fn();
     const formRef = React.createRef<EventFormHandle>();
-    (eventService.getBlockingForFieldInRange as jest.Mock).mockResolvedValue({
-      events: [],
-      rentalSlots: [
-        {
-          $id: 'rental_slot_1',
-          scheduledFieldId: 'field_1',
-          scheduledFieldIds: ['field_1'],
-          dayOfWeek: 0,
-          daysOfWeek: [0],
-          startTimeMinutes: 9 * 60,
-          endTimeMinutes: 21 * 60,
-          repeating: true,
-          startDate: '2026-04-20T09:00:00',
-          endDate: '2026-06-01T17:00:00',
+    const baseConflict = buildServerFieldConflict();
+    (eventService.getFieldSchedulingConflicts as jest.Mock).mockResolvedValue({
+      conflicts: [{
+        ...baseConflict,
+        kind: 'RENTAL_BOOKING',
+        source: {
+          ...baseConflict.source,
+          kind: 'RENTAL_BOOKING',
+          eventId: null,
+          parentId: 'booking_1',
         },
-      ],
+      }],
     });
 
     renderForm(onDirtyStateChange, formRef, {
@@ -2459,9 +2497,9 @@ describe('EventForm dirty state', () => {
     });
 
     await waitFor(() => {
-      expect(eventService.getBlockingForFieldInRange).toHaveBeenCalled();
+      expect(eventService.getFieldSchedulingConflicts).toHaveBeenCalled();
     });
-    expect(screen.getByTestId('league-conflict-count')).toHaveTextContent('0');
+    expect(screen.getByTestId('league-conflict-count')).toHaveTextContent('1');
 
     let isValid: boolean | undefined;
     await act(async () => {
@@ -2470,7 +2508,7 @@ describe('EventForm dirty state', () => {
 
     expect(isValid).toBe(true);
     expect(formRef.current?.getValidationErrors()).toEqual([]);
-    expect(screen.queryByText(/Timeslot court conflicts are warnings/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/Timeslot court conflicts are warnings/i)).toBeInTheDocument();
   });
 
   it('does not display a fixed end input in generated-end mode', async () => {
@@ -2515,7 +2553,7 @@ describe('EventForm dirty state', () => {
     });
   });
 
-  it('disables generated-end-date mode and clears stale values for Weekly Events', async () => {
+  it('preserves and edits No Planned End for Weekly Events', async () => {
     const formRef = React.createRef<EventFormHandle>();
 
     renderForm(jest.fn(), formRef, {
@@ -2543,12 +2581,14 @@ describe('EventForm dirty state', () => {
       }],
     });
 
-    const generatedEndCheckbox = screen.getByRole('checkbox', {
-      name: 'Set the end date during match generation',
+    const noPlannedEndCheckbox = screen.getByRole('checkbox', {
+      name: 'No Planned End',
     });
-    expect(generatedEndCheckbox).toBeDisabled();
-    expect(generatedEndCheckbox).not.toBeChecked();
+    expect(noPlannedEndCheckbox).toBeEnabled();
+    expect(noPlannedEndCheckbox).toBeChecked();
 
+    fireEvent.click(noPlannedEndCheckbox);
+    expect(noPlannedEndCheckbox).not.toBeChecked();
     await waitFor(() => expect(getLegacyDraft(formRef)?.noFixedEndDateTime).toBe(false));
   });
 
@@ -3000,8 +3040,8 @@ describe('EventForm dirty state', () => {
     });
 
     const eventDetailsGrid = document.getElementById('section-event-details-content');
-    const startControl = screen.getByRole('button', { name: 'Start Date & Time' }).closest('.md\\:col-span-2');
-    const endControl = screen.getByRole('button', { name: 'End Date & Time' }).closest('.md\\:col-span-2');
+    const startControl = (await screen.findByRole('button', { name: 'Start Date & Time' })).closest('.md\\:col-span-2');
+    const endControl = (await screen.findByRole('button', { name: 'End Date & Time' })).closest('.md\\:col-span-2');
     const registrationCutoffControl = screen.getByLabelText('Registration Cutoff (Hours)').closest('.md\\:col-span-2');
     const refundCutoffControl = screen.getByLabelText('Refund Cutoff (Hours)').closest('.md\\:col-span-2');
 
@@ -3087,7 +3127,7 @@ describe('EventForm dirty state', () => {
     expect(within(locationMapColumn).queryByRole('button', { name: /show map|hide map/i })).not.toBeInTheDocument();
   });
 
-  it('keeps affiliate capacity in Event Details while pricing affiliate divisions in the division editor', async () => {
+  it('keeps external event operations available with shared capacity and per-division listing prices', async () => {
     const onDirtyStateChange = jest.fn();
     const baseDivision = buildEvent().divisionDetails[0];
 
@@ -3132,18 +3172,18 @@ describe('EventForm dirty state', () => {
     expect(mapSideControls).toContainElement(maxParticipantsInput);
     expect(within(mapSideControls).queryByTestId('cents-input')).not.toBeInTheDocument();
     expect(divisionModeSwitches).toContainElement(screen.getByText('Single Division (all skill levels play together)'));
-    expect(divisionModeSwitches).not.toContainElement(screen.queryByText('Register by Division Type'));
+    expect(divisionModeSwitches).toContainElement(screen.getByText('Register by Division Type'));
     expect(divisionSettingsSection).toContainElement(divisionPriceInput);
     expect(screen.getByText('New Division')).toBeInTheDocument();
     expect(screen.getByLabelText('Gender')).toBeInTheDocument();
     expect(screen.getByLabelText('Skill Division')).toBeInTheDocument();
     expect(screen.getByLabelText('Age Division')).toBeInTheDocument();
-    expect(screen.getByLabelText('Division Max Participants')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Division Max Participants')).not.toBeInTheDocument();
     expect(screen.getByText('Open Division')).toBeInTheDocument();
     expect(screen.queryByText('Capacity & Price')).not.toBeInTheDocument();
     expect(screen.queryByText('Listing Capacity')).not.toBeInTheDocument();
     expect(screen.queryByText('Payment Plans')).not.toBeInTheDocument();
-    expect(screen.getByText('Price: $99.00 • Max participants: 99')).toBeInTheDocument();
+    expect(screen.getByText('Price: $99.00 • Max teams: 40')).toBeInTheDocument();
     expect(screen.queryByText(/Payment plan:/)).not.toBeInTheDocument();
   });
 
@@ -4410,8 +4450,8 @@ describe('EventForm dirty state', () => {
 
     expect(screen.getByText('Rented')).toBeInTheDocument();
     expect(screen.getByLabelText('Rental Court')).toBeChecked();
-    expect(screen.getByRole('button', { name: 'Start Date & Time' })).not.toBeDisabled();
-    expect(screen.getByRole('button', { name: 'End Date & Time' })).not.toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'Start Date & Time' })).not.toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'End Date & Time' })).not.toBeDisabled();
 
     await userEvent.click(screen.getByRole('button', { name: /Home Facility/i }));
     await userEvent.click(screen.getByLabelText('Main Court'));
@@ -4622,8 +4662,8 @@ describe('EventForm dirty state', () => {
 
     const selectedRentalResource = await screen.findByLabelText(/Rental Court - Mar 12, 2026/i);
     expect(selectedRentalResource).toBeChecked();
-    expect(screen.getByRole('button', { name: 'Start Date & Time' })).not.toBeDisabled();
-    expect(screen.getByRole('button', { name: 'End Date & Time' })).not.toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'Start Date & Time' })).not.toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'End Date & Time' })).not.toBeDisabled();
   });
 
   it('allows selected rental resources to use no fixed end datetime scheduling for leagues', async () => {

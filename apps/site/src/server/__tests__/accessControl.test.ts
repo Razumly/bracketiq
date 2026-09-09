@@ -557,6 +557,7 @@ describe('canManageEvent', () => {
       canDelegateHost: false,
       readOnly: true,
       readOnlyReason: 'MANAGEMENT_AUTHORITY_UNVERIFIED',
+      organizationOwnershipStatus: 'UNCLAIMED',
       managementAuthority: null,
       viewerIsEventHost: true,
     }));

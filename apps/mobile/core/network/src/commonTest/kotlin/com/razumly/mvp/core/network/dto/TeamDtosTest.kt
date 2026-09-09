@@ -269,6 +269,30 @@ class TeamDtosTest {
         assertEquals("sent", registration?.consentStatus)
         assertEquals("parent-1", registration?.createdBy)
     }
+    @Test
+    fun given_team_api_dto_json_when_decoded_then_proposal_player_records_are_preserved() {
+        val dto = jsonMVP.decodeFromString<TeamApiDto>(
+            """
+            {
+              "id": "team-1",
+              "name": "Aces",
+              "players": [
+                {
+                  "id": "player-1",
+                  "firstName": "Alex",
+                  "lastName": "Player"
+                }
+              ]
+            }
+            """.trimIndent(),
+        )
+
+        assertEquals("player-1", dto.players?.single()?.id)
+        assertEquals(
+            "Alex Player",
+            "${dto.players?.single()?.firstName} ${dto.players?.single()?.lastName}",
+        )
+    }
 
     @Test
     fun update_team_request_serialization_includes_required_templates_and_registration_metadata() {

@@ -1786,6 +1786,8 @@ class BillingRepositoryHttpTest {
                 eventAmountCents = 4500,
                 divisionId = "open",
                 label = "Event registration • Open",
+                slotId = "slot_1",
+                occurrenceDate = "2026-05-19",
             ),
         ).getOrThrow()
 
@@ -1794,6 +1796,8 @@ class BillingRepositoryHttpTest {
         assertTrue(capturedBody.contains("\"eventAmountCents\":4500"))
         assertTrue(capturedBody.contains("\"taxAmountCents\":0"))
         assertTrue(capturedBody.contains("\"divisionId\":\"open\""))
+        assertTrue(capturedBody.contains("\"slotId\":\"slot_1\""))
+        assertTrue(capturedBody.contains("\"occurrenceDate\":\"2026-05-19\""))
         assertEquals("https://checkout.stripe.com/c/pay/session_1", checkout.checkoutUrl)
         assertEquals("https://example.test/api/billing/checkout-qr?url=session_1", checkout.qrCodeUrl)
         assertEquals(4715, checkout.amountCents)
@@ -1801,6 +1805,62 @@ class BillingRepositoryHttpTest {
         assertEquals("team_1", checkout.billOwnerId)
         assertEquals("manager_1", checkout.payerUserId)
         assertEquals("event_payment", checkout.feeBreakdown?.purchaseType)
+    }
+
+    @Test
+    fun getEventTeamBillingSnapshot_includes_selected_weekly_occurrence() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+        val engine = MockEngine { request ->
+            assertEquals(
+                "/api/events/event_1/teams/team_1/billing",
+                request.url.encodedPath,
+            )
+            assertEquals("slot_1", request.url.parameters["slotId"])
+            assertEquals("2026-05-19", request.url.parameters["occurrenceDate"])
+            assertEquals(HttpMethod.Get, request.method)
+
+            respond(
+                content = """
+                    {
+                      "team": {
+                        "id": "team_1",
+                        "name": "Beach Aces",
+                        "playerIds": []
+                      },
+                      "users": [],
+                      "bills": []
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val repo = BillingRepository(
+            MvpApiClient(
+                HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+                "http://example.test",
+                tokenStore,
+            ),
+            userRepo,
+            BillingRepositoryHttp_UnusedEventRepository,
+            db,
+        )
+
+        val snapshot = repo.getEventTeamBillingSnapshot(
+            eventId = "event_1",
+            teamId = "team_1",
+            occurrence = EventOccurrenceSelection(
+                slotId = "slot_1",
+                occurrenceDate = "2026-05-19",
+            ),
+        ).getOrThrow()
+
+        assertEquals("team_1", snapshot.teamId)
     }
 
     @Test

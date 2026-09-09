@@ -185,6 +185,48 @@ describe("usePublicRentalSelections context lifecycle", () => {
     );
   });
 
+  it("accepts a public selection inside an overnight repeating rental slot", async () => {
+    const timeZone =
+      Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    const slot = {
+      $id: "slot_overnight",
+      dayOfWeek: 0,
+      daysOfWeek: [0],
+      startDate: "2030-06-10T00:00:00",
+      endDate: "2030-06-17T00:00:00",
+      startTimeMinutes: 23 * 60,
+      endTimeMinutes: 60,
+      timeZone,
+      repeating: true,
+      scheduledFieldId: "field_overnight",
+      scheduledFieldIds: ["field_overnight"],
+    } as TimeSlot;
+    const field = {
+      $id: "field_overnight",
+      name: "Overnight Court",
+      rentalSlots: [slot],
+      events: [],
+      matches: [],
+    } as Field;
+    const hook = renderRentalSelections({
+      canManage: false,
+      fields: [field],
+      rentalListings: [{
+        field,
+        slot,
+        nextOccurrence: new Date(2030, 5, 10, 23, 0, 0, 0),
+      }],
+      selectionContextKey: "org_overnight",
+    });
+
+    await waitFor(() => {
+      expect(hook.result.current.hasPendingConflictChecks).toBe(false);
+      expect(hook.result.current.rentalSelectionValidations[0]?.errors).toEqual(
+        [],
+      );
+    });
+  });
+
   it("waits for a usable listing when fields arrive first", async () => {
     const start = new Date("2030-06-10T10:00:00");
     const end = new Date("2030-06-10T11:00:00");

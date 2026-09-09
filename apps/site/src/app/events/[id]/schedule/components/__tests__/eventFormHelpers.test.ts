@@ -27,7 +27,6 @@ import {
   getEventOfficialUserIds,
   normalizeEventOfficials,
   normalizeEventOfficialPositions,
-  normalizeOfficialSchedulingMode,
   normalizeSportOfficialPositionTemplates,
 } from '../eventForm/officials';
 import {
@@ -200,7 +199,6 @@ const makeAffiliateEventFormValues = (overrides: Record<string, unknown> = {}) =
   teams: [],
   officials: [],
   officialIds: ['official_1'],
-  officialSchedulingMode: 'SCHEDULE',
   officialPositions: [{ id: 'ref', name: 'Referee', count: 1, order: 0 }],
   eventOfficials: [{ id: 'event_official_1', userId: 'official_1', positionIds: ['ref'], fieldIds: [], isActive: true }],
   pendingStaffInvites: [{ firstName: 'Ava', lastName: 'Ref', email: 'ava@test.com', roles: ['OFFICIAL'] }],
@@ -599,7 +597,7 @@ describe('Weekly Event schedule validation', () => {
     expect(mixedResult.success).toBe(true);
   });
 
-  it('does not restore generated-end-date mode from a stale Weekly Event', () => {
+  it('preserves No Planned End for a saved Weekly Event', () => {
     const editState = mapEventToFormState({
       $id: 'weekly_event_1',
       eventType: 'WEEKLY_EVENT',
@@ -611,12 +609,12 @@ describe('Weekly Event schedule validation', () => {
       end: '2026-08-31T12:00:00.000Z',
     } as any);
 
-    expect(editState.noFixedEndDateTime).toBe(false);
+    expect(editState.noFixedEndDateTime).toBe(true);
   });
 });
 
 describe('affiliate event form helpers', () => {
-  it('keeps affiliate division metadata while stripping BIQ-only setup from the draft', () => {
+  it('keeps external Event operations while removing inapplicable payment setup from the command', () => {
     const source = makeAffiliateEventFormValues();
     const schema = buildEventFormSchema({ allowMissingEventImage: true, allowMissingEventDivisions: true });
 
@@ -644,7 +642,10 @@ describe('affiliate event form helpers', () => {
       resolvedOrganization: {
         $id: 'org_1',
         ownerId: 'user_1',
-        staffMembers: [],
+        staffMembers: [
+          { organizationId: 'org_1', userId: 'assistant_1', types: ['HOST'] },
+          { organizationId: 'org_1', userId: 'official_1', types: ['OFFICIAL'] },
+        ],
         staffInvites: [],
       } as any,
       selectedRentedFieldIds: [],
@@ -660,21 +661,21 @@ describe('affiliate event form helpers', () => {
       price: 9900,
       allowPaymentPlans: false,
       allowTeamSplitDefault: false,
-      teamSignup: false,
+      teamSignup: true,
       singleDivision: false,
       splitLeaguePlayoffDivisions: false,
-      registrationByDivisionType: false,
+      registrationByDivisionType: true,
       divisions: ['stale_division'],
       playoffDivisionDetails: [],
       requiredTemplateIds: [],
-      officialIds: [],
-      officialPositions: [],
-      eventOfficials: [],
-      assistantHostIds: [],
-      doTeamsOfficiate: false,
-      teamOfficialsMaySwap: false,
-      matchRulesOverride: null,
-      autoCreatePointMatchIncidents: false,
+      officialIds: ['official_1'],
+      officialPositions: [expect.objectContaining({ id: 'ref', name: 'Referee', count: 1 })],
+      eventOfficials: [expect.objectContaining({ userId: 'official_1', positionIds: ['ref'] })],
+      assistantHostIds: ['assistant_1'],
+      doTeamsOfficiate: true,
+      teamOfficialsMaySwap: true,
+      matchRulesOverride: { scoringModel: 'POINTS_ONLY' },
+      autoCreatePointMatchIncidents: true,
       taxHandling: 'INHERIT_ORG',
       organizerManualTaxRateBps: 0,
     });
@@ -749,7 +750,7 @@ describe('affiliate event form helpers', () => {
       expect.objectContaining({
         id: 'single_affiliate_division',
         price: 15800,
-        maxParticipants: 99,
+        maxParticipants: 24,
         allowPaymentPlans: false,
         installmentCount: 0,
         installmentAmounts: [],
@@ -1187,6 +1188,7 @@ describe('event form slot helpers', () => {
     const payload = buildSlotConflictPayload({
       eventId: 'event_1',
       eventType: 'LEAGUE',
+      organizationId: 'organization_1',
       parentEvent: null,
       eventStart: '2026-06-24T09:00',
       eventEnd: null,
@@ -1211,6 +1213,7 @@ describe('event form slot helpers', () => {
     expect(payload).toMatchObject({
       eventId: 'event_1',
       eventType: 'LEAGUE',
+      organizationId: 'organization_1',
       parentEvent: null,
       eventStart: '2026-06-24T09:00',
       eventEnd: undefined,
@@ -1546,10 +1549,7 @@ describe('event form official helpers', () => {
     expect(buildAvailableOfficialFieldOptions([owned], []).map((option) => option.value)).toEqual(['owned_1']);
   });
 
-  it('normalizes scheduling mode aliases and position templates', () => {
-    expect(normalizeOfficialSchedulingMode('NONE')).toBe('OFF');
-    expect(normalizeOfficialSchedulingMode('STAFFING')).toBe('STAFFING');
-    expect(normalizeOfficialSchedulingMode('bad')).toBe('SCHEDULE');
+  it('normalizes position templates', () => {
     expect(normalizeSportOfficialPositionTemplates([
       { name: ' Referee ', count: 2.8 },
       { name: 'Scorekeeper', count: 0 },

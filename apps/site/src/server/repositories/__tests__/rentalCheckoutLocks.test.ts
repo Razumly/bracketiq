@@ -2,6 +2,7 @@
 
 const assertNoEventFieldSchedulingConflictsMock = jest.fn();
 const advisoryLockIdMock = jest.fn();
+const acquireFieldLocksMock = jest.fn();
 
 jest.mock('@/server/repositories/events', () => {
   class EventFieldConflictError extends Error {
@@ -22,6 +23,7 @@ jest.mock('@/server/repositories/events', () => {
 
 jest.mock('@/server/repositories/locks', () => ({
   advisoryLockId: (...args: unknown[]) => advisoryLockIdMock(...args),
+  acquireFieldLocks: (...args: unknown[]) => acquireFieldLocksMock(...args),
 }));
 
 import {
@@ -135,8 +137,8 @@ const createClient = () => {
 
 describe('reserveRentalCheckoutLocks concurrency', () => {
   beforeEach(() => {
-    jest.resetAllMocks();
     advisoryLockIdMock.mockReturnValue(1n);
+    acquireFieldLocksMock.mockResolvedValue(undefined);
     assertNoEventFieldSchedulingConflictsMock.mockResolvedValue(undefined);
   });
 
@@ -435,7 +437,7 @@ describe('reserveRentalCheckoutLocks concurrency', () => {
     expect(lockRows.size).toBe(0);
   });
 
-  it('acquires per-field advisory locks in lexical order', async () => {
+  it('uses the shared per-field advisory lock contract in lexical order', async () => {
     const { client } = createClient();
     await reserveRentalCheckoutWindowLocks({
       client,
@@ -456,8 +458,7 @@ describe('reserveRentalCheckoutLocks concurrency', () => {
 
     expect(advisoryLockIdMock.mock.calls.map(([key]) => key)).toEqual([
       'rental-checkout-user:user_1',
-      'rental-checkout-field:field_a',
-      'rental-checkout-field:field_z',
     ]);
+    expect(acquireFieldLocksMock).toHaveBeenCalledWith(expect.anything(), ['field_a', 'field_z']);
   });
 });

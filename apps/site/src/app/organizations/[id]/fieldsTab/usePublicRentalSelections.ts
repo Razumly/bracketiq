@@ -18,6 +18,10 @@ import {
 import { createId } from "@/lib/id";
 import { fieldService } from "@/lib/fieldService";
 import { getFacilityScopedFieldDisplayName } from "@/lib/fieldUtils";
+import {
+  enumerateRepeatingTimeSlotOccurrences,
+  RepeatingTimeSlotValidationError,
+} from "@/lib/repeatingTimeSlotAvailability";
 import { buildFieldCalendarEvents } from "../fieldCalendar";
 import { normalizeDaysOfWeek, normalizeFieldIds } from "./facilityFormUtils";
 import type {
@@ -253,54 +257,16 @@ const rentalSlotCoversDraftDay = (
     );
   }
 
-  const dayOfWeek = mondayDayOf(params.selectionStart);
-  const startTimeMinutes =
-    params.selectionStart.getHours() * 60 + params.selectionStart.getMinutes();
-  const endTimeMinutes =
-    params.selectionEnd.getHours() * 60 + params.selectionEnd.getMinutes();
-  const slotDays = normalizeDaysOfWeek(slot.daysOfWeek, slot.dayOfWeek);
-  if (!slotDays.includes(dayOfWeek)) {
-    return false;
-  }
-  const slotStartMinutes =
-    typeof slot.startTimeMinutes === "number" ? slot.startTimeMinutes : null;
-  const slotEndMinutes =
-    typeof slot.endTimeMinutes === "number" ? slot.endTimeMinutes : null;
-  if (
-    slotStartMinutes === null ||
-    slotEndMinutes === null ||
-    slotEndMinutes <= slotStartMinutes
-  ) {
-    return false;
-  }
-  if (startTimeMinutes < slotStartMinutes || endTimeMinutes > slotEndMinutes) {
-    return false;
-  }
-
-  const slotStartBoundary = parseLocalDateTime(slot.startDate ?? null);
-  const slotEndBoundary = parseLocalDateTime(slot.endDate ?? null);
-
-  const normalizeDay = (date: Date) =>
-    new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
-  if (
-    slotStartBoundary &&
-    normalizeDay(params.selectionStart) < normalizeDay(slotStartBoundary)
-  ) {
-    return false;
-  }
-  if (
-    slotEndBoundary &&
-    normalizeDay(params.selectionStart) > normalizeDay(slotEndBoundary)
-  ) {
-    return false;
-  }
-  if (
-    slotEndBoundary &&
-    normalizeDay(params.selectionEnd) > normalizeDay(slotEndBoundary)
-  ) {
-    return false;
-  }
-  return true;
+  const occurrences = enumerateRepeatingTimeSlotOccurrences({
+    slot,
+    windowStart: params.selectionStart,
+    windowEnd: params.selectionEnd,
+  });
+  return occurrences.some(
+    (occurrence) =>
+      params.selectionStart.getTime() >= occurrence.start.getTime() &&
+      params.selectionEnd.getTime() <= occurrence.end.getTime(),
+  );
 };
 
 export function usePublicRentalSelections({
@@ -670,15 +636,29 @@ export function usePublicRentalSelections({
             errors.push(`Resource ${fieldId} is unavailable.`);
             return;
           }
-          const matchedRentalSlot = (field.rentalSlots || []).find((slot) =>
-            rentalSlotCoversDraftDay(slot, {
-              selectionStart: dateRange.start,
-              selectionEnd: dateRange.end,
-            }),
-          );
+          let matchedRentalSlot: TimeSlot | undefined;
+          let repeatingResolutionError: string | null = null;
+          for (const slot of field.rentalSlots || []) {
+            try {
+              if (rentalSlotCoversDraftDay(slot, {
+                selectionStart: dateRange.start,
+                selectionEnd: dateRange.end,
+              })) {
+                matchedRentalSlot = slot;
+                break;
+              }
+            } catch (error) {
+              if (error instanceof RepeatingTimeSlotValidationError) {
+                repeatingResolutionError ??= error.message;
+                continue;
+              }
+              throw error;
+            }
+          }
           if (!matchedRentalSlot) {
             errors.push(
-              `${getFacilityScopedFieldDisplayName(field)} is unavailable for ${formatDisplayDateTime(dateRange.start)} - ${formatDisplayDateTime(dateRange.end)}.`,
+              repeatingResolutionError
+                ?? `${getFacilityScopedFieldDisplayName(field)} is unavailable for ${formatDisplayDateTime(dateRange.start)} - ${formatDisplayDateTime(dateRange.end)}.`,
             );
             return;
           }

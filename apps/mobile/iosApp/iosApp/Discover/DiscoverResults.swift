@@ -68,7 +68,7 @@ struct NativeDiscoverResultsView: View {
 
 private struct NativeEventResults: View {
     @ObservedObject var state: DiscoverObservableState
-    let events: [Event]
+    let events: [DiscoverEventSearchResult]
     let searchQuery: String
     let topPadding: CGFloat
     let bottomPadding: CGFloat
@@ -99,9 +99,11 @@ private struct NativeEventResults: View {
                         )
                     }
                 } else {
-                    ForEach(Array(events.enumerated()), id: \.element.id) { index, event in
+                    ForEach(Array(events.enumerated()), id: \.element.event.id) { index, result in
+                        let event = result.event
                         NativeDiscoverEventCard(
                             event: event,
+                            nextOccurrence: result.nextOccurrence,
                             organizationLogoId: organizationLogoId(for: event),
                             showsPublishedBadge: event.canShowPublishedBadgeForViewer(
                                 viewerUserId: state.currentUserId,
@@ -133,8 +135,9 @@ private struct NativeEventResults: View {
             state.component.refreshEvents(force: true)
         }
         .task(id: imagePreloadIdentity) {
-            let requests = events.map { event in
-                discoverEventImageRequest(
+            let requests = events.map { result in
+                let event = result.event
+                return discoverEventImageRequest(
                     event: event,
                     organizationLogoId: organizationLogoId(for: event)
                 )
@@ -146,8 +149,9 @@ private struct NativeEventResults: View {
 
 private extension NativeEventResults {
     var imagePreloadIdentity: String {
-        events.map { event in
-            "\(event.id):\(event.imageId):\(organizationLogoId(for: event) ?? "")"
+        events.map { result in
+            let event = result.event
+            return "\(event.id):\(event.imageId):\(result.nextOccurrence?.start.epochSeconds ?? 0):\(organizationLogoId(for: event) ?? "")"
         }
         .joined(separator: "|")
     }

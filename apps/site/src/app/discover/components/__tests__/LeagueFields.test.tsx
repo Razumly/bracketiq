@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { fireEvent, screen } from "@testing-library/react";
 import LeagueFields, { LeagueSlotForm } from "../LeagueFields";
 import { renderWithMantine } from "../../../../../test/utils/renderWithMantine";
@@ -24,6 +25,32 @@ const baseSlot: LeagueSlotForm = {
 };
 
 const noop = () => {};
+const InteractiveLeagueFields = () => {
+  const [slots, setSlots] = useState<LeagueSlotForm[]>([baseSlot]);
+
+  return (
+    <LeagueFields
+      leagueData={{
+        gamesPerOpponent: 1,
+        includePlayoffs: false,
+        usesSets: false,
+        matchDurationMinutes: 60,
+        restTimeMinutes: 0,
+      }}
+      onLeagueDataChange={noop}
+      slots={slots}
+      onAddSlot={noop}
+      onUpdateSlot={(index, update) => {
+        setSlots((current) => current.map((slot, slotIndex) => (
+          slotIndex === index ? { ...slot, ...update } : slot
+        )));
+      }}
+      onRemoveSlot={noop}
+      fields={[field]}
+      fieldsLoading={false}
+    />
+  );
+};
 
 const getLabeledInput = (label: RegExp): HTMLElement => {
   const input = screen
@@ -129,6 +156,27 @@ describe("LeagueFields", () => {
       0,
       expect.objectContaining({ repeating: false }),
     );
+  });
+
+  it("shows the following local weekday for an overnight repeating slot", () => {
+    renderWithMantine(<InteractiveLeagueFields />);
+
+    const daysInput = getLabeledInput(/Days of Week/i);
+    fireEvent.click(daysInput);
+    fireEvent.click(screen.getByRole("option", { name: "Tuesday" }));
+    fireEvent.click(screen.getByRole("option", { name: "Monday" }));
+
+    const startTimeInput = getLabeledInput(/Start Time/i);
+    fireEvent.click(startTimeInput);
+    fireEvent.click(screen.getByRole("option", { name: "10:00 PM" }));
+
+    const endTimeInput = getLabeledInput(/End Time/i);
+    fireEvent.click(endTimeInput);
+    fireEvent.click(screen.getByRole("option", { name: "2:00 AM" }));
+
+    expect(
+      screen.getByText("Overnight slot ends on the next local weekday: Tuesday."),
+    ).toBeInTheDocument();
   });
 
   it("renders only the slot type owned by a single-style Simple Setup page", () => {
@@ -671,7 +719,7 @@ describe("LeagueFields", () => {
     );
   });
 
-  it("allows adding resources to a rental-locked readonly slot when resource edits are explicitly allowed", () => {
+  it("keeps booked Resources locked when organizer Resource edits are allowed", () => {
     const onUpdateSlot = jest.fn();
     const rentalField: Field = {
       ...field,
@@ -749,18 +797,10 @@ describe("LeagueFields", () => {
 
     expect(
       screen.getByPlaceholderText("Search resources..."),
-    ).not.toBeDisabled();
+    ).toBeDisabled();
     expect(screen.getByLabelText(/Repeats weekly/i)).toBeDisabled();
-
-    fireEvent.click(screen.getByRole("button", { name: /Court B/i }));
-
-    expect(onUpdateSlot).toHaveBeenCalledWith(
-      0,
-      expect.objectContaining({
-        scheduledFieldId: "rental_field_1",
-        scheduledFieldIds: ["rental_field_1", "field_2"],
-      }),
-    );
+    expect(screen.getByRole("button", { name: /Remove/i })).toBeDisabled();
+    expect(onUpdateSlot).not.toHaveBeenCalled();
   });
 
   it("does not offer a rental booking item on another timeslot once it is selected", () => {

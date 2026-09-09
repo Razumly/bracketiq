@@ -5,11 +5,15 @@ import { requireSession } from '@/lib/permissions';
 import { parseDateInput } from '@/server/requestParsing';
 import { canManageOrganization } from '@/server/accessControl';
 import { loadBillDiscountSummaries, withBillDiscountAmounts } from '@/server/billing/billDiscountSummaries';
+import { validateEventRegistrationBillSource } from '@/server/billing/eventRegistrationPaymentContext';
 import { handleApiRouteError } from '@/server/http/routeErrors';
+import { acquireEventLock } from '@/server/repositories/locks';
 import {
-  isWeeklyParentEvent,
+  isActiveWeeklyParentEvent,
+  isArchivedWeeklyParentEvent,
   resolveWeeklyOccurrence,
   resolveWeeklyOccurrenceStartAt,
+  WEEKLY_EVENT_ARCHIVED_ERROR,
 } from '@/server/events/weeklyOccurrences';
 
 export const dynamic = 'force-dynamic';
@@ -279,14 +283,30 @@ export async function POST(req: NextRequest) {
   const lineItemsTotalAmountCents = normalizedLineItems.reduce((sum, item) => sum + item.amountCents, 0);
   const effectiveTotalAmountCents = lineItemsTotalAmountCents > 0 ? lineItemsTotalAmountCents : totalAmountCents;
 
-  const eventId = parsed.data.eventId?.trim() || null;
+  let eventId = parsed.data.eventId?.trim() || null;
   const slotId = parsed.data.slotId?.trim() || null;
   const occurrenceDate = parsed.data.occurrenceDate?.trim() || null;
   const organizationId = parsed.data.organizationId?.trim() || null;
-  const sourceType = parsed.data.sourceType?.trim() || null;
+  const sourceType = parsed.data.sourceType?.trim().toUpperCase() || null;
   const sourceId = parsed.data.sourceId?.trim() || null;
   const paymentPlanEnabled = parsed.data.paymentPlanEnabled ?? false;
   const now = new Date();
+
+  if (sourceType === 'EVENT_REGISTRATION') {
+    const sourceValidation = await validateEventRegistrationBillSource({
+      sourceId,
+      ownerType: parsed.data.ownerType,
+      ownerId,
+      eventId,
+      organizationId,
+      slotId,
+      occurrenceDate,
+    });
+    if (!sourceValidation.valid) {
+      return NextResponse.json({ error: 'Invalid event registration bill source.' }, { status: 400 });
+    }
+    eventId = sourceValidation.registration.eventId;
+  }
 
   const alternateTeamOwnerIds = [ownerId];
   if (parsed.data.ownerType === 'TEAM') {
@@ -327,62 +347,7 @@ export async function POST(req: NextRequest) {
   let resolvedBillSlotId: string | null = null;
   let resolvedBillOccurrenceDate: string | null = null;
   let dueDates: Date[] = [];
-  if (paymentPlanEnabled && eventId) {
-    const event = await prisma.events.findUnique({
-      where: { id: eventId },
-      select: {
-        id: true,
-        eventType: true,
-        parentEvent: true,
-        timeSlotIds: true,
-      },
-    });
-    if (!event) {
-      return NextResponse.json({ error: 'Event not found.' }, { status: 404 });
-    }
-    if (isWeeklyParentEvent(event)) {
-      if (!slotId || !occurrenceDate) {
-        return NextResponse.json(
-          { error: 'Weekly payment plans require slotId and occurrenceDate.' },
-          { status: 400 },
-        );
-      }
-      const resolvedOccurrence = await resolveWeeklyOccurrence({
-        event,
-        occurrence: { slotId, occurrenceDate },
-      });
-      if (!resolvedOccurrence.ok) {
-        return NextResponse.json({ error: resolvedOccurrence.error }, { status: 400 });
-      }
-      resolvedBillSlotId = resolvedOccurrence.value.slotId;
-      resolvedBillOccurrenceDate = resolvedOccurrence.value.occurrenceDate;
-      if (relativeDueDays.length === 0) {
-        return NextResponse.json(
-          { error: 'Weekly payment plans require installmentDueRelativeDays.' },
-          { status: 400 },
-        );
-      }
-      if (relativeDueDays.length > 0) {
-        const occurrenceStart = resolveWeeklyOccurrenceStartAt(
-          resolvedOccurrence.value.slot,
-          resolvedOccurrence.value.occurrenceDate,
-        );
-        if (!occurrenceStart) {
-          return NextResponse.json({ error: 'Unable to resolve weekly occurrence start date.' }, { status: 400 });
-        }
-        dueDates = relativeDueDays.map((offsetDays) => {
-          const dueDate = new Date(occurrenceStart.getTime());
-          dueDate.setDate(dueDate.getDate() + offsetDays);
-          return dueDate;
-        });
-      }
-    } else if (slotId || occurrenceDate || relativeDueDays.length > 0) {
-      return NextResponse.json(
-        { error: 'Occurrence-relative payment plans are only valid for weekly events.' },
-        { status: 400 },
-      );
-    }
-  } else if (slotId || occurrenceDate || relativeDueDays.length > 0) {
+  if ((slotId || occurrenceDate || relativeDueDays.length > 0) && (!eventId || !paymentPlanEnabled)) {
     return NextResponse.json(
       { error: 'Occurrence-relative payment plans require an event payment plan.' },
       { status: 400 },
@@ -397,6 +362,81 @@ export async function POST(req: NextRequest) {
 
   const shouldEnforceUniquePaymentPlan = Boolean(eventId && paymentPlanEnabled);
   const creationResult = await prisma.$transaction(async (tx) => {
+    if (eventId) {
+      const loadLockedEvent = async (lockedEventId: string) => {
+        if (typeof tx.$executeRaw === 'function') {
+          await acquireEventLock(tx, lockedEventId);
+        }
+        return tx.events.findUnique({
+          where: { id: lockedEventId },
+          select: {
+            id: true,
+            eventType: true,
+            parentEvent: true,
+            timeSlotIds: true,
+            start: true,
+            end: true,
+            archivedAt: true,
+          },
+        });
+      };
+      let event = await loadLockedEvent(eventId);
+      if (!event) {
+        return { error: 'Event not found.', status: 404 } as const;
+      }
+      const parentEventId = normalizeId(event.parentEvent);
+      if (parentEventId && parentEventId !== event.id) {
+        const parentEvent = await loadLockedEvent(parentEventId);
+        if (!parentEvent) {
+          return { error: 'Event not found.', status: 404 } as const;
+        }
+        eventId = parentEvent.id;
+        event = parentEvent;
+      }
+      if (event.archivedAt || isArchivedWeeklyParentEvent(event)) {
+        return { error: WEEKLY_EVENT_ARCHIVED_ERROR, status: 409 } as const;
+      }
+      if (paymentPlanEnabled && isActiveWeeklyParentEvent(event)) {
+        if (!slotId || !occurrenceDate) {
+          return {
+            error: 'Weekly payment plans require slotId and occurrenceDate.',
+            status: 400,
+          } as const;
+        }
+        const resolvedOccurrence = await resolveWeeklyOccurrence({
+          event,
+          occurrence: { slotId, occurrenceDate },
+        }, tx);
+        if (!resolvedOccurrence.ok) {
+          return { error: resolvedOccurrence.error, status: 400 } as const;
+        }
+        resolvedBillSlotId = resolvedOccurrence.value.slotId;
+        resolvedBillOccurrenceDate = resolvedOccurrence.value.occurrenceDate;
+        if (relativeDueDays.length === 0) {
+          return {
+            error: 'Weekly payment plans require installmentDueRelativeDays.',
+            status: 400,
+          } as const;
+        }
+        const occurrenceStart = resolveWeeklyOccurrenceStartAt(
+          resolvedOccurrence.value.slot,
+          resolvedOccurrence.value.occurrenceDate,
+        );
+        if (!occurrenceStart) {
+          return { error: 'Unable to resolve weekly occurrence start date.', status: 400 } as const;
+        }
+        dueDates = relativeDueDays.map((offsetDays) => {
+          const dueDate = new Date(occurrenceStart.getTime());
+          dueDate.setDate(dueDate.getDate() + offsetDays);
+          return dueDate;
+        });
+      } else if (slotId || occurrenceDate || relativeDueDays.length > 0) {
+        return {
+          error: 'Occurrence-relative payment plans are only valid for weekly events.',
+          status: 400,
+        } as const;
+      }
+    }
     if (shouldEnforceUniquePaymentPlan && eventId) {
       const existing = await tx.bills.findFirst({
         where: {
@@ -480,6 +520,12 @@ export async function POST(req: NextRequest) {
     return { bill: updatedBill } as const;
   });
 
+  if ('error' in creationResult) {
+    return NextResponse.json(
+      { error: creationResult.error },
+      { status: creationResult.status },
+    );
+  }
   if ('duplicateBillId' in creationResult) {
     return NextResponse.json(
       {

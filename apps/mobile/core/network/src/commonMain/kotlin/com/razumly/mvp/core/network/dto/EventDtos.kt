@@ -3,6 +3,8 @@
 package com.razumly.mvp.core.network.dto
 
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventAuthorityCapabilities
+import com.razumly.mvp.core.data.dataTypes.EventSearchOccurrence
 import com.razumly.mvp.core.data.dataTypes.isBracketTeamCountEnabled
 import com.razumly.mvp.core.data.dataTypes.normalizeBracketTeamCount
 import com.razumly.mvp.core.data.dataTypes.DEFAULT_EVENT_SEED_COLOR_ARGB
@@ -15,10 +17,7 @@ import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.ManualPaymentLink
 import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
-import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.StaffingPriority
-import com.razumly.mvp.core.data.dataTypes.toLegacyOfficialSchedulingMode
-import com.razumly.mvp.core.data.dataTypes.resolveStaffingPriority
 import com.razumly.mvp.core.data.dataTypes.REGISTRATION_PAYMENT_MODE_ONLINE
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
@@ -26,6 +25,7 @@ import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.TimeSlotDTO
 import com.razumly.mvp.core.data.dataTypes.buildEventOfficialRecordId
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.enums.normalizeAutomatedSchedulingForEventType
 import com.razumly.mvp.core.data.dataTypes.isManualRegistrationPaymentMode
 import com.razumly.mvp.core.data.dataTypes.normalizeManualPaymentInstructions
 import com.razumly.mvp.core.data.dataTypes.normalizeManualPaymentLinks
@@ -71,25 +71,31 @@ private fun parseApiInstant(value: String, timeZone: String): Instant? {
     }.getOrDefault(TimeZone.UTC)
     return runCatching { LocalDateTime.parse(normalized).toInstant(zone) }.getOrNull()
 }
+@Serializable
+data class EventSearchOccurrenceDto(
+    val slotId: String? = null,
+    val occurrenceDate: String? = null,
+    val start: String? = null,
+    val end: String? = null,
+    val timeZone: String? = null,
+)
+
 
 @Serializable
 data class EventApiDto(
     val id: String? = null,
 
     val name: String? = null,
-    @property:ObjCName(swiftName = "eventDescription")
-    val description: String? = null,
-
+    val start: String? = null,
+    val end: String? = null,
+    val timeZone: String? = null,
+    val nextOccurrence: EventSearchOccurrenceDto? = null,
     val divisions: List<String>? = null,
     val divisionDetails: List<DivisionDetail>? = null,
     val playoffDivisionDetails: List<DivisionDetail>? = null,
     val location: String? = null,
     val address: String? = null,
-
-    val start: String? = null,
-    val end: String? = null,
-    val timeZone: String? = null,
-
+    val description: String? = null,
     val price: Int? = null,
     val rating: Double? = null,
     val imageId: String? = null,
@@ -98,6 +104,9 @@ data class EventApiDto(
     val hostId: String? = null,
     val assistantHostIds: List<String>? = null,
     val noFixedEndDateTime: Boolean? = null,
+    val scheduleEndConstraint: String? = null,
+    val generatedScheduleEnd: String? = null,
+    val isAutomatedScheduling: Boolean? = null,
     val teamSignup: Boolean? = null,
     val singleDivision: Boolean? = null,
     val registrationByDivisionType: Boolean? = null,
@@ -111,15 +120,22 @@ data class EventApiDto(
     val registrationCutoffHours: Int? = null,
     val seedColor: Int? = null,
 
+    val fieldIds: List<String>? = null,
     val sportIds: List<String>? = null,
     val timeSlotIds: List<String>? = null,
-    val fieldIds: List<String>? = null,
+    val leagueScoringConfigId: String? = null,
     val fields: List<Field> = emptyList(),
     val timeSlots: List<TimeSlotDTO> = emptyList(),
-    val leagueScoringConfigId: String? = null,
+    val teams: List<TeamApiDto> = emptyList(),
+    val officials: List<EventEditorProposalGraphUserDto> = emptyList(),
+    val matches: List<MatchApiDto>? = null,
     val leagueScoringConfig: LeagueScoringConfigDTO? = null,
     val organizationId: String? = null,
     val affiliateUrl: String? = null,
+    val sourceType: String? = null,
+    val sourceId: String? = null,
+    val sourceUrl: String? = null,
+    val capabilities: EventAuthorityCapabilities? = null,
     val scheduleText: String? = null,
     val dateDisplayMode: String? = null,
     val dateDisplayText: String? = null,
@@ -134,6 +150,9 @@ data class EventApiDto(
     val teamSizeLimit: Int? = null,
 
     val eventType: String? = null,
+    val eventTypeLocked: Boolean? = null,
+    val registrationUnitLocked: Boolean? = null,
+    val eventTypeHasProtectedHistory: Boolean? = null,
     val fieldCount: Int? = null,
     val gamesPerOpponent: Int? = null,
     val includePlayoffs: Boolean? = null,
@@ -164,9 +183,9 @@ data class EventApiDto(
     val restTimeMinutes: Int? = null,
 
     val state: String? = null,
+    val archivedAt: String? = null,
     val pointsToVictory: List<Int>? = null,
     val staffingPriority: String? = null,
-    val officialSchedulingMode: String? = null,
     val officialPositions: List<EventOfficialPosition>? = null,
     val eventOfficials: List<EventOfficial>? = null,
     val officialIds: List<String>? = null,
@@ -184,7 +203,7 @@ data class EventApiDto(
     val prizeTitle: String? = null, // legacy/unused; ignore if present
 ) {
     @OptIn(ExperimentalTime::class)
-    fun toEventOrNull(): Event? {
+    fun toEventOrNull(requireOwnerIdentity: Boolean = true): Event? {
         val resolvedId = id
         val resolvedName = name
         val resolvedHostId = hostId
@@ -195,15 +214,41 @@ data class EventApiDto(
         val resolvedDateDisplayMode = dateDisplayMode?.trim()?.takeIf(String::isNotBlank)
         val resolvedDateDisplayText = dateDisplayText?.trim()?.takeIf(String::isNotBlank)
         if (resolvedId.isNullOrBlank() || resolvedName.isNullOrBlank()) return null
-        if (resolvedHostId.isNullOrBlank() && resolvedAffiliateUrl == null) return null
+        if (requireOwnerIdentity && resolvedHostId.isNullOrBlank() && resolvedAffiliateUrl == null) return null
         if (resolvedStart.isNullOrBlank()) return null
         val resolvedTimeZone = timeZone?.trim()?.takeIf(String::isNotBlank) ?: "UTC"
         val parsedStart = parseApiInstant(resolvedStart, resolvedTimeZone) ?: return null
+        val resolvedNextOccurrence = nextOccurrence?.let { occurrence ->
+            val occurrenceSlotId = occurrence.slotId?.trim()?.takeIf(String::isNotBlank)
+            val occurrenceDate = occurrence.occurrenceDate?.trim()?.takeIf(String::isNotBlank)
+            val occurrenceTimeZone = occurrence.timeZone?.trim()?.takeIf(String::isNotBlank)
+                ?: resolvedTimeZone
+            val occurrenceStart = occurrence.start
+                ?.let { value -> parseApiInstant(value, occurrenceTimeZone) }
+            val occurrenceEnd = occurrence.end
+                ?.let { value -> parseApiInstant(value, occurrenceTimeZone) }
+            if (occurrenceSlotId == null || occurrenceDate == null || occurrenceStart == null || occurrenceEnd == null) {
+                null
+            } else {
+                EventSearchOccurrence(
+                    slotId = occurrenceSlotId,
+                    occurrenceDate = occurrenceDate,
+                    start = occurrenceStart,
+                    end = occurrenceEnd,
+                    timeZone = occurrenceTimeZone,
+                )
+            }
+        }
+
 
         val normalizedEventType = eventType?.trim()?.uppercase()
         val resolvedEventType = runCatching { EventType.valueOf(normalizedEventType ?: EventType.EVENT.name) }
-            .getOrDefault(EventType.EVENT)
+            .getOrNull() ?: return null
         val resolvedNoFixedEndDateTime = noFixedEndDateTime ?: false
+        val resolvedAutomatedScheduling = normalizeAutomatedSchedulingForEventType(
+            resolvedEventType,
+            isAutomatedScheduling,
+        )
         val parsedEnd = when {
             !resolvedEnd.isNullOrBlank() -> parseApiInstant(resolvedEnd, resolvedTimeZone)
             resolvedNoFixedEndDateTime -> parsedStart
@@ -372,36 +417,13 @@ data class EventApiDto(
             )
         }
 
-        val resolvedStaffingPriority = resolveStaffingPriority(
-            staffingPriority = staffingPriority,
-            legacyOfficialSchedulingMode = officialSchedulingMode,
-        )
-        val hasCanonicalStaffingPriority = staffingPriority
-            ?.trim()
-            ?.uppercase()
-            ?.let { normalized ->
-                StaffingPriority.entries.any { priority -> priority.name == normalized }
-            }
-            ?: false
-        val legacyOfficialSchedulingMode = runCatching {
-            officialSchedulingMode
-                ?.trim()
-                ?.uppercase()
-                ?.let(OfficialSchedulingMode::valueOf)
-        }.getOrNull()
-        val resolvedOfficialSchedulingMode = if (hasCanonicalStaffingPriority) {
-            resolvedStaffingPriority.toLegacyOfficialSchedulingMode()
+        val priorityName = staffingPriority
+        val resolvedStaffingPriority = if (priorityName == null) {
+            StaffingPriority.BEST_AVAILABLE_COVERAGE
         } else {
-            legacyOfficialSchedulingMode ?: resolvedStaffingPriority.toLegacyOfficialSchedulingMode()
+            runCatching { StaffingPriority.valueOf(priorityName) }.getOrNull() ?: return null
         }
-        val effectiveDoTeamsOfficiate = if (
-            !hasCanonicalStaffingPriority &&
-            legacyOfficialSchedulingMode == OfficialSchedulingMode.TEAM_STAFFING
-        ) {
-            true
-        } else {
-            doTeamsOfficiate ?: false
-        }
+        val effectiveDoTeamsOfficiate = doTeamsOfficiate ?: false
         val normalizedEventOfficials = when {
             !eventOfficials.isNullOrEmpty() -> eventOfficials
             !officialIds.isNullOrEmpty() -> officialIds.mapNotNull { officialId ->
@@ -421,7 +443,7 @@ data class EventApiDto(
             else -> emptyList()
         }
 
-        return Event(
+        val event = Event(
             id = resolvedId,
             name = resolvedName,
             description = description ?: "",
@@ -439,6 +461,7 @@ data class EventApiDto(
             hostId = resolvedHostId.orEmpty(),
             assistantHostIds = assistantHostIds ?: emptyList(),
             noFixedEndDateTime = resolvedNoFixedEndDateTime,
+            isAutomatedScheduling = resolvedAutomatedScheduling,
             teamSignup = teamSignup ?: true,
             singleDivision = singleDivision ?: true,
             freeAgentIds = freeAgentIds ?: emptyList(),
@@ -458,6 +481,10 @@ data class EventApiDto(
             leagueScoringConfigId = leagueScoringConfigId,
             organizationId = organizationId,
             affiliateUrl = resolvedAffiliateUrl,
+            sourceType = sourceType,
+            sourceId = sourceId,
+            sourceUrl = sourceUrl,
+            capabilities = capabilities,
             scheduleText = resolvedScheduleText,
             dateDisplayMode = resolvedDateDisplayMode,
             dateDisplayText = resolvedDateDisplayText,
@@ -479,6 +506,9 @@ data class EventApiDto(
             teamSizeLimit = (teamSizeLimit ?: 0).takeIf { it > 0 } ?: 2,
             registrationByDivisionType = registrationByDivisionType ?: false,
             eventType = resolvedEventType,
+            eventTypeLocked = eventTypeLocked == true || eventTypeHasProtectedHistory == true,
+            registrationUnitLocked = registrationUnitLocked ?: false,
+            eventTypeHasProtectedHistory = eventTypeHasProtectedHistory ?: false,
             fieldCount = resolvedFieldCount,
             gamesPerOpponent = gamesPerOpponent,
             includePlayoffs = resolvedIncludePlayoffsOrPools,
@@ -505,9 +535,9 @@ data class EventApiDto(
             resolvedMatchRules = resolvedMatchRules,
             restTimeMinutes = restTimeMinutes,
             state = state ?: "UNPUBLISHED",
+            archivedAt = archivedAt,
             pointsToVictory = pointsToVictory ?: emptyList(),
             staffingPriority = resolvedStaffingPriority,
-            officialSchedulingMode = resolvedOfficialSchedulingMode,
             officialPositions = officialPositions ?: emptyList(),
             eventOfficials = normalizedEventOfficials,
             officialIds = normalizedEventOfficials.map(EventOfficial::userId),
@@ -515,12 +545,14 @@ data class EventApiDto(
             installmentCount = resolvedEventInstallmentCount,
             installmentDueDates = resolvedEventInstallmentDueDates,
             installmentDueRelativeDays = resolvedEventInstallmentDueRelativeDays,
+            tags = (tags ?: emptyList()).syncEventTypeTagsForEventType(resolvedEventType),
             installmentAmounts = resolvedEventInstallmentAmounts,
             allowTeamSplitDefault = allowTeamSplitDefault,
             requiredTemplateIds = requiredTemplateIds ?: emptyList(),
-            tags = (tags ?: emptyList()).syncEventTypeTagsForEventType(resolvedEventType),
             lastUpdated = Clock.System.now(),
         )
+        event.nextOccurrence = resolvedNextOccurrence
+        return event
     }
 }
 
@@ -528,10 +560,17 @@ data class EventApiDto(
  * Convert an API event at a repository boundary where dropping a row would make the server page
  * look complete. Nullable conversion remains available for explicitly optional embedded records,
  * but collection responses must fail as a unit so callers can surface and retry the same page.
+ *
+ * Public event detail responses intentionally omit ownership fields. Detail callers can disable
+ * the ownership requirement while collection callers keep the strict default.
  */
-fun EventApiDto.toEventOrThrow(context: String = "event response"): Event =
-    toEventOrNull() ?: throw IllegalArgumentException(
-        "$context contains a malformed event (${eventPayloadIdentity()}): ${eventPayloadValidationFailure()}",
+fun EventApiDto.toEventOrThrow(
+    context: String = "event response",
+    requireOwnerIdentity: Boolean = true,
+): Event =
+    toEventOrNull(requireOwnerIdentity) ?: throw IllegalArgumentException(
+        "$context contains a malformed event (${eventPayloadIdentity()}): " +
+            eventPayloadValidationFailure(requireOwnerIdentity),
     )
 
 fun List<EventApiDto>.toEventsOrThrow(context: String): List<Event> =
@@ -544,11 +583,11 @@ private fun EventApiDto.eventPayloadIdentity(): String {
     return resolvedId?.let { "id=$it" } ?: "missing id"
 }
 
-private fun EventApiDto.eventPayloadValidationFailure(): String {
+private fun EventApiDto.eventPayloadValidationFailure(requireOwnerIdentity: Boolean): String {
     val resolvedId = id?.trim()?.takeIf(String::isNotBlank)
     if (resolvedId == null) return "id is required"
     if (name.isNullOrBlank()) return "name is required"
-    if (hostId.isNullOrBlank() && affiliateUrl.isNullOrBlank()) {
+    if (requireOwnerIdentity && hostId.isNullOrBlank() && affiliateUrl.isNullOrBlank()) {
         return "hostId or affiliateUrl is required"
     }
     val resolvedStart = start?.trim()?.takeIf(String::isNotBlank)
@@ -967,6 +1006,7 @@ data class ProfileScheduleNextActionResponseDto(
 @Serializable
 data class EventDetailBootstrapResponseDto(
     val event: EventApiDto? = null,
+    val capabilities: EventAuthorityCapabilities? = null,
     val participantSnapshot: EventParticipantsSnapshotResponseDto? = null,
     val matches: List<MatchApiDto> = emptyList(),
     val fields: List<Field> = emptyList(),

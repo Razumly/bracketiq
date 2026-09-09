@@ -311,9 +311,11 @@ class BillingRepository(
     override suspend fun getEventTeamBillingSnapshot(
         eventId: String,
         teamId: String,
+        occurrence: EventOccurrenceSelection?,
     ): Result<EventTeamBillingSnapshot> = paymentCoordinator.getEventTeamBillingSnapshot(
         eventId = eventId,
         teamId = teamId,
+        occurrence = occurrence,
     )
 
     override suspend fun createEventTeamBill(
@@ -341,11 +343,13 @@ class BillingRepository(
         teamId: String,
         billPaymentId: String,
         amountCents: Int,
+        occurrence: EventOccurrenceSelection?,
     ): Result<Unit> = paymentCoordinator.refundEventTeamBillPayment(
         eventId = eventId,
         teamId = teamId,
         billPaymentId = billPaymentId,
         amountCents = amountCents,
+        occurrence = occurrence,
     )
 
     override suspend fun createBillingIntent(

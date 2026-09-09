@@ -7,7 +7,11 @@ import {
   assertValidOneTimeTimeSlots,
   TimeSlotValidationError,
 } from '@/lib/timeSlotAvailability';
-import { acquireEventLock } from '@/server/repositories/locks';
+import {
+  assertRepeatingTimeSlotsResolvable,
+} from '@/lib/repeatingTimeSlotAvailability';
+import { repeatingTimeSlotValidationResponse } from '@/server/repeatingTimeSlotValidationResponse';
+import { acquireEventLock, acquireFieldLocks } from '@/server/repositories/locks';
 
 export const dynamic = 'force-dynamic';
 
@@ -64,6 +68,7 @@ export async function PATCH(
       if (!existing) {
         throw new Response('Not found', { status: 404 });
       }
+      await acquireFieldLocks(tx, existing.fieldIds ?? []);
       if (!(await canManageEvent(session, existing, tx))) {
         throw new Response('Forbidden', { status: 403 });
       }
@@ -138,6 +143,11 @@ export async function PATCH(
           divisions: divisionIds,
         };
       });
+      assertRepeatingTimeSlotsResolvable({
+        slots: canonicalSlots,
+        eventStart: existing.start,
+        eventEnd: existing.noFixedEndDateTime ? null : existing.end,
+      });
       assertValidOneTimeTimeSlots({
         slots: canonicalSlots,
         fallbackTimeZone: existing.timeZone,
@@ -173,6 +183,10 @@ export async function PATCH(
   } catch (error) {
     if (error instanceof Response) {
       return error;
+    }
+    const repeatingTimeSlotResponse = repeatingTimeSlotValidationResponse(error);
+    if (repeatingTimeSlotResponse) {
+      return repeatingTimeSlotResponse;
     }
     if (error instanceof TimeSlotValidationError) {
       return NextResponse.json(

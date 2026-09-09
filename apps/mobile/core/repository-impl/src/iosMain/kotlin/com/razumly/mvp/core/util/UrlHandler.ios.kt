@@ -16,6 +16,12 @@ private fun sanitizeUrlForIosOpen(url: String): String {
 }
 
 actual class UrlHandler {
+    actual suspend fun openRegistrationUrl(url: String): Result<String> {
+        val registrationUrl = registrationUrlOrNull(url)
+            ?: return Result.failure(IllegalArgumentException("Enter a valid HTTP or HTTPS registration website."))
+        return openTrustedUrl(registrationUrl, "registration")
+    }
+
     actual suspend fun openUrlInWebView(url: String): Result<String> {
         val trustedUrl = trustedExternalHttpsUrlOrNull(url)
             ?: return Result.failure(IllegalArgumentException("Only secure HTTPS links can be opened."))

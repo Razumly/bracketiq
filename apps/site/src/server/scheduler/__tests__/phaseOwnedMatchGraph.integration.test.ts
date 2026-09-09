@@ -1,8 +1,14 @@
 /** @jest-environment node */
 
 import { buildEventDivisionId } from "@/lib/divisionTypes";
-import { loadEventWithRelations, upsertEventFromPayload } from "@/server/repositories/events";
+import {
+  loadEventWithRelations,
+  persistScheduledRosterTeams,
+  saveMatches,
+  upsertEventFromPayload,
+} from "@/server/repositories/events";
 import { scheduleEvent } from "@/server/scheduler/scheduleEvent";
+import { matchDemandFromGraph } from "@/server/scheduler/matchGraph";
 import {
   persistCreateOnlyMatchGraph,
   type CreateOnlyMatchGraphPersistenceResult,
@@ -12,27 +18,115 @@ type Store = Map<string, Row>;
 
 const cloneValue = <T>(value: T): T => structuredClone(value);
 
-const valueMatches = (value: unknown, condition: unknown): boolean => {
-  if (condition && typeof condition === "object" && !Array.isArray(condition)) {
-    const operators = condition as Record<string, unknown>;
-    if ("in" in operators) {
-      return Array.isArray(operators.in) && operators.in.includes(value);
-    }
-    if ("not" in operators && valueMatches(value, operators.not)) {
-      return false;
-    }
-    if ("hasSome" in operators) {
-      return Array.isArray(value)
-        && Array.isArray(operators.hasSome)
-        && operators.hasSome.some((entry) => value.includes(entry));
-    }
-    if ("lt" in operators && !(value as any < operators.lt)) return false;
-    if ("lte" in operators && !(value as any <= operators.lte)) return false;
-    if ("gt" in operators && !(value as any > operators.gt)) return false;
-    if ("gte" in operators && !(value as any >= operators.gte)) return false;
-    return true;
+type ValueMatcher = (value: unknown, operand: unknown) => boolean;
+
+const comparisonMatchers: Record<string, ValueMatcher> = {
+  lt: (value, operand) => (value as any) < operand,
+  lte: (value, operand) => (value as any) <= operand,
+  gt: (value, operand) => (value as any) > operand,
+  gte: (value, operand) => (value as any) >= operand,
+};
+
+const matchesComparisonOperators = (
+  value: unknown,
+  operators: Record<string, unknown>,
+): boolean =>
+  Object.entries(comparisonMatchers).every(([key, matcher]) =>
+    !(key in operators) || matcher(value, operators[key]),
+  );
+
+const isValueOperatorObject = (
+  value: unknown,
+): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+function matchesValueOperators(
+  value: unknown,
+  operators: Record<string, unknown>,
+): boolean {
+  if ("in" in operators) {
+    return Array.isArray(operators.in) && operators.in.includes(value);
   }
-  return value === condition;
+  if ("not" in operators && valueMatches(value, operators.not)) {
+    return false;
+  }
+  if ("hasSome" in operators) {
+    return Array.isArray(value)
+      && Array.isArray(operators.hasSome)
+      && operators.hasSome.some((entry) => value.includes(entry));
+  }
+  return matchesComparisonOperators(value, operators);
+}
+
+function valueMatches(value: unknown, condition: unknown): boolean {
+  if (!isValueOperatorObject(condition)) {
+    return value === condition;
+  }
+  return matchesValueOperators(value, condition);
+}
+
+type TeamLike = {
+  id: string;
+  kind?: unknown;
+  division?: {
+    id?: string;
+    kind?: unknown;
+    phase?: unknown;
+  } | null;
+};
+
+const isPlaceholderTeam = (team: TeamLike): boolean =>
+  String(team.kind ?? "").trim().toUpperCase() === "PLACEHOLDER";
+
+const isBracketPhase = (value: unknown): boolean =>
+  ["BRACKET", "PLAYOFF"].includes(String(value ?? "").trim().toUpperCase());
+
+const collectPlaceholderTeamIds = (
+  teams: Record<string, TeamLike>,
+): string[] =>
+  Object.values(teams)
+    .filter(isPlaceholderTeam)
+    .map((team) => team.id)
+    .sort();
+
+const collectBracketPlaceholderTeamIds = (
+  teams: Record<string, TeamLike>,
+): string[] =>
+  Object.values(teams)
+    .filter((team) =>
+      isPlaceholderTeam(team)
+      && isBracketPhase(team.division?.phase ?? team.division?.kind),
+    )
+    .map((team) => team.id)
+    .sort();
+
+const requireTeams = (
+  teams: Record<string, TeamLike>,
+  teamIds: string[],
+): TeamLike[] =>
+  teamIds.map((teamId) => {
+    const team = teams[teamId];
+    if (!team) {
+      throw new Error(`Missing persisted team ${teamId}`);
+    }
+    return team;
+  });
+
+const collectNonPlaceholderTeamIds = (
+  teams: Record<string, TeamLike>,
+): string[] =>
+  Object.values(teams)
+    .filter((team) => !isPlaceholderTeam(team))
+    .map((team) => team.id)
+    .sort();
+const requireValue = <T>(
+  value: T | null | undefined,
+  label: string,
+): T => {
+  if (!value) {
+    throw new Error(`Missing ${label}`);
+  }
+  return value;
 };
 
 const rowMatches = (row: Row, where: unknown): boolean => {
@@ -195,6 +289,46 @@ class InMemoryClient {
     return result;
   }
 }
+const seedPoolTeams = (
+  client: InMemoryClient,
+  eventRow: Row,
+  teamRows: ReadonlyArray<readonly [string, string]>,
+): void => {
+  eventRow.teamIds = teamRows.map(([teamId]) => teamId);
+  const teamStore = client.state.teams ?? (client.state.teams = new Map());
+  for (const [teamId, divisionId] of teamRows) {
+    teamStore.set(teamId, {
+      id: teamId,
+      captainId: `${teamId}_captain`,
+      division: divisionId,
+      name: teamId,
+      playerIds: [],
+    });
+  }
+};
+
+const findPhaseId = (rows: Row[], phase: string): string =>
+  String(
+    rows.find(
+      (row) => row.role === "PHASE" && row.phase === phase,
+    )?.id ?? "",
+  );
+
+const findSourceEntryId = (rows: Row[], phaseDivisionId: string): string =>
+  String(
+    rows.find((row) => row.phaseDivisionId === phaseDivisionId)
+      ?.entryDivisionId ?? "",
+  );
+
+const setMaxParticipants = (
+  divisions: Array<{ maxParticipants: number | null }>,
+  maxParticipants: number,
+): void => {
+  for (const division of divisions) {
+    division.maxParticipants = maxParticipants;
+  }
+};
+
 
 const leaguePayload = (eventId: string) => {
   const entryDivisionId = buildEventDivisionId(eventId, "open");
@@ -244,7 +378,6 @@ const leaguePayload = (eventId: string) => {
     requiredTemplateIds: [],
     eventOfficials: [],
     officialPositions: [],
-    officialSchedulingMode: "OFF",
     staffingPriority: "BEST_AVAILABLE_COVERAGE",
     assistantHostIds: [],
   };
@@ -612,7 +745,7 @@ describe("phase-owned Match Graph persistence", () => {
         name: "Persisted Multi-Pool Tournament",
         eventType: "TOURNAMENT",
         includePlayoffs: true,
-        singleDivision: false,
+        singleDivision: true,
         divisions: [entryDivisionId],
         fieldIds: ["field-1"],
         fields: [{
@@ -675,8 +808,10 @@ describe("phase-owned Match Graph persistence", () => {
       }, tx as unknown as Parameters<typeof upsertEventFromPayload>[1]);
     });
 
-    const eventRow = client.state.events.get(eventId);
-    if (!eventRow) throw new Error(`Missing persisted event ${eventId}`);
+    const eventRow = requireValue(
+      client.state.events.get(eventId),
+      `persisted event ${eventId}`,
+    );
     const poolPhaseIds = [...client.state.divisions.values()]
       .filter((row) => row.role === "PHASE" && row.phase === "POOL")
       .sort((left, right) => Number(left.sortOrder ?? 0) - Number(right.sortOrder ?? 0))
@@ -688,28 +823,14 @@ describe("phase-owned Match Graph persistence", () => {
       ["team_pool_b_1", poolPhaseIds[1]],
       ["team_pool_b_2", poolPhaseIds[1]],
     ] as const;
-    eventRow.teamIds = teamRows.map(([teamId]) => teamId);
-    const teamStore = client.state.teams ?? (client.state.teams = new Map());
-    for (const [teamId, divisionId] of teamRows) {
-      teamStore.set(teamId, {
-        id: teamId,
-        captainId: `${teamId}_captain`,
-        division: divisionId,
-        name: teamId,
-        playerIds: [],
-      });
-    }
+    seedPoolTeams(client, eventRow, teamRows);
 
     const sourceRows = [...client.state.eventDivisionPhaseSources.values()];
-    const bracketPhaseId = String(
-      [...client.state.divisions.values()].find(
-        (row) => row.role === "PHASE" && row.phase === "BRACKET",
-      )?.id ?? "",
+    const bracketPhaseId = findPhaseId(
+      [...client.state.divisions.values()],
+      "BRACKET",
     );
-    const firstPoolEntryId = String(
-      sourceRows.find((row) => row.phaseDivisionId === poolPhaseIds[0])
-        ?.entryDivisionId ?? "",
-    );
+    const firstPoolEntryId = findSourceEntryId(sourceRows, poolPhaseIds[0]);
     expect(bracketPhaseId).not.toBe("");
     expect(firstPoolEntryId).not.toBe("");
 
@@ -762,5 +883,89 @@ describe("phase-owned Match Graph persistence", () => {
       new Set([bracketPhaseId]),
     );
     expect(bracketMatches.every((match) => match.field?.id === "field-1")).toBe(true);
+
+    const firstDemand = matchDemandFromGraph(scheduled.matches);
+    const firstRealTeamIds = collectNonPlaceholderTeamIds(
+      scheduled.event.teams,
+    );
+    const firstBracketSeedIds = collectBracketPlaceholderTeamIds(
+      scheduled.event.teams,
+    );
+    expect(firstBracketSeedIds).toHaveLength(4);
+
+    await persistScheduledRosterTeams(
+      {
+        eventId,
+        scheduled: scheduled.event,
+      },
+      client as unknown as Parameters<typeof persistScheduledRosterTeams>[1],
+    );
+    await saveMatches(
+      eventId,
+      scheduled.matches,
+      client as unknown as Parameters<typeof saveMatches>[2],
+    );
+    const persistedMatchIds = [...client.state.matches.keys()].sort();
+
+    const rehydrated = await loadEventWithRelations(
+      eventId,
+      client as unknown as Parameters<typeof loadEventWithRelations>[1],
+    );
+    expect(Object.keys(rehydrated.matches).sort()).toEqual(persistedMatchIds);
+    const rehydratedBracketDivision = requireValue(
+      rehydrated.playoffDivisions.find((division) =>
+        isBracketPhase(division.phase ?? division.kind),
+      ),
+      "rehydrated bracket division",
+    );
+    const rehydratedBracketSeedIds = [...rehydratedBracketDivision.teamIds].sort();
+    expect(rehydratedBracketSeedIds).toEqual(firstBracketSeedIds);
+    const rehydratedBracketSeeds = requireTeams(
+      rehydrated.teams,
+      rehydratedBracketSeedIds,
+    );
+    expect(rehydratedBracketSeeds.every(isPlaceholderTeam)).toBe(true);
+    expect(
+      rehydratedBracketSeeds.every((team) =>
+        team.division?.id !== rehydratedBracketDivision.id,
+      ),
+    ).toBe(true);
+    expect(collectPlaceholderTeamIds(rehydrated.teams)).toEqual(
+      firstBracketSeedIds,
+    );
+
+    rehydrated.maxParticipants = 4;
+    setMaxParticipants(rehydrated.divisions, 2);
+    setMaxParticipants(rehydrated.playoffDivisions, 4);
+    const rebuilt = scheduleEvent(
+      { event: rehydrated, includePlaceholderTeams: true },
+      { log: () => {}, error: () => {} },
+    );
+    expect(matchDemandFromGraph(rebuilt.matches)).toEqual(firstDemand);
+    expect(collectNonPlaceholderTeamIds(rebuilt.event.teams)).toEqual(
+      firstRealTeamIds,
+    );
+    const rebuiltBracketSeedIds = collectBracketPlaceholderTeamIds(
+      rebuilt.event.teams,
+    );
+    expect(rebuiltBracketSeedIds).toEqual(firstBracketSeedIds);
+    expect(collectPlaceholderTeamIds(rebuilt.event.teams)).toEqual(
+      firstBracketSeedIds,
+    );
+    const rebuiltPoolParticipantIds = rebuilt.matches
+      .filter((match) => match.division.phase === "POOL")
+      .flatMap((match) => [match.team1?.id, match.team2?.id])
+      .filter((teamId): teamId is string => Boolean(teamId));
+    expect(rebuiltPoolParticipantIds.some((teamId) => (
+      firstBracketSeedIds.includes(teamId)
+    ))).toBe(false);
+    expect(
+      Object.values(rebuilt.event.teams).filter((team) => (
+        String(team.kind ?? "").trim().toUpperCase() === "PLACEHOLDER"
+        && ["BRACKET", "PLAYOFF"].includes(
+          String(team.division.phase ?? "").trim().toUpperCase(),
+        )
+      )),
+    ).toHaveLength(firstBracketSeedIds.length);
   });
 });

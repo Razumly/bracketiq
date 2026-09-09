@@ -38,3 +38,43 @@ export const acquireTeamStaffRoleLock = async (
   const lockId = advisoryLockId(`team-staff:${teamId}:${role}`);
   await client.$executeRaw`SELECT pg_advisory_xact_lock(${lockId})`;
 };
+
+const acquireResourceLocks = async (
+  client: PrismaLike,
+  resourceType: string,
+  resourceIds: string[],
+): Promise<void> => {
+  const normalizedResourceIds = Array.from(
+    new Set(
+      resourceIds
+        .map((resourceId) => resourceId.trim())
+        .filter((resourceId) => resourceId.length > 0),
+    ),
+  ).sort();
+  for (const resourceId of normalizedResourceIds) {
+    const lockId = advisoryLockId(`${resourceType}:${resourceId}`);
+    await client.$executeRaw`SELECT pg_advisory_xact_lock(${lockId})`;
+  }
+};
+
+export const acquireFieldLocks = async (
+  client: PrismaLike,
+  fieldIds: string[],
+): Promise<void> => acquireResourceLocks(client, "field", fieldIds);
+
+export const acquireTimeSlotLocks = async (
+  client: PrismaLike,
+  timeSlotIds: string[],
+): Promise<void> => acquireResourceLocks(client, "time-slot", timeSlotIds);
+export const acquireEventTemplateLocks = async (
+  client: PrismaLike,
+  templateIds: string[],
+): Promise<void> => acquireResourceLocks(client, "event-template", templateIds);
+export const acquireRentalBookingLocks = async (
+  client: PrismaLike,
+  bookingIds: string[],
+  bookingItemIds: string[] = [],
+): Promise<void> => {
+  await acquireResourceLocks(client, "rental-booking", bookingIds);
+  await acquireResourceLocks(client, "rental-booking-item", bookingItemIds);
+};

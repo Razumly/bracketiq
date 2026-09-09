@@ -89,6 +89,13 @@ npm run dev
 # open http://localhost:3000
 ```
 
+For an isolated worktree database, copy `.env.docker.local.example` to
+`.env.docker.local`, set a unique Compose project name and host port, and set
+the matching `DATABASE_URL` in `.env.local`. This worktree already has local
+settings for issue 40. Run `npm run dev:worktree` to start Postgres, apply
+tracked migrations, and launch the backend. Run `npm run db:down` to stop the
+worktree database without deleting its data.
+
 `npm run dev` now starts ngrok (when available) and injects a public redirect URL for BoldSign (`BOLDSIGN_DEV_REDIRECT_BASE_URL`) to avoid browser Private Network Access blocks after signing. To disable this behavior: `MVP_DEV_ENABLE_NGROK=0 npm run dev`.
 It also injects `PUBLIC_WEB_BASE_URL` (for canonical web links), `STRIPE_CONNECT_REDIRECT_URI` (for Stripe OAuth callback), and `INTUIT_REDIRECT_URI` (for QuickBooks OAuth callback), so localhost is not sent as `redirect_uri`.
 The default reserved dev tunnel is `https://untarnished-berserkly-everette.ngrok-free.dev`; override it with `NGROK_DOMAIN` or `MVP_DEV_NGROK_DOMAIN` if needed. VS Code launch configs require ngrok and Stripe listener startup so broken webhook forwarding fails immediately.

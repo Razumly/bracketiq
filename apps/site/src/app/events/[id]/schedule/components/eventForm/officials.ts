@@ -8,7 +8,6 @@ import {
     STAFFING_PRIORITIES,
     type StaffingPriority,
 } from '@/server/officials/config';
-export { normalizeOfficialSchedulingMode } from '@/server/officials/config';
 
 import { createClientId } from '@/lib/clientId';
 import { getFieldDisplayName } from '@/lib/fieldUtils';

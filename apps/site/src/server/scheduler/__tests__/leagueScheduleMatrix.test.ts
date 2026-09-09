@@ -227,7 +227,6 @@ describe('league schedule matrix', () => {
       timeSlots,
       doTeamsOfficiate: scenario.officiating === 'TEAM',
       teamOfficialsMaySwap: scenario.officiating === 'TEAM',
-      officialSchedulingMode: scenario.officiating === 'TEAM' ? 'TEAM_STAFFING' : 'SCHEDULE',
       staffingPriority: scenario.officiating === 'TEAM'
         ? 'BEST_AVAILABLE_COVERAGE'
         : 'OFFICIAL_COVERAGE_REQUIRED',

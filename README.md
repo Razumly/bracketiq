@@ -92,25 +92,75 @@ cd ..
 ./gradlew :composeApp:iosSimulatorArm64Test :core:database:iosSimulatorArm64Test --continue --stacktrace
 ```
 
-## Local mobile-to-backend work
+## Local mobile-to-site work
 
 The mobile tooling resolves the backend to the sibling `apps/site` directory. A normal monorepo clone does not need `MVP_SITE_DIR`.
 
 From `apps/mobile`, start or verify the local backend through the checked-in launcher only when that runtime change is intended:
 
 ```bash
-./scripts/ensure-local-backend.sh
+MVP_TEST_DISABLE_OUTBOUND_PROVIDERS=1 MVP_BACKEND_PORT=3100 ./scripts/ensure-local-backend.sh
 ```
 
 Set `MVP_SITE_DIR` only when you intentionally use a backend checkout outside this repository. The backend HTTP interface remains the boundary between applications. Do not share runtime TypeScript or Kotlin source across that boundary.
 
-For the real mobile API integration check, start a non-production backend first. Then run:
+For the real mobile-to-site integration check, start a non-production backend first with outbound providers disabled. The checked-in launcher derives the Compose database URL. If `POSTGRES_*` values are overridden, the launcher output remains the source of truth. Run the focused Event Editor contract test locally from `apps/mobile`:
 
 ```bash
-cd apps/mobile
-MVP_TEST_BACKEND_URL=http://127.0.0.1:3000 \
+MVP_TEST_DISABLE_OUTBOUND_PROVIDERS=1 MVP_BACKEND_PORT=3100 ./scripts/ensure-local-backend.sh
+COMPOSE_DATABASE_URL="$(./scripts/ensure-local-backend.sh --print-database-url)"
+MVP_TEST_DISABLE_OUTBOUND_PROVIDERS=1 \
+MVP_TEST_BACKEND_URL=http://127.0.0.1:3100 \
+MVP_TEST_DATABASE_URL="$COMPOSE_DATABASE_URL" \
 MVP_TEST_ALLOW_DB_SEED=true \
-  ./gradlew :composeApp:testDebugUnitTest \
-  --tests 'com.razumly.mvp.eventDetail.EventLifecycleMobileApiIntegrationTest' \
+MVP_TEST_REQUIRE_BACKEND=true \
+JAVA_TOOL_OPTIONS='-XX:TieredStopAtLevel=1' \
+  ./gradlew --no-daemon :composeApp:testDebugUnitTest \
+  --rerun-tasks \
+  --tests 'com.razumly.mvp.eventDetail.MobileEventEditorApiContractTest.given_mobile_editor_create_command_when_sent_to_site_then_event_is_persisted' \
   --stacktrace
 ```
+
+Expected Event Editor result: one executed test, zero skipped tests, zero failures, and a persisted Event returned after mobile reload.
+For the Tournament-specific required assertion, first start and verify the same provider-disabled non-production backend from `apps/mobile`:
+
+```bash
+MVP_TEST_DISABLE_OUTBOUND_PROVIDERS=1 MVP_BACKEND_PORT=3100 ./scripts/ensure-local-backend.sh
+curl -fsS 'http://127.0.0.1:3100/api/app-version?platform=ANDROID&versionName=0.0.0&buildNumber=0'
+```
+
+The launcher must complete its database-backed readiness check and the `curl` request must return JSON. Only then derive the guarded Compose database URL. `./scripts/ensure-local-backend.sh --print-database-url` only prints that URL; it does not start or verify the backend:
+
+```bash
+COMPOSE_DATABASE_URL="$(./scripts/ensure-local-backend.sh --print-database-url)"
+MVP_TEST_DISABLE_OUTBOUND_PROVIDERS=1 \
+MVP_TEST_BACKEND_URL=http://127.0.0.1:3100 \
+MVP_TEST_DATABASE_URL="$COMPOSE_DATABASE_URL" \
+MVP_TEST_ALLOW_DB_SEED=true \
+MVP_TEST_REQUIRE_BACKEND=true \
+JAVA_TOOL_OPTIONS='-XX:TieredStopAtLevel=1' \
+  ./gradlew --no-daemon :composeApp:testDebugUnitTest \
+  --rerun-tasks \
+  --tests 'com.razumly.mvp.eventDetail.MobileTournamentEventEditorApiContractTest.given_mobile_tournament_editor_create_command_when_sent_to_site_then_tournament_is_persisted' \
+  --stacktrace
+```
+
+Expected Tournament result: one executed test, zero skipped tests, zero failures, zero errors, and a persisted Tournament returned after mobile reload with its graph, selected resources, and fixed end policy verified. Do not record this as a pass unless those observations are present.
+
+The shared Tournament wire-parity cases are separate dependency-project checks; `:composeApp:*Test` does not execute them:
+
+```bash
+./gradlew --no-daemon :core:repository-impl:testDebugUnitTest \
+  --tests 'com.razumly.mvp.core.data.repositories.EventEditorTournamentParityAndroidTest.given_shared_tournament_fixture_when_mobile_command_is_built_then_it_matches_the_web_golden'
+```
+
+Expected Android result: `BUILD SUCCESSFUL`, one executed case, zero skips, zero failures, and zero errors. The recorded result at `2026-08-30T01:45:27.894Z` was `tests=1`, `skipped=0`, `failures=0`, and `errors=0`.
+
+```bash
+./gradlew --no-daemon :core:repository-impl:iosSimulatorArm64Test \
+  --tests 'com.razumly.mvp.core.data.repositories.EventEditorTournamentParityCommonTest.given_shared_tournament_draft_when_command_is_encoded_then_complete_canonical_wire_is_preserved'
+```
+
+Expected iOS result: `BUILD SUCCESSFUL`, one executed case, zero skips, zero failures, and zero errors. The recorded result at `2026-08-29T19:46:42.900Z` was `tests=1`, `skipped=0`, `failures=0`, and `errors=0`.
+
+If the launcher or readiness request fails, stop before dispatching the Tournament test. Record a backend readiness failure, not a test failure. Do not repair or restart a runtime without authorization. After an authorized repair or restart, rerun the launcher, readiness request, URL derivation, and exact Tournament selector.

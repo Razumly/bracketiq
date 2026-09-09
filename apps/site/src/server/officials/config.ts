@@ -1,4 +1,3 @@
-export type OfficialSchedulingMode = 'STAFFING' | 'TEAM_STAFFING' | 'SCHEDULE' | 'OFF';
 export const STAFFING_PRIORITIES = [
   'FULL_COVERAGE_REQUIRED',
   'TEAM_COVERAGE_REQUIRED',
@@ -39,12 +38,6 @@ export type MatchOfficialAssignment = {
   hasConflict: boolean;
 };
 
-const SCHEDULING_MODE_VALUES: Readonly<Record<OfficialSchedulingMode, true>> = {
-  STAFFING: true,
-  TEAM_STAFFING: true,
-  SCHEDULE: true,
-  OFF: true,
-};
 const HOLDER_TYPE_VALUES: Readonly<Record<OfficialAssignmentHolderType, true>> = {
   OFFICIAL: true,
   PLAYER: true,
@@ -57,19 +50,6 @@ const STAFFING_PRIORITY_VALUES: Readonly<Record<StaffingPriority, true>> = {
   FULL_COVERAGE_WITH_CONFLICTS_ALLOWED: true,
 };
 
-export const LEGACY_STAFFING_PRIORITY_BY_MODE: Readonly<Record<OfficialSchedulingMode, StaffingPriority>> = {
-  STAFFING: 'OFFICIAL_COVERAGE_REQUIRED',
-  TEAM_STAFFING: 'TEAM_COVERAGE_REQUIRED',
-  SCHEDULE: 'BEST_AVAILABLE_COVERAGE',
-  OFF: 'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED',
-};
-export const LEGACY_OFFICIAL_SCHEDULING_MODE_BY_PRIORITY: Readonly<Record<StaffingPriority, OfficialSchedulingMode>> = {
-  FULL_COVERAGE_REQUIRED: 'STAFFING',
-  TEAM_COVERAGE_REQUIRED: 'TEAM_STAFFING',
-  OFFICIAL_COVERAGE_REQUIRED: 'STAFFING',
-  BEST_AVAILABLE_COVERAGE: 'SCHEDULE',
-  FULL_COVERAGE_WITH_CONFLICTS_ALLOWED: 'OFF',
-};
 
 export type StaffingPriorityPolicy = {
   requiresTeamDutySlot: boolean;
@@ -164,16 +144,6 @@ export const ensureStringArray = (value: unknown): string[] => (
     : []
 );
 
-export const normalizeOfficialSchedulingMode = (
-  value: unknown,
-  fallback: OfficialSchedulingMode = 'SCHEDULE',
-): OfficialSchedulingMode => {
-  const normalized = typeof value === 'string' ? value.trim().toUpperCase() : '';
-  const canonical = normalized === 'NONE' ? 'OFF' : normalized;
-  return SCHEDULING_MODE_VALUES[canonical as OfficialSchedulingMode] === true
-    ? canonical as OfficialSchedulingMode
-    : fallback;
-};
 
 export const isStaffingPriority = (value: unknown): value is StaffingPriority => (
   typeof value === 'string' && STAFFING_PRIORITY_VALUES[value as StaffingPriority] === true
@@ -181,13 +151,10 @@ export const isStaffingPriority = (value: unknown): value is StaffingPriority =>
 
 export const normalizeStaffingPriority = (
   value: unknown,
-  legacyMode: unknown = 'SCHEDULE',
+  fallback: StaffingPriority = 'BEST_AVAILABLE_COVERAGE',
 ): StaffingPriority => {
   const normalized = typeof value === 'string' ? value.trim().toUpperCase() : '';
-  if (isStaffingPriority(normalized)) {
-    return normalized;
-  }
-  return LEGACY_STAFFING_PRIORITY_BY_MODE[normalizeOfficialSchedulingMode(legacyMode)];
+  return isStaffingPriority(normalized) ? normalized : fallback;
 };
 
 export const normalizeSportOfficialPositionTemplates = (value: unknown): SportOfficialPositionTemplate[] => {

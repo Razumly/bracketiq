@@ -2,12 +2,15 @@
 
 package com.razumly.mvp.core.data.dataTypes
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Ignore
 import androidx.room.PrimaryKey
 import androidx.room.TypeConverters
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.enums.isScheduleConstructionAutomationType
 import com.razumly.mvp.core.data.util.DivisionConverters
+import com.razumly.mvp.core.data.util.EventAuthorityConverters
 import com.razumly.mvp.core.data.util.DivisionDetailConverters
 import com.razumly.mvp.core.data.util.findDivisionDetailByIdentifier
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
@@ -20,7 +23,18 @@ import kotlinx.serialization.Transient
 import kotlin.native.ObjCName
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
+import kotlin.time.Duration.Companion.hours
 import kotlin.time.Instant
+
+@Serializable
+@OptIn(ExperimentalTime::class)
+data class EventSearchOccurrence(
+    val slotId: String,
+    val occurrenceDate: String,
+    @Contextual val start: Instant,
+    @Contextual val end: Instant,
+    val timeZone: String = "UTC",
+)
 
 @Entity
 @Serializable
@@ -52,6 +66,8 @@ data class Event(
     val hostId: String = "",
     val assistantHostIds: List<String> = emptyList(),
     val noFixedEndDateTime: Boolean = false,
+    @ColumnInfo(name = "automatedScheduling")
+    val isAutomatedScheduling: Boolean = false,
     val teamSignup: Boolean = true,
     val singleDivision: Boolean = true,
     val freeAgentIds: List<String> = emptyList(),
@@ -67,6 +83,11 @@ data class Event(
     val leagueScoringConfigId: String? = null,
     val organizationId: String? = null,
     val affiliateUrl: String? = null,
+    val sourceType: String? = null,
+    val sourceId: String? = null,
+    val sourceUrl: String? = null,
+    @field:TypeConverters(EventAuthorityConverters::class)
+    val capabilities: EventAuthorityCapabilities? = null,
     val scheduleText: String? = null,
     val dateDisplayMode: String? = null,
     val dateDisplayText: String? = null,
@@ -80,6 +101,9 @@ data class Event(
     val teamSizeLimit: Int = 2,
     val registrationByDivisionType: Boolean = false,
     val eventType: EventType = EventType.EVENT,
+    val eventTypeLocked: Boolean = false,
+    val registrationUnitLocked: Boolean = false,
+    val eventTypeHasProtectedHistory: Boolean = false,
     val fieldCount: Int? = null,
     val gamesPerOpponent: Int? = null,
     val includePlayoffs: Boolean = false,
@@ -100,8 +124,8 @@ data class Event(
     val resolvedMatchRules: ResolvedMatchRulesMVP? = null,
     val restTimeMinutes: Int? = null,
     val state: String = "UNPUBLISHED",
+    val archivedAt: String? = null,
     val pointsToVictory: List<Int> = emptyList(),
-    val officialSchedulingMode: OfficialSchedulingMode = OfficialSchedulingMode.SCHEDULE,
     val staffingPriority: StaffingPriority = StaffingPriority.BEST_AVAILABLE_COVERAGE,
     val officialPositions: List<EventOfficialPosition> = emptyList(),
     val eventOfficials: List<EventOfficial> = emptyList(),
@@ -116,6 +140,9 @@ data class Event(
     val tags: List<EventTag> = emptyList(),
     @Transient val lastUpdated: Instant = Clock.System.now(),
 ) : MVPDocument {
+    @Ignore
+    @Transient
+    var nextOccurrence: EventSearchOccurrence? = null
     @Ignore
     var price: Double = 0.0
         get() = priceCents.toDouble() / 100.0
@@ -164,6 +191,28 @@ fun Event.usableLatitudeLongitude(): Pair<Double, Double>? {
 }
 
 fun Event.hasUsableCoordinates(): Boolean = usableLatitudeLongitude() != null
+
+fun Event.withAutomatedScheduling(enabled: Boolean): Event = copy(isAutomatedScheduling = enabled)
+
+fun Event.showsScheduleConstructionControls(): Boolean =
+    !eventType.isScheduleConstructionAutomationType() || isAutomatedScheduling
+
+fun Event.showsGeneratedEndDateControl(): Boolean = when (eventType) {
+    EventType.LEAGUE,
+    EventType.TOURNAMENT -> isAutomatedScheduling || noFixedEndDateTime
+    EventType.WEEKLY_EVENT -> true
+    EventType.EVENT,
+    EventType.TRYOUT -> false
+}
+
+fun normalizeScheduleConstructionTimeSlots(
+    event: Event,
+    slots: List<TimeSlot>,
+): List<TimeSlot> = if (event.showsScheduleConstructionControls()) {
+    slots
+} else {
+    slots.filter(TimeSlot::isRentalBacked)
+}
 
 @Serializable
 enum class TeamCheckInMode {

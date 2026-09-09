@@ -12,6 +12,7 @@ internal sealed class WeeklySessionSelectionResult {
 }
 
 internal class EventWeeklyOccurrenceCoordinator {
+    private var selectedEventId: String? = null
     private val _selectedWeeklyOccurrence = MutableStateFlow<SelectedWeeklyOccurrenceState?>(null)
     val selectedWeeklyOccurrence = _selectedWeeklyOccurrence.asStateFlow()
 
@@ -24,7 +25,13 @@ internal class EventWeeklyOccurrenceCoordinator {
     private val _overviewParticipantSummary = MutableStateFlow<EventParticipantsSummary?>(null)
     val overviewParticipantSummary = _overviewParticipantSummary.asStateFlow()
 
-    fun handleSelectedEventChanged(isWeeklyParent: Boolean) {
+    fun handleSelectedEventChanged(eventId: String, isWeeklyParent: Boolean) {
+        val normalizedEventId = eventId.trim()
+        if (selectedEventId != normalizedEventId) {
+            _selectedWeeklyOccurrence.value = null
+            _selectedWeeklyOccurrenceSummary.value = null
+        }
+        selectedEventId = normalizedEventId
         _weeklyOccurrenceSummaries.value = emptyMap()
         if (!isWeeklyParent) {
             _selectedWeeklyOccurrence.value = null

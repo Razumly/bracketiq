@@ -136,7 +136,7 @@ class DefaultEventDetailComponent(
     }
 
     private fun canManageMatchEditing(): Boolean =
-        canManageEventForUser(
+        authoritySession.isVerified(selectedEvent.value, currentUser.value.id) && canManageEventForUser(
             event = selectedEvent.value,
             user = currentUser.value,
             organization = eventWithRelations.value.organization,
@@ -146,7 +146,7 @@ class DefaultEventDetailComponent(
         event: Event = selectedEvent.value,
         user: UserData = currentUser.value,
         organization: Organization? = eventWithRelations.value.organization,
-    ): Boolean = canManageEventForUser(
+    ): Boolean = authoritySession.isVerified(event, user.id) && canManageEventForUser(
         event = event,
         user = user,
         organization = organization,
@@ -350,11 +350,17 @@ class DefaultEventDetailComponent(
     private val editActionCoordinator = EventEditActionCoordinator()
     private val editDraftCoordinator = EventEditDraftCoordinator(
         initialEvent = event,
-        canEditInitial = event.state.equals("TEMPLATE", ignoreCase = true) && canEditEventDetails(event),
+        canEditInitial = false,
     )
     override var editedEvent = editDraftCoordinator.editedEvent
     override var isEditing = editDraftCoordinator.isEditing
     override val eventEditorControlLocks = editDraftCoordinator.controlLocks
+    override val eventEditorSnapshot
+        get() = eventEditActionHandler.eventEditorSnapshot
+    override val scheduleMaintenanceReview
+        get() = eventEditActionHandler.scheduleMaintenanceReview
+    override val scheduleMaintenanceOptions
+        get() = eventEditActionHandler.scheduleMaintenanceOptions
     override val eventTypeTransitionConfirmation
         get() = eventEditActionHandler.eventTypeTransitionConfirmation
 
@@ -421,18 +427,22 @@ class DefaultEventDetailComponent(
     override val divisionTypeParameters = sportsCatalogCoordinator.divisionTypeParameters
 
     override val selectedEvent = relationStateCoordinator.selectedEvent
+    private val authoritySession = EventAuthoritySession()
+    override val authorityVerified = combine(authoritySession.verified, selectedEvent, currentUser) { verified, event, user ->
+        verified?.matches(event, user.id) == true
+    }.stateIn(scope, SharingStarted.Eagerly, false)
 
     private val bootstrapResourcesCoordinator = EventBootstrapResourcesCoordinator(
-        selectedEvent = selectedEvent,
         eventRelations = eventRelations,
-        fieldRepository = fieldRepository,
         eventRepository = eventRepository,
         scope = scope,
     )
     private val eventTimeSlots = bootstrapResourcesCoordinator.eventTimeSlots
     private val eventLeagueScoringConfig = bootstrapResourcesCoordinator.eventLeagueScoringConfig
 
-    override val isHost = selectedEvent.map { it.hostId == currentUser.value.id }
+    override val isHost = combine(selectedEvent, currentUser, authorityVerified) { event, user, verified ->
+        verified && event.capabilities?.let { it.canEditFor(user.id) && it.viewerIsEventHost } == true
+    }
         .stateIn(scope, SharingStarted.Eagerly, false)
 
     private val selectedEventId = relationStateCoordinator.selectedEventId
@@ -597,7 +607,9 @@ class DefaultEventDetailComponent(
         participantManagementCoordinator = participantManagementCoordinator,
         weeklyOccurrenceCoordinator = weeklyOccurrenceCoordinator,
         operations = EventParticipantBootstrapOperations(
-            getEvent = eventRepository::getEvent,
+            getEvent = { eventId ->
+                authoritySession.refresh(eventId, currentUser.value.id, eventRepository::getEvent)
+            },
             syncCurrentUserRegistrationCacheForEvent = eventRepository::syncCurrentUserRegistrationCacheForEvent,
             syncEventParticipants = eventRepository::syncEventParticipants,
             syncEventDetail = eventRepository::syncEventDetail,
@@ -679,6 +691,7 @@ class DefaultEventDetailComponent(
         setError = { error -> _errorState.value = error },
     )
     private val eventEditActionHandler = EventEditActionHandler(
+        currentUserId = { currentUser.value.id },
         scope = scope,
         editActionCoordinator = editActionCoordinator,
         editDraftCoordinator = editDraftCoordinator,
@@ -944,13 +957,28 @@ class DefaultEventDetailComponent(
             selectedEvent,
             resourceLifecycleHandler::loadOrganizationTemplates,
         )
-        lifecycleBindings.bindSelectedEventResources(selectedEvent) { eventId ->
-            participantBootstrapCoordinator.hydrateMobileEventDetail(
-                showDetailsOnSuccess = false,
-                showLoading = false,
-                reportErrors = false,
-            )
-            eventEditActionHandler.loadAvailableRentalResources(eventId)
+        scope.launch {
+            combine(selectedEvent, currentUser) { selected, viewer -> selected.id to viewer.id }
+                .distinctUntilChanged()
+                .collect { (eventId, _) ->
+                    participantBootstrapCoordinator.hydrateMobileEventDetail(
+                        showDetailsOnSuccess = false,
+                        showLoading = false,
+                        reportErrors = false,
+                    )
+                    eventEditActionHandler.loadAvailableRentalResources(eventId)
+                }
+        }
+        scope.launch {
+            authorityVerified.collect { verified ->
+                if (verified && selectedEvent.value.state.equals("TEMPLATE", ignoreCase = true)) {
+                    eventEditActionHandler.startEditingEvent()
+                }
+                if (!verified) {
+                    matchEditingCoordinator.cancelEditing()
+                    eventEditActionHandler.invalidateAuthority()
+                }
+            }
         }
         lifecycleBindings.bindScheduleTrackedUser(
             currentUser,
@@ -988,6 +1016,7 @@ class DefaultEventDetailComponent(
             participantBootstrapCoordinator.managedBootstrapTargetFlow(
                 currentUser,
                 eventOrganization,
+                authorityVerified,
             ) { eventValue, user, organization ->
                 canManageParticipantData(
                     event = eventValue,
@@ -1173,7 +1202,7 @@ class DefaultEventDetailComponent(
         event: Event = selectedEvent.value,
         errorMessage: String = "Select an occurrence before continuing.",
     ): EventOccurrenceSelection? {
-        if (!isWeeklyParentEvent(event)) {
+        if (!isWeeklyEventShape(event)) {
             return null
         }
         return currentWeeklyOccurrenceSelection() ?: run {
@@ -1195,6 +1224,8 @@ class DefaultEventDetailComponent(
             put("event_id", event.id)
             put("event_type", event.eventType.name)
             put("registration_type", "affiliate")
+            event.sourceType?.takeIf(String::isNotBlank)?.let { put("source_type", it) }
+            event.sourceId?.takeIf(String::isNotBlank)?.let { put("source_id", it) }
             put("source", "event_detail")
             put("team_signup", event.teamSignup.toString())
             event.organizationId?.trim()?.takeIf(String::isNotBlank)?.let { put("organization_id", it) }
@@ -1209,7 +1240,7 @@ class DefaultEventDetailComponent(
             eventProperties + mapOf("destination_selected" to "true"),
         )
         scope.launch {
-            val result = urlHandler?.openUrlInWebView(affiliateUrl)
+            val result = urlHandler?.openRegistrationUrl(affiliateUrl)
             if (result == null) {
                 _errorState.value = ErrorMessage("Unable to open registration link.")
                 return@launch
@@ -1333,6 +1364,13 @@ class DefaultEventDetailComponent(
 
     override fun startEditingEvent() = eventEditActionHandler.startEditingEvent()
 
+    override fun openScheduleMaintenance() = eventEditActionHandler.openScheduleMaintenance()
+
+    override fun dismissScheduleMaintenanceOptions() = eventEditActionHandler.dismissScheduleMaintenanceOptions()
+
+    override fun selectScheduleMaintenanceOperation(operation: com.razumly.mvp.core.network.dto.EventEditorMaintenanceOperation) =
+        eventEditActionHandler.selectScheduleMaintenanceOperation(operation)
+
     override fun cancelEditingEvent() = eventEditActionHandler.cancelEditingEvent()
 
     override fun editEventField(update: Event.() -> Event) =
@@ -1375,6 +1413,20 @@ class DefaultEventDetailComponent(
 
     override fun confirmEventTypeTransition() =
         eventEditActionHandler.confirmEventTypeTransition()
+
+    override fun acceptScheduleMaintenanceProposal() =
+        eventEditActionHandler.acceptScheduleMaintenanceProposal()
+    override fun retryAcceptedScheduleSync() =
+        eventEditActionHandler.retryAcceptedScheduleSync()
+
+    override fun rejectScheduleMaintenanceProposal() =
+        eventEditActionHandler.rejectScheduleMaintenanceProposal()
+
+    override fun dismissScheduleMaintenanceReview() =
+        eventEditActionHandler.dismissScheduleMaintenanceReview()
+
+    override fun requestFreshScheduleMaintenanceProposal() =
+        eventEditActionHandler.requestFreshScheduleMaintenanceProposal()
 
     override fun rescheduleEvent() = eventEditActionHandler.rescheduleEvent()
 
@@ -1521,6 +1573,11 @@ class DefaultEventDetailComponent(
     override fun cancelEditingMatches() = matchEditActionHandler.cancelEditingMatches()
 
     override fun commitMatchChanges() = matchEditActionHandler.commitMatchChanges()
+    override val protectedMatchDeletionConfirmation
+        get() = matchEditingCoordinator.protectedDeletionConfirmation
+    override fun confirmProtectedMatchDeletion() = matchEditActionHandler.commitMatchChanges(true)
+    override fun dismissProtectedMatchDeletionConfirmation() =
+        matchEditingCoordinator.dismissProtectedDeletionConfirmation()
 
     override fun updateEditableMatch(matchId: String, updater: (MatchMVP) -> MatchMVP) =
         matchEditActionHandler.updateEditableMatch(matchId, updater)

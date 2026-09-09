@@ -114,6 +114,8 @@ internal data class EventTeamBillCreateRequestDto(
     val taxAmountCents: Int = 0,
     val allowSplit: Boolean = false,
     val label: String? = null,
+    val slotId: String? = null,
+    val occurrenceDate: String? = null,
 )
 
 @Serializable
@@ -124,6 +126,8 @@ internal data class EventTeamPaymentCheckoutRequestDto(
     val taxAmountCents: Int = 0,
     val divisionId: String? = null,
     val label: String? = null,
+    val slotId: String? = null,
+    val occurrenceDate: String? = null,
 )
 
 @Serializable

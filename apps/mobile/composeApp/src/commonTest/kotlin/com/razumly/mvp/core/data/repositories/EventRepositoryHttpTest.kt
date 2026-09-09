@@ -8,6 +8,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.EventParticipantManagementCacheEntry
+import com.razumly.mvp.core.data.dataTypes.EventTimeSlotCacheEntry
 import com.razumly.mvp.core.data.dataTypes.EventTeamComplianceCacheEntry
 import com.razumly.mvp.core.data.dataTypes.EventUserComplianceCacheEntry
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
@@ -31,6 +32,7 @@ import com.razumly.mvp.core.data.dataTypes.daos.CatalogCacheDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventComplianceDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventParticipantManagementDao
+import com.razumly.mvp.core.data.dataTypes.daos.EventTimeSlotDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventRegistrationDao
 import com.razumly.mvp.core.data.dataTypes.daos.FieldDao
 import com.razumly.mvp.core.data.dataTypes.daos.MatchDao
@@ -41,13 +43,36 @@ import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
 import com.razumly.mvp.core.network.AuthTokenStore
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.configureMvpHttpClient
+import com.razumly.mvp.core.network.dto.EVENT_EDITOR_CONTRACT_VERSION
+import com.razumly.mvp.core.network.dto.EventEditorAcceptMaintenanceProposalDto
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceAcceptedResultDto
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceGraphDto
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceOperation
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceProposalDto
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceRequestDto
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceResponseDto
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceResponseStatus
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceScheduleOutcomeDto
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceScheduleOutcomeStatus
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceUnscheduledMatchDto
+import com.razumly.mvp.core.network.dto.EventEditorRejectMaintenanceProposalDto
+import com.razumly.mvp.core.network.dto.TeamApiDto
+import com.razumly.mvp.core.data.dataTypes.TimeSlotDTO
+import com.razumly.mvp.core.data.dataTypes.toEventTimeSlotCacheEntry
+import com.razumly.mvp.core.network.dto.EventEditorCreateProposalDto
+import com.razumly.mvp.core.network.dto.EventApiDto
+import com.razumly.mvp.core.network.dto.EventEditorCreateProposalGraphDto
+import com.razumly.mvp.core.network.dto.EventEditorRevisionBindingDto
+import com.razumly.mvp.core.network.dto.MatchApiDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateCommandDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateCompletionDto
+import com.razumly.mvp.core.network.dto.EventEditorExpectedCreateRevisionsDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateCompletionMode
 import com.razumly.mvp.core.network.dto.EventEditorCapabilitiesDto
 import com.razumly.mvp.core.network.dto.EventEditorCatalogsDto
 import com.razumly.mvp.core.network.dto.EventEditorBasicsDto
 import com.razumly.mvp.core.network.dto.EventEditorCompetitionDto
+import com.razumly.mvp.core.network.dto.EventEditorDivisionDetailDto
 import com.razumly.mvp.core.network.dto.EventEditorDraftDto
 import com.razumly.mvp.core.network.dto.EventEditorFieldDto
 import com.razumly.mvp.core.network.dto.EventEditorImmutableDto
@@ -61,9 +86,15 @@ import com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeDto
 import com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus
 import com.razumly.mvp.core.network.dto.EventEditorScheduleStateDto
 import com.razumly.mvp.core.network.dto.EventEditorSaveResultDto
+import com.razumly.mvp.core.network.dto.EventEditorSaveCommandDto
+import com.razumly.mvp.core.network.dto.EventEditorSaveScheduleTransitionDto
+import com.razumly.mvp.core.network.dto.EventEditorScheduleTransitionMode
 import com.razumly.mvp.core.network.dto.EventEditorSnapshotDto
 import com.razumly.mvp.core.network.dto.EventEditorStaffDto
 import com.razumly.mvp.core.network.dto.EventEditorTimeSlotDto
+import com.razumly.mvp.core.network.dto.EventEditorOfficialPositionDto
+import com.razumly.mvp.core.network.dto.EventEditorOfficialDto
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import com.razumly.mvp.core.util.jsonMVP
 import dev.icerock.moko.geo.LatLng
@@ -79,6 +110,7 @@ import io.ktor.http.headersOf
 import io.ktor.http.content.OutgoingContent
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -92,10 +124,16 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.serializer
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.test.assertNull
 import kotlin.time.ExperimentalTime
 import kotlin.time.Duration.Companion.days
 import kotlin.time.Instant
@@ -115,13 +153,14 @@ private class EventRepositoryHttp_FakeEventDao : EventDao {
     val deleteEventWithCrossRefsCalls = mutableListOf<String>()
     val deleteEventCrossRefsCalls = mutableListOf<String>()
     var clearAllEventsWithCrossRefsCalls = 0
+    var eventTimeSlotCacheEntries: Map<String, List<EventTimeSlotCacheEntry>> = emptyMap()
 
     override suspend fun upsertEvent(game: Event) {
-        events.value = events.value + (game.id to game)
+        events.value = events.value + (game.id to game.copy())
     }
 
     override suspend fun upsertEvents(games: List<Event>) {
-        events.value = games.fold(events.value) { acc, event -> acc + (event.id to event) }
+        events.value = games.fold(events.value) { acc, event -> acc + (event.id to event.copy()) }
     }
 
     override suspend fun deleteEvent(game: Event) {
@@ -151,7 +190,12 @@ private class EventRepositoryHttp_FakeEventDao : EventDao {
     override suspend fun deleteEventById(id: String) { events.value = events.value - id }
     override suspend fun getEventById(id: String): Event? = events.value[id]
     override suspend fun getEventsByIds(ids: List<String>): List<Event> = ids.mapNotNull(events.value::get)
-    override suspend fun getEventWithRelationsById(id: String): EventWithRelations = error("unused")
+    override suspend fun getEventWithRelationsById(id: String): EventWithRelations =
+        EventWithRelations(
+            event = events.value[id] ?: error("Missing event $id"),
+            host = null,
+            timeSlotCacheEntries = eventTimeSlotCacheEntries[id].orEmpty(),
+        )
     override fun getEventWithRelationsFlow(id: String): Flow<EventWithRelations> = error("unused")
     override suspend fun deleteEventWithCrossRefs(eventId: String) {
         deleteEventWithCrossRefsCalls += eventId
@@ -172,39 +216,71 @@ private class EventRepositoryHttp_FakeEventDao : EventDao {
     }
 }
 
-private class EventRepositoryHttp_FakeUserDataDao : RoomUserDataDaoTestAdapter() {
+private class EventRepositoryHttp_FakeUserDataDao(
+    initialUsers: List<UserData> = emptyList(),
+) : RoomUserDataDaoTestAdapter() {
+    private val users = initialUsers.associateBy(UserData::id).toMutableMap()
     val eventCrossRefs = mutableListOf<EventUserCrossRef>()
-    override suspend fun upsertUserData(userData: UserData) {}
-    override suspend fun upsertUsersData(usersData: List<UserData>) {}
-    override suspend fun deleteUsersById(ids: List<String>) {}
+    override suspend fun upsertUserData(userData: UserData) {
+        users[userData.id] = userData
+    }
+    override suspend fun upsertUsersData(usersData: List<UserData>) {
+        usersData.forEach { userData -> users[userData.id] = userData }
+    }
+    override suspend fun deleteUsersById(ids: List<String>) {
+        ids.forEach(users::remove)
+    }
     override suspend fun upsertUserEventCrossRef(crossRef: EventUserCrossRef) {
         eventCrossRefs += crossRef
     }
     override suspend fun upsertUserEventCrossRefs(crossRefs: List<EventUserCrossRef>) {
         eventCrossRefs += crossRefs
     }
+    override suspend fun upsertUsersWithRelations(usersData: List<UserData>) {
+        upsertUsersData(usersData)
+    }
     override suspend fun upsertUserTeamCrossRefs(crossRefs: List<TeamPlayerCrossRef>) {}
-    override suspend fun deleteUserData(userData: UserData) {}
+    override suspend fun deleteUserData(userData: UserData) {
+        users.remove(userData.id)
+    }
     override suspend fun deleteTeamCrossRefById(userIds: List<String>) {}
-    override suspend fun getUserDataById(id: String): UserData? = null
-    override suspend fun getUserDatasById(ids: List<String>): List<UserData> = emptyList()
-    override fun getUserDatasByIdFlow(ids: List<String>): Flow<List<UserData>> = flowOf(emptyList())
-    override fun getUserFlowById(id: String): Flow<UserData?> = flowOf(null)
+    override suspend fun getUserDataById(id: String): UserData? = users[id]
+    override suspend fun getUserDatasById(ids: List<String>): List<UserData> =
+        ids.mapNotNull(users::get)
+    override fun getUserDatasByIdFlow(ids: List<String>): Flow<List<UserData>> =
+        flowOf(ids.mapNotNull(users::get))
+    override fun getUserFlowById(id: String): Flow<UserData?> = flowOf(users[id])
     override suspend fun searchUsers(search: String): List<UserData> = emptyList()
 }
 
 private class EventRepositoryHttp_FakeTeamDao : RoomTeamDaoTestAdapter() {
-    override suspend fun upsertTeam(team: Team) {}
-    override suspend fun upsertTeams(teams: List<Team>) {}
-    override suspend fun getTeam(teamId: String): Team = error("unused")
-    override suspend fun getTeams(teamIds: List<String>): List<Team> = emptyList()
+    val teams = mutableMapOf<String, Team>()
+
+    override suspend fun upsertTeamRow(team: Team) {
+        teams[team.id] = team
+    }
+    override suspend fun upsertTeamRows(teams: List<Team>) {
+        teams.forEach { team -> this.teams[team.id] = team }
+    }
+    override suspend fun upsertTeam(team: Team) {
+        teams[team.id] = team
+    }
+    override suspend fun upsertTeams(teams: List<Team>) {
+        teams.forEach { team -> this.teams[team.id] = team }
+    }
+    override suspend fun getTeam(teamId: String): Team = teams.getValue(teamId)
+    override suspend fun getTeams(teamIds: List<String>): List<Team> = teamIds.mapNotNull(teams::get)
     override suspend fun getTeamsForUser(userId: String): List<Team> = emptyList()
     override fun getTeamsForUserFlow(userId: String): Flow<List<TeamWithPlayers>> = flowOf(emptyList())
     override suspend fun getTeamInvitesForUser(userId: String): List<Team> = emptyList()
     override fun getTeamInvitesForUserFlow(userId: String): Flow<List<TeamWithPlayers>> = flowOf(emptyList())
-    override suspend fun deleteTeamsByIds(ids: List<String>) {}
+    override suspend fun deleteTeamsByIds(ids: List<String>) {
+        ids.forEach(teams::remove)
+    }
     override suspend fun getTeamPlayerCrossRefsByTeamId(teamId: String): List<TeamPlayerCrossRef> = emptyList()
-    override suspend fun deleteTeam(team: Team) {}
+    override suspend fun deleteTeam(team: Team) {
+        teams.remove(team.id)
+    }
     override suspend fun upsertTeamPlayerCrossRef(crossRef: TeamPlayerCrossRef) {}
     override suspend fun upsertTeamPendingPlayerCrossRef(crossRef: com.razumly.mvp.core.data.dataTypes.crossRef.TeamPendingPlayerCrossRef) {}
     override suspend fun upsertTeamPlayerCrossRefs(crossRefs: List<TeamPlayerCrossRef>) {}
@@ -215,11 +291,15 @@ private class EventRepositoryHttp_FakeTeamDao : RoomTeamDaoTestAdapter() {
     override suspend fun deleteTeamPlayerCrossRefsByTeamId(teamId: String) {}
     override suspend fun deleteTeamPendingPlayerCrossRefsByTeamId(teamId: String) {}
     override suspend fun getTeamWithPlayers(teamId: String): TeamWithPlayers = error("unused")
-    override fun getTeamWithPlayersFlow(teamId: String): Flow<TeamWithRelations?> = error("unused")
-    override suspend fun getTeamsWithPlayers(teamIds: List<String>): List<TeamWithRelations> = error("unused")
+    override fun getTeamWithPlayersFlow(teamId: String): Flow<TeamWithRelations?> = flowOf(null)
+    override suspend fun getTeamsWithPlayers(teamIds: List<String>): List<TeamWithRelations> = emptyList()
     override fun getTeamsWithPlayersFlowByIds(ids: List<String>): Flow<List<TeamWithPlayers>> = flowOf(emptyList())
-    override suspend fun upsertTeamWithRelations(team: Team) {}
-    override suspend fun upsertTeamsWithRelations(teams: List<Team>) {}
+    override suspend fun upsertTeamWithRelations(team: Team) {
+        teams[team.id] = team
+    }
+    override suspend fun upsertTeamsWithRelations(teams: List<Team>) {
+        teams.forEach { team -> this.teams[team.id] = team }
+    }
 }
 
 private class EventRepositoryHttp_FakeFieldDao : FieldDao {
@@ -240,6 +320,32 @@ private class EventRepositoryHttp_FakeFieldDao : FieldDao {
     }
     override fun getFieldById(id: String): Flow<FieldWithMatches?> = flowOf(null)
     override fun getFieldsWithMatches(ids: List<String>): Flow<List<FieldWithMatches>> = flowOf(emptyList())
+}
+private class EventRepositoryHttp_FakeEventTimeSlotDao(
+    private val onUpsert: suspend (List<EventTimeSlotCacheEntry>) -> Unit = {},
+) : EventTimeSlotDao {
+    val entries = mutableListOf<EventTimeSlotCacheEntry>()
+
+    override suspend fun getTimeSlotsByEventId(eventId: String): List<EventTimeSlotCacheEntry> =
+        entries.filter { entry -> entry.eventId == eventId }.sortedBy(EventTimeSlotCacheEntry::position)
+
+    override suspend fun upsertTimeSlots(entries: List<EventTimeSlotCacheEntry>) {
+        entries.forEach { entry ->
+            this.entries.removeAll { existing ->
+                existing.eventId == entry.eventId && existing.slotId == entry.slotId
+            }
+            this.entries += entry
+        }
+        onUpsert(entries)
+    }
+
+    override suspend fun deleteTimeSlotsByEventId(eventId: String) {
+        entries.removeAll { entry -> entry.eventId == eventId }
+    }
+
+    override suspend fun deleteAllTimeSlots() {
+        entries.clear()
+    }
 }
 
 private class EventRepositoryHttp_FakeMatchDao : MatchDao {
@@ -431,6 +537,7 @@ private class EventRepositoryHttp_FakeDatabaseService(
     override val getTeamDao: TeamDao,
     override val getMatchDao: MatchDao = EventRepositoryHttp_FakeMatchDao(),
     override val getFieldDao: FieldDao = EventRepositoryHttp_FakeFieldDao(),
+    override val getEventTimeSlotDao: EventTimeSlotDao = EventRepositoryHttp_FakeEventTimeSlotDao(),
     override val getEventParticipantManagementDao: EventParticipantManagementDao =
         EventRepositoryHttp_FakeParticipantManagementDao(),
     override val getEventComplianceDao: EventComplianceDao = EventRepositoryHttp_FakeComplianceDao(),
@@ -484,6 +591,512 @@ private fun makeUser(id: String): UserData {
         id = id,
     )
 }
+private const val MAINTENANCE_EVENT_ID = "maintenance-event"
+private const val MAINTENANCE_START = "2026-09-01T10:00:00Z"
+
+private val maintenanceResponseJson = Json {
+    encodeDefaults = true
+    explicitNulls = true
+    isLenient = true
+    allowSpecialFloatingPointValues = true
+    allowStructuredMapKeys = true
+    useArrayPolymorphism = false
+}
+private const val MAINTENANCE_END = "2026-09-01T12:00:00Z"
+
+private fun maintenanceRevisionBinding(): EventEditorRevisionBindingDto =
+    EventEditorRevisionBindingDto(
+        editorRevision = "maintenance-editor-revision",
+        staffRevision = "maintenance-staff-revision",
+        scheduleRevision = "maintenance-schedule-revision",
+        rentalBookingRevision = "maintenance-rental-revision",
+        fieldRevisions = mapOf("field-proposed" to "field-revision"),
+        timeSlotRevisions = mapOf("slot-proposed" to "slot-revision"),
+        availabilityRevision = "maintenance-availability-revision",
+    )
+
+private val maintenanceGraphDivisionKeys = setOf(
+    "id",
+    "name",
+    "kind",
+    "role",
+    "phase",
+    "sourceDivisionId",
+    "isSystemGenerated",
+    "phaseSettings",
+    "teamIds",
+    "playoffTeamCount",
+    "playoffPlacementDivisionIds",
+    "standingsOverrides",
+    "standingsConfirmedAt",
+    "standingsConfirmedBy",
+    "playoffConfig",
+    "leagueConfig",
+)
+
+private fun canonicalMaintenanceDivision(source: JsonObject): JsonObject {
+    val phaseSettings = JsonObject(
+        (source["phaseSettings"] as? JsonObject)?.mapValues { (_, settings) ->
+            JsonObject(
+                (settings as? JsonObject)?.filterValues { value -> value !is JsonNull }
+                    ?: emptyMap(),
+            )
+        } ?: emptyMap(),
+    )
+    return JsonObject(
+        source.filterKeys { key -> key in maintenanceGraphDivisionKeys } + mapOf(
+            "id" to (source["id"] ?: JsonPrimitive("")),
+            "name" to (source["name"] ?: JsonPrimitive("")),
+            "kind" to (source["kind"] ?: JsonPrimitive("LEAGUE")),
+            "role" to (source["role"] ?: JsonPrimitive("ENTRY")),
+            "phase" to (source["phase"] ?: JsonNull),
+            "sourceDivisionId" to (source["sourceDivisionId"] ?: JsonNull),
+            "isSystemGenerated" to (source["isSystemGenerated"] ?: JsonPrimitive(false)),
+            "phaseSettings" to phaseSettings,
+            "teamIds" to (source["teamIds"] ?: JsonArray(emptyList())),
+            "playoffTeamCount" to (source["playoffTeamCount"] ?: JsonNull),
+            "playoffPlacementDivisionIds" to (
+                source["playoffPlacementDivisionIds"] ?: JsonArray(emptyList())
+                ),
+            "standingsOverrides" to (source["standingsOverrides"] ?: JsonNull),
+            "standingsConfirmedAt" to (source["standingsConfirmedAt"] ?: JsonNull),
+            "standingsConfirmedBy" to (source["standingsConfirmedBy"] ?: JsonNull),
+            "playoffConfig" to (source["playoffConfig"] ?: JsonNull),
+            "leagueConfig" to (source["leagueConfig"] ?: JsonNull),
+        ),
+    )
+}
+
+private fun canonicalMaintenanceDivisions(event: JsonObject, key: String): JsonArray =
+    JsonArray(
+        (event[key] as? JsonArray)?.map { division ->
+            canonicalMaintenanceDivision(division.jsonObject)
+        } ?: emptyList(),
+    )
+private val maintenanceGraphTeamKeys = setOf(
+    "id",
+    "captainId",
+    "division",
+    "kind",
+    "name",
+    "playerIds",
+    "players",
+    "playerRegistrations",
+)
+
+private fun canonicalMaintenanceTeam(source: JsonObject): JsonObject =
+    JsonObject(
+        source.filterKeys { key -> key in maintenanceGraphTeamKeys } + mapOf(
+            "id" to (source["id"] ?: JsonPrimitive("")),
+            "captainId" to (source["captainId"] ?: JsonNull),
+            "division" to (source["division"] ?: JsonNull),
+            "kind" to (source["kind"] ?: JsonNull),
+            "name" to (source["name"] ?: JsonPrimitive("")),
+            "playerIds" to (source["playerIds"] ?: JsonArray(emptyList())),
+            "players" to (source["players"] ?: JsonArray(emptyList())),
+            "playerRegistrations" to (source["playerRegistrations"] ?: JsonArray(emptyList())),
+        ),
+    )
+
+private fun canonicalMaintenanceTeams(event: JsonObject): JsonArray =
+    JsonArray(
+        (event["teams"] as? JsonArray)?.map { team ->
+            canonicalMaintenanceTeam(team.jsonObject)
+        } ?: emptyList(),
+    )
+
+
+private inline fun <reified T> encodeMaintenanceResponse(value: T): String {
+    val root = maintenanceResponseJson.encodeToJsonElement(serializer(), value).jsonObject
+    val graph = root["graph"]?.jsonObject ?: return maintenanceResponseJson.encodeToString(value)
+    val event = graph["event"]?.jsonObject
+        ?: return maintenanceResponseJson.encodeToString(value)
+    val enrichedEvent = JsonObject(
+        event.filterKeys { key ->
+            key !in setOf(
+                "address",
+                "affiliateUrl",
+                "isAutomatedScheduling",
+                "registrationByDivisionType",
+                "timeZone",
+            )
+        } + mapOf(
+            "fields" to JsonArray(
+                event["fields"]?.jsonArray?.map { field ->
+                    JsonObject(
+                        field.jsonObject.filterKeys { key ->
+                            key !in setOf(
+                                "fieldNumber",
+                                "inUse",
+                                "location",
+                                "rentalSlotIds",
+                                "sportIds",
+                            )
+                        } + mapOf(
+                            "organizationId" to (field.jsonObject["organizationId"] ?: JsonNull),
+                        ),
+                    )
+                } ?: emptyList(),
+            ),
+            "divisionDetails" to canonicalMaintenanceDivisions(event, "divisionDetails"),
+            "playoffDivisionDetails" to canonicalMaintenanceDivisions(event, "playoffDivisionDetails"),
+            "teams" to canonicalMaintenanceTeams(event),
+            "timeSlots" to JsonArray(
+                event["timeSlots"]?.jsonArray?.map { slot ->
+                    JsonObject(
+                        slot.jsonObject.filterKeys { key ->
+                            key in setOf(
+                                "id",
+                                "dayOfWeek",
+                                "daysOfWeek",
+                                "startDate",
+                                "endDate",
+                                "repeating",
+                                "startTimeMinutes",
+                                "endTimeMinutes",
+                                "price",
+                                "scheduledFieldId",
+                                "scheduledFieldIds",
+                                "divisions",
+                            )
+                        } + mapOf(
+                            "price" to (slot.jsonObject["price"] ?: JsonNull),
+                        ),
+                    )
+                } ?: emptyList(),
+            ),
+            "cancellationRefundHours" to (event["cancellationRefundHours"] ?: JsonNull),
+            "coordinates" to (event["coordinates"] ?: JsonNull),
+            "hostId" to (event["hostId"] ?: JsonNull),
+            "imageId" to (event["imageId"] ?: JsonNull),
+            "leagueScoringConfigId" to (event["leagueScoringConfigId"] ?: JsonNull),
+            "matchRulesOverride" to (event["matchRulesOverride"] ?: JsonNull),
+            "maxAge" to (event["maxAge"] ?: JsonNull),
+            "minAge" to (event["minAge"] ?: JsonNull),
+            "organizationId" to (event["organizationId"] ?: JsonNull),
+            "price" to (event["price"] ?: JsonNull),
+            "rating" to (event["rating"] ?: JsonNull),
+            "resolvedMatchRules" to (event["resolvedMatchRules"] ?: JsonNull),
+            "seedColor" to (event["seedColor"] ?: JsonNull),
+        ),
+    )
+    val matches = graph["matches"]?.jsonArray ?: return maintenanceResponseJson.encodeToString(value)
+    val enrichedMatches = JsonArray(matches.map { match ->
+        val matchObject = match.jsonObject
+        JsonObject(
+            matchObject + mapOf(
+                "start" to (matchObject["start"] ?: JsonNull),
+                "end" to (matchObject["end"] ?: JsonNull),
+                "fieldId" to (matchObject["fieldId"] ?: JsonNull),
+                "actualStart" to (matchObject["actualStart"] ?: JsonNull),
+                "actualEnd" to (matchObject["actualEnd"] ?: JsonNull),
+                "loserNextMatchId" to (matchObject["loserNextMatchId"] ?: JsonNull),
+                "matchRulesSnapshot" to (matchObject["matchRulesSnapshot"] ?: JsonNull),
+                "previousLeftId" to (matchObject["previousLeftId"] ?: JsonNull),
+                "previousRightId" to (matchObject["previousRightId"] ?: JsonNull),
+                "resolvedMatchRules" to (matchObject["resolvedMatchRules"] ?: JsonNull),
+                "resultStatus" to (matchObject["resultStatus"] ?: JsonNull),
+                "resultType" to (matchObject["resultType"] ?: JsonNull),
+                "side" to (matchObject["side"] ?: JsonNull),
+                "status" to (matchObject["status"] ?: JsonNull),
+                "statusReason" to (matchObject["statusReason"] ?: JsonNull),
+                "team1Id" to (matchObject["team1Id"] ?: JsonNull),
+                "team1Seed" to (matchObject["team1Seed"] ?: JsonNull),
+                "team2Id" to (matchObject["team2Id"] ?: JsonNull),
+                "team2Seed" to (matchObject["team2Seed"] ?: JsonNull),
+                "teamOfficialId" to (matchObject["teamOfficialId"] ?: JsonNull),
+                "winnerEventTeamId" to (matchObject["winnerEventTeamId"] ?: JsonNull),
+                "winnerNextMatchId" to (matchObject["winnerNextMatchId"] ?: JsonNull),
+                "field" to (matchObject["field"] ?: JsonNull),
+                "official" to (matchObject["official"] ?: JsonNull),
+                "officialAssignments" to (matchObject["officialAssignments"] ?: JsonArray(emptyList())),
+                "team1" to (matchObject["team1"] ?: JsonNull),
+                "team2" to (matchObject["team2"] ?: JsonNull),
+                "teamOfficial" to (matchObject["teamOfficial"] ?: JsonNull),
+                "teamOfficialSeed" to (matchObject["teamOfficialSeed"] ?: JsonNull),
+            ),
+        )
+    })
+    return maintenanceResponseJson.encodeToString(
+        JsonObject(
+            root + mapOf(
+                "graph" to JsonObject(
+                    graph + mapOf(
+                        "event" to enrichedEvent,
+                        "matches" to enrichedMatches,
+                    ),
+                ),
+            ),
+        ),
+    )
+}
+
+private fun maintenanceRequest(
+    operation: EventEditorMaintenanceOperation,
+    eventId: String = MAINTENANCE_EVENT_ID,
+    operationId: String = "maintenance-operation",
+): EventEditorMaintenanceRequestDto = EventEditorMaintenanceRequestDto(
+    contractVersion = EVENT_EDITOR_CONTRACT_VERSION,
+    eventId = eventId,
+    operation = operation,
+    operationId = operationId,
+    expectedRevisions = maintenanceRevisionBinding(),
+    participantCount = 8,
+    includePlaceholderTeams = true,
+)
+
+private fun maintenanceAcceptRequest(
+    request: EventEditorMaintenanceRequestDto,
+    proposalRevision: String,
+    acceptanceOperationId: String = "maintenance-acceptance",
+): EventEditorAcceptMaintenanceProposalDto = EventEditorAcceptMaintenanceProposalDto(
+    contractVersion = request.contractVersion,
+    eventId = request.eventId,
+    operation = request.operation,
+    operationId = request.operationId,
+    proposalRevision = proposalRevision,
+    acceptanceOperationId = acceptanceOperationId,
+)
+
+private fun maintenanceRejectRequest(
+    request: EventEditorMaintenanceRequestDto,
+    proposalRevision: String,
+): EventEditorRejectMaintenanceProposalDto = EventEditorRejectMaintenanceProposalDto(
+    contractVersion = request.contractVersion,
+    eventId = request.eventId,
+    operation = request.operation,
+    operationId = request.operationId,
+    proposalRevision = proposalRevision,
+)
+
+private fun maintenanceProjection(
+    eventId: String,
+    id: String,
+    matchId: Int,
+    placementState: String = "PLACED",
+    fieldId: String? = "field-proposed",
+    start: String? = MAINTENANCE_START,
+    end: String? = MAINTENANCE_END,
+): EventEditorMatchProjectionDto = EventEditorMatchProjectionDto(
+    id = id,
+    matchId = matchId,
+    eventId = eventId,
+    start = start,
+    end = end,
+    placementState = placementState,
+    phase = "POOL",
+    sourceDivisionId = "division-source",
+    phaseDivisionId = "phase-pool",
+    division = "division-1",
+    fieldId = fieldId,
+)
+
+private fun maintenanceTimeSlotDto(
+    id: String = "slot-proposed",
+    fieldId: String = "field-proposed",
+): TimeSlotDTO = TimeSlotDTO(
+    id = id,
+    dayOfWeek = 2,
+    daysOfWeek = listOf(2),
+    divisions = emptyList(),
+    startTimeMinutes = 600,
+    endTimeMinutes = 660,
+    startDate = MAINTENANCE_START,
+    endDate = MAINTENANCE_END,
+    timeZone = "UTC",
+    scheduledFieldId = fieldId,
+    scheduledFieldIds = listOf(fieldId),
+)
+
+private fun maintenanceGraph(
+    eventId: String,
+    matches: List<EventEditorMatchProjectionDto>,
+    eventName: String = "Maintenance Event",
+    fieldId: String = "field-proposed",
+    timeSlotId: String = "slot-proposed",
+): EventEditorMaintenanceGraphDto {
+    val field = Field(
+        id = fieldId,
+        name = "Court 1",
+        fieldNumber = 1,
+        organizationId = null,
+    )
+    val timeSlot = maintenanceTimeSlotDto(id = timeSlotId, fieldId = fieldId)
+    return EventEditorMaintenanceGraphDto(
+        event = EventApiDto(
+            id = eventId,
+            name = eventName,
+            start = MAINTENANCE_START,
+            end = MAINTENANCE_END,
+            timeZone = "UTC",
+            description = "",
+            location = "",
+            coordinates = null,
+            price = null,
+            minAge = null,
+            maxAge = null,
+            rating = null,
+            imageId = null,
+            hostId = "host-1",
+            noFixedEndDateTime = false,
+            scheduleEndConstraint = MAINTENANCE_END,
+            generatedScheduleEnd = MAINTENANCE_END,
+            state = "UNPUBLISHED",
+            maxParticipants = 8,
+            teamSizeLimit = 2,
+            restTimeMinutes = 0,
+            teamSignup = true,
+            singleDivision = true,
+            waitListIds = emptyList(),
+            freeAgentIds = emptyList(),
+            teamIds = emptyList(),
+            userIds = emptyList(),
+            fieldIds = listOf(fieldId),
+            timeSlotIds = listOf(timeSlotId),
+            officialIds = emptyList(),
+            staffingPriority = "BEST_AVAILABLE_COVERAGE",
+            officialPositions = emptyList(),
+            eventOfficials = emptyList(),
+            autoCreatePointMatchIncidents = false,
+            cancellationRefundHours = null,
+            registrationCutoffHours = 0,
+            seedColor = null,
+            eventType = "LEAGUE",
+            sportIds = emptyList(),
+            leagueScoringConfigId = null,
+            organizationId = null,
+            requiredTemplateIds = emptyList(),
+            allowPaymentPlans = false,
+            installmentCount = 0,
+            installmentDueDates = emptyList(),
+            installmentDueRelativeDays = emptyList(),
+            installmentAmounts = emptyList(),
+            allowTeamSplitDefault = false,
+            splitLeaguePlayoffDivisions = false,
+            divisions = emptyList(),
+            divisionDetails = emptyList(),
+            playoffDivisionDetails = emptyList(),
+            fields = listOf(field),
+            teams = emptyList(),
+            timeSlots = listOf(timeSlot),
+            officials = emptyList(),
+        ),
+        matches = matches,
+    )
+}
+
+private fun maintenanceScheduleOutcome(
+    matches: List<EventEditorMatchProjectionDto>,
+): EventEditorMaintenanceScheduleOutcomeDto {
+    val unplacedMatches = matches.filter { match ->
+        match.placementState.equals("UNPLACED", ignoreCase = true)
+    }
+    return EventEditorMaintenanceScheduleOutcomeDto(
+        status = if (unplacedMatches.isEmpty()) {
+            EventEditorMaintenanceScheduleOutcomeStatus.COMPLETE
+        } else {
+            EventEditorMaintenanceScheduleOutcomeStatus.INCOMPLETE
+        },
+        isComplete = unplacedMatches.isEmpty(),
+        matchCount = matches.size,
+        placedMatchCount = matches.size - unplacedMatches.size,
+        unplacedMatchCount = unplacedMatches.size,
+        matches = matches,
+        unscheduledMatches = unplacedMatches.map { match ->
+            EventEditorMaintenanceUnscheduledMatchDto(
+                id = match.id,
+                matchId = match.matchId,
+                phaseDivisionId = match.phaseDivisionId ?: "phase-pool",
+                phase = match.phase ?: "POOL",
+                sourceDivisionId = match.sourceDivisionId,
+            )
+        },
+        affectedCompetitionPhases = emptyList(),
+        warnings = emptyList(),
+    )
+}
+
+private fun maintenanceProposal(
+    request: EventEditorMaintenanceRequestDto,
+    graph: EventEditorMaintenanceGraphDto = maintenanceGraph(
+        eventId = request.eventId,
+        matches = listOf(
+            maintenanceProjection(
+                eventId = request.eventId,
+                id = "match-proposed",
+                matchId = 1,
+            ),
+        ),
+    ),
+    protectedMatchIds: List<String> = emptyList(),
+): EventEditorMaintenanceProposalDto = EventEditorMaintenanceProposalDto(
+    status = EventEditorMaintenanceResponseStatus.PROPOSED,
+    contractVersion = request.contractVersion,
+    eventId = request.eventId,
+    operation = request.operation,
+    operationId = request.operationId,
+    proposalRevision = "maintenance-proposal-revision",
+    revisionBinding = request.expectedRevisions ?: maintenanceRevisionBinding(),
+    graph = graph,
+    protectedMatchIds = protectedMatchIds,
+    scheduleOutcome = maintenanceScheduleOutcome(graph.matches),
+)
+
+private fun maintenanceAcceptedResult(
+    proposal: EventEditorMaintenanceProposalDto,
+    acceptanceOperationId: String = "maintenance-acceptance",
+): EventEditorMaintenanceAcceptedResultDto = EventEditorMaintenanceAcceptedResultDto(
+    status = EventEditorMaintenanceResponseStatus.ACCEPTED,
+    contractVersion = proposal.contractVersion,
+    eventId = proposal.eventId,
+    operation = proposal.operation,
+    operationId = proposal.operationId,
+    proposalRevision = proposal.proposalRevision,
+    revisionBinding = proposal.revisionBinding,
+    graph = proposal.graph,
+    protectedMatchIds = proposal.protectedMatchIds,
+    scheduleOutcome = proposal.scheduleOutcome,
+    acceptanceOperationId = acceptanceOperationId,
+)
+
+@OptIn(ExperimentalTime::class)
+private fun maintenanceTimeSlotCacheEntry(
+    eventId: String,
+    slotId: String,
+    position: Int = 0,
+): EventTimeSlotCacheEntry = TimeSlot(
+    id = slotId,
+    dayOfWeek = 2,
+    daysOfWeek = listOf(2),
+    startTimeMinutes = 600,
+    endTimeMinutes = 660,
+    startDate = Instant.parse(MAINTENANCE_START),
+    timeZone = "UTC",
+    repeating = false,
+    endDate = Instant.parse(MAINTENANCE_END),
+    scheduledFieldId = "field-existing",
+    scheduledFieldIds = listOf("field-existing"),
+    price = null,
+).toEventTimeSlotCacheEntry(
+    eventId = eventId,
+    position = position,
+)
+
+private fun maintenanceHttpRepository(
+    database: EventRepositoryHttp_FakeDatabaseService,
+    engine: MockEngine,
+    coroutineDispatcher: CoroutineDispatcher,
+): EventRepository = EventRepository(
+    database,
+    MvpApiClient(
+        HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+        "http://example.test",
+        EventRepositoryHttp_InMemoryAuthTokenStore("t123"),
+    ),
+    EventRepositoryHttp_UnusedTeamRepository,
+    EventRepositoryHttp_FakeUserRepository(makeUser("host-1")),
+    coroutineDispatcher = coroutineDispatcher,
+)
 
 private class EventRepositoryHttp_FakeUserRepository(
     initialCurrentUser: UserData,
@@ -1407,7 +2020,7 @@ class EventRepositoryHttpTest {
 
     @Test
     @OptIn(ExperimentalCoroutinesApi::class)
-    fun getCachedEventsFlow_clears_cached_events_when_current_user_changes() = runTest {
+    fun getCachedEventsFlow_clears_cached_events_and_time_slots_when_current_user_changes() = runTest {
         val eventDao = EventRepositoryHttp_FakeEventDao()
         eventDao.upsertEvents(
             listOf(
@@ -1415,10 +2028,12 @@ class EventRepositoryHttpTest {
                 makeEvent(id = "visible_event", hostId = "host_2"),
             )
         )
+        val timeSlotDao = EventRepositoryHttp_FakeEventTimeSlotDao()
         val db = EventRepositoryHttp_FakeDatabaseService(
             eventDao,
             EventRepositoryHttp_FakeUserDataDao(),
             EventRepositoryHttp_FakeTeamDao(),
+            getEventTimeSlotDao = timeSlotDao,
         )
         val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
         val api = MvpApiClient(
@@ -1435,6 +2050,30 @@ class EventRepositoryHttpTest {
             userRepo,
             coroutineDispatcher = StandardTestDispatcher(testScheduler),
         )
+        advanceUntilIdle()
+        timeSlotDao.entries += EventTimeSlotCacheEntry(
+            eventId = "visible_event",
+            slotId = "slot_session_change",
+            position = 0,
+            dayOfWeek = 1,
+            daysOfWeek = listOf(1),
+            divisions = emptyList(),
+            startTimeMinutes = 9 * 60,
+            endTimeMinutes = 10 * 60,
+            startDate = Instant.parse("2026-01-05T00:00:00Z"),
+            timeZone = "UTC",
+            repeating = true,
+            endDate = null,
+            scheduledFieldId = "field_1",
+            scheduledFieldIds = listOf("field_1"),
+            price = null,
+            requiredTemplateIds = emptyList(),
+            hostRequiredTemplateIds = emptyList(),
+            sourceType = null,
+            rentalBookingId = null,
+            rentalBookingItemId = null,
+            rentalLocked = null,
+        )
 
         userRepo.emitCurrentUser(makeUser("u2"))
         advanceUntilIdle()
@@ -1443,6 +2082,7 @@ class EventRepositoryHttpTest {
 
         assertTrue(events.isEmpty())
         assertEquals(1, eventDao.clearAllEventsWithCrossRefsCalls)
+        assertTrue(timeSlotDao.entries.isEmpty())
     }
 
     @Test
@@ -2132,16 +2772,40 @@ class EventRepositoryHttpTest {
 
         assertEquals(listOf("Tryouts"), tags.map { it.name })
     }
-
     @Test
-    fun getEvent_removes_cached_event_when_server_returns_forbidden() = runTest {
+    fun getEvent_removes_cached_event_and_time_slots_when_server_returns_forbidden() = runTest {
         val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
         val eventDao = EventRepositoryHttp_FakeEventDao()
+        val timeSlotDao = EventRepositoryHttp_FakeEventTimeSlotDao()
         eventDao.upsertEvent(makeEvent(id = "e1", hostId = "h1"))
+        timeSlotDao.entries += EventTimeSlotCacheEntry(
+            eventId = "e1",
+            slotId = "slot_1",
+            position = 0,
+            dayOfWeek = 1,
+            daysOfWeek = listOf(1),
+            divisions = emptyList(),
+            startTimeMinutes = 9 * 60,
+            endTimeMinutes = 10 * 60,
+            startDate = Instant.parse("2026-01-05T00:00:00Z"),
+            timeZone = "UTC",
+            repeating = true,
+            endDate = null,
+            scheduledFieldId = "field_1",
+            scheduledFieldIds = listOf("field_1"),
+            price = null,
+            requiredTemplateIds = emptyList(),
+            hostRequiredTemplateIds = emptyList(),
+            sourceType = null,
+            rentalBookingId = null,
+            rentalBookingItemId = null,
+            rentalLocked = null,
+        )
         val db = EventRepositoryHttp_FakeDatabaseService(
             eventDao,
             EventRepositoryHttp_FakeUserDataDao(),
             EventRepositoryHttp_FakeTeamDao(),
+            getEventTimeSlotDao = timeSlotDao,
         )
         val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
         val engine = MockEngine { request ->
@@ -2162,6 +2826,7 @@ class EventRepositoryHttpTest {
         assertTrue(result.isFailure)
         assertEquals(listOf("e1"), eventDao.deleteEventWithCrossRefsCalls)
         assertEquals(null, eventDao.getEventById("e1"))
+        assertTrue(timeSlotDao.entries.isEmpty())
     }
 
     @Test
@@ -2237,6 +2902,42 @@ class EventRepositoryHttpTest {
         assertEquals(emptyList(), cachedAfterRefresh?.waitListIds)
         assertEquals(emptyList(), cachedAfterRefresh?.freeAgentIds)
         assertEquals(emptyList(), eventDao.deleteEventCrossRefsCalls)
+        assertEquals(1, db.transactionCalls)
+    }
+
+    @Test
+    fun given_cached_protected_history_when_local_event_is_updated_without_authority_then_locks_are_preserved() = runTest {
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val cachedEvent = makeEvent(id = "e1", hostId = "h1").copy(
+            eventTypeLocked = true,
+            eventTypeHasProtectedHistory = true,
+        )
+        eventDao.upsertEvent(cachedEvent)
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val api = MvpApiClient(
+            HttpClient(MockEngine { error("unused") }) { configureMvpHttpClient() },
+            "http://example.test",
+            tokenStore,
+        )
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, EventRepositoryHttp_FakeUserRepository(makeUser("u1")))
+
+        val result = repo.updateLocalEvent(
+            cachedEvent.copy(
+                eventTypeLocked = false,
+                eventTypeHasProtectedHistory = false,
+            ),
+        )
+
+        assertTrue(result.isSuccess)
+        val persistedEvent = eventDao.getEventById("e1")
+        assertTrue(persistedEvent?.eventTypeLocked == true)
+        assertTrue(persistedEvent?.eventTypeHasProtectedHistory == true)
+        assertEquals(1, db.transactionCalls)
     }
 
     @Test
@@ -2246,11 +2947,16 @@ class EventRepositoryHttpTest {
         val cachedEvent = makeEvent(id = "e1", hostId = "h1").copy(
             teamSignup = true,
             teamIds = listOf("cached_team"),
+            eventTypeLocked = true,
+            eventTypeHasProtectedHistory = true,
         )
         eventDao.upsertEvent(cachedEvent)
         val matchDao = EventRepositoryHttp_FakeMatchDao()
         matchDao.upsertMatch(MatchMVP(matchId = 99, eventId = "e1", id = "stale_match"))
         val fieldDao = EventRepositoryHttp_FakeFieldDao()
+        val timeSlotDao = EventRepositoryHttp_FakeEventTimeSlotDao { entries ->
+            eventDao.eventTimeSlotCacheEntries = mapOf("e1" to entries)
+        }
         val managementDao = EventRepositoryHttp_FakeParticipantManagementDao()
         val complianceDao = EventRepositoryHttp_FakeComplianceDao()
         val db = EventRepositoryHttp_FakeDatabaseService(
@@ -2259,6 +2965,7 @@ class EventRepositoryHttpTest {
             EventRepositoryHttp_FakeTeamDao(),
             getMatchDao = matchDao,
             getFieldDao = fieldDao,
+            getEventTimeSlotDao = timeSlotDao,
             getEventParticipantManagementDao = managementDao,
             getEventComplianceDao = complianceDao,
         )
@@ -2276,6 +2983,8 @@ class EventRepositoryHttpTest {
                         "hostId": "h1",
                         "coordinates": [-80.0, 25.0],
                         "start": "2026-02-10T00:00:00Z",
+                        "eventTypeLocked": true,
+                        "eventTypeHasProtectedHistory": true,
                         "end": "2026-02-10T01:00:00Z",
                         "teamSignup": true,
                         "teamIds": ["partial_team"],
@@ -2284,6 +2993,14 @@ class EventRepositoryHttpTest {
                         "leagueScoringConfigId": "config_1"
                       },
                       "participantSnapshot": {
+                        "event": {
+                          "id": "e1",
+                          "name": "Participant Event",
+                          "hostId": "h1",
+                          "start": "2026-02-10T00:00:00Z",
+                          "end": "2026-02-10T01:00:00Z",
+                          "teamSignup": true
+                        },
                         "participants": {
                           "teamIds": ["team_1", "team_2"],
                           "userIds": [],
@@ -2418,16 +3135,50 @@ class EventRepositoryHttpTest {
         assertEquals(listOf("team_1", "team_2"), detail.event.teamIds)
         assertEquals(2, detail.participants.participantCount)
         assertEquals(listOf("team_1", "team_2"), cachedAfterRefresh?.teamIds)
+        assertTrue(cachedAfterRefresh?.eventTypeLocked == true)
+        assertTrue(cachedAfterRefresh?.eventTypeHasProtectedHistory == true)
         assertEquals(listOf("match_1"), matchDao.matches.keys.toList())
         assertEquals(listOf(listOf("stale_match")), matchDao.deletedMatchIds)
         assertEquals(listOf("field_1"), fieldDao.fields.keys.toList())
         assertEquals(listOf("slot_1"), detail.timeSlots.map { slot -> slot.id })
+        assertEquals(listOf("slot_1"), timeSlotDao.getTimeSlotsByEventId("e1").map(EventTimeSlotCacheEntry::slotId))
         assertEquals("config_1", detail.leagueScoringConfig?.id)
         assertEquals(3, detail.leagueScoringConfig?.pointsForWin)
         assertEquals(listOf("invite_1"), detail.staffInvites.map(Invite::id))
         assertEquals("staff_revision_1", detail.staffRevision)
         assertEquals(1, managementDao.entries.size)
         assertEquals(1, complianceDao.teamSummaries.size)
+        assertEquals(1, db.transactionCalls)
+        val publicEngine = MockEngine { request ->
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("/api/events/e1/detail", request.url.encodedPath)
+            assertEquals(null, request.url.parameters["manage"])
+            respond(
+                content = """
+                    {
+                      "event": {
+                        "id": "e1",
+                        "name": "Public Event",
+                        "start": "2026-02-10T00:00:00Z",
+                        "end": "2026-02-10T01:00:00Z"
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val publicApi = MvpApiClient(
+            HttpClient(publicEngine) { configureMvpHttpClient() },
+            "http://example.test",
+            tokenStore,
+        )
+        val publicRepo = EventRepository(db, publicApi, teamRepository, userRepo)
+
+        val publicDetail = publicRepo.syncEventDetail(detail.event, manage = false).getOrThrow()
+        assertEquals("Public Event", publicDetail.event.name)
+        assertEquals("Public Event", eventDao.getEventById("e1")?.name)
+        assertEquals(2, db.transactionCalls)
     }
 
     @Test
@@ -2823,9 +3574,12 @@ class EventRepositoryHttpTest {
 
 
     @Test
-    fun getEventsInBounds_posts_search_and_persists_to_cache() = runTest {
+    fun getEventsInBounds_caches_canonical_event_and_returns_occurrence_projection() = runTest {
         val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
         val eventDao = EventRepositoryHttp_FakeEventDao()
+        eventDao.upsertEvent(
+            makeEvent(id = "e1", hostId = "h1").copy(divisions = listOf("cached-division")),
+        )
         val db = EventRepositoryHttp_FakeDatabaseService(eventDao, EventRepositoryHttp_FakeUserDataDao(), EventRepositoryHttp_FakeTeamDao())
         val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
         var capturedBody = ""
@@ -2849,7 +3603,13 @@ class EventRepositoryHttpTest {
                           "hostId": "h1",
                           "start": "2026-02-10T00:00:00Z",
                           "end": "2026-02-10T01:00:00Z",
-                          "coordinates": [-80.0, 25.0],
+                          "nextOccurrence": {
+                            "slotId": "slot-e1",
+                            "occurrenceDate": "2026-02-11",
+                            "start": "2026-02-11T09:00:00",
+                            "end": "2026-02-11T10:00:00",
+                            "timeZone": "America/New_York"
+                          },
                           "location": "Miami",
                           "eventType": "EVENT",
                           "userIds": [],
@@ -2879,7 +3639,10 @@ class EventRepositoryHttpTest {
         val result = repo.getEventsInBounds(bounds).getOrThrow()
         assertEquals(1, result.first.size)
         assertFalse(result.second)
+        assertEquals("2026-02-11", result.first.first().nextOccurrence?.occurrenceDate)
         assertEquals("e1", eventDao.getEventById("e1")?.id)
+        val cachedEvent = eventDao.getEventById("e1")
+        assertNull(cachedEvent?.nextOccurrence)
         assertTrue(capturedBody.contains("\"sort\":\"NEAREST\""))
     }
 
@@ -4973,15 +5736,17 @@ class EventRepositoryHttpTest {
     fun given_accepted_editor_create_when_repository_returns_then_event_relations_fields_and_matches_are_cached_before_result() = runTest {
         val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
         val eventDao = EventRepositoryHttp_FakeEventDao()
-        val userDao = EventRepositoryHttp_FakeUserDataDao()
+        val userDao = EventRepositoryHttp_FakeUserDataDao(initialUsers = listOf(makeUser("host-1")))
         val fieldDao = EventRepositoryHttp_FakeFieldDao()
         val matchDao = EventRepositoryHttp_FakeMatchDao()
+        val timeSlotDao = EventRepositoryHttp_FakeEventTimeSlotDao()
         val database = EventRepositoryHttp_FakeDatabaseService(
             getEventDao = eventDao,
             getUserDataDao = userDao,
             getTeamDao = EventRepositoryHttp_FakeTeamDao(),
             getMatchDao = matchDao,
             getFieldDao = fieldDao,
+            getEventTimeSlotDao = timeSlotDao,
         )
         val start = "2026-07-14T10:00:00Z"
         val end = "2026-07-14T12:00:00Z"
@@ -5118,6 +5883,11 @@ class EventRepositoryHttpTest {
         val command = EventEditorCreateCommandDto(
             contractVersion = 3,
             createOperationId = "operation-1",
+            expectedRevisions = EventEditorExpectedCreateRevisionsDto(
+                editorRevision = "revision-1",
+                staffRevision = null,
+                scheduleRevision = "schedule-1",
+            ),
             draft = draft,
             completion = EventEditorCreateCompletionDto(EventEditorCreateCompletionMode.CREATE_ONLY),
         )
@@ -5137,7 +5907,1095 @@ class EventRepositoryHttpTest {
         assertEquals("entry-open", cachedMatch.division)
         assertEquals(listOf(EventUserCrossRef("host-1", "event-created")), userDao.eventCrossRefs)
         assertEquals("slot-created", result.session.canonicalState.timeSlots.single().id)
+        assertEquals(
+            listOf("slot-created"),
+            timeSlotDao.getTimeSlotsByEventId("event-created").map(EventTimeSlotCacheEntry::slotId),
+        )
     }
+    @Test
+    fun given_sparse_rebuilt_tournament_team_when_editor_save_persists_then_cached_team_metadata_survives() =
+        runTest {
+            val eventId = "editor-rebuilt-team"
+            val teamId = "editor-rebuilt-team-1"
+            val oldPlayerId = "editor-old-player"
+            val newPlayerId = "editor-new-player"
+            val start = "2026-09-01T10:00:00Z"
+            val end = "2026-09-01T12:00:00Z"
+            val eventDao = EventRepositoryHttp_FakeEventDao()
+            val teamDao = EventRepositoryHttp_FakeTeamDao()
+            val matchDao = EventRepositoryHttp_FakeMatchDao()
+            val database = EventRepositoryHttp_FakeDatabaseService(
+                getEventDao = eventDao,
+                getUserDataDao = EventRepositoryHttp_FakeUserDataDao(),
+                getTeamDao = teamDao,
+                getMatchDao = matchDao,
+            )
+            eventDao.upsertEvent(
+                makeEvent(eventId, "host-1").copy(
+                    eventType = EventType.TOURNAMENT,
+                    teamSignup = true,
+                    teamIds = listOf(teamId),
+                    divisions = listOf("division-cached"),
+                    divisionDetails = listOf(
+                        DivisionDetail(id = "division-cached", name = "Cached Division"),
+                    ),
+                ),
+            )
+            teamDao.teams[teamId] = Team(
+                division = "division-cached",
+                name = "Cached Registered Team",
+                kind = "REGISTERED",
+                captainId = "cached-captain",
+                managerId = "manager-1",
+                headCoachId = "head-coach-1",
+                coachIds = listOf("coach-1"),
+                playerIds = listOf(oldPlayerId),
+                teamSize = 8,
+                profileImageId = "profile-1",
+                organizationId = "organization-1",
+                joinPolicy = "OPEN",
+                openRegistration = true,
+                registrationPriceCents = 2500,
+                id = teamId,
+            )
+            val draft = EventEditorDraftDto(
+                basics = EventEditorBasicsDto(
+                    name = "Editor Tournament",
+                    description = "Tournament editor save",
+                    eventType = EventType.TOURNAMENT.name,
+                    start = start,
+                    timeZone = "UTC",
+                    location = "Gym",
+                    address = "",
+                    affiliateUrl = "",
+                    hostId = "host-1",
+                    state = "PUBLISHED",
+                ),
+                participation = EventEditorParticipationDto(
+                    teamSignup = true,
+                    singleDivision = true,
+                    registrationByDivisionType = false,
+                    maxParticipants = 8,
+                    teamSizeLimit = 8,
+                    registrationCutoffHours = 0,
+                    allowTeamSplitDefault = false,
+                ),
+                registration = EventEditorRegistrationDto(
+                    payment = EventEditorPaymentDto(
+                        mode = "FREE",
+                        priceCents = 0,
+                        taxHandling = "NONE",
+                        organizerManualTaxRateBps = 0,
+                        allowPaymentPlans = false,
+                    ),
+                ),
+                competition = EventEditorCompetitionDto(
+                    divisionIds = listOf("division-cached"),
+                    doubleElimination = false,
+                    includePlayoffs = false,
+                    splitLeaguePlayoffDivisions = false,
+                    usesSets = false,
+                ),
+                schedule = EventEditorScheduleDto(
+                    mode = "FIXED_END",
+                    endConstraint = end,
+                ),
+                resources = EventEditorResourcesDto(),
+                staff = EventEditorStaffDto(
+                    teamCheckInMode = "OFF",
+                    teamCheckInOpenMinutesBefore = 0,
+                    allowMatchRosterEdits = false,
+                    allowTemporaryMatchPlayers = false,
+                    autoCreatePointMatchIncidents = false,
+                ),
+            )
+            val snapshot = EventEditorSnapshotDto(
+                contractVersion = EVENT_EDITOR_CONTRACT_VERSION,
+                draft = draft,
+                mode = "EDIT",
+                eventId = eventId,
+                editorRevision = "editor-revision",
+                capabilities = EventEditorCapabilitiesDto(
+                    canUseOnlinePayments = false,
+                    canManageStaff = true,
+                    canEdit = true,
+                    supportsTeamStaffing = true,
+                ),
+                catalogs = EventEditorCatalogsDto(),
+                immutable = EventEditorImmutableDto(),
+                scheduleState = EventEditorScheduleStateDto(
+                    matchCount = 1,
+                    revision = "schedule-revision",
+                    hasProtectedHistory = false,
+                ),
+            )
+            val sparseGraphTeam = TeamApiDto(
+                id = teamId,
+                name = "Rebuilt Team",
+                kind = "REGISTERED",
+                division = "division-rebuilt",
+                captainId = newPlayerId,
+                playerIds = listOf(newPlayerId),
+            )
+            val matchId = "editor-rebuilt-match"
+            val response = EventEditorSaveResultDto(
+                status = "SAVED",
+                snapshot = snapshot,
+                staffEmailDelivery = "NOT_REQUESTED",
+                scheduleOutcome = EventEditorScheduleOutcomeDto(
+                    status = EventEditorScheduleOutcomeStatus.BUILT,
+                    matchCount = 1,
+                    matches = listOf(
+                        EventEditorMatchProjectionDto(
+                            id = matchId,
+                            matchId = 1,
+                            eventId = eventId,
+                            placementState = "UNPLACED",
+                            phase = "POOL",
+                            division = "division-rebuilt",
+                        ),
+                    ),
+                ),
+                graph = canonicalProposalGraph(EventEditorCreateProposalGraphDto(
+                    event = EventApiDto(
+                        id = eventId,
+                        name = "Graph Tournament",
+                        start = start,
+                        end = end,
+                        timeZone = "UTC",
+                        hostId = "host-1",
+                        eventType = EventType.TOURNAMENT.name,
+                        divisions = listOf("division-rebuilt"),
+                        teamIds = listOf(teamId),
+                        teams = listOf(sparseGraphTeam),
+                    ),
+                    matches = listOf(
+                        MatchApiDto(
+                            id = matchId,
+                            matchId = 1,
+                            eventId = eventId,
+                            placementState = "UNPLACED",
+                            phase = "POOL",
+                            division = "division-rebuilt",
+                        ),
+                    ),
+                )),
+            )
+            val engine = MockEngine { request ->
+                assertEquals("/api/events/$eventId/editor", request.url.encodedPath)
+                assertEquals(HttpMethod.Put, request.method)
+                respond(
+                    content = jsonMVP.encodeToString(EventEditorSaveResultDto.serializer(), response),
+                    status = HttpStatusCode.Created,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            }
+            val http = HttpClient(engine) { configureMvpHttpClient() }
+            val userRepository = EventRepositoryHttp_FakeUserRepository(makeUser("host-1"))
+            val repository = EventRepository(
+                database,
+                MvpApiClient(
+                    http,
+                    "http://example.test",
+                    EventRepositoryHttp_InMemoryAuthTokenStore("t123"),
+                ),
+                EventRepositoryHttp_UnusedTeamRepository,
+                userRepository,
+            )
+            val command = EventEditorSaveCommandDto(
+                contractVersion = snapshot.contractVersion,
+                editorRevision = snapshot.editorRevision,
+                staffRevision = snapshot.staffRevision,
+                draft = snapshot.draft,
+                scheduleTransition = EventEditorSaveScheduleTransitionDto(
+                    mode = EventEditorScheduleTransitionMode.RECONCILE,
+                    expectedScheduleRevision = snapshot.scheduleState.revision,
+                ),
+            )
+
+            try {
+                repository.saveEventEditor(eventId, command).getOrThrow()
+
+                val persistedTeam = teamDao.teams[teamId] ?: error("Expected persisted team")
+                assertEquals("Rebuilt Team", persistedTeam.name)
+                assertEquals("division-rebuilt", persistedTeam.division)
+                assertEquals("REGISTERED", persistedTeam.kind)
+                assertEquals(newPlayerId, persistedTeam.captainId)
+                assertEquals(listOf(newPlayerId), persistedTeam.playerIds)
+                assertEquals("manager-1", persistedTeam.managerId)
+                assertEquals("head-coach-1", persistedTeam.headCoachId)
+                assertEquals(listOf("coach-1"), persistedTeam.coachIds)
+                assertEquals("profile-1", persistedTeam.profileImageId)
+                assertEquals("organization-1", persistedTeam.organizationId)
+                assertEquals("OPEN", persistedTeam.joinPolicy)
+                assertTrue(persistedTeam.openRegistration)
+                assertEquals(2500, persistedTeam.registrationPriceCents)
+                assertTrue(userRepository.requestedUserIds.contains(newPlayerId))
+                assertFalse(userRepository.requestedUserIds.contains(oldPlayerId))
+                assertTrue(database.transactionCalls > 0)
+            } finally {
+                repository.close()
+                http.close()
+            }
+        }
+    @Test
+    fun given_schedule_proposal_when_accepted_then_room_writes_graph_only_after_acceptance() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val fieldDao = EventRepositoryHttp_FakeFieldDao()
+        val matchDao = EventRepositoryHttp_FakeMatchDao()
+        val timeSlotDao = EventRepositoryHttp_FakeEventTimeSlotDao()
+        val database = EventRepositoryHttp_FakeDatabaseService(
+            getEventDao = eventDao,
+            getUserDataDao = EventRepositoryHttp_FakeUserDataDao(),
+            getTeamDao = EventRepositoryHttp_FakeTeamDao(),
+            getMatchDao = matchDao,
+            getFieldDao = fieldDao,
+            getEventTimeSlotDao = timeSlotDao,
+        )
+        val start = "2026-09-01T10:00:00Z"
+        val end = "2026-09-01T12:00:00Z"
+        val timeSlot = EventEditorTimeSlotDto(
+            id = "slot-proposed",
+            eventId = "event-proposed",
+            dayOfWeek = 2,
+            daysOfWeek = listOf(2),
+            startTimeMinutes = 600,
+            endTimeMinutes = 660,
+            startDate = start,
+            endDate = end,
+            timeZone = "UTC",
+            scheduledFieldId = "field-proposed",
+            scheduledFieldIds = listOf("field-proposed"),
+        )
+        val draft = EventEditorDraftDto(
+            basics = EventEditorBasicsDto(
+                name = "Scheduled League",
+                description = "Proposal fixture",
+                eventType = "LEAGUE",
+                sportIds = listOf("sport-1"),
+                start = start,
+                timeZone = "America/New_York",
+                location = "Gym",
+                address = "1 Main Street",
+                affiliateUrl = "",
+                hostId = "host-1",
+                state = "UNPUBLISHED",
+            ),
+            participation = EventEditorParticipationDto(
+                teamSignup = true,
+                singleDivision = true,
+                registrationByDivisionType = true,
+                registrationCutoffHours = 0,
+                allowTeamSplitDefault = false,
+            ),
+            registration = EventEditorRegistrationDto(
+                payment = EventEditorPaymentDto(
+                    mode = "FREE",
+                    priceCents = 0,
+                    taxHandling = "NONE",
+                    organizerManualTaxRateBps = 0,
+                    allowPaymentPlans = false,
+                ),
+            ),
+            competition = EventEditorCompetitionDto(
+                divisionIds = listOf("division-1"),
+                doubleElimination = false,
+                includePlayoffs = false,
+                splitLeaguePlayoffDivisions = false,
+                usesSets = false,
+            ),
+            schedule = EventEditorScheduleDto(
+                mode = "FIXED_END",
+                endConstraint = end,
+                isAutomatedScheduling = true,
+            ),
+            resources = EventEditorResourcesDto(
+                fieldIds = listOf("field-proposed"),
+                fields = listOf(EventEditorFieldDto(id = "field-proposed", name = "Court 1")),
+                timeSlotIds = listOf("slot-proposed"),
+                timeSlots = listOf(timeSlot),
+            ),
+            staff = EventEditorStaffDto(
+                teamCheckInMode = "OFF",
+                teamCheckInOpenMinutesBefore = 0,
+                allowMatchRosterEdits = false,
+                allowTemporaryMatchPlayers = false,
+                autoCreatePointMatchIncidents = false,
+            ),
+        )
+        val command = EventEditorCreateCommandDto(
+            contractVersion = 3,
+            createOperationId = "proposal-operation",
+            expectedRevisions = EventEditorExpectedCreateRevisionsDto(
+                editorRevision = "editor-1",
+                staffRevision = null,
+                scheduleRevision = "schedule-1",
+            ),
+            draft = draft,
+            completion = EventEditorCreateCompletionDto(
+                EventEditorCreateCompletionMode.CREATE_AND_BUILD_SCHEDULE,
+            ),
+            hasScheduleProposalSupport = true,
+        )
+
+        val graph = canonicalProposalGraph(EventEditorCreateProposalGraphDto(
+            event = EventApiDto(
+                id = "event-proposed",
+                name = "Scheduled League",
+                hostId = "host-1",
+                start = start,
+                end = end,
+                timeZone = null,
+                eventType = "LEAGUE",
+                divisions = listOf("division-1"),
+                fieldIds = listOf("field-proposed"),
+                timeSlotIds = listOf("slot-proposed"),
+                fields = listOf(
+                    Field(
+                        id = "field-proposed",
+                        name = "Court 1",
+                        fieldNumber = 1,
+                    ),
+                ),
+                timeSlots = listOf(
+                    com.razumly.mvp.core.data.dataTypes.TimeSlotDTO(
+                        id = "slot-proposed",
+                        dayOfWeek = 2,
+                        startDate = start,
+                        timeZone = "UTC",
+                        scheduledFieldId = "field-proposed",
+                    ),
+                ),
+                officialIds = listOf("official-1"),
+            ),
+            matches = listOf(
+                MatchApiDto(
+                    id = "match-proposed",
+                    matchId = 1,
+                    eventId = "event-proposed",
+                    officialId = "official-1",
+                    fieldId = "field-proposed",
+                    start = start,
+                    end = end,
+                    placementState = "PLACED",
+                    phase = "POOL",
+                    division = "division-1",
+                ),
+            ),
+        ))
+        val snapshot = EventEditorSnapshotDto(
+            contractVersion = 3,
+            draft = draft,
+            mode = "CREATE",
+            eventId = "event-proposed",
+            editorRevision = "editor-1",
+            capabilities = EventEditorCapabilitiesDto(
+                canUseOnlinePayments = false,
+                canManageStaff = true,
+                canEdit = true,
+                supportsTeamStaffing = true,
+            ),
+            catalogs = EventEditorCatalogsDto(),
+            immutable = EventEditorImmutableDto(),
+            scheduleState = EventEditorScheduleStateDto(
+                matchCount = 1,
+                revision = "schedule-1",
+                hasProtectedHistory = false,
+            ),
+        )
+        val scheduleOutcome = EventEditorScheduleOutcomeDto(
+            status = EventEditorScheduleOutcomeStatus.BUILT,
+            matchCount = 1,
+            matches = listOf(
+                EventEditorMatchProjectionDto(
+                    id = "match-proposed",
+                    matchId = 1,
+                    eventId = "event-proposed",
+                    officialId = "official-1",
+                    fieldId = "field-proposed",
+                    start = start,
+                    end = end,
+                    placementState = "PLACED",
+                    phase = "POOL",
+                    division = "division-1",
+                ),
+            ),
+        )
+        val proposal = EventEditorCreateProposalDto(
+            status = "PROPOSED",
+            createOperationId = command.createOperationId,
+            eventId = "event-proposed",
+            proposalRevision = "proposal-revision",
+            expectedRevisions = command.expectedRevisions,
+            completion = command.completion,
+            snapshot = snapshot,
+            revisionBinding = EventEditorRevisionBindingDto(
+                editorRevision = "editor-1",
+                scheduleRevision = "schedule-1",
+                fieldRevisions = mapOf("field-proposed" to "field-1"),
+                timeSlotRevisions = mapOf("slot-proposed" to "slot-1"),
+                availabilityRevision = "availability-1",
+            ),
+            scheduleOutcome = scheduleOutcome,
+            graph = graph,
+        )
+        val accepted = EventEditorSaveResultDto(
+            status = "SAVED",
+            snapshot = snapshot,
+            staffEmailDelivery = "NOT_REQUESTED",
+            scheduleOutcome = scheduleOutcome,
+            graph = graph,
+        )
+        var requestCount = 0
+        val engine = MockEngine { request ->
+            assertEquals("/api/events/editor", request.url.encodedPath)
+            requestCount += 1
+            if (request.method == HttpMethod.Post) {
+                respond(
+                    content = jsonMVP.encodeToString(proposal),
+                    status = HttpStatusCode.Accepted,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            } else {
+                assertEquals(HttpMethod.Put, request.method)
+                respond(
+                    content = jsonMVP.encodeToString(accepted),
+                    status = HttpStatusCode.Created,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            }
+        }
+        val repository = EventRepository(
+            database,
+            MvpApiClient(
+                HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+                "http://example.test",
+                tokenStore,
+            ),
+            EventRepositoryHttp_UnusedTeamRepository,
+            EventRepositoryHttp_FakeUserRepository(makeUser("host-1")),
+        )
+
+        val proposalOutcome = repository.createEventEditor(command).getOrThrow()
+        assertTrue(proposalOutcome.proposal != null)
+        assertEquals(null, eventDao.getEventById("event-proposed"))
+        assertTrue(fieldDao.fields.isEmpty())
+        assertTrue(matchDao.matches.isEmpty())
+        assertTrue(timeSlotDao.getTimeSlotsByEventId("event-proposed").isEmpty())
+
+        val acceptedOutcome = repository.acceptEventEditorProposal(
+            createOperationId = command.createOperationId,
+            proposalRevision = proposalOutcome.proposal!!.proposalRevision,
+            draft = draft,
+        ).getOrThrow()
+
+        assertEquals(2, requestCount)
+        assertEquals("event-proposed", acceptedOutcome.session.canonicalState.event.id)
+        assertEquals("America/New_York", acceptedOutcome.session.canonicalState.event.timeZone)
+        assertEquals("1 Main Street", acceptedOutcome.session.canonicalState.event.address)
+        assertEquals("Scheduled League", eventDao.getEventById("event-proposed")?.name)
+        assertEquals("Court 1", fieldDao.fields["field-proposed"]?.name)
+        assertEquals("match-proposed", matchDao.matches["match-proposed"]?.id)
+        assertEquals("official-1", matchDao.matches["match-proposed"]?.officialId)
+        assertEquals(
+            listOf("slot-proposed"),
+            timeSlotDao.getTimeSlotsByEventId("event-proposed")
+                .map(EventTimeSlotCacheEntry::slotId),
+        )
+    }
+
+
+    @Test
+    fun given_maintenance_schedule_proposal_when_requested_then_room_remains_unchanged() = runTest {
+        val eventId = "maintenance-proposal"
+        val request = maintenanceRequest(
+            operation = EventEditorMaintenanceOperation.BUILD,
+            eventId = eventId,
+            operationId = "maintenance-proposal-operation",
+        )
+        val proposal = maintenanceProposal(request)
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val userDao = EventRepositoryHttp_FakeUserDataDao()
+        val teamDao = EventRepositoryHttp_FakeTeamDao()
+        val fieldDao = EventRepositoryHttp_FakeFieldDao()
+        val matchDao = EventRepositoryHttp_FakeMatchDao()
+        val timeSlotDao = EventRepositoryHttp_FakeEventTimeSlotDao()
+        val participantDao = EventRepositoryHttp_FakeParticipantManagementDao()
+        val complianceDao = EventRepositoryHttp_FakeComplianceDao()
+        val database = EventRepositoryHttp_FakeDatabaseService(
+            getEventDao = eventDao,
+            getUserDataDao = userDao,
+            getTeamDao = teamDao,
+            getMatchDao = matchDao,
+            getFieldDao = fieldDao,
+            getEventTimeSlotDao = timeSlotDao,
+            getEventParticipantManagementDao = participantDao,
+            getEventComplianceDao = complianceDao,
+        )
+        eventDao.upsertEvent(makeEvent(eventId, "host-1").copy(name = "Cached Event"))
+        fieldDao.fields["field-existing"] = Field(id = "field-existing", name = "Cached Court")
+        timeSlotDao.entries += maintenanceTimeSlotCacheEntry(eventId, "slot-existing")
+        matchDao.matches["match-existing"] = MatchMVP(
+            matchId = 99,
+            eventId = eventId,
+            id = "match-existing",
+        )
+        val cachedEvents = eventDao.getAllCachedEvents().first()
+        val cachedFields = fieldDao.fields.toMap()
+        val cachedTimeSlots = timeSlotDao.entries.toList()
+        val cachedMatches = matchDao.matches.toMap()
+        val engine = MockEngine { httpRequest ->
+            assertEquals(HttpMethod.Post, httpRequest.method)
+            assertEquals("/api/events/$eventId/schedule", httpRequest.url.encodedPath)
+            val body = (httpRequest.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                ?: error("Expected maintenance request JSON.")
+            assertEquals(
+                request,
+                jsonMVP.decodeFromString<EventEditorMaintenanceRequestDto>(body),
+            )
+            respond(
+                content = encodeMaintenanceResponse(proposal),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val repository = maintenanceHttpRepository(database, engine, StandardTestDispatcher(testScheduler))
+        advanceUntilIdle()
+
+        val result = repository.proposeEventScheduleMaintenance(request)
+        val proposed = result.getOrThrow() as? EventEditorMaintenanceResponseDto.Proposed
+            ?: error("Expected a proposed maintenance response.")
+
+        assertEquals(EventEditorMaintenanceResponseStatus.PROPOSED, proposed.proposal.status)
+        assertEquals(proposal.proposalRevision, proposed.proposal.proposalRevision)
+        assertEquals(0, database.transactionCalls)
+        assertEquals(cachedEvents, eventDao.getAllCachedEvents().first())
+        assertEquals(cachedFields, fieldDao.fields)
+        assertEquals(cachedTimeSlots, timeSlotDao.entries)
+        assertEquals(cachedMatches, matchDao.matches)
+        assertTrue(userDao.eventCrossRefs.isEmpty())
+        assertTrue(teamDao.teams.isEmpty())
+        assertTrue(participantDao.entries.isEmpty())
+        assertTrue(complianceDao.teamSummaries.isEmpty())
+        assertTrue(complianceDao.userSummaries.isEmpty())
+    }
+
+    @Test
+    fun given_accepted_maintenance_response_when_repository_accepts_then_graph_is_written_in_one_transaction() =
+        runTest {
+            val eventId = "maintenance-accepted"
+            val request = maintenanceRequest(
+                operation = EventEditorMaintenanceOperation.BUILD,
+                eventId = eventId,
+                operationId = "maintenance-accepted-operation",
+            )
+            val graph = maintenanceGraph(
+                eventId = eventId,
+                matches = listOf(
+                    maintenanceProjection(
+                        eventId = eventId,
+                        id = "match-accepted",
+                        matchId = 1,
+                    ),
+                ),
+            )
+            val proposal = maintenanceProposal(request, graph)
+            val accepted = maintenanceAcceptedResult(proposal)
+            val eventDao = EventRepositoryHttp_FakeEventDao()
+            val fieldDao = EventRepositoryHttp_FakeFieldDao()
+            val matchDao = EventRepositoryHttp_FakeMatchDao()
+            val timeSlotDao = EventRepositoryHttp_FakeEventTimeSlotDao()
+            val database = EventRepositoryHttp_FakeDatabaseService(
+                getEventDao = eventDao,
+                getUserDataDao = EventRepositoryHttp_FakeUserDataDao(),
+                getTeamDao = EventRepositoryHttp_FakeTeamDao(),
+                getMatchDao = matchDao,
+                getFieldDao = fieldDao,
+                getEventTimeSlotDao = timeSlotDao,
+            )
+            val engine = MockEngine { httpRequest ->
+                assertEquals(HttpMethod.Put, httpRequest.method)
+                assertEquals("/api/events/$eventId/schedule", httpRequest.url.encodedPath)
+                val body = (httpRequest.body as? OutgoingContent.ByteArrayContent)
+                    ?.bytes()
+                    ?.decodeToString()
+                    ?: error("Expected maintenance acceptance JSON.")
+                assertEquals(
+                    maintenanceAcceptRequest(request, proposal.proposalRevision),
+                    jsonMVP.decodeFromString<EventEditorAcceptMaintenanceProposalDto>(body),
+                )
+                respond(
+                    content = encodeMaintenanceResponse(accepted),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            }
+            val repository = maintenanceHttpRepository(database, engine, StandardTestDispatcher(testScheduler))
+            advanceUntilIdle()
+
+            val result = repository.acceptEventScheduleMaintenance(
+                maintenanceAcceptRequest(request, proposal.proposalRevision),
+            )
+
+            val acceptedResult = result.getOrThrow()
+            assertEquals(EventEditorMaintenanceResponseStatus.ACCEPTED, acceptedResult.status)
+            assertEquals(1, database.transactionCalls)
+            assertEquals("Maintenance Event", eventDao.getEventById(eventId)?.name)
+            assertEquals(EventType.LEAGUE, eventDao.getEventById(eventId)?.eventType)
+            assertEquals("Court 1", fieldDao.fields["field-proposed"]?.name)
+            assertEquals(
+                listOf("slot-proposed"),
+                timeSlotDao.getTimeSlotsByEventId(eventId).map(EventTimeSlotCacheEntry::slotId),
+            )
+            assertEquals("match-accepted", matchDao.matches["match-accepted"]?.id)
+            assertEquals("PLACED", matchDao.matches["match-accepted"]?.placementState)
+        }
+
+    @Test
+    fun given_cached_rows_when_accepted_maintenance_graph_is_persisted_then_projection_is_exact_and_metadata_survives() =
+        runTest {
+            val eventId = "maintenance-projection"
+            val fieldId = "field-proposed"
+            val timeSlotId = "slot-proposed"
+            val teamId = "team-proposed"
+            val request = maintenanceRequest(
+                operation = EventEditorMaintenanceOperation.BUILD,
+                eventId = eventId,
+                operationId = "maintenance-projection-operation",
+            )
+            val eventDao = EventRepositoryHttp_FakeEventDao()
+            val fieldDao = EventRepositoryHttp_FakeFieldDao()
+            val teamDao = EventRepositoryHttp_FakeTeamDao()
+            val matchDao = EventRepositoryHttp_FakeMatchDao()
+            val timeSlotDao = EventRepositoryHttp_FakeEventTimeSlotDao()
+            val database = EventRepositoryHttp_FakeDatabaseService(
+                getEventDao = eventDao,
+                getUserDataDao = EventRepositoryHttp_FakeUserDataDao(),
+                getTeamDao = teamDao,
+                getMatchDao = matchDao,
+                getFieldDao = fieldDao,
+                getEventTimeSlotDao = timeSlotDao,
+            )
+            val canonicalEvent = makeEvent(eventId, "canonical-host").copy(
+                name = "Canonical Event",
+                description = "Canonical description",
+                divisions = listOf("division-canonical"),
+                divisionDetails = listOf(
+                    DivisionDetail(id = "division-canonical", name = "Canonical Division"),
+                ),
+                teamIds = listOf(teamId),
+                fieldIds = listOf(fieldId),
+                timeSlotIds = listOf(timeSlotId),
+                requiredTemplateIds = listOf("event-template"),
+                registrationPaymentMode = "MANUAL",
+                manualPaymentInstructions = "Pay at check-in.",
+                eventTypeLocked = true,
+                registrationUnitLocked = true,
+                eventTypeHasProtectedHistory = true,
+            )
+            val canonicalField = Field(
+                id = fieldId,
+                divisions = listOf("division-canonical"),
+                sportIds = listOf("canonical-sport"),
+                name = "Canonical Court",
+                location = "Canonical location",
+                organizationId = "canonical-organization",
+                facilityId = "canonical-facility",
+            )
+            val canonicalTeam = Team(
+                division = "division-canonical",
+                name = "Canonical Team",
+                captainId = "canonical-captain",
+                managerId = "canonical-manager",
+                playerIds = listOf("canonical-player"),
+                playerRegistrationIds = listOf("canonical-registration"),
+                pending = listOf("canonical-pending"),
+                staffAssignmentIds = listOf("canonical-staff"),
+                teamSize = 8,
+                requiredTemplateIds = listOf("team-template"),
+                id = teamId,
+            )
+            val canonicalTimeSlot = maintenanceTimeSlotCacheEntry(eventId, timeSlotId).copy(
+                requiredTemplateIds = listOf("slot-template"),
+                hostRequiredTemplateIds = listOf("host-slot-template"),
+                sourceType = "CANONICAL",
+                rentalBookingId = "booking-slot",
+                rentalBookingItemId = "booking-item-slot",
+                rentalLocked = true,
+            )
+            val canonicalMatch = MatchMVP(
+                matchId = 1,
+                eventId = eventId,
+                placementState = "PLACED",
+                segments = listOf(
+                    MatchSegmentMVP(
+                        id = "canonical-segment",
+                        matchId = "match-projection",
+                        sequence = 1,
+                    ),
+                ),
+                id = "match-projection",
+            )
+            eventDao.upsertEvent(canonicalEvent)
+            fieldDao.fields[fieldId] = canonicalField
+            teamDao.teams[teamId] = canonicalTeam
+            timeSlotDao.entries += canonicalTimeSlot
+            matchDao.matches[canonicalMatch.id] = canonicalMatch
+
+            val baseGraph = maintenanceGraph(
+                eventId = eventId,
+                matches = listOf(
+                    maintenanceProjection(
+                        eventId = eventId,
+                        id = canonicalMatch.id,
+                        matchId = canonicalMatch.matchId,
+                    ),
+                ),
+                fieldId = fieldId,
+                timeSlotId = timeSlotId,
+            )
+            val graph = baseGraph.copy(
+                event = baseGraph.event.copy(
+                    divisions = listOf("division-graph"),
+                    divisionDetails = listOf(
+                        DivisionDetail(id = "division-graph", name = "Graph Division"),
+                    ),
+                    teamIds = listOf(teamId),
+                    fieldIds = listOf(fieldId),
+                    timeSlotIds = listOf(timeSlotId),
+                    teams = listOf(
+                        TeamApiDto(
+                            id = teamId,
+                            captainId = null,
+                            division = null,
+                            kind = null,
+                            name = "",
+                            playerIds = emptyList(),
+                            players = emptyList(),
+                            playerRegistrations = emptyList(),
+                        ),
+                    ),
+                ),
+            )
+            val proposal = maintenanceProposal(request, graph)
+            val accepted = maintenanceAcceptedResult(proposal)
+            val engine = MockEngine {
+                respond(
+                    content = encodeMaintenanceResponse(accepted),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            }
+            val repository = maintenanceHttpRepository(database, engine, StandardTestDispatcher(testScheduler))
+            advanceUntilIdle()
+            timeSlotDao.entries += canonicalTimeSlot
+
+            repository.acceptEventScheduleMaintenance(
+                maintenanceAcceptRequest(request, proposal.proposalRevision),
+            ).getOrThrow()
+
+            val persistedEvent = eventDao.getEventById(eventId)
+            assertEquals("Canonical description", persistedEvent?.description)
+            assertEquals(listOf("event-template"), persistedEvent?.requiredTemplateIds)
+            assertEquals("MANUAL", persistedEvent?.registrationPaymentMode)
+            assertEquals("Pay at check-in.", persistedEvent?.manualPaymentInstructions)
+            assertTrue(persistedEvent?.eventTypeLocked == true)
+            assertTrue(persistedEvent?.registrationUnitLocked == true)
+            assertTrue(persistedEvent?.eventTypeHasProtectedHistory == true)
+            assertEquals(listOf("division_graph"), persistedEvent?.divisions)
+            assertEquals(listOf("division_graph"), persistedEvent?.divisionDetails?.map(DivisionDetail::id))
+            assertEquals(listOf(teamId), persistedEvent?.teamIds)
+            assertEquals(listOf(fieldId), persistedEvent?.fieldIds)
+            assertEquals(listOf(timeSlotId), persistedEvent?.timeSlotIds)
+            assertEquals(
+                canonicalField.copy(divisions = emptyList()),
+                fieldDao.fields[fieldId],
+            )
+            assertEquals(
+                canonicalTeam.copy(
+                    division = "open",
+                    name = "",
+                    captainId = "",
+                    playerIds = emptyList(),
+                    playerRegistrations = emptyList(),
+                ),
+                teamDao.teams[teamId],
+            )
+            val persistedTimeSlot = timeSlotDao.getTimeSlotsByEventId(eventId).single()
+            assertEquals(listOf("slot-template"), persistedTimeSlot.requiredTemplateIds)
+            assertEquals(listOf("host-slot-template"), persistedTimeSlot.hostRequiredTemplateIds)
+            assertEquals("CANONICAL", persistedTimeSlot.sourceType)
+            assertEquals("booking-slot", persistedTimeSlot.rentalBookingId)
+            assertEquals("booking-item-slot", persistedTimeSlot.rentalBookingItemId)
+            assertTrue(persistedTimeSlot.rentalLocked == true)
+            assertTrue(matchDao.matches[canonicalMatch.id]?.segments?.isEmpty() == true)
+        }
+
+    private fun assertAcceptedMaintenancePlacement(match: MatchMVP) {
+        assertEquals("field-proposed", match.fieldId)
+        assertEquals(Instant.parse(MAINTENANCE_START), match.start)
+        assertEquals(Instant.parse(MAINTENANCE_END), match.end)
+        assertEquals("POOL", match.phase)
+        assertFalse(match.locked)
+    }
+
+    @Test
+    fun given_complete_maintenance_when_cache_is_stale_then_accepted_match_values_replace_it() =
+        runTest {
+            val eventId = "maintenance-complete"
+            val request = maintenanceRequest(
+                operation = EventEditorMaintenanceOperation.COMPLETE,
+                eventId = eventId,
+                operationId = "maintenance-complete-operation",
+            )
+            val eventDao = EventRepositoryHttp_FakeEventDao()
+            val fieldDao = EventRepositoryHttp_FakeFieldDao()
+            val matchDao = EventRepositoryHttp_FakeMatchDao()
+            val timeSlotDao = EventRepositoryHttp_FakeEventTimeSlotDao()
+            val database = EventRepositoryHttp_FakeDatabaseService(
+                getEventDao = eventDao,
+                getUserDataDao = EventRepositoryHttp_FakeUserDataDao(),
+                getTeamDao = EventRepositoryHttp_FakeTeamDao(),
+                getMatchDao = matchDao,
+                getFieldDao = fieldDao,
+                getEventTimeSlotDao = timeSlotDao,
+            )
+            val localPlaced = MatchMVP(
+                matchId = 7,
+                eventId = eventId,
+                fieldId = "field-local",
+                start = Instant.parse(MAINTENANCE_START),
+                end = Instant.parse(MAINTENANCE_END),
+                placementState = "PLACED",
+                id = "match-placed",
+            )
+            matchDao.matches[localPlaced.id] = localPlaced
+            val graph = maintenanceGraph(
+                eventId = eventId,
+                matches = listOf(
+                    maintenanceProjection(
+                        eventId = eventId,
+                        id = localPlaced.id,
+                        matchId = localPlaced.matchId,
+                        fieldId = "field-proposed",
+                    ),
+                    maintenanceProjection(
+                        eventId = eventId,
+                        id = "match-new-unplaced",
+                        matchId = 8,
+                        placementState = "UNPLACED",
+                        fieldId = null,
+                        start = null,
+                        end = null,
+                    ),
+                ),
+            )
+            val proposal = maintenanceProposal(
+                request = request,
+                graph = graph,
+                protectedMatchIds = listOf(localPlaced.id),
+            )
+            val accepted = maintenanceAcceptedResult(proposal)
+            val engine = MockEngine { httpRequest ->
+                assertEquals(HttpMethod.Put, httpRequest.method)
+                assertEquals("/api/events/$eventId/schedule", httpRequest.url.encodedPath)
+                respond(
+                    content = encodeMaintenanceResponse(accepted),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            }
+            val repository = maintenanceHttpRepository(database, engine, StandardTestDispatcher(testScheduler))
+            advanceUntilIdle()
+
+            val result = repository.acceptEventScheduleMaintenance(
+                maintenanceAcceptRequest(request, proposal.proposalRevision),
+            )
+
+            result.getOrThrow()
+            assertEquals(1, database.transactionCalls)
+            assertAcceptedMaintenancePlacement(requireNotNull(matchDao.matches["match-placed"]))
+            assertEquals("match-new-unplaced", matchDao.matches["match-new-unplaced"]?.id)
+            assertEquals("UNPLACED", matchDao.matches["match-new-unplaced"]?.placementState)
+            assertEquals(
+                setOf("match-placed", "match-new-unplaced"),
+                matchDao.matches.keys,
+            )
+        }
+
+    @Test
+    fun given_rebuild_maintenance_when_cache_is_stale_then_accepted_graph_replaces_it() =
+        runTest {
+            val eventId = "maintenance-rebuild"
+            val request = maintenanceRequest(
+                operation = EventEditorMaintenanceOperation.REBUILD,
+                eventId = eventId,
+                operationId = "maintenance-rebuild-operation",
+            )
+            val eventDao = EventRepositoryHttp_FakeEventDao()
+            val fieldDao = EventRepositoryHttp_FakeFieldDao()
+            val matchDao = EventRepositoryHttp_FakeMatchDao()
+            val timeSlotDao = EventRepositoryHttp_FakeEventTimeSlotDao()
+            val database = EventRepositoryHttp_FakeDatabaseService(
+                getEventDao = eventDao,
+                getUserDataDao = EventRepositoryHttp_FakeUserDataDao(),
+                getTeamDao = EventRepositoryHttp_FakeTeamDao(),
+                getMatchDao = matchDao,
+                getFieldDao = fieldDao,
+                getEventTimeSlotDao = timeSlotDao,
+            )
+            val localProtected = MatchMVP(
+                matchId = 11,
+                eventId = eventId,
+                fieldId = "field-local",
+                placementState = "PLACED",
+                locked = true,
+                id = "match-protected",
+            )
+            matchDao.matches[localProtected.id] = localProtected
+            matchDao.matches["match-stale"] = MatchMVP(
+                matchId = 12,
+                eventId = eventId,
+                placementState = "UNPLACED",
+                id = "match-stale",
+            )
+            val graph = maintenanceGraph(
+                eventId = eventId,
+                matches = listOf(
+                    maintenanceProjection(
+                        eventId = eventId,
+                        id = localProtected.id,
+                        matchId = localProtected.matchId,
+                        fieldId = "field-proposed",
+                    ),
+                    maintenanceProjection(
+                        eventId = eventId,
+                        id = "match-rebuild-new",
+                        matchId = 13,
+                        placementState = "UNPLACED",
+                        fieldId = null,
+                        start = null,
+                        end = null,
+                    ),
+                ),
+            )
+            val proposal = maintenanceProposal(
+                request = request,
+                graph = graph,
+                protectedMatchIds = listOf(localProtected.id),
+            )
+            val accepted = maintenanceAcceptedResult(proposal)
+            val engine = MockEngine { httpRequest ->
+                assertEquals(HttpMethod.Put, httpRequest.method)
+                assertEquals("/api/events/$eventId/schedule", httpRequest.url.encodedPath)
+                respond(
+                    content = encodeMaintenanceResponse(accepted),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            }
+            val repository = maintenanceHttpRepository(database, engine, StandardTestDispatcher(testScheduler))
+            advanceUntilIdle()
+
+            repository.acceptEventScheduleMaintenance(
+                maintenanceAcceptRequest(request, proposal.proposalRevision),
+            ).getOrThrow()
+
+            assertEquals(1, database.transactionCalls)
+            assertAcceptedMaintenancePlacement(requireNotNull(matchDao.matches[localProtected.id]))
+            assertNull(matchDao.matches["match-stale"])
+            assertEquals("UNPLACED", matchDao.matches["match-rebuild-new"]?.placementState)
+            assertEquals(
+                listOf(listOf("match-stale")),
+                matchDao.deletedMatchIds,
+            )
+        }
+
+    @Test
+    fun given_stale_or_rejected_maintenance_response_when_gateway_fails_then_room_remains_unchanged() =
+        runTest {
+            val eventId = "maintenance-failure"
+            val request = maintenanceRequest(
+                operation = EventEditorMaintenanceOperation.COMPLETE,
+                eventId = eventId,
+                operationId = "maintenance-failure-operation",
+            )
+            val eventDao = EventRepositoryHttp_FakeEventDao()
+            val userDao = EventRepositoryHttp_FakeUserDataDao()
+            val teamDao = EventRepositoryHttp_FakeTeamDao()
+            val fieldDao = EventRepositoryHttp_FakeFieldDao()
+            val matchDao = EventRepositoryHttp_FakeMatchDao()
+            val timeSlotDao = EventRepositoryHttp_FakeEventTimeSlotDao()
+            val participantDao = EventRepositoryHttp_FakeParticipantManagementDao()
+            val complianceDao = EventRepositoryHttp_FakeComplianceDao()
+            val database = EventRepositoryHttp_FakeDatabaseService(
+                getEventDao = eventDao,
+                getUserDataDao = userDao,
+                getTeamDao = teamDao,
+                getMatchDao = matchDao,
+                getFieldDao = fieldDao,
+                getEventTimeSlotDao = timeSlotDao,
+                getEventParticipantManagementDao = participantDao,
+                getEventComplianceDao = complianceDao,
+            )
+            eventDao.upsertEvent(makeEvent(eventId, "host-1").copy(name = "Cached Failure Event"))
+            fieldDao.fields["field-existing"] = Field(id = "field-existing", name = "Cached Court")
+            timeSlotDao.entries += maintenanceTimeSlotCacheEntry(eventId, "slot-existing")
+            matchDao.matches["match-existing"] = MatchMVP(
+                matchId = 99,
+                eventId = eventId,
+                id = "match-existing",
+            )
+            val cachedEvents = eventDao.getAllCachedEvents().first()
+            val cachedFields = fieldDao.fields.toMap()
+            val cachedTimeSlots = timeSlotDao.entries.toList()
+            val cachedMatches = matchDao.matches.toMap()
+            val methods = mutableListOf<HttpMethod>()
+            val engine = MockEngine { httpRequest ->
+                assertEquals("/api/events/$eventId/schedule", httpRequest.url.encodedPath)
+                methods += httpRequest.method
+                val responseBody = when (httpRequest.method) {
+                    HttpMethod.Put ->
+                        """{"error":"The schedule changed.","code":"EDITOR_MAINTENANCE_STALE","scheduleRevision":"new-revision"}"""
+                    HttpMethod.Delete ->
+                        """{"error":"The proposal was rejected.","code":"EDITOR_MAINTENANCE_REJECTED"}"""
+                    else -> error("Unexpected maintenance method ${httpRequest.method}.")
+                }
+                respond(
+                    content = responseBody,
+                    status = HttpStatusCode.Conflict,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            }
+            val repository = maintenanceHttpRepository(database, engine, StandardTestDispatcher(testScheduler))
+            advanceUntilIdle()
+
+            val staleResult = repository.acceptEventScheduleMaintenance(
+                maintenanceAcceptRequest(request, "maintenance-proposal-revision"),
+            )
+            val rejectedResult = repository.rejectEventScheduleMaintenance(
+                maintenanceRejectRequest(request, "maintenance-proposal-revision"),
+            )
+
+            assertTrue(staleResult.isFailure)
+            assertTrue(rejectedResult.isFailure)
+            assertEquals(listOf(HttpMethod.Put, HttpMethod.Delete), methods)
+            assertEquals(0, database.transactionCalls)
+            assertEquals(cachedEvents, eventDao.getAllCachedEvents().first())
+            assertEquals(cachedFields, fieldDao.fields)
+            assertEquals(cachedTimeSlots, timeSlotDao.entries)
+            assertEquals(cachedMatches, matchDao.matches)
+            assertTrue(eventDao.deleteEventCrossRefsCalls.isEmpty())
+            assertTrue(userDao.eventCrossRefs.isEmpty())
+            assertTrue(teamDao.teams.isEmpty())
+            assertTrue(participantDao.entries.isEmpty())
+            assertTrue(complianceDao.teamSummaries.isEmpty())
+            assertTrue(complianceDao.userSummaries.isEmpty())
+        }
+
 
     @Test
     fun given_remote_editor_create_failure_when_repository_submits_then_no_rows_are_cached() = runTest {
@@ -5146,12 +7004,15 @@ class EventRepositoryHttpTest {
         val userDao = EventRepositoryHttp_FakeUserDataDao()
         val fieldDao = EventRepositoryHttp_FakeFieldDao()
         val matchDao = EventRepositoryHttp_FakeMatchDao()
+        val teamDao = EventRepositoryHttp_FakeTeamDao()
+        val timeSlotDao = EventRepositoryHttp_FakeEventTimeSlotDao()
         val database = EventRepositoryHttp_FakeDatabaseService(
             getEventDao = eventDao,
             getUserDataDao = userDao,
-            getTeamDao = EventRepositoryHttp_FakeTeamDao(),
+            getTeamDao = teamDao,
             getMatchDao = matchDao,
             getFieldDao = fieldDao,
+            getEventTimeSlotDao = timeSlotDao,
         )
         val engine = MockEngine {
             respond(
@@ -5173,6 +7034,11 @@ class EventRepositoryHttpTest {
         val command = EventEditorCreateCommandDto(
             contractVersion = 3,
             createOperationId = "failed-operation",
+            expectedRevisions = EventEditorExpectedCreateRevisionsDto(
+                editorRevision = "revision-1",
+                staffRevision = null,
+                scheduleRevision = "schedule-1",
+            ),
             draft = EventEditorDraftDto(
                 basics = EventEditorBasicsDto(
                     name = "Failed event",
@@ -5228,7 +7094,535 @@ class EventRepositoryHttpTest {
         assertTrue(result.isFailure)
         assertTrue(eventDao.getAllCachedEvents().first().isEmpty())
         assertTrue(fieldDao.fields.isEmpty())
+        assertTrue(timeSlotDao.entries.isEmpty())
         assertTrue(matchDao.matches.isEmpty())
+        assertTrue(teamDao.teams.isEmpty())
+        assertTrue(userDao.eventCrossRefs.isEmpty())
+    }
+
+    @Test
+    fun given_remote_tournament_editor_create_failure_when_repository_submits_then_no_optimistic_room_rows_are_cached() = runTest {
+        val eventId = "failed-tournament"
+        val fieldId = "field-tournament"
+        val timeSlotId = "slot-tournament"
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val userDao = EventRepositoryHttp_FakeUserDataDao()
+        val teamDao = EventRepositoryHttp_FakeTeamDao()
+        val fieldDao = EventRepositoryHttp_FakeFieldDao()
+        val timeSlotDao = EventRepositoryHttp_FakeEventTimeSlotDao()
+        val matchDao = EventRepositoryHttp_FakeMatchDao()
+        val database = EventRepositoryHttp_FakeDatabaseService(
+            getEventDao = eventDao,
+            getUserDataDao = userDao,
+            getTeamDao = teamDao,
+            getMatchDao = matchDao,
+            getFieldDao = fieldDao,
+            getEventTimeSlotDao = timeSlotDao,
+        )
+        val start = "2026-08-15T08:00:00Z"
+        val end = "2026-08-15T18:00:00Z"
+        var requestCount = 0
+        var submittedBody = ""
+        // This MockEngine case covers only the client no-optimistic-write contract.
+        // Real Room rollback is covered by EventRepositoryRoomPersistenceTest.
+        // Server rollback is covered by the Issue 34 real-DB Tournament test:
+        // apps/site/src/server/events/__tests__/eventEditorSave.database.integration.test.ts.
+        val engine = MockEngine { request ->
+            assertEquals("/api/events/editor", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+            requestCount += 1
+            submittedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+            respond(
+                content = """{"error":"offline","code":"EVENT_CREATE_UNAVAILABLE"}""",
+                status = HttpStatusCode.InternalServerError,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val repository = EventRepository(
+            database,
+            MvpApiClient(
+                HttpClient(engine) { configureMvpHttpClient() },
+                "http://example.test",
+                tokenStore,
+            ),
+            EventRepositoryHttp_UnusedTeamRepository,
+            EventRepositoryHttp_FakeUserRepository(makeUser("host-1")),
+        )
+        val command = EventEditorCreateCommandDto(
+            contractVersion = 3,
+            createOperationId = "failed-tournament-operation",
+            expectedRevisions = EventEditorExpectedCreateRevisionsDto(
+                editorRevision = "tournament-revision",
+                staffRevision = "tournament-staff-revision",
+                scheduleRevision = "tournament-schedule-revision",
+            ),
+            draft = EventEditorDraftDto(
+                basics = EventEditorBasicsDto(
+                    name = "Failed Tournament",
+                    description = "Tournament draft must survive a failed submission.",
+                    eventType = "TOURNAMENT",
+                    sportIds = listOf("sport-volleyball"),
+                    start = start,
+                    timeZone = "America/New_York",
+                    location = "Tournament Center",
+                    address = "1 Bracket Way",
+                    coordinates = listOf(25.7617, -80.1918),
+                    affiliateUrl = "",
+                    hostId = "host-1",
+                    state = "UNPUBLISHED",
+                ),
+                participation = EventEditorParticipationDto(
+                    teamSignup = true,
+                    singleDivision = false,
+                    registrationByDivisionType = true,
+                    teamSizeLimit = 2,
+                    maxParticipants = 16,
+                    minAge = 18,
+                    maxAge = 40,
+                    cancellationRefundHours = 24,
+                    registrationCutoffHours = 48,
+                    allowTeamSplitDefault = false,
+                ),
+                registration = EventEditorRegistrationDto(
+                    payment = EventEditorPaymentDto(
+                        mode = "FREE",
+                        priceCents = 0,
+                        taxHandling = "NONE",
+                        organizerManualTaxRateBps = 0,
+                        allowPaymentPlans = false,
+                    ),
+                ),
+                competition = EventEditorCompetitionDto(
+                    divisionIds = listOf("division-open"),
+                    divisionDetails = listOf(
+                        EventEditorDivisionDetailDto(
+                            id = "division-open",
+                            key = "open",
+                            name = "Open Pool",
+                            kind = "LEAGUE",
+                            isSystemGenerated = false,
+                            poolPlay = true,
+                            divisionTypeId = "division-type-open",
+                            skillDivisionTypeId = "skill-open",
+                            ageDivisionTypeId = "age-open",
+                            divisionTypeName = "Open",
+                            ratingType = "NONE",
+                            gender = "MIXED",
+                            price = 125.0,
+                            maxParticipants = 16.0,
+                            playoffTeamCount = 4.0,
+                            poolCount = 2.0,
+                            poolTeamCount = 4.0,
+                            phaseSettings = jsonMVP.parseToJsonElement(
+                                """{"stage":"POOL","poolCount":2}""",
+                            ).jsonObject,
+                            playoffPlacementDivisionIds = listOf("division-playoff"),
+                            playoffConfig = jsonMVP.parseToJsonElement(
+                                """{"format":"DOUBLE_ELIMINATION","bracketSize":4}""",
+                            ).jsonObject,
+                            gamesPerOpponent = 2.0,
+                            restTimeMinutes = 10.0,
+                            usesSets = true,
+                            matchDurationMinutes = 30.0,
+                            setDurationMinutes = 15.0,
+                            setsPerMatch = 3.0,
+                            pointsToVictory = listOf(21, 21, 15),
+                            fieldIds = listOf(fieldId),
+                            teamIds = listOf("team-red", "team-blue"),
+                        ),
+                    ),
+                    playoffDivisionDetails = listOf(
+                        EventEditorDivisionDetailDto(
+                            id = "division-playoff",
+                            sourceDivisionId = "division-open",
+                            key = "championship",
+                            name = "Championship Bracket",
+                            kind = "PLAYOFF",
+                            isSystemGenerated = true,
+                            poolPlay = false,
+                            divisionTypeId = "division-type-playoff",
+                            skillDivisionTypeId = "skill-open",
+                            ageDivisionTypeId = "age-open",
+                            divisionTypeName = "Playoff",
+                            ratingType = "NONE",
+                            gender = "MIXED",
+                            maxParticipants = 4.0,
+                            playoffTeamCount = 4.0,
+                            phaseSettings = jsonMVP.parseToJsonElement(
+                                """{"stage":"BRACKET","elimination":"DOUBLE"}""",
+                            ).jsonObject,
+                            playoffConfig = jsonMVP.parseToJsonElement(
+                                """{"format":"DOUBLE_ELIMINATION","loserSetCount":1}""",
+                            ).jsonObject,
+                            gamesPerOpponent = 1.0,
+                            restTimeMinutes = 10.0,
+                            usesSets = true,
+                            matchDurationMinutes = 30.0,
+                            setDurationMinutes = 15.0,
+                            setsPerMatch = 3.0,
+                            pointsToVictory = listOf(21, 21, 15),
+                            fieldIds = listOf(fieldId),
+                        ),
+                    ),
+                    divisionFieldIds = mapOf(
+                        "division-open" to listOf(fieldId),
+                        "division-playoff" to listOf(fieldId),
+                    ),
+                    winnerSetCount = 3,
+                    loserSetCount = 1,
+                    doubleElimination = true,
+                    includePlayoffs = true,
+                    splitLeaguePlayoffDivisions = true,
+                    playoffTeamCount = 4,
+                    pointsToVictory = listOf(21, 21, 15),
+                    winnerBracketPointsToVictory = listOf(21, 21, 15),
+                    loserBracketPointsToVictory = listOf(21, 15),
+                    usesSets = true,
+                    setsPerMatch = 3,
+                    setDurationMinutes = 15.0,
+                    restTimeMinutes = 10.0,
+                    matchDurationMinutes = 30.0,
+                    gamesPerOpponent = 2,
+                ),
+                schedule = EventEditorScheduleDto(
+                    mode = "FIXED_END",
+                    endConstraint = end,
+                    isAutomatedScheduling = true,
+                ),
+                resources = EventEditorResourcesDto(
+                    fieldIds = listOf(fieldId),
+                    fields = listOf(
+                        EventEditorFieldDto(
+                            id = fieldId,
+                            name = "Tournament Court 1",
+                            location = "Tournament Center",
+                            address = "1 Bracket Way",
+                            sportIds = listOf("sport-volleyball"),
+                        ),
+                    ),
+                    timeSlotIds = listOf(timeSlotId),
+                    timeSlots = listOf(
+                        EventEditorTimeSlotDto(
+                            id = timeSlotId,
+                            eventId = eventId,
+                            dayOfWeek = 6,
+                            daysOfWeek = listOf(6),
+                            startTimeMinutes = 480,
+                            endTimeMinutes = 1080,
+                            startDate = start,
+                            endDate = end,
+                            start = start,
+                            end = end,
+                            timeZone = "America/New_York",
+                            scheduledFieldId = fieldId,
+                            scheduledFieldIds = listOf(fieldId),
+                            fieldId = fieldId,
+                            fieldIds = listOf(fieldId),
+                            division = "division-open",
+                            divisions = listOf("division-open", "division-playoff"),
+                            divisionKeys = listOf("open", "championship"),
+                        ),
+                    ),
+                ),
+                staff = EventEditorStaffDto(
+                    staffingPriority = "OFFICIAL_COVERAGE_REQUIRED",
+                    doTeamsOfficiate = true,
+                    teamOfficialsMaySwap = true,
+                    teamCheckInMode = "EVENT",
+                    teamCheckInOpenMinutesBefore = 30,
+                    allowMatchRosterEdits = true,
+                    allowTemporaryMatchPlayers = false,
+                    autoCreatePointMatchIncidents = true,
+                    officialIds = listOf("official-1"),
+                    officialPositions = listOf(
+                        EventEditorOfficialPositionDto(
+                            id = "referee",
+                            name = "Referee",
+                            count = 1,
+                            order = 0,
+                        ),
+                    ),
+                    eventOfficials = listOf(
+                        EventEditorOfficialDto(
+                            id = "event-official-1",
+                            userId = "official-1",
+                            positionIds = listOf("referee"),
+                            fieldIds = listOf(fieldId),
+                            isActive = true,
+                        ),
+                    ),
+                ),
+            ),
+            completion = EventEditorCreateCompletionDto(
+                EventEditorCreateCompletionMode.CREATE_AND_BUILD_SCHEDULE,
+            ),
+        )
+
+        val result = repository.createEventEditor(command)
+
+        assertEquals(1, requestCount)
+        val submittedCommand = jsonMVP.decodeFromString<EventEditorCreateCommandDto>(submittedBody)
+        assertEquals("TOURNAMENT", submittedCommand.draft.basics.eventType)
+        assertEquals(true, submittedCommand.draft.competition.doubleElimination)
+        assertEquals(true, submittedCommand.draft.competition.divisionDetails.single().poolPlay)
+        assertEquals("PLAYOFF", submittedCommand.draft.competition.playoffDivisionDetails.single().kind)
+        assertEquals(listOf(fieldId), submittedCommand.draft.resources.fieldIds)
+        assertEquals(listOf(timeSlotId), submittedCommand.draft.resources.timeSlotIds)
+        assertEquals(true, submittedCommand.draft.staff.doTeamsOfficiate)
+        assertEquals(listOf("official-1"), submittedCommand.draft.staff.officialIds)
+
+        val failure = result.exceptionOrNull() as? EventEditorApiException
+            ?: error("Expected a typed Event Editor API failure, received ${result.exceptionOrNull()}")
+        assertEquals(HttpStatusCode.InternalServerError.value, failure.statusCode)
+        assertEquals("EVENT_CREATE_UNAVAILABLE", failure.payload?.code)
+
+        assertEquals(0, database.transactionCalls)
+        assertTrue(eventDao.getAllCachedEvents().first().isEmpty())
+        assertEquals(null, eventDao.getEventById(eventId))
+        assertTrue(fieldDao.fields.isEmpty())
+        assertTrue(timeSlotDao.entries.isEmpty())
+        assertTrue(timeSlotDao.getTimeSlotsByEventId(eventId).isEmpty())
+        assertTrue(matchDao.matches.isEmpty())
+        assertTrue(matchDao.getMatchesOfTournament(eventId).isEmpty())
+        assertTrue(teamDao.teams.isEmpty())
         assertTrue(userDao.eventCrossRefs.isEmpty())
     }
 }
+private fun canonicalProposalGraph(
+    graph: EventEditorCreateProposalGraphDto,
+): EventEditorCreateProposalGraphDto {
+    val canonicalEvent = jsonMVP
+        .encodeToJsonElement(EventApiDto.serializer(), graph.event)
+        .jsonObject
+        .withMissing(
+            "id" to JsonPrimitive("event"),
+            "name" to JsonPrimitive("Event"),
+            "description" to JsonPrimitive(""),
+            "start" to JsonPrimitive("2026-01-01T00:00:00Z"),
+            "end" to JsonPrimitive("2026-01-01T01:00:00Z"),
+            "location" to JsonPrimitive(""),
+            "coordinates" to JsonNull,
+            "price" to JsonNull,
+            "minAge" to JsonNull,
+            "maxAge" to JsonNull,
+            "rating" to JsonNull,
+            "imageId" to JsonNull,
+            "hostId" to JsonNull,
+            "noFixedEndDateTime" to JsonPrimitive(false),
+            "scheduleEndConstraint" to JsonNull,
+            "generatedScheduleEnd" to JsonNull,
+            "state" to JsonPrimitive("UNPUBLISHED"),
+            "maxParticipants" to JsonPrimitive(0),
+            "teamSizeLimit" to JsonNull,
+            "restTimeMinutes" to JsonPrimitive(0),
+            "teamSignup" to JsonPrimitive(false),
+            "singleDivision" to JsonPrimitive(false),
+            "waitListIds" to JsonArray(emptyList()),
+            "freeAgentIds" to JsonArray(emptyList()),
+            "teamIds" to JsonArray(emptyList()),
+            "userIds" to JsonArray(emptyList()),
+            "fieldIds" to JsonArray(emptyList()),
+            "timeSlotIds" to JsonArray(emptyList()),
+            "officialIds" to JsonArray(emptyList()),
+            "staffingPriority" to JsonPrimitive("BEST_AVAILABLE_COVERAGE"),
+            "officialPositions" to JsonArray(emptyList()),
+            "eventOfficials" to JsonArray(emptyList()),
+            "matchRulesOverride" to JsonNull,
+            "autoCreatePointMatchIncidents" to JsonPrimitive(false),
+            "resolvedMatchRules" to JsonNull,
+            "cancellationRefundHours" to JsonNull,
+            "registrationCutoffHours" to JsonNull,
+            "seedColor" to JsonNull,
+            "eventType" to JsonPrimitive("EVENT"),
+            "sportIds" to JsonArray(emptyList()),
+            "leagueScoringConfigId" to JsonNull,
+            "organizationId" to JsonNull,
+            "requiredTemplateIds" to JsonArray(emptyList()),
+            "allowPaymentPlans" to JsonPrimitive(false),
+            "installmentCount" to JsonPrimitive(0),
+            "installmentDueDates" to JsonArray(emptyList()),
+            "installmentDueRelativeDays" to JsonArray(emptyList()),
+            "installmentAmounts" to JsonArray(emptyList()),
+            "allowTeamSplitDefault" to JsonPrimitive(false),
+            "splitLeaguePlayoffDivisions" to JsonPrimitive(false),
+            "divisions" to JsonArray(emptyList()),
+            "divisionDetails" to JsonArray(emptyList()),
+            "playoffDivisionDetails" to JsonArray(emptyList()),
+            "fields" to JsonArray(emptyList()),
+            "teams" to JsonArray(emptyList()),
+            "timeSlots" to JsonArray(emptyList()),
+            "officials" to JsonArray(emptyList()),
+        )
+        .toMutableMap()
+        .apply {
+            this["fields"] = JsonArray(getValue("fields").jsonArray.mapIndexed { index, field ->
+                field.jsonObject.withMissing(
+                    "id" to JsonPrimitive("field-$index"),
+                    "organizationId" to JsonNull,
+                    "divisions" to JsonArray(emptyList()),
+                    "name" to JsonPrimitive("Resource ${index + 1}"),
+                )
+            })
+            this["teams"] = JsonArray(getValue("teams").jsonArray.mapIndexed { index, team ->
+                team.jsonObject.withMissing(
+                    "id" to JsonPrimitive("team-$index"),
+                    "captainId" to JsonNull,
+                    "division" to JsonNull,
+                    "kind" to JsonNull,
+                    "name" to JsonPrimitive("Team ${index + 1}"),
+                    "playerIds" to JsonArray(emptyList()),
+                    "players" to JsonArray(emptyList()),
+                    "playerRegistrations" to JsonArray(emptyList()),
+                )
+            })
+            this["timeSlots"] = JsonArray(getValue("timeSlots").jsonArray.mapIndexed { index, slot ->
+                slot.jsonObject.withMissing(
+                    "id" to JsonPrimitive("slot-$index"),
+                    "dayOfWeek" to JsonPrimitive(0),
+                    "daysOfWeek" to JsonArray(listOf(JsonPrimitive(0))),
+                    "endDate" to JsonNull,
+                    "repeating" to JsonPrimitive(false),
+                    "startTimeMinutes" to JsonPrimitive(0),
+                    "endTimeMinutes" to JsonPrimitive(0),
+                    "price" to JsonNull,
+                    "scheduledFieldId" to JsonNull,
+                    "scheduledFieldIds" to JsonArray(emptyList()),
+                    "divisions" to JsonArray(emptyList()),
+                )
+            })
+            this["officials"] = JsonArray(getValue("officials").jsonArray.mapIndexed { index, official ->
+                official.jsonObject.withMissing("id" to JsonPrimitive("official-$index"))
+            })
+        }
+        .let(::JsonObject)
+        .onlyCanonicalGraphEventKeys()
+    val canonicalMatches = JsonArray(graph.matches.mapIndexed { index, match ->
+        jsonMVP
+            .encodeToJsonElement(MatchApiDto.serializer(), match)
+            .jsonObject
+            .withMissing(
+                "id" to JsonPrimitive("match-$index"),
+                "matchId" to JsonPrimitive(index + 1),
+                "eventId" to (canonicalEvent["id"] ?: JsonPrimitive("event")),
+                "start" to JsonNull,
+                "end" to JsonNull,
+                "locked" to JsonPrimitive(false),
+                "placementState" to JsonPrimitive("UNPLACED"),
+                "phase" to JsonPrimitive("POOL"),
+                "sourceDivisionId" to JsonNull,
+                "phaseDivisionId" to JsonNull,
+                "division" to JsonNull,
+                "fieldId" to JsonNull,
+                "team1Id" to JsonNull,
+                "team2Id" to JsonNull,
+                "team1Seed" to JsonNull,
+                "team2Seed" to JsonNull,
+                "status" to JsonPrimitive("SCHEDULED"),
+                "resultStatus" to JsonPrimitive("PENDING"),
+                "resultType" to JsonPrimitive("NONE"),
+                "actualStart" to JsonNull,
+                "actualEnd" to JsonNull,
+                "statusReason" to JsonNull,
+                "winnerEventTeamId" to JsonNull,
+                "segments" to JsonArray(emptyList()),
+                "incidents" to JsonArray(emptyList()),
+                "officialIds" to JsonArray(emptyList()),
+                "officialAssignments" to JsonArray(emptyList()),
+                "teamOfficialId" to JsonNull,
+                "teamOfficialSeed" to JsonNull,
+                "matchRulesSnapshot" to JsonNull,
+                "resolvedMatchRules" to JsonNull,
+                "team1Points" to JsonArray(emptyList()),
+                "team2Points" to JsonArray(emptyList()),
+                "losersBracket" to JsonPrimitive(false),
+                "winnerNextMatchId" to JsonNull,
+                "loserNextMatchId" to JsonNull,
+                "previousLeftId" to JsonNull,
+                "previousRightId" to JsonNull,
+                "side" to JsonNull,
+                "officialCheckedIn" to JsonPrimitive(false),
+                "team1" to JsonNull,
+                "team2" to JsonNull,
+                "teamOfficial" to JsonNull,
+                "official" to JsonNull,
+                "field" to JsonNull,
+            )
+            .let { base ->
+                base.toMutableMap().apply {
+                    val officialId = get("officialId")
+                        ?.takeUnless { it is JsonNull }
+                        ?.jsonPrimitive
+                        ?.content
+                    if (officialId != null && getValue("officialIds").jsonArray.isEmpty()) {
+                        this["officialIds"] = JsonArray(listOf(JsonObject(mapOf(
+                            "positionId" to JsonPrimitive("official"),
+                            "slotIndex" to JsonPrimitive(0),
+                            "holderType" to JsonPrimitive("OFFICIAL"),
+                            "userId" to JsonPrimitive(officialId),
+                            "eventOfficialId" to JsonNull,
+                            "checkedIn" to JsonPrimitive(false),
+                            "hasConflict" to JsonPrimitive(false),
+                        ))))
+                    }
+                }.let(::JsonObject).onlyCanonicalGraphMatchKeys()
+            }
+    })
+    return graph.copy(
+        canonicalGraph = EventEditorMaintenanceGraphDto(
+            event = graph.event,
+            matches = emptyList(),
+            rawEvent = canonicalEvent,
+            rawMatches = canonicalMatches.map { it.jsonObject },
+        ),
+    )
+}
+
+private fun JsonObject.withMissing(vararg fields: Pair<String, kotlinx.serialization.json.JsonElement>): JsonObject {
+    val result = toMutableMap()
+    fields.forEach { (key, field) ->
+        if (!result.containsKey(key)) result[key] = field
+    }
+    return JsonObject(result)
+}
+private fun JsonObject.onlyCanonicalGraphEventKeys(): JsonObject =
+    JsonObject(filterKeys {
+        it in setOf(
+            "id", "name", "description", "start", "end", "location", "coordinates", "price",
+            "minAge", "maxAge", "rating", "imageId", "hostId", "noFixedEndDateTime",
+            "scheduleEndConstraint", "generatedScheduleEnd", "state", "maxParticipants",
+            "teamSizeLimit", "restTimeMinutes", "teamSignup", "singleDivision", "waitListIds",
+            "freeAgentIds", "teamIds", "userIds", "fieldIds", "timeSlotIds", "officialIds",
+            "staffingPriority", "officialPositions", "eventOfficials", "matchRulesOverride",
+            "autoCreatePointMatchIncidents", "resolvedMatchRules", "cancellationRefundHours",
+            "registrationCutoffHours", "seedColor", "eventType", "sportIds",
+            "leagueScoringConfigId", "organizationId", "requiredTemplateIds", "allowPaymentPlans",
+            "installmentCount", "installmentDueDates", "installmentDueRelativeDays",
+            "installmentAmounts", "allowTeamSplitDefault", "splitLeaguePlayoffDivisions",
+            "divisions", "divisionDetails", "playoffDivisionDetails", "fields", "teams",
+            "timeSlots", "officials", "doubleElimination", "winnerSetCount", "loserSetCount",
+            "winnerBracketPointsToVictory", "loserBracketPointsToVictory", "prize", "fieldCount",
+            "matches", "usesSets", "matchDurationMinutes", "setDurationMinutes", "setsPerMatch",
+            "doTeamsOfficiate", "teamOfficialsMaySwap", "teamCheckInMode",
+            "teamCheckInOpenMinutesBefore", "allowMatchRosterEdits", "allowTemporaryMatchPlayers",
+            "gamesPerOpponent", "includePlayoffs", "playoffTeamCount", "pointsToVictory",
+        )
+    })
+
+private fun JsonObject.onlyCanonicalGraphMatchKeys(): JsonObject =
+    JsonObject(filterKeys {
+        it in setOf(
+            "id", "matchId", "eventId", "start", "end", "locked", "placementState", "phase",
+            "sourceDivisionId", "phaseDivisionId", "division", "fieldId", "team1Id", "team2Id",
+            "team1Seed", "team2Seed", "status", "resultStatus", "resultType", "actualStart",
+            "actualEnd", "statusReason", "winnerEventTeamId", "matchRulesSnapshot",
+            "resolvedMatchRules", "segments", "incidents", "officialIds", "officialAssignments",
+            "teamOfficialId", "teamOfficialSeed", "team1Points", "team2Points", "losersBracket",
+            "winnerNextMatchId", "loserNextMatchId", "previousLeftId", "previousRightId", "side",
+            "officialCheckedIn", "team1", "team2", "teamOfficial", "official", "field",
+        )
+    })

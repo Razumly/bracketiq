@@ -69,6 +69,7 @@ export type EventFormState = {
     requiredTemplateIds: string[];
     hostId?: string;
     noFixedEndDateTime: boolean;
+    isAutomatedScheduling: boolean;
     imageId: string;
     seedColor: number;
     waitList: string[];

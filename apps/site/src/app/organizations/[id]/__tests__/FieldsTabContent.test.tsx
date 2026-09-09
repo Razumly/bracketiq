@@ -266,6 +266,7 @@ const buildOrganizationWithRentalSlot = () => ({
         {
           $id: 'slot_1',
           repeating: true,
+          timeZone: 'America/Los_Angeles',
           dayOfWeek: 1,
           daysOfWeek: [1],
           startDate: '2026-01-01T00:00:00.000Z',
@@ -693,6 +694,7 @@ describe('FieldsTabContent calendar navigation', () => {
             {
               $id: 'slot_1',
               repeating: true,
+              timeZone: 'America/Los_Angeles',
               dayOfWeek: ((rentalDate.getDay() + 6) % 7),
               daysOfWeek: [((rentalDate.getDay() + 6) % 7)],
               startDate: '2026-01-01T00:00:00.000Z',
@@ -3714,6 +3716,7 @@ describe('FieldsTabContent calendar navigation', () => {
             {
               $id: 'slot_1',
               repeating: true,
+              timeZone: 'America/Los_Angeles',
               dayOfWeek: 1,
               daysOfWeek: [1],
               startDate: '2026-01-01T00:00:00.000Z',

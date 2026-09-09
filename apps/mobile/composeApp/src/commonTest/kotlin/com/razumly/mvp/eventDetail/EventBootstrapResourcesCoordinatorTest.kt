@@ -1,66 +1,35 @@
 package com.razumly.mvp.eventDetail
 
+import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfig
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.toEventTimeSlotCacheEntry
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
+@OptIn(ExperimentalTime::class)
 class EventBootstrapResourcesCoordinatorTest {
     @Test
-    fun time_slot_target_orders_complete_bootstrap_slots_by_event_slot_ids() {
-        val target = resolveEventTimeSlotLoadTarget(
-            eventId = "event-1",
-            slotIds = listOf("slot-1", "slot-2"),
-            bootstrap = EventScopedValue(
-                eventId = "event-1",
-                value = listOf(slot("slot-2"), slot("unused"), slot("slot-1")),
+    fun given_room_event_relations_when_read_then_expose_time_slots_in_position_order() {
+        val relations = EventWithRelations(
+            event = Event(id = "event-1"),
+            host = null,
+            timeSlotCacheEntries = listOf(
+                slot("slot-2").toEventTimeSlotCacheEntry("event-1", position = 1),
+                slot("slot-1").toEventTimeSlotCacheEntry("event-1", position = 0),
             ),
-            bootstrappedEventIds = setOf("event-1"),
         )
 
-        assertEquals(listOf("slot-1", "slot-2"), target.slotIds)
-        assertEquals(listOf("slot-1", "slot-2"), target.bootstrapSlots?.map(TimeSlot::id))
-        assertTrue(target.bootstrapped)
+        assertEquals(listOf("slot-1", "slot-2"), relations.timeSlots.map(TimeSlot::id))
     }
 
     @Test
-    fun time_slot_target_requires_every_slot_before_using_bootstrap_slots() {
-        val target = resolveEventTimeSlotLoadTarget(
-            eventId = "event-1",
-            slotIds = listOf("slot-1", "slot-2"),
-            bootstrap = EventScopedValue(
-                eventId = "event-1",
-                value = listOf(slot("slot-1")),
-            ),
-            bootstrappedEventIds = emptySet(),
-        )
-
-        assertNull(target.bootstrapSlots)
-        assertFalse(target.bootstrapped)
-    }
-
-    @Test
-    fun time_slot_target_ignores_bootstrap_slots_for_other_events() {
-        val target = resolveEventTimeSlotLoadTarget(
-            eventId = "event-1",
-            slotIds = listOf("slot-1"),
-            bootstrap = EventScopedValue(
-                eventId = "event-2",
-                value = listOf(slot("slot-1")),
-            ),
-            bootstrappedEventIds = setOf("event-1"),
-        )
-
-        assertNull(target.bootstrapSlots)
-        assertTrue(target.bootstrapped)
-    }
-
-    @Test
-    fun league_scoring_target_uses_matching_bootstrap_config() {
+    fun given_matching_bootstrap_config_when_resolving_league_scoring_target_then_use_it() {
         val config = scoringConfig("scoring-1")
 
         val target = resolveEventLeagueScoringLoadTarget(
@@ -76,7 +45,7 @@ class EventBootstrapResourcesCoordinatorTest {
     }
 
     @Test
-    fun league_scoring_target_ignores_bootstrap_config_for_other_events() {
+    fun given_other_event_bootstrap_when_resolving_league_scoring_target_then_ignore_it() {
         val target = resolveEventLeagueScoringLoadTarget(
             eventId = "event-1",
             scoringConfigId = "scoring-1",

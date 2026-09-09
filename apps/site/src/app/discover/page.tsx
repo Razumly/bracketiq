@@ -158,7 +158,7 @@ function DiscoverPageContent() {
   const isLoadMoreRequestInFlightRef = useRef(false);
   const visibleEventIdsRef = useRef<Set<string>>(new Set());
 
-  const EVENT_TYPE_OPTIONS = useMemo(() => ['EVENT', 'TOURNAMENT', 'LEAGUE', 'WEEKLY_EVENT', 'TRYOUT', 'AFFILIATE'] as const, []);
+  const EVENT_TYPE_OPTIONS = useMemo(() => ['EVENT', 'TOURNAMENT', 'LEAGUE', 'WEEKLY_EVENT', 'TRYOUT'] as const, []);
   const [selectedEventTypes, setSelectedEventTypes] =
     useState<(typeof EVENT_TYPE_OPTIONS)[number][]>(() => {
       const requested = urlPreset.eventTypes.filter(

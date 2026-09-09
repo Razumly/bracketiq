@@ -1,6 +1,16 @@
 import { addMinutes } from 'date-fns';
 import type { Field, Match, Event as EventRecord, TimeSlot } from '@/types';
 import { getFacilityScopedFieldDisplayName } from '@/lib/fieldUtils';
+import {
+  resolveOneTimeTimeSlot,
+  TimeSlotValidationError,
+} from '@/lib/timeSlotAvailability';
+import {
+  enumerateRepeatingTimeSlotOccurrences,
+  RepeatingTimeSlotValidationError,
+  type ResolvedRepeatingTimeSlot,
+} from '@/lib/repeatingTimeSlotAvailability';
+
 
 const ONE_HOUR_IN_MINUTES = 60;
 
@@ -12,6 +22,7 @@ const parseToDate = (value?: string | Date | null): Date | null => {
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
+
 
 const ensureEndDate = (start: Date, rawEnd?: string | Date | null, fallbackMinutes: number = ONE_HOUR_IN_MINUTES): Date => {
   const parsed = parseToDate(rawEnd);
@@ -73,6 +84,15 @@ export type FacilityCalendarConflict = {
   hours: number;
 };
 
+export type FacilityCalendarDiagnostic = {
+  code: string;
+  message: string;
+  fieldId: string;
+  fieldName: string;
+  eventId?: string | null;
+  slotId?: string | null;
+};
+
 export type FacilityCalendarMetricTotals = {
   fieldCount: number;
   rentalSlotCount: number;
@@ -86,6 +106,7 @@ export type FacilityCalendarMetricTotals = {
   revenuePerCourtHourCents: number;
   utilizationPercent: number;
   conflicts: FacilityCalendarConflict[];
+  diagnostics: FacilityCalendarDiagnostic[];
 };
 
 export type FacilityCalendarFacilitySummary = FacilityCalendarMetricTotals & {
@@ -103,21 +124,6 @@ export type FacilityCalendarFeed = {
   range: CalendarRange;
 };
 
-const normalizeToMondayIndex = (date: Date): number => {
-  return (date.getDay() + 6) % 7;
-};
-
-const alignDateToSlot = (seed: Date, slotDay: number): Date => {
-  const aligned = new Date(seed.getTime());
-  aligned.setHours(0, 0, 0, 0);
-  const seedIndex = normalizeToMondayIndex(aligned);
-  let diff = slotDay - seedIndex;
-  if (diff < 0) {
-    diff += 7;
-  }
-  aligned.setDate(aligned.getDate() + diff);
-  return aligned;
-};
 
 const addDays = (date: Date, days: number): Date => {
   const next = new Date(date.getTime());
@@ -234,7 +240,24 @@ const emptyFacilityCalendarTotals = (fieldCount: number): FacilityCalendarMetric
   revenuePerCourtHourCents: 0,
   utilizationPercent: 0,
   conflicts: [],
+  diagnostics: [],
 });
+
+const appendFacilityCalendarDiagnostic = (
+  diagnostics: FacilityCalendarDiagnostic[],
+  diagnostic: FacilityCalendarDiagnostic,
+): void => {
+  const hasDuplicate = diagnostics.some((existing) => (
+    existing.code === diagnostic.code
+    && existing.fieldId === diagnostic.fieldId
+    && existing.eventId === diagnostic.eventId
+    && existing.slotId === diagnostic.slotId
+    && existing.message === diagnostic.message
+  ));
+  if (!hasDuplicate) {
+    diagnostics.push(diagnostic);
+  }
+};
 
 const normalizeMetricTotals = (totals: FacilityCalendarMetricTotals): FacilityCalendarMetricTotals => {
   const rentalInventoryHours = Math.max(0, totals.rentalInventoryHours);
@@ -263,7 +286,9 @@ const buildMetricTotalsForFields = (
   range: CalendarRange,
 ): FacilityCalendarMetricTotals => {
   const totals = emptyFacilityCalendarTotals(fields.length);
-  const entries = buildFieldCalendarEvents(fields, range);
+  const diagnostics: FacilityCalendarDiagnostic[] = [];
+  const entries = buildFieldCalendarEvents(fields, range, diagnostics);
+  totals.diagnostics.push(...diagnostics);
   const bookedEntries = entries
     .filter((entry) => entry.metaType === 'booked')
     .map((entry) => ({ entry, interval: getEntryInterval(entry, range) }))
@@ -770,7 +795,7 @@ export const buildFacilityCalendarFeed = (
 ): FacilityCalendarFeed => {
   const fieldsById = new Map(fields.map((field) => [field.$id, field]));
   const summary = buildFacilityCalendarSummary(fields, range);
-  const baseItems = buildFieldCalendarEvents(fields, range).map((entry) => buildBaseFeedItem(entry, fieldsById));
+  const baseItems = buildFieldCalendarEvents(fields, range, summary.diagnostics).map((entry) => buildBaseFeedItem(entry, fieldsById));
   const assignmentItems = buildHydratedAssignmentFeedItems(fields, range);
   const conflictItems = buildConflictFeedItems(summary.conflicts, fieldsById);
 
@@ -785,7 +810,11 @@ export const buildFacilityCalendarFeed = (
   };
 };
 
-export const buildFieldCalendarEvents = (fields: Field[], range: CalendarRange = null): FieldCalendarEntry[] => {
+export const buildFieldCalendarEvents = (
+  fields: Field[],
+  range: CalendarRange = null,
+  diagnostics?: FacilityCalendarDiagnostic[],
+): FieldCalendarEntry[] => {
   return fields.flatMap((field) => {
     const baseTitle = getFacilityScopedFieldDisplayName(field);
     const events = (field.events || []).filter((evt) => {
@@ -822,63 +851,83 @@ export const buildFieldCalendarEvents = (fields: Field[], range: CalendarRange =
             return;
           }
 
-          const slotDays = Array.from(
-            new Set(
-              (
-                Array.isArray(slot.daysOfWeek) && slot.daysOfWeek.length
-                  ? slot.daysOfWeek
-                  : typeof slot.dayOfWeek === 'number'
-                    ? [slot.dayOfWeek]
-                    : []
-              )
-                .map((value) => Number(value))
-                .filter((value) => Number.isInteger(value) && value >= 0 && value <= 6),
-            ),
-          );
-          const startMinutes = typeof slot.startTimeMinutes === 'number' ? slot.startTimeMinutes : null;
-          const endMinutes = typeof slot.endTimeMinutes === 'number' ? slot.endTimeMinutes : null;
-          if (!slotDays.length || startMinutes === null || endMinutes === null || endMinutes <= startMinutes) {
+          if (slot.repeating === false) {
+            try {
+              const resolved = resolveOneTimeTimeSlot(slot);
+              if (
+                resolved.start.getTime() < rangeEnd.getTime()
+                && resolved.end.getTime() > rangeStart.getTime()
+              ) {
+                generated.push({
+                  id: `field-booked-one-time-${field.$id}-${evt.$id}-${slot.$id}`,
+                  title: 'Booked',
+                  start: resolved.start,
+                  end: resolved.end,
+                  resourceId: field.$id,
+                  resource: evt,
+                  metaType: 'booked',
+                  fieldName: baseTitle,
+                });
+              }
+            } catch (error) {
+              if (error instanceof TimeSlotValidationError) {
+                if (!diagnostics) {
+                  throw error;
+                }
+                appendFacilityCalendarDiagnostic(diagnostics, {
+                  code: error.code,
+                  message: error.message,
+                  fieldId: field.$id,
+                  fieldName: baseTitle,
+                  eventId: evt.$id ?? null,
+                  slotId: slot.$id ?? null,
+                });
+                return;
+              }
+              throw error;
+            }
             return;
           }
 
-          const normalizedBase = new Date(baseStart.getTime());
-          normalizedBase.setHours(0, 0, 0, 0);
-
-          const slotEndBoundaryRaw = parseToDate(slot.endDate ?? null);
-          const slotEndBoundary = slotEndBoundaryRaw ? new Date(slotEndBoundaryRaw.getTime()) : null;
-          if (slotEndBoundary) {
-            slotEndBoundary.setHours(23, 59, 59, 999);
-          }
-
-          let weekCursor = new Date(rangeStart.getTime());
-          weekCursor.setDate(weekCursor.getDate() - normalizeToMondayIndex(weekCursor));
-          weekCursor.setHours(0, 0, 0, 0);
-
-          while (weekCursor <= rangeEnd) {
-            slotDays.forEach((slotDay) => {
-              const occurrence = addDays(weekCursor, slotDay);
-              if (occurrence < normalizedBase || occurrence < rangeStart || occurrence > rangeEnd) {
-                return;
-              }
-              if (slotEndBoundary && occurrence > slotEndBoundary) {
-                return;
-              }
-              const effectiveStart = new Date(occurrence.getTime());
-              effectiveStart.setMinutes(startMinutes);
-              const effectiveEnd = addMinutes(effectiveStart, Math.max(1, endMinutes - startMinutes));
-              generated.push({
-                id: `field-booked-weekly-${field.$id}-${evt.$id}-${slot.$id}-${effectiveStart.getTime()}`,
-                title: 'Booked',
-                start: effectiveStart,
-                end: effectiveEnd,
-                resourceId: field.$id,
-                resource: evt,
-                metaType: 'booked',
-                fieldName: baseTitle,
-              });
+          let resolvedOccurrences: ResolvedRepeatingTimeSlot[];
+          try {
+            resolvedOccurrences = enumerateRepeatingTimeSlotOccurrences({
+              slot,
+              windowStart: rangeStart,
+              windowEnd: rangeEnd,
             });
-            weekCursor = addDays(weekCursor, 7);
+          } catch (error) {
+            if (error instanceof RepeatingTimeSlotValidationError) {
+              if (!diagnostics) {
+                throw error;
+              }
+              appendFacilityCalendarDiagnostic(diagnostics, {
+                code: error.code,
+                message: error.message,
+                fieldId: field.$id,
+                fieldName: baseTitle,
+                eventId: evt.$id ?? null,
+                slotId: slot.$id ?? null,
+              });
+              return;
+            }
+            throw error;
           }
+
+          resolvedOccurrences.forEach((resolved) => {
+            const effectiveStart = resolved.start;
+            const effectiveEnd = resolved.end;
+            generated.push({
+              id: `field-booked-weekly-${field.$id}-${evt.$id}-${slot.$id}-${effectiveStart.getTime()}`,
+              title: 'Booked',
+              start: effectiveStart,
+              end: effectiveEnd,
+              resourceId: field.$id,
+              resource: evt,
+              metaType: 'booked',
+              fieldName: baseTitle,
+            });
+          });
         });
 
         return generated;
@@ -920,63 +969,48 @@ export const buildFieldCalendarEvents = (fields: Field[], range: CalendarRange =
         return;
       }
 
-      if (
-        slot.repeating &&
-        typeof slot.dayOfWeek === 'number' &&
-        typeof slot.startTimeMinutes === 'number' &&
-        typeof slot.endTimeMinutes === 'number'
-      ) {
+      if (slot.repeating) {
         const rangeStart = range ? new Date(range.start.getTime()) : new Date(baseStart.getTime());
-        const rangeEnd = range ? new Date(range.end.getTime()) : new Date(baseStart.getTime());
+        const rangeEnd = range ? new Date(range.end.getTime()) : addDays(rangeStart, 28);
         rangeStart.setHours(0, 0, 0, 0);
         rangeEnd.setHours(23, 59, 59, 999);
 
-        const normalizedBase = new Date(baseStart.getTime());
-        normalizedBase.setHours(0, 0, 0, 0);
-
-        if (rangeEnd < normalizedBase) {
-          return;
-        }
-
-        if (rangeStart < normalizedBase) {
-          rangeStart.setTime(normalizedBase.getTime());
-        }
-
-        const slotEndBoundaryRaw = parseToDate(slot.endDate ?? null);
-        const slotEndBoundary = slotEndBoundaryRaw ? new Date(slotEndBoundaryRaw.getTime()) : null;
-        if (slotEndBoundary) {
-          slotEndBoundary.setHours(23, 59, 59, 999);
-          if (slotEndBoundary < rangeStart) {
+        let resolvedOccurrences: ResolvedRepeatingTimeSlot[];
+        try {
+          resolvedOccurrences = enumerateRepeatingTimeSlotOccurrences({
+            slot,
+            windowStart: rangeStart,
+            windowEnd: rangeEnd,
+          });
+        } catch (error) {
+          if (error instanceof RepeatingTimeSlotValidationError) {
+            if (!diagnostics) {
+              throw error;
+            }
+            appendFacilityCalendarDiagnostic(diagnostics, {
+              code: error.code,
+              message: error.message,
+              fieldId: field.$id,
+              fieldName: baseTitle,
+              slotId: slot.$id ?? null,
+            });
             return;
           }
+          throw error;
         }
 
-        let occurrence = alignDateToSlot(rangeStart, slot.dayOfWeek);
-        if (occurrence < normalizedBase) {
-          const weeksToCatchUp = Math.ceil((normalizedBase.getTime() - occurrence.getTime()) / (7 * 24 * 60 * 60 * 1000));
-          occurrence = addDays(occurrence, weeksToCatchUp * 7);
-        }
-
-        const duration = Math.max(1, slot.endTimeMinutes - slot.startTimeMinutes);
-
-        while (occurrence <= rangeEnd && (!slotEndBoundary || occurrence <= slotEndBoundary)) {
-          const effectiveStart = new Date(occurrence.getTime());
-          effectiveStart.setMinutes(slot.startTimeMinutes);
-          const effectiveEnd = addMinutes(effectiveStart, duration);
-
+        resolvedOccurrences.forEach((resolved) => {
           rentalEntries.push({
-            id: `field-rental-${field.$id}-${slot.$id}-${effectiveStart.getTime()}`,
+            id: `field-rental-${field.$id}-${slot.$id}-${resolved.start.getTime()}`,
             title: 'Rental Slot',
-            start: effectiveStart,
-            end: effectiveEnd,
+            start: resolved.start,
+            end: resolved.end,
             resourceId: field.$id,
             resource: slot,
             metaType: 'rental',
             fieldName: baseTitle,
           });
-
-          occurrence = addDays(occurrence, 7);
-        }
+        });
 
         return;
       }

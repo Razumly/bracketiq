@@ -44,6 +44,7 @@ import com.razumly.mvp.core.data.repositories.RentalResourceOption
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
 import com.razumly.mvp.core.network.dto.TeamCheckInDto
+import com.razumly.mvp.core.network.dto.EventEditorSnapshotDto
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.composables.PermissionPrimerState
 import com.razumly.mvp.core.util.ErrorMessage
@@ -56,6 +57,7 @@ import kotlin.time.Instant
 
 interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val selectedEvent: StateFlow<Event>
+    val authorityVerified: StateFlow<Boolean>
     val divisionMatches: StateFlow<Map<String, MatchWithRelations>>
     val divisionTeams: StateFlow<Map<String, TeamWithPlayers>>
     val selectedDivision: StateFlow<String?>
@@ -89,7 +91,11 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val isHost: StateFlow<Boolean>
     val isEditing: StateFlow<Boolean>
     val eventEditorControlLocks: StateFlow<EventEditorControlLocks>
+    val eventEditorSnapshot: StateFlow<EventEditorSnapshotDto?>
+    val scheduleMaintenanceReview: StateFlow<EventScheduleMaintenanceReview?>
+    val scheduleMaintenanceOptions: StateFlow<EventScheduleMaintenanceOptions?>
     val eventTypeTransitionConfirmation: StateFlow<EventTypeTransitionConfirmation?>
+    val protectedMatchDeletionConfirmation: StateFlow<String?>
     val isUserInEvent: StateFlow<Boolean>
     val isRegistrationPaymentPending: StateFlow<Boolean>
     val isRegistrationPaymentFailed: StateFlow<Boolean>
@@ -193,6 +199,14 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun updateEvent()
     fun dismissEventTypeTransitionConfirmation()
     fun confirmEventTypeTransition()
+    fun acceptScheduleMaintenanceProposal()
+    fun openScheduleMaintenance()
+    fun dismissScheduleMaintenanceOptions()
+    fun selectScheduleMaintenanceOperation(operation: com.razumly.mvp.core.network.dto.EventEditorMaintenanceOperation)
+    fun retryAcceptedScheduleSync()
+    fun rejectScheduleMaintenanceProposal()
+    fun dismissScheduleMaintenanceReview()
+    fun requestFreshScheduleMaintenanceProposal()
     fun rescheduleEvent()
     fun buildSchedule()
     fun rebuildWithoutPlaceholderTeams()
@@ -256,6 +270,8 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun startEditingMatches()
     fun cancelEditingMatches()
     fun commitMatchChanges()
+    fun confirmProtectedMatchDeletion()
+    fun dismissProtectedMatchDeletionConfirmation()
     fun updateEditableMatch(matchId: String, updater: (MatchMVP) -> MatchMVP)
     fun setLockForEditableMatches(matchIds: List<String>, locked: Boolean)
     fun addScheduleMatch()

@@ -25,6 +25,7 @@ const prismaMock = {
   eventRegistrations: {
     findMany: jest.fn(),
   },
+  $executeRaw: jest.fn(),
 };
 
 const requireSessionMock = jest.fn();
@@ -98,6 +99,29 @@ describe('POST /api/billing/refund-all', () => {
         createdAt: new Date('2026-06-01T00:00:00.000Z'),
       },
     ]);
+  });
+  it('rejects refunds for an archived event before creating requests', async () => {
+    prismaMock.events.findUnique.mockResolvedValueOnce({
+      id: 'event_1',
+      hostId: 'host_1',
+      assistantHostIds: [],
+      organizationId: 'org_1',
+      userIds: [],
+      waitListIds: [],
+      freeAgentIds: [],
+      teamIds: [],
+      parentEvent: null,
+      archivedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+
+    const response = await POST(
+      jsonPost('http://localhost/api/billing/refund-all', { eventId: 'event_1' }),
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(payload.error).toBe('This weekly event is archived and no longer available.');
+    expect(prismaMock.refundRequests.create).not.toHaveBeenCalled();
   });
 
   it('rejects team-level refunds from event managers who are not team managers', async () => {

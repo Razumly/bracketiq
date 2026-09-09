@@ -1117,9 +1117,6 @@ fun MatchDetailScreen(
 
     val canUseMatchStatusActions = (canManageMatchActions || (isOfficial && officialCheckedIn && officialMatchWindowOpen)) &&
         !matchFinished
-    val canUsePreStartMatchActions = canUseMatchStatusActions &&
-        match.match.actualStart.isNullOrBlank() &&
-        !matchSuspended
     val canSuspendMatch = canUseMatchStatusActions && !matchSuspended
     val canResumeMatch = canUseMatchStatusActions && matchSuspended
 
@@ -1369,6 +1366,7 @@ fun MatchDetailScreen(
                         when (actionTarget.action) {
                             "FORFEIT" -> actionTarget.forfeitingEventTeamId?.let(component::forfeitTeam)
                             "CANCEL" -> component.cancelMatch()
+                            "NO_CONTEST" -> component.noContestMatch()
                             "SUSPEND" -> component.suspendMatch()
                             "RESUME" -> component.resumeMatch()
                         }
@@ -1843,9 +1841,9 @@ fun MatchDetailScreen(
                     ?.let { teamId -> matchTeamCheckIns[teamId]?.status?.equals("CHECKED_IN", ignoreCase = true) == true }
                     == true,
                 canUseMatchStatusActions = canUseMatchStatusActions,
-                canUsePreStartMatchActions = canUsePreStartMatchActions &&
+                canForfeitMatch = canUseMatchStatusActions &&
                     !match.match.team1Id.isNullOrBlank() &&
-                    !match.match.team2Id.isNullOrBlank(),
+                    !match.match.team2Id.isNullOrBlank() && match.match.team1Id != match.match.team2Id,
                 canSuspendMatch = canSuspendMatch,
                 canResumeMatch = canResumeMatch,
                 canAddIncident = canAddIncident,
@@ -1865,6 +1863,14 @@ fun MatchDetailScreen(
                         title = "Suspend match?",
                         message = "This match will be suspended and can be resumed later.",
                         confirmLabel = "Suspend",
+                    )
+                },
+                onNoContestMatchClick = {
+                    pendingMatchAction = MatchActionDialogTarget(
+                        action = "NO_CONTEST",
+                        title = "Record no contest?",
+                        message = "This match will end without a winner. Dependent matches will not advance.",
+                        confirmLabel = "No contest",
                     )
                 },
                 onResumeMatchClick = {
@@ -2186,7 +2192,7 @@ private fun MatchDetailBottomActions(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Warning,
-                        contentDescription = "Field differs from event location",
+                        contentDescription = "Resource differs from event location",
                         tint = MaterialTheme.colorScheme.error,
                     )
                     Text(

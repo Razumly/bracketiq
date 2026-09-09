@@ -4,6 +4,8 @@ import { prisma } from '@/lib/prisma';
 import { getOptionalSession, requireSession } from '@/lib/permissions';
 import { calculateAgeOnDate } from '@/lib/age';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
+import type { EventRegistrationsStatusEnum } from '@/generated/prisma/enums';
+
 import {
   resolveEventDivisionSelection,
 } from '@/app/api/events/[eventId]/registrationDivisionUtils';
@@ -21,7 +23,10 @@ import {
   syncDivisionTeamMembershipFromRegistrations,
   upsertEventRegistration,
   acquireEventLockAndLoadStructure,
+  normalizeEventRegistrationPaymentResolutionReason,
 } from '@/server/events/eventRegistrations';
+
+import { eventRegistrationErrorResponse } from '@/server/events/eventRegistrationErrorResponse';
 import {
   claimOrCreateEventTeamSnapshot,
   findRegisteredEventTeamForCanonical,
@@ -29,10 +34,16 @@ import {
   loadCanonicalTeamById,
 } from '@/server/teams/teamMembership';
 import {
+  acquireEventMutationTarget,
+  assertEventMutationTargetActive,
+  EventMutationArchivedError,
+  isActiveWeeklyParentEvent,
+  isArchivedWeeklyParentEvent,
   isWeeklyParentEvent,
   isWeeklyOccurrenceJoinClosed,
   resolveWeeklyOccurrence,
   resolveWeeklyOccurrenceStartAt,
+  WEEKLY_EVENT_ARCHIVED_ERROR,
   WEEKLY_OCCURRENCE_JOIN_CLOSED_ERROR,
 } from '@/server/events/weeklyOccurrences';
 import { getRefundPolicy } from '@/lib/refundPolicy';
@@ -129,6 +140,7 @@ const paymentFailedRegistrationSelect = {
   registrantType: true,
   rosterRole: true,
   status: true,
+  paymentResolutionReason: true,
   parentId: true,
   eventTeamId: true,
   divisionId: true,
@@ -141,13 +153,22 @@ const paymentFailedRegistrationSelect = {
   createdAt: true,
   updatedAt: true,
 } as const;
+type ParticipantRegistrationRow = Prisma.EventRegistrationsGetPayload<{
+  select: typeof paymentFailedRegistrationSelect;
+}> & {
+  status: EventRegistrationsStatusEnum | null;
+};
 
-const toRegistrationEntry = (row: any) => ({
+
+const toRegistrationEntry = (row: ParticipantRegistrationRow) => ({
   registrationId: row.id,
   registrantId: row.registrantId,
   registrantType: row.registrantType,
   rosterRole: row.rosterRole,
   status: row.status,
+  paymentResolutionReason: normalizeEventRegistrationPaymentResolutionReason(
+    row.paymentResolutionReason,
+  ),
   parentId: normalizeId(row.parentId),
   divisionId: normalizeId(row.divisionId),
   divisionTypeId: normalizeId(row.divisionTypeId),
@@ -207,14 +228,23 @@ const loadViewerPaymentFailedRegistrations = async ({
       { registrantType: 'TEAM', parentId: { in: viewerTeamIds } },
     );
   }
-
   const rows = await prisma.eventRegistrations.findMany({
     where: {
       eventId,
-      status: 'PAYMENT_FAILED' as any,
       slotId: slotId ?? null,
       occurrenceDate: occurrenceDate ?? null,
-      OR: or,
+      AND: [
+        {
+          OR: [
+            { status: 'PAYMENT_FAILED' },
+            {
+              status: 'CANCELLED',
+              paymentResolutionReason: { not: null },
+            },
+          ],
+        },
+        { OR: or },
+      ],
     },
     select: paymentFailedRegistrationSelect,
     orderBy: [
@@ -340,6 +370,7 @@ const createWeeklyPaymentPlanBillForRegistration = async (
     event: any;
     ownerType: 'USER' | 'TEAM';
     ownerId: string;
+    registrationId: string;
     divisionSelection: {
       divisionId?: string | null;
       divisionTypeId?: string | null;
@@ -349,7 +380,7 @@ const createWeeklyPaymentPlanBillForRegistration = async (
     createdBy: string;
   },
 ) => {
-  if (!isWeeklyParentEvent(params.event) || !params.occurrence) {
+  if (!isActiveWeeklyParentEvent(params.event) || !params.occurrence) {
     return null;
   }
 
@@ -357,6 +388,11 @@ const createWeeklyPaymentPlanBillForRegistration = async (
   if (!ownerId) {
     return null;
   }
+  const registrationId = normalizeId(params.registrationId);
+  if (!registrationId) {
+    return null;
+  }
+
 
   const division = await resolveBillingDivision(
     params.tx,
@@ -406,10 +442,20 @@ const createWeeklyPaymentPlanBillForRegistration = async (
       parentBillId: null,
       paymentPlanEnabled: true,
     },
-    select: { id: true },
+    select: { id: true, sourceType: true, sourceId: true },
   } as any);
   if (existing) {
-    return existing;
+    if (existing.sourceType === 'EVENT_REGISTRATION' && existing.sourceId === registrationId) {
+      return existing;
+    }
+    return params.tx.bills.update({
+      where: { id: existing.id },
+      data: {
+        sourceType: 'EVENT_REGISTRATION',
+        sourceId: registrationId,
+        updatedAt: new Date(),
+      },
+    });
   }
 
   const now = new Date();
@@ -421,6 +467,8 @@ const createWeeklyPaymentPlanBillForRegistration = async (
       totalAmountCents,
       paidAmountCents: 0,
       eventId: params.event.id,
+      sourceType: 'EVENT_REGISTRATION',
+      sourceId: registrationId,
       slotId: params.occurrence.slotId,
       occurrenceDate: params.occurrence.occurrenceDate,
       organizationId: normalizeId(params.event.organizationId),
@@ -679,13 +727,13 @@ const cancelFreeAgentRegistrationsForUsers = async ({
     where: {
       eventId,
       ...buildOccurrenceWhere(occurrence),
-      registrantType: { in: ['SELF', 'CHILD'] as any[] },
+      registrantType: { in: ['SELF', 'CHILD'] },
       registrantId: { in: normalizedUserIds },
-      rosterRole: 'FREE_AGENT' as any,
-      status: { in: [...ACTIVE_REGISTRATION_STATUSES] as any[] },
+      rosterRole: 'FREE_AGENT',
+      status: { in: [...ACTIVE_REGISTRATION_STATUSES] },
     },
     data: {
-      status: 'CANCELLED' as any,
+      status: 'CANCELLED',
       updatedAt: new Date(),
     },
   });
@@ -1011,10 +1059,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ even
       manualPaymentLinks: true,
       manualPaymentInstructions: true,
       timeSlotIds: true,
+      start: true,
+      end: true,
+      archivedAt: true,
     },
   });
   if (!event) {
     return NextResponse.json({ error: 'Event not found' }, { status: 404 });
+  }
+  if (isArchivedWeeklyParentEvent(event)) {
+    return NextResponse.json({ error: WEEKLY_EVENT_ARCHIVED_ERROR }, { status: 409 });
   }
 
   const eventState = String(event.state ?? '').toUpperCase();
@@ -1032,7 +1086,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ even
   if (manageModeRequested && !canManageCurrentEvent) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
-  if (isWeeklyParentEvent(event) && (!slotId || !occurrenceDate)) {
+  if (isActiveWeeklyParentEvent(event) && (!slotId || !occurrenceDate)) {
     return NextResponse.json({
       event: await toEventResponse(event),
       participants: {
@@ -1060,10 +1114,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ even
       weeklySelectionRequired: true,
     }, { status: 200 });
   }
-  if (!isWeeklyParentEvent(event) && (slotId || occurrenceDate)) {
+  if (!isActiveWeeklyParentEvent(event) && (slotId || occurrenceDate)) {
     return NextResponse.json({ error: 'Weekly occurrence selection is only valid for weekly events.' }, { status: 400 });
   }
-  if (isWeeklyParentEvent(event)) {
+  if (isActiveWeeklyParentEvent(event)) {
     const resolvedOccurrence = await resolveWeeklyOccurrence({
       event,
       occurrence: {
@@ -1202,13 +1256,32 @@ async function updateParticipants(
     return NextResponse.json({ error: 'Invalid input', details: parsed.error.flatten() }, { status: 400 });
   }
 
-  const { eventId } = await params;
-  const event = await prisma.events.findUnique({
-    where: { id: eventId },
-  });
-  if (!event) {
+  let eventId = (await params).eventId;
+  const requestedUserId = parsed.data.userId ?? extractId(parsed.data.user);
+  const requestedTeamId = parsed.data.teamId ?? extractId(parsed.data.team);
+  const allowArchivedAutoTeamRemoval = mode === 'remove'
+    && Boolean(requestedTeamId)
+    && parsed.data.refundMode === 'auto';
+  let eventTarget;
+  try {
+    eventTarget = await prisma.$transaction((tx) => (
+      acquireEventMutationTarget(tx, eventId)
+    ));
+    if (!allowArchivedAutoTeamRemoval) {
+      assertEventMutationTargetActive(eventTarget);
+    }
+  } catch (error) {
+    if (error instanceof EventMutationArchivedError) {
+      return NextResponse.json({ error: WEEKLY_EVENT_ARCHIVED_ERROR }, { status: 409 });
+    }
+    throw error;
+  }
+  if (!eventTarget) {
     return NextResponse.json({ error: 'Event not found' }, { status: 404 });
   }
+  const event = eventTarget.parentEvent ?? eventTarget.event;
+  eventId = event.id;
+
   const affiliateUrl = typeof event.affiliateUrl === 'string' ? event.affiliateUrl.trim() : '';
   if (mode === 'add' && affiliateUrl.length > 0) {
     return NextResponse.json(
@@ -1222,8 +1295,8 @@ async function updateParticipants(
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
-  const userId = parsed.data.userId ?? extractId(parsed.data.user);
-  const teamId = parsed.data.teamId ?? extractId(parsed.data.team);
+  const userId = requestedUserId;
+  const teamId = requestedTeamId;
   if ((userId && teamId) || (!userId && !teamId)) {
     return NextResponse.json(
       { error: 'Specify exactly one participant target via userId or teamId.' },
@@ -1232,22 +1305,24 @@ async function updateParticipants(
   }
 
   const hasOccurrenceInput = Boolean(parsed.data.slotId || parsed.data.occurrenceDate);
-  const weeklyOccurrence = isWeeklyParentEvent(event)
+  const weeklyParent = isWeeklyParentEvent(event);
+  const weeklyOccurrence = weeklyParent
     ? await resolveWeeklyOccurrence({
       event,
       occurrence: parsed.data,
+      allowArchivedEvent: allowArchivedAutoTeamRemoval,
     })
     : null;
   if (weeklyOccurrence && !weeklyOccurrence.ok) {
     return NextResponse.json({ error: weeklyOccurrence.error }, { status: 400 });
   }
-  if (isWeeklyParentEvent(event) && (!parsed.data.slotId || !parsed.data.occurrenceDate)) {
+  if (weeklyParent && (!parsed.data.slotId || !parsed.data.occurrenceDate)) {
     return NextResponse.json(
       { error: 'Weekly events require slotId and occurrenceDate for participant changes.' },
       { status: 400 },
     );
   }
-  if (!isWeeklyParentEvent(event) && hasOccurrenceInput) {
+  if (!weeklyParent && hasOccurrenceInput) {
     return NextResponse.json(
       { error: 'Weekly occurrence selection is only valid for weekly events.' },
       { status: 400 },
@@ -1434,6 +1509,8 @@ async function updateParticipants(
           return registration;
         });
       } catch (error) {
+        const archivedResponse = eventRegistrationErrorResponse(error);
+        if (archivedResponse) return archivedResponse;
         if ((error as { code?: unknown })?.code === 'EVENT_CONFIGURATION_CHANGED') {
           return NextResponse.json(
             {
@@ -1441,6 +1518,29 @@ async function updateParticipants(
               code: 'EVENT_CONFIGURATION_CHANGED',
             },
             { status: 409 },
+          );
+        }
+        const errorCode = error && typeof error === 'object' && 'code' in error
+          ? error.code
+          : null;
+        if (errorCode === 'EVENT_REGISTRATION_CAPACITY_EXCEEDED') {
+          return NextResponse.json(
+            {
+              error: error instanceof Error ? error.message : 'Event registration capacity has been reached.',
+              code: 'EVENT_REGISTRATION_CAPACITY_EXCEEDED',
+              capacity: (error as { capacity?: number })?.capacity,
+              participantCount: (error as { participantCount?: number })?.participantCount,
+            },
+            { status: 409 },
+          );
+        }
+        if (errorCode === 'INVALID_EVENT_REGISTRATION_UNIT') {
+          return NextResponse.json(
+            {
+              error: error instanceof Error ? error.message : 'The registration unit does not match this event.',
+              code: 'INVALID_EVENT_REGISTRATION_UNIT',
+            },
+            { status: 400 },
           );
         }
         throw error;
@@ -1477,6 +1577,7 @@ async function updateParticipants(
   let teamRefundAuthorizedPayerUserIds: string[] = [];
   let teamRefundRequestTeamId: string | null = null;
   let canonicalTeamRow: Record<string, any> | null = null;
+  let isTeamManagerForRemoval = false;
   let teamForRemoval: Record<string, any> | null = null;
 
   if (teamId) {
@@ -1492,6 +1593,7 @@ async function updateParticipants(
     }, prisma);
     const isTeamManager = normalizeId((team as any).managerId) === session.userId
       || normalizeId((team as any).captainId) === session.userId;
+    isTeamManagerForRemoval = isTeamManager;
     if (!session.isAdmin && !isTeamManager && !canManageCurrentEvent) {
       return NextResponse.json(
         { error: 'Only the team manager can register or withdraw this team.' },
@@ -1708,6 +1810,13 @@ async function updateParticipants(
             return { bill };
           });
         } catch (error) {
+          if ((error as { code?: unknown })?.code === 'EVENT_REGISTRATION_EVENT_ARCHIVED') {
+            return {
+              error: error instanceof Error ? error.message : 'This weekly event is archived and no longer accepts registration changes.',
+              code: 'EVENT_REGISTRATION_EVENT_ARCHIVED',
+              status: 409,
+            };
+          }
           const errorCode = error && typeof error === 'object' && 'code' in error
             ? error.code
             : null;
@@ -1725,12 +1834,37 @@ async function updateParticipants(
               status: 409,
             };
           }
+          if (errorCode === 'EVENT_REGISTRATION_CAPACITY_EXCEEDED') {
+            return {
+              error: error instanceof Error ? error.message : 'Event registration capacity has been reached.',
+              code: 'EVENT_REGISTRATION_CAPACITY_EXCEEDED',
+              capacity: (error as { capacity?: number })?.capacity,
+              participantCount: (error as { participantCount?: number })?.participantCount,
+              status: 409,
+            };
+          }
+          if (errorCode === 'INVALID_EVENT_REGISTRATION_UNIT') {
+            return {
+              error: error instanceof Error ? error.message : 'The registration unit does not match this event.',
+              code: 'INVALID_EVENT_REGISTRATION_UNIT',
+              status: 400,
+            };
+          }
           throw error;
         }
       })();
       if ('error' in result) {
         return NextResponse.json(
-          { error: result.error, code: result.code },
+          {
+            error: result.error,
+            code: result.code,
+            ...('capacity' in result
+              ? {
+                  capacity: result.capacity,
+                  participantCount: result.participantCount,
+                }
+              : {}),
+          },
           { status: result.status ?? 409 },
         );
       }
@@ -1771,7 +1905,7 @@ async function updateParticipants(
         orderBy: { updatedAt: 'desc' },
         select: refundRequestSelect,
       }) as RefundRequestRow | null;
-      existingAutoRefundRequest = (session.isAdmin || canManageCurrentEvent)
+      existingAutoRefundRequest = (session.isAdmin || canManageCurrentEvent || isTeamManagerForRemoval)
         && existingAutoRefundCandidate
         && isRefundScopeSnapshotValid(existingAutoRefundCandidate)
         ? existingAutoRefundCandidate
@@ -1788,7 +1922,7 @@ async function updateParticipants(
           eventId: event.id,
           userId: session.userId,
           requestedByUserId: session.userId,
-          hostId: event.hostId,
+          hostId: event.hostId ?? null,
           teamId: teamRefundRequestTeamId ?? teamId,
           organizationId: event.organizationId ?? null,
           reason: teamRefundReason,
@@ -1799,32 +1933,135 @@ async function updateParticipants(
         };
 
       try {
-        const refundablePayments = await resolveRefundablePaymentsForRequest(
-          prisma,
-          autoRefundRequest,
-          { scopeMode: 'TEAM_WIDE' },
-        );
-        if (existingAutoRefundRequest && hasRefundScopeDrift(existingAutoRefundRequest, refundablePayments)) {
+        if (!autoRefundRequest) {
+          throw new Error('Automatic refund request was not initialized.');
+        }
+        const initializedAutoRefundRequest = autoRefundRequest;
+        const intent = await prisma.$transaction(async (tx) => {
+          const target = await acquireEventMutationTarget(tx, event.id);
+          if (!target) {
+            return { kind: 'missing' as const };
+          }
+
+          let lockedExistingRequest = existingAutoRefundRequest;
+          if (!lockedExistingRequest && (session.isAdmin || canManageCurrentEvent || isTeamManagerForRemoval)) {
+            const lockedCandidate = await tx.refundRequests.findFirst({
+              where: {
+                eventId: event.id,
+                teamId: { in: refundTeamIds },
+                requestedByUserId: session.userId,
+                slotId: resolvedOccurrence?.slotId ?? null,
+                occurrenceDate: resolvedOccurrence?.occurrenceDate ?? null,
+                status: { in: ['WAITING', 'APPROVED'] },
+              },
+              orderBy: { updatedAt: 'desc' },
+              select: refundRequestSelect,
+            }) as RefundRequestRow | null;
+            lockedExistingRequest = lockedCandidate
+              && isRefundScopeSnapshotValid(lockedCandidate)
+              ? lockedCandidate
+              : null;
+          }
+          const targetArchived = Boolean(
+            target.event.archivedAt || target.parentEvent?.archivedAt,
+          );
+          if (targetArchived && !lockedExistingRequest) {
+            return { kind: 'archived' as const };
+          }
+
+          const requestForIntent: RefundRequestRow = lockedExistingRequest
+            ? {
+              ...lockedExistingRequest,
+              reason: teamRefundReason,
+              slotId: resolvedOccurrence?.slotId ?? null,
+              occurrenceDate: resolvedOccurrence?.occurrenceDate ?? null,
+            }
+            : initializedAutoRefundRequest;
+          const refundablePayments = await resolveRefundablePaymentsForRequest(
+            tx,
+            requestForIntent,
+            { scopeMode: 'TEAM_WIDE' },
+          );
+          if (
+            lockedExistingRequest
+            && hasRefundScopeDrift(lockedExistingRequest, refundablePayments)
+          ) {
+            return { kind: 'scope_drift' as const };
+          }
+          if (!lockedExistingRequest && !refundablePayments.length) {
+            return { kind: 'no_payments' as const };
+          }
+
+          let persistedRequest = requestForIntent;
+          if (!lockedExistingRequest) {
+            persistedRequest = {
+              ...requestForIntent,
+              status: 'WAITING',
+              ...buildRefundScopeSnapshot(
+                requestForIntent,
+                refundablePayments,
+                'AUTO_APPROVED',
+              ),
+            };
+            await tx.refundRequests.create({
+              data: {
+                id: persistedRequest.id,
+                eventId: persistedRequest.eventId,
+                userId: persistedRequest.userId,
+                requestedByUserId: persistedRequest.requestedByUserId,
+                hostId: persistedRequest.hostId,
+                teamId: persistedRequest.teamId,
+                organizationId: persistedRequest.organizationId,
+                slotId: persistedRequest.slotId ?? null,
+                occurrenceDate: persistedRequest.occurrenceDate ?? null,
+                billIds: persistedRequest.billIds ?? [],
+                paymentIds: persistedRequest.paymentIds ?? [],
+                paymentScope: persistedRequest.paymentScope ?? [],
+                requestedAmountCents: persistedRequest.requestedAmountCents ?? 0,
+                currency: persistedRequest.currency ?? 'usd',
+                policyDecision: persistedRequest.policyDecision,
+                scopeVersion: persistedRequest.scopeVersion ?? REFUND_SCOPE_VERSION,
+                scopeHash: persistedRequest.scopeHash,
+                reason: persistedRequest.reason,
+                status: 'WAITING',
+                createdAt: now,
+                updatedAt: now,
+              },
+            });
+          }
+
+          return {
+            kind: 'ready' as const,
+            existingRequest: lockedExistingRequest,
+            request: persistedRequest,
+            refundablePayments,
+          };
+        });
+
+        if (intent.kind === 'missing' || intent.kind === 'archived') {
+          return NextResponse.json(
+            { error: WEEKLY_EVENT_ARCHIVED_ERROR },
+            { status: 409 },
+          );
+        }
+        if (intent.kind === 'scope_drift') {
           return NextResponse.json(
             { error: 'The payment scope changed after this automatic refund was created. Submit a new refund request.' },
             { status: 409 },
           );
         }
-        if (!existingAutoRefundRequest && !refundablePayments.length) {
+        if (intent.kind === 'no_payments') {
           return NextResponse.json(
             { error: 'No refundable payment found for automatic refund.' },
             { status: 400 },
           );
         }
-        if (!existingAutoRefundRequest) {
-          autoRefundRequest = {
-            ...autoRefundRequest,
-            ...buildRefundScopeSnapshot(autoRefundRequest, refundablePayments, 'AUTO_APPROVED'),
-          };
-        }
+
+        existingAutoRefundRequest = intent.existingRequest;
+        autoRefundRequest = intent.request;
         autoRefundAttempts = await createStripeRefundAttempts({
-          request: autoRefundRequest,
-          payments: refundablePayments,
+          request: intent.request,
+          payments: intent.refundablePayments,
           approvedByUserId: session.userId,
         });
       } catch (error) {
@@ -1843,14 +2080,28 @@ async function updateParticipants(
       }
     }
 
+    const allowArchivedRefundIntent = requestedRefundMode === 'auto'
+      && autoRefundRequest !== null;
     const updatedEvent = await prisma.$transaction(async (tx) => {
+      const target = await acquireEventMutationTarget(tx, event.id);
+      if (
+        !target
+        || (
+          (target.event.archivedAt || target.parentEvent?.archivedAt)
+          && !allowArchivedRefundIntent
+        )
+      ) {
+        return null;
+      }
       const eventTeamIdToRemove = normalizeId(existingRegistration.eventTeamId) ?? normalizeId(existingRegistration.registrantId) ?? teamId;
       await deleteEventRegistration({
         eventId: event.id,
         registrantType: 'TEAM',
         registrantId: eventTeamIdToRemove,
         occurrence: resolvedOccurrence,
+        allowArchivedWeeklyReservation: allowArchivedRefundIntent,
       }, tx);
+
       let removedTournamentPoolId: string | null = null;
       if (isTournamentPoolPlayEnabled(event)) {
         removedTournamentPoolId = await removeRegisteredTeamFromTournamentPools({
@@ -1912,46 +2163,18 @@ async function updateParticipants(
       });
 
       if (requestedRefundMode === 'auto' && autoRefundRequest) {
-        if (existingAutoRefundRequest) {
-          await tx.refundRequests.update({
-            where: { id: existingAutoRefundRequest.id },
-            data: {
-              status: 'APPROVED',
-              updatedAt: now,
-            },
-          });
-        } else {
-          await tx.refundRequests.create({
-            data: {
-              id: autoRefundRequest.id,
-              eventId: autoRefundRequest.eventId,
-              userId: autoRefundRequest.userId,
-              requestedByUserId: autoRefundRequest.requestedByUserId,
-              hostId: autoRefundRequest.hostId,
-              teamId: autoRefundRequest.teamId,
-              organizationId: autoRefundRequest.organizationId,
-              slotId: autoRefundRequest.slotId ?? null,
-              occurrenceDate: autoRefundRequest.occurrenceDate ?? null,
-              billIds: autoRefundRequest.billIds ?? [],
-              paymentIds: autoRefundRequest.paymentIds ?? [],
-              paymentScope: autoRefundRequest.paymentScope ?? [],
-              requestedAmountCents: autoRefundRequest.requestedAmountCents ?? 0,
-              currency: autoRefundRequest.currency ?? 'usd',
-              policyDecision: autoRefundRequest.policyDecision,
-              scopeVersion: autoRefundRequest.scopeVersion ?? REFUND_SCOPE_VERSION,
-              scopeHash: autoRefundRequest.scopeHash,
-              reason: autoRefundRequest.reason,
-              status: 'APPROVED',
-              createdAt: now,
-              updatedAt: now,
-            },
-          });
-        }
+        await tx.refundRequests.update({
+          where: { id: autoRefundRequest.id },
+          data: {
+            status: 'APPROVED',
+            updatedAt: now,
+          },
+        });
         await applyRefundAttempts(tx, autoRefundAttempts, now);
       } else {
         await ensureTeamRefundRequest({
           eventId: event.id,
-          hostId: event.hostId,
+          hostId: event.hostId ?? null,
           organizationId: event.organizationId ?? null,
           teamId: teamRefundRequestTeamId ?? normalizeId(existingRegistration.eventTeamId) ?? teamId,
           requestedByUserId: session.userId,
@@ -1965,6 +2188,9 @@ async function updateParticipants(
       return touchedEvent;
     });
 
+    if (!updatedEvent) {
+      return NextResponse.json({ error: WEEKLY_EVENT_ARCHIVED_ERROR }, { status: 409 });
+    }
     return NextResponse.json({
       event: await toEventResponse(updatedEvent),
       warnings: warnings.length ? warnings : undefined,
@@ -2123,6 +2349,8 @@ async function updateParticipants(
         return { registration, bill };
       });
     } catch (error) {
+      const archivedResponse = eventRegistrationErrorResponse(error);
+      if (archivedResponse) return archivedResponse;
       if ((error as { code?: unknown })?.code === 'EVENT_CONFIGURATION_CHANGED') {
         return NextResponse.json(
           {
@@ -2130,6 +2358,29 @@ async function updateParticipants(
             code: 'EVENT_CONFIGURATION_CHANGED',
           },
           { status: 409 },
+        );
+      }
+      const errorCode = error && typeof error === 'object' && 'code' in error
+        ? error.code
+        : null;
+      if (errorCode === 'EVENT_REGISTRATION_CAPACITY_EXCEEDED') {
+        return NextResponse.json(
+          {
+            error: error instanceof Error ? error.message : 'Event registration capacity has been reached.',
+            code: 'EVENT_REGISTRATION_CAPACITY_EXCEEDED',
+            capacity: (error as { capacity?: number })?.capacity,
+            participantCount: (error as { participantCount?: number })?.participantCount,
+          },
+          { status: 409 },
+        );
+      }
+      if (errorCode === 'INVALID_EVENT_REGISTRATION_UNIT') {
+        return NextResponse.json(
+          {
+            error: error instanceof Error ? error.message : 'The registration unit does not match this event.',
+            code: 'INVALID_EVENT_REGISTRATION_UNIT',
+          },
+          { status: 400 },
         );
       }
       throw error;
@@ -2144,6 +2395,10 @@ async function updateParticipants(
   }
 
   const updatedEvent = await prisma.$transaction(async (tx) => {
+    const target = await acquireEventMutationTarget(tx, event.id);
+    if (!target || target.event.archivedAt || target.parentEvent?.archivedAt) {
+      return null;
+    }
     await tx.eventRegistrations.updateMany({
       where: {
         eventId: event.id,
@@ -2170,6 +2425,9 @@ async function updateParticipants(
       data: { updatedAt: new Date() },
     });
   });
+  if (!updatedEvent) {
+    return NextResponse.json({ error: WEEKLY_EVENT_ARCHIVED_ERROR }, { status: 409 });
+  }
 
   await prisma.invites?.deleteMany?.({
     where: {

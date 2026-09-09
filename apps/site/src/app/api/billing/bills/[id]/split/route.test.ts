@@ -53,6 +53,11 @@ describe('POST /api/billing/bills/[id]/split', () => {
       ownerId: 'team_1',
       organizationId: 'org_1',
       eventId: 'event_1',
+      sourceType: 'EVENT_REGISTRATION',
+      sourceId: 'registration_1',
+      lineItems: [
+        { purchaseType: 'event', eventRegistrationId: 'registration_1' },
+      ],
       totalAmountCents: 1000,
       paidAmountCents: 0,
       paymentPlanEnabled: true,
@@ -115,6 +120,14 @@ describe('POST /api/billing/bills/[id]/split', () => {
           nextPaymentDue: dueDateOne,
           nextPaymentAmountCents: 300,
           paymentPlanEnabled: true,
+          sourceType: 'EVENT_REGISTRATION',
+          sourceId: 'registration_1',
+          lineItems: expect.arrayContaining([
+            expect.objectContaining({
+              purchaseType: 'event',
+              eventRegistrationId: 'registration_1',
+            }),
+          ]),
           parentBillId: 'bill_team_1',
         }),
       }),
@@ -127,6 +140,14 @@ describe('POST /api/billing/bills/[id]/split', () => {
           totalAmountCents: 500,
           nextPaymentDue: dueDateOne,
           nextPaymentAmountCents: 300,
+          sourceType: 'EVENT_REGISTRATION',
+          sourceId: 'registration_1',
+          lineItems: expect.arrayContaining([
+            expect.objectContaining({
+              purchaseType: 'event',
+              eventRegistrationId: 'registration_1',
+            }),
+          ]),
           paymentPlanEnabled: true,
           parentBillId: 'bill_team_1',
         }),

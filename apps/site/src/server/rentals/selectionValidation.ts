@@ -1,7 +1,10 @@
 import { z } from 'zod';
 import {
-  localDatePartsInTimeZone,
-  mondayDayInTimeZone,
+  addRepeatingTimeSlotLocalDays,
+  getRepeatingTimeSlotLocalDate,
+  resolveRepeatingTimeSlotOccurrence,
+} from '@/lib/repeatingTimeSlotAvailability';
+import {
   minutesInTimeZone,
   parseDateInputInTimeZone,
   resolveTimeZone,
@@ -86,33 +89,12 @@ export const normalizeRentalStringArray = (value: unknown): string[] => (
     : []
 );
 
-const dateOnlyValueInTimeZone = (date: Date, timeZone: string): number => {
-  const parts = localDatePartsInTimeZone(date, timeZone);
-  if (!parts) {
-    return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
-  }
-  return Date.UTC(parts.year, parts.month - 1, parts.day);
-};
-
 const MINUTES_PER_DAY = 24 * 60;
-const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
-const recurringSelectionEndMinutes = (
-  start: Date,
-  end: Date,
-  timeZone: string,
-): number | null => {
-  const startDateValue = dateOnlyValueInTimeZone(start, timeZone);
-  const endDateValue = dateOnlyValueInTimeZone(end, timeZone);
-  const daySpan = (endDateValue - startDateValue) / MILLISECONDS_PER_DAY;
-  if (!Number.isInteger(daySpan) || daySpan < 0 || daySpan > 1) {
-    return null;
-  }
-  return minutesInTimeZone(end, timeZone) + (daySpan * MINUTES_PER_DAY);
-};
 
 type RentalSlotMinuteBounds = {
   startMinutes: number;
+  endMinutes: number;
   normalizedEndMinutes: number;
   durationMinutes: number;
   isOvernight: boolean;
@@ -134,17 +116,44 @@ const resolveRentalSlotMinuteBounds = (
     : slotEnd
       ? minutesInTimeZone(slotEnd, slotTimeZone)
       : null;
-  if (startMinutes === null || endMinutes === null || startMinutes === endMinutes) {
+  if (startMinutes === null || endMinutes === null) {
     return null;
   }
 
-  const isOvernight = endMinutes < startMinutes;
-  const normalizedEndMinutes = isOvernight ? endMinutes + MINUTES_PER_DAY : endMinutes;
+  const isOvernight = endMinutes === MINUTES_PER_DAY || endMinutes <= startMinutes;
+  const normalizedEndMinutes = endMinutes === MINUTES_PER_DAY
+    ? MINUTES_PER_DAY
+    : isOvernight
+      ? endMinutes + MINUTES_PER_DAY
+      : endMinutes;
   const durationMinutes = normalizedEndMinutes - startMinutes;
   if (durationMinutes <= 0) {
     return null;
   }
-  return { startMinutes, normalizedEndMinutes, durationMinutes, isOvernight };
+  return { startMinutes, endMinutes, normalizedEndMinutes, durationMinutes, isOvernight };
+};
+
+const withResolvedRentalSlotMinuteBounds = (
+  slot: RentalAvailabilitySlot,
+  slotStart: Date | null,
+  slotEnd: Date | null,
+  slotTimeZone: string,
+): RentalAvailabilitySlot | null => {
+  const bounds = resolveRentalSlotMinuteBounds(slot, slotStart, slotEnd, slotTimeZone);
+  if (!bounds) {
+    return null;
+  }
+  if (
+    typeof slot.startTimeMinutes === 'number'
+    && typeof slot.endTimeMinutes === 'number'
+  ) {
+    return slot;
+  }
+  return {
+    ...slot,
+    startTimeMinutes: bounds.startMinutes,
+    endTimeMinutes: bounds.endMinutes,
+  };
 };
 
 const normalizedRentalSlotDurationMinutes = (
@@ -207,47 +216,44 @@ const rentalSlotCoversSelection = (
     );
   }
 
-  const selectionDay = mondayDayInTimeZone(selectionStart, slotTimeZone);
-  const slotDays = Array.isArray(slot.daysOfWeek) && slot.daysOfWeek.length
-    ? slot.daysOfWeek.map((entry) => Number(entry)).filter((entry) => Number.isInteger(entry))
-    : typeof slot.dayOfWeek === 'number'
-      ? [slot.dayOfWeek]
-      : [];
-  if (slotDays.length && !slotDays.includes(selectionDay)) {
+  const resolvedSlot = withResolvedRentalSlotMinuteBounds(
+    slot,
+    slotStart,
+    slotEnd,
+    slotTimeZone,
+  );
+  if (!resolvedSlot) {
     return false;
   }
 
-  const selectionStartMinutes = minutesInTimeZone(selectionStart, slotTimeZone);
-  const selectionEndMinutes = recurringSelectionEndMinutes(selectionStart, selectionEnd, slotTimeZone);
-  if (selectionEndMinutes === null) {
+  const selectionStartLocalDate = getRepeatingTimeSlotLocalDate(
+    selectionStart,
+    slotTimeZone,
+  );
+  if (!selectionStartLocalDate) {
     return false;
   }
-  const slotMinuteBounds = resolveRentalSlotMinuteBounds(slot, slotStart, slotEnd, slotTimeZone);
-  if (!slotMinuteBounds) {
-    return false;
-  }
-  if (
-    selectionStartMinutes < slotMinuteBounds.startMinutes
-    || selectionEndMinutes > slotMinuteBounds.normalizedEndMinutes
-  ) {
-    return false;
-  }
-
-  const selectionAnchorDateValue = dateOnlyValueInTimeZone(selectionStart, slotTimeZone);
-  if (slotStart && selectionAnchorDateValue < dateOnlyValueInTimeZone(slotStart, slotTimeZone)) {
-    return false;
-  }
-  if (slotEnd && selectionAnchorDateValue > dateOnlyValueInTimeZone(slotEnd, slotTimeZone)) {
-    return false;
-  }
-  if (
-    slotEnd
-    && !slotMinuteBounds.isOvernight
-    && dateOnlyValueInTimeZone(selectionEnd, slotTimeZone) > dateOnlyValueInTimeZone(slotEnd, slotTimeZone)
-  ) {
-    return false;
-  }
-  return true;
+  const anchorDates = [
+    selectionStartLocalDate,
+    addRepeatingTimeSlotLocalDays(selectionStartLocalDate, -1),
+  ].filter((value): value is string => Boolean(value));
+  return anchorDates.some((anchorDate) => {
+    try {
+      const occurrence = resolveRepeatingTimeSlotOccurrence(
+        {
+          ...resolvedSlot,
+          timeZone: slotTimeZone,
+        },
+        anchorDate,
+      );
+      return (
+        selectionStart.getTime() >= occurrence.start.getTime()
+        && selectionEnd.getTime() <= occurrence.end.getTime()
+      );
+    } catch {
+      return false;
+    }
+  });
 };
 
 export const validateRentalSelections = ({

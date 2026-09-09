@@ -36,6 +36,8 @@ import com.razumly.mvp.core.network.dto.MatchActionOperationDto
 import com.razumly.mvp.core.network.dto.MatchLifecycleOperationDto
 import com.razumly.mvp.core.network.dto.MatchOfficialCheckInOperationDto
 import com.razumly.mvp.core.network.dto.MatchSegmentOperationDto
+import com.razumly.mvp.core.network.dto.TerminalMatchResultDto
+import com.razumly.mvp.core.network.dto.TerminalMatchStatus
 import com.razumly.mvp.eventDetail.resolveEventMatchRules
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -117,6 +119,7 @@ interface MatchContentComponent {
     val matchRosterSaving: StateFlow<Boolean>
     val showMatchRosterDialog: StateFlow<Boolean>
     val errorState: StateFlow<String?>
+    val terminalMatchOutcome: StateFlow<TerminalMatchResultDto?>
 
     fun dismissOfficialDialog()
     fun dismissTeamCheckInDialog()
@@ -138,6 +141,7 @@ interface MatchContentComponent {
     fun markMatchDelayed()
     fun forfeitTeam(eventTeamId: String)
     fun cancelMatch()
+    fun noContestMatch()
     fun suspendMatch()
     fun resumeMatch()
     fun startMatch()
@@ -300,6 +304,8 @@ class DefaultMatchContentComponent(
 
     private val _errorState = MutableStateFlow<String?>(null)
     override val errorState = _errorState.asStateFlow()
+    private val _terminalMatchOutcome = MutableStateFlow<TerminalMatchResultDto?>(null)
+    override val terminalMatchOutcome = _terminalMatchOutcome.asStateFlow()
 
     override val event =
         eventRepository.getEventWithRelationsFlow(selectedMatch.match.eventId)
@@ -503,6 +509,15 @@ class DefaultMatchContentComponent(
 
     init {
         instanceKeeper.put(MATCH_DETAIL_CLEANUP_KEY, Cleanup(matchRepository, realtimePauseReason))
+        scope.launch {
+            matchRepository.terminalMatchOutcome.collect { outcome ->
+                if (outcome?.matchId != selectedMatch.match.id) return@collect
+                _terminalMatchOutcome.value = outcome
+                if (outcome.status == TerminalMatchStatus.REPLAYED) {
+                    _errorState.value = "This Match action was already applied. Refresh the Event Schedule."
+                }
+            }
+        }
         scope.launch {
             _isOfficial.collect { ownsMatchEditing ->
                 if (ownsMatchEditing) {
@@ -939,6 +954,10 @@ class DefaultMatchContentComponent(
         applyMatchAction("CANCEL")
     }
 
+    override fun noContestMatch() {
+        applyMatchAction("NO_CONTEST")
+    }
+
     override fun suspendMatch() {
         applyMatchAction("SUSPEND")
     }
@@ -966,7 +985,7 @@ class DefaultMatchContentComponent(
             "FORFEIT" -> teamIds.firstOrNull { teamId -> teamId != normalizedForfeitingTeamId }
             else -> null
         }
-        if (action == "FORFEIT" && winnerEventTeamId == null) {
+        if (action == "FORFEIT" && (teamIds.distinct().size != 2 || normalizedForfeitingTeamId !in teamIds || winnerEventTeamId == null)) {
             _errorState.value = "Choose a team to forfeit."
             return
         }
@@ -975,6 +994,24 @@ class DefaultMatchContentComponent(
         scope.launch {
             try {
                 val now = Clock.System.now().toString()
+                if (action in setOf("FORFEIT", "CANCEL", "NO_CONTEST")) {
+                    if (!drainIncidentQueueForConfirmation()) {
+                        _errorState.value = "Save the pending scoring operations before ending this Match."
+                        return@launch
+                    }
+                    matchRepository.updateMatchOperations(
+                        match = currentMatch,
+                        matchAction = MatchActionOperationDto(action, normalizedForfeitingTeamId, winnerEventTeamId),
+                        time = Instant.parse(now),
+                    ).onSuccess { confirmed ->
+                        applyConfirmedMatchState(confirmed)
+                        clearConfirmedMatchWhenRepositoryCatchesUp(confirmed)
+                    }.onFailure { error ->
+                        _optimisticMatch.value = null
+                        _errorState.value = "Failed to update match: ${error.userMessage()}"
+                    }
+                    return@launch
+                }
                 val activeSegmentIndex = currentSet.value.coerceIn(
                     0,
                     (currentMatch.segments.size - 1).coerceAtLeast(0),
@@ -1003,23 +1040,6 @@ class DefaultMatchContentComponent(
                     currentMatch.segments
                 }
                 val updatedMatch = when (action) {
-                    "FORFEIT" -> currentMatch.copy(
-                        status = "COMPLETE",
-                        resultStatus = "FINAL",
-                        resultType = "FORFEIT",
-                        winnerEventTeamId = winnerEventTeamId,
-                        actualEnd = currentMatch.actualEnd?.takeIf(String::isNotBlank) ?: now,
-                        locked = true,
-                    )
-                    "CANCEL" -> currentMatch.copy(
-                        status = "CANCELLED",
-                        resultStatus = "NO_CONTEST",
-                        resultType = "NO_CONTEST",
-                        winnerEventTeamId = null,
-                        actualEnd = currentMatch.actualEnd?.takeIf(String::isNotBlank) ?: now,
-                        statusReason = "Cancelled",
-                        locked = true,
-                    )
                     "SUSPEND" -> currentMatch.copy(
                         status = "SUSPENDED",
                         statusReason = "Suspended",

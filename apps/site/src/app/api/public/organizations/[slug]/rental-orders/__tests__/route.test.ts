@@ -9,6 +9,7 @@ const timeSlotsFindManyMock = jest.fn();
 const prismaTransactionMock = jest.fn();
 const requireSessionMock = jest.fn();
 const assertNoEventFieldSchedulingConflictsMock = jest.fn();
+const acquireFieldLocksMock = jest.fn();
 const txRentalBookingsFindUniqueMock = jest.fn();
 const txRentalBookingsCreateMock = jest.fn();
 const txRentalBookingItemsFindManyMock = jest.fn();
@@ -65,6 +66,9 @@ jest.mock('@/server/repositories/events', () => ({
   assertNoEventFieldSchedulingConflicts: (...args: any[]) => (
     assertNoEventFieldSchedulingConflictsMock(...args)
   ),
+}));
+jest.mock('@/server/repositories/locks', () => ({
+  acquireFieldLocks: (...args: any[]) => acquireFieldLocksMock(...args),
 }));
 
 import { POST } from '@/app/api/public/organizations/[slug]/rental-orders/route';
@@ -775,7 +779,7 @@ describe('/api/public/organizations/[slug]/rental-orders POST', () => {
     }));
   });
 
-  it('rejects a recurring rental slot with equal start and end minutes', async () => {
+  it('accepts a recurring rental slot with equal start and end minutes as a full-day window', async () => {
     mockRecurringOvernightRentalInventory({ endTimeMinutes: 22 * 60 });
 
     const response = await POST(createRequest({
@@ -788,11 +792,14 @@ describe('/api/public/organizations/[slug]/rental-orders POST', () => {
       }],
       sportId: null,
     }), { params });
-    const json = await response.json();
-
-    expect(response.status).toBe(400);
-    expect(json.error).toMatch(/not available for the selected time/i);
-    expect(prismaTransactionMock).not.toHaveBeenCalled();
+    expect(response.status).toBe(201);
+    expect(txRentalBookingItemsCreateMock).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        availabilitySlotId: 'slot_1',
+        start: new Date('2030-06-10T22:00:00.000Z'),
+        end: new Date('2030-06-10T22:30:00.000Z'),
+      }),
+    }));
   });
 
   it('rejects paid rental creation when Stripe verification is unavailable', async () => {

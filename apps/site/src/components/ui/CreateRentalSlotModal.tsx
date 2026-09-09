@@ -5,8 +5,12 @@ import { Button, Group, Modal, MultiSelect, Stack, Switch, Text } from '@mantine
 import { DatePickerInput, TimeInput } from '@mantine/dates';
 import type { Field, TimeSlot } from '@/types';
 import { fieldService, type ManageRentalSlotResult } from '@/lib/fieldService';
-import { apiRequest } from '@/lib/apiClient';
-import { formatLocalDateTime, parseLocalDateTime } from '@/lib/dateUtils';
+import { apiRequest, isApiRequestError } from '@/lib/apiClient';
+import { formatLocalDateTime, getSystemTimeZone, instantToCalendarDateInTimeZone, normalizeTimeZone, parseDateTimeInTimeZone, parseLocalDateTime } from '@/lib/dateUtils';
+import {
+  formatOvernightWeekdayWarning,
+  repeatingTimeSlotHasOvernightWindow,
+} from '@/lib/repeatingTimeSlotAvailability';
 import { getFieldDisplayName } from '@/lib/fieldUtils';
 import { getOrderedEntityColorPair, type EntityColorReferenceValue } from '@/lib/entityColors';
 import HostPriceInput from '@/components/ui/HostPriceInput';
@@ -102,6 +106,38 @@ const coerceDateValue = (value: unknown): Date | null => {
   return parseLocalDateTime(value as string | Date | null);
 };
 
+const getFacilityTimeZone = (field: Field | null): string | null => {
+  const facility = field?.facility;
+  if (!facility || typeof facility !== 'object') {
+    return null;
+  }
+  return typeof facility.timeZone === 'string' && facility.timeZone.trim()
+    ? facility.timeZone
+    : null;
+};
+
+const resolveRentalEditorTimeZone = (
+  slot: TimeSlot | null | undefined,
+  field: Field | null,
+): { timeZone: string; hasSlotTimeZone: boolean } => {
+  const slotTimeZone = typeof slot?.timeZone === 'string' && slot.timeZone.trim()
+    ? slot.timeZone
+    : null;
+  const timeZone = slotTimeZone ?? getFacilityTimeZone(field);
+  return {
+    timeZone: normalizeTimeZone(timeZone, getSystemTimeZone()),
+    hasSlotTimeZone: Boolean(slotTimeZone),
+  };
+};
+
+const parseRentalCalendarDate = (
+  value: Date | string | null | undefined,
+  timeZone: string,
+): Date | null => {
+  const instant = parseDateTimeInTimeZone(value, timeZone);
+  return instant ? instantToCalendarDateInTimeZone(instant, timeZone) : null;
+};
+
 const minutesToTimeValue = (minutes: number): string => {
   const normalized = Math.max(0, Math.floor(minutes));
   const hours = Math.floor(normalized / 60) % 24;
@@ -135,11 +171,15 @@ export default function CreateRentalSlotModal({
   organizationId = null,
   fieldColorReferenceList,
 }: CreateRentalSlotModalProps) {
+  const editorTimeZone = useMemo(
+    () => resolveRentalEditorTimeZone(slot, field),
+    [field, slot],
+  );
   const now = useMemo(() => {
-    const current = new Date();
+    const current = parseRentalCalendarDate(new Date(), editorTimeZone.timeZone) ?? new Date();
     current.setMinutes(0, 0, 0);
     return current;
-  }, []);
+  }, [editorTimeZone.timeZone]);
 
   const defaultEnd = useMemo(() => {
     const base = new Date(now.getTime());
@@ -170,6 +210,19 @@ export default function CreateRentalSlotModal({
     return field ? [field] : [];
   }, [field, selectedFields, slot]);
   const hasTargetFields = targetFields.length > 0;
+  const startMinutes = parseTimeValue(startTime);
+  const endMinutes = parseTimeValue(endTime);
+  const hasOvernightWindow = repeatingTimeSlotHasOvernightWindow(startMinutes, endMinutes);
+  const overnightWeekdayWarning = useMemo(() => {
+    if (!repeating || !hasOvernightWindow) {
+      return null;
+    }
+
+    const startDateValue = coerceDateValue(startDate);
+    return formatOvernightWeekdayWarning(
+      startDateValue ? [toMondayBasedDay(startDateValue)] : [],
+    );
+  }, [hasOvernightWindow, repeating, startDate]);
   const effectiveFieldColorReferenceList = useMemo(
     () => (
       fieldColorReferenceList?.length
@@ -189,7 +242,10 @@ export default function CreateRentalSlotModal({
     setError(null);
 
     if (slot) {
-      const parsedStartRaw = parseLocalDateTime(slot.startDate ?? null) ?? new Date();
+      const parsedStartRaw = parseRentalCalendarDate(
+        slot.startDate ?? null,
+        editorTimeZone.timeZone,
+      ) ?? new Date();
       parsedStartRaw.setHours(0, 0, 0, 0);
       const parsedStart = new Date(parsedStartRaw.getTime());
       setStartDate(parsedStart);
@@ -199,10 +255,15 @@ export default function CreateRentalSlotModal({
         const endMinutes = typeof slot.endTimeMinutes === 'number' ? slot.endTimeMinutes : startMinutes + 60;
         setStartTime(minutesToTimeValue(startMinutes));
         setEndTime(minutesToTimeValue(endMinutes));
-        const parsedEnd = slot.endDate ? parseLocalDateTime(slot.endDate) : null;
+        const parsedEnd = slot.endDate
+          ? parseRentalCalendarDate(slot.endDate, editorTimeZone.timeZone)
+          : null;
         setEndDate(parsedEnd ? new Date(parsedEnd.getTime()) : null);
       } else {
-        const parsedEndRaw = parseLocalDateTime(slot.endDate ?? slot.startDate ?? null);
+        const parsedEndRaw = parseRentalCalendarDate(
+          slot.endDate ?? slot.startDate ?? null,
+          editorTimeZone.timeZone,
+        );
         const parsedEnd = parsedEndRaw ? new Date(parsedEndRaw.getTime()) : null;
         setEndDate(parsedEnd);
         setStartTime(toTimeValue(parsedStart));
@@ -229,9 +290,11 @@ export default function CreateRentalSlotModal({
     }
 
     if (initialRange?.start instanceof Date && initialRange?.end instanceof Date) {
-      const rangeStart = new Date(initialRange.start.getTime());
+      const rangeStart = parseRentalCalendarDate(initialRange.start, editorTimeZone.timeZone)
+        ?? new Date(initialRange.start.getTime());
       rangeStart.setSeconds(0, 0);
-      const rangeEnd = new Date(initialRange.end.getTime());
+      const rangeEnd = parseRentalCalendarDate(initialRange.end, editorTimeZone.timeZone)
+        ?? new Date(initialRange.end.getTime());
       rangeEnd.setSeconds(0, 0);
 
       const startDay = new Date(rangeStart.getTime());
@@ -248,7 +311,7 @@ export default function CreateRentalSlotModal({
       return;
     }
 
-    const baseDate = new Date();
+    const baseDate = parseRentalCalendarDate(new Date(), editorTimeZone.timeZone) ?? new Date();
     baseDate.setMinutes(0, 0, 0);
     const baseEnd = new Date(baseDate.getTime());
     baseEnd.setHours(baseEnd.getHours() + 1);
@@ -260,7 +323,7 @@ export default function CreateRentalSlotModal({
     setPrice(0);
     setRequiredTemplateIds([]);
     setHostRequiredTemplateIds([]);
-  }, [opened, slot, initialRange, organizationHasStripeAccount]);
+  }, [editorTimeZone.timeZone, initialRange, now, opened, organizationHasStripeAccount, slot]);
 
   useEffect(() => {
     if (!opened) {
@@ -318,14 +381,14 @@ export default function CreateRentalSlotModal({
   }, [organizationHasStripeAccount]);
 
   useEffect(() => {
-    if (!repeating && startDate && !endDate) {
+    if (!repeating && startDate && !endDate && !slot?.repeating && !initialRange) {
       setEndDate(new Date(startDate.getTime()));
       return;
     }
     if (startDate && endDate && endDate < startDate) {
       setEndDate(new Date(startDate.getTime()));
     }
-  }, [startDate, endDate, repeating]);
+  }, [startDate, endDate, initialRange, repeating, slot]);
 
   const handleClose = () => {
     if (submitting || deleting) {
@@ -418,20 +481,19 @@ export default function CreateRentalSlotModal({
       endDateTime.setHours(0, 0, 0, 0);
     }
 
-    if (
-      repeating &&
-      !endDateValue &&
-      endMinutes !== null &&
-      startMinutes !== null &&
-      endMinutes <= startMinutes
-    ) {
-      setError('When the slot repeats weekly without an end date, the end time must be after the start time.');
-      return;
+    if (repeating && endDateValue) {
+      const startDay = new Date(startDateValue.getTime());
+      const endDay = new Date(endDateValue.getTime());
+      startDay.setHours(0, 0, 0, 0);
+      endDay.setHours(0, 0, 0, 0);
+      if (endDay.getTime() < startDay.getTime()) {
+        setError('End date must be on or after the start date.');
+        return;
+      }
     }
 
     const compare = endDateTime.getTime() - startDateTime.getTime();
-    const isInvalidRange = repeating ? compare <= 0 : compare < 0;
-    if (isInvalidRange) {
+    if (!repeating && compare < 0) {
       setError('End date/time must be after the start date/time.');
       return;
     }
@@ -446,6 +508,7 @@ export default function CreateRentalSlotModal({
         repeating,
         startDate: formatLocalDateTime(startDateTime),
         endDate: endDateValue ? formatLocalDateTime(endDateTime) : null,
+        timeZone: editorTimeZone.hasSlotTimeZone ? editorTimeZone.timeZone : undefined,
         startTimeMinutes: repeating && startMinutes !== null ? startMinutes : undefined,
         endTimeMinutes: repeating && endMinutes !== null ? endMinutes : undefined,
         requiredTemplateIds,
@@ -464,6 +527,7 @@ export default function CreateRentalSlotModal({
           repeating: payload.repeating ?? false,
           startDate: payload.startDate,
           endDate: payload.endDate ?? null,
+          timeZone: payload.timeZone,
           startTimeMinutes: payload.startTimeMinutes,
           endTimeMinutes: payload.endTimeMinutes,
           requiredTemplateIds: payload.requiredTemplateIds,
@@ -503,7 +567,7 @@ export default function CreateRentalSlotModal({
       onClose();
     } catch (err) {
       console.error('Failed to save rental slot:', err);
-      setError('Failed to save rental slot. Please try again.');
+      setError(isApiRequestError(err) ? err.message : 'Failed to save rental slot. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -600,6 +664,7 @@ export default function CreateRentalSlotModal({
           />
 
           {repeating && (
+            <>
             <Group grow>
               <TimeInput
                 label="Start time"
@@ -618,6 +683,12 @@ export default function CreateRentalSlotModal({
                 required
               />
             </Group>
+            {overnightWeekdayWarning && (
+              <Text size="xs" c="orange" mt={4}>
+                {overnightWeekdayWarning}
+              </Text>
+            )}
+            </>
           )}
 
           <div>

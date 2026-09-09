@@ -73,6 +73,7 @@ import com.razumly.mvp.core.data.dataTypes.resolveEventResourceLabels
 import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.isRentalBacked
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.displayPriceRangeLabel
 import com.razumly.mvp.core.data.dataTypes.evergreenDateDisplayLabel
@@ -84,12 +85,14 @@ import com.razumly.mvp.core.data.dataTypes.toLeagueConfig
 import com.razumly.mvp.core.data.dataTypes.toTournamentConfig
 import com.razumly.mvp.core.data.dataTypes.usesManualRegistrationPayments
 import com.razumly.mvp.core.data.dataTypes.withLeagueConfig
+import com.razumly.mvp.core.data.dataTypes.withAutomatedScheduling
 import com.razumly.mvp.core.data.dataTypes.withTournamentConfig
 import com.razumly.mvp.core.data.dataTypes.withSimplePlayoffsOrPoolPlay
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
 import com.razumly.mvp.core.data.dataTypes.skillsForSport
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.enums.minimumParticipantCount
+import com.razumly.mvp.core.data.dataTypes.enums.isScheduleConstructionAutomationType
 import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeId
 import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeName
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
@@ -240,9 +243,8 @@ fun EventDetails(
     isNewEvent: Boolean,
     showValidationErrors: Boolean = true,
     rentalTimeLocked: Boolean = false,
-    eventTypeLocked: Boolean = false,
-    eventTypeHasProtectedHistory: Boolean = false,
-    teamSignupLocked: Boolean = false,
+    eventEditorControlLocks: EventEditorControlLocks = EventEditorControlLocks(),
+    tryoutAvailable: Boolean = false,
     onHostCreateAccount: () -> Unit,
     onOpenLocationMap: () -> Unit,
     onPlaceSelected: (MVPPlace?) -> Unit,
@@ -637,7 +639,7 @@ fun EventDetails(
         divisionEditorReady = divisionEditorReady,
         divisionPriceCents = divisionEditor.priceCents,
     )
-    val isInclusivePriceQuoteConfirmed = isEventInclusivePriceReady(
+    val isInclusivePriceQuoteConfirmed = editEvent.isAffiliateEvent() || isEventInclusivePriceReady(
         editView = editView,
         manualPaymentsEnabled = editEvent.usesManualRegistrationPayments() ||
             (useSimpleSectionContent && !simplePaidRegistrationEnabled),
@@ -1554,13 +1556,15 @@ fun EventDetails(
     }
     val hasAvailableRentalResources = availableRentalResources.isNotEmpty()
     val allowLockedSlotDivisionEdits = (scheduleTimeLocked || hasRentalBackedSlots) && splitByDivisionScheduling
-    val allowLocalResourceCreationWithRentalResources = editEvent.eventType == EventType.LEAGUE ||
+    val allowLocalResourceCreationWithRentalResources = editEvent.eventType == EventType.EVENT ||
+        editEvent.eventType == EventType.LEAGUE ||
         editEvent.eventType == EventType.TOURNAMENT ||
         editEvent.eventType == EventType.WEEKLY_EVENT
     val supportsOptionalManualTimeSlots = remember(
         isNewEvent,
         scheduleTimeLocked,
         editEvent.eventType,
+        editEvent.isAutomatedScheduling,
         editEvent.noFixedEndDateTime,
         editEvent.end,
         editEvent.start,
@@ -1673,7 +1677,7 @@ fun EventDetails(
                 divisionDetailsForSettings = divisionDetailsForSettings,
                 isColorLoaded = isColorLoaded,
                 scheduleTimeLocked = scheduleTimeLocked,
-                requiresPositiveRegistrationPrice = useSimpleSectionContent &&
+                requiresPositiveRegistrationPrice = !editEvent.isAffiliateEvent() && useSimpleSectionContent &&
                     simplePaidRegistrationEnabled,
                 leagueScoringConfig = leagueScoringConfig,
                 selectedSport = sports.firstOrNull { sport -> sport.id == editEventSportId },
@@ -2510,9 +2514,15 @@ fun EventDetails(
                             editEvent = editEvent,
                             paidRegistrationEnabled = simplePaidRegistrationEnabled,
                             hostHasAccount = hostHasAccount,
-                            eventTypeLocked = eventTypeLocked,
-                            eventTypeHasProtectedHistory = eventTypeHasProtectedHistory,
-                            teamSignupLocked = teamSignupLocked,
+                            eventTypeLocked = eventEditorControlLocks.eventType,
+                            eventTypeHasProtectedHistory =
+                                eventEditorControlLocks.eventTypeHasProtectedHistory,
+                            teamSignupLocked = eventEditorControlLocks.teamSignup,
+                            automatedSchedulingLocked = eventEditorControlLocks.automatedScheduling,
+                            tryoutAvailable = tryoutAvailable,
+                            preserveSelectedTryout = !isNewEvent &&
+                                editView &&
+                                editEvent.eventType == EventType.TRYOUT,
                         ),
                         actions = SimpleEventDetailsOptionsActions(
                             onEventTypeSelected = onEventTypeSelected,
@@ -2527,9 +2537,33 @@ fun EventDetails(
                                     multipleDivisions,
                                 )
                             },
+                            onAutomatedSchedulingChange = { enabled ->
+                                if (
+                                    editEvent.eventType == EventType.LEAGUE ||
+                                    editEvent.eventType == EventType.TOURNAMENT
+                                ) {
+                                    onEditEvent { withAutomatedScheduling(enabled) }
+                                }
+                            },
                             onNoFixedEndDateChange = { enabled ->
-                                if (editEvent.eventType != EventType.WEEKLY_EVENT) {
-                                    onEditEvent { copy(noFixedEndDateTime = enabled) }
+                                if (!enabled) {
+                                    showEndPicker = true
+                                } else if (
+                                    editEvent.eventType == EventType.WEEKLY_EVENT ||
+                                        editEvent.eventType.isScheduleConstructionAutomationType()
+                                ) {
+                                    onEditEvent {
+                                        copy(
+                                            noFixedEndDateTime = enabled,
+                                            isAutomatedScheduling = if (
+                                                eventType == EventType.WEEKLY_EVENT
+                                            ) {
+                                                true
+                                            } else {
+                                                isAutomatedScheduling
+                                            },
+                                        )
+                                    }
                                 }
                             },
                             onPlayoffsOrPoolPlayChange = { enabled ->
@@ -2653,13 +2687,15 @@ fun EventDetails(
                         sectionExpansionStates = sectionExpansionStates,
                         eventDetailsMode = eventDetailsMode,
                         lazyListState = lazyListState,
-                        eventTypeLocked = eventTypeLocked,
-                        eventTypeHasProtectedHistory = eventTypeHasProtectedHistory,
-                        teamSignupLocked = teamSignupLocked,
+                        eventTypeLocked = eventEditorControlLocks.eventType,
+                        eventTypeHasProtectedHistory =
+                            eventEditorControlLocks.eventTypeHasProtectedHistory,
+                        teamSignupLocked = eventEditorControlLocks.teamSignup,
                         stickyHeaderTopInset = stickyHeaderTopInset,
                         enabled = sportRequiredSectionEnabled,
                         isNewEvent = isNewEvent,
                         rentalTimeLocked = rentalTimeLocked,
+                        tryoutAvailable = tryoutAvailable,
                         event = event,
                         editEvent = editEvent,
                         divisionDetails = divisionDetailsForSettings,
@@ -3020,9 +3056,13 @@ fun EventDetails(
                         isLeagueSlotsValid = isLeagueSlotsValid,
                         showValidationErrors = showValidationErrors,
                         scheduleTimeLocked = scheduleTimeLocked,
+                        automatedSchedulingLocked = eventEditorControlLocks.automatedScheduling,
                     ),
                     actions = EventDetailsScheduleActions(
                         onDisabledClick = ::showSelectSportMessage,
+                        onAutomatedSchedulingChange = { enabled ->
+                            onEditEvent { withAutomatedScheduling(enabled) }
+                        },
                         onRentalResourceSelectionChange = onRentalResourceSelectionChange,
                         onFieldCountChange = { count ->
                             fieldCount = count
@@ -3076,11 +3116,11 @@ fun EventDetails(
         onDateSelected = { selectedInstant ->
             val selected = selectedInstant?.reinterpretSystemLocalSelectionIn(editEventTimeZone)
                 ?: return@PlatformDateTimePicker
-            onEditEvent { copy(end = selected) }
+            onEditEvent { copy(end = selected, noFixedEndDateTime = false) }
             showEndPicker = false
         },
         onDismissRequest = { showEndPicker = false },
-        showPicker = showEndPicker && !scheduleTimeLocked && !editEvent.noFixedEndDateTime,
+        showPicker = showEndPicker && !scheduleTimeLocked,
         getTime = true,
         canSelectPast = false,
         initialDate = editEvent.end.asSystemLocalPickerInstant(editEventTimeZone),

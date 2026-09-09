@@ -5,6 +5,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
 import org.gradle.api.tasks.bundling.Zip
+import org.gradle.api.tasks.testing.Test
 import java.io.ByteArrayOutputStream
 import java.util.Properties
 import java.util.concurrent.TimeUnit
@@ -23,6 +24,12 @@ plugins {
     alias(libs.plugins.skie)
     id("kotlin-parcelize")
 }
+private val MOBILE_LIVE_CONTRACT_TEST_CLASSES = listOf(
+    "com.razumly.mvp.eventDetail.MobileEventEditorApiContractTest",
+    "com.razumly.mvp.eventDetail.MobileTournamentEventEditorApiContractTest",
+)
+private val runMobileLiveContractTests =
+    System.getenv("MVP_TEST_REQUIRE_BACKEND")?.trim()?.lowercase() in setOf("1", "true", "yes")
 
 val googleServicesConfigFile = layout.projectDirectory.file("google-services.json").asFile
 val hasGoogleServicesConfig = googleServicesConfigFile.isFile
@@ -555,6 +562,15 @@ val packageReleaseNativeDebugSymbols by tasks.registering(Zip::class) {
 tasks.configureEach {
     if (name == "assembleRelease" || name == "bundleRelease") {
         finalizedBy(packageReleaseNativeDebugSymbols)
+    }
+}
+tasks.withType<Test>().configureEach {
+    if (!runMobileLiveContractTests) {
+        filter {
+            MOBILE_LIVE_CONTRACT_TEST_CLASSES.forEach { testClass ->
+                excludeTestsMatching("$testClass.*")
+            }
+        }
     }
 }
 

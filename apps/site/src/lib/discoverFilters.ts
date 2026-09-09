@@ -1,6 +1,6 @@
 export const DISCOVER_SPORT_PARAM = 'sport';
 const LEGACY_DISCOVER_SPORTS_PARAM = 'sports';
-const DISCOVER_EVENT_TYPES = new Set(['EVENT', 'TOURNAMENT', 'LEAGUE', 'WEEKLY_EVENT', 'TRYOUT', 'AFFILIATE']);
+const DISCOVER_EVENT_TYPES = new Set(['EVENT', 'TOURNAMENT', 'LEAGUE', 'WEEKLY_EVENT', 'TRYOUT']);
 const DISCOVER_GENDERS = new Set(['M', 'F', 'C']);
 export type DiscoverTabValue = 'events' | 'organizations' | 'rentals' | 'teams';
 

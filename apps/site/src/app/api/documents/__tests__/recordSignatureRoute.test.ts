@@ -199,6 +199,42 @@ describe('POST /api/documents/record-signature', () => {
     );
     expect(prismaMock.signedDocuments.create).not.toHaveBeenCalled();
   });
+  it('writes the signed document and consent sync through one transaction client', async () => {
+    const transaction = {
+      ...prismaMock,
+      signedDocuments: {
+        ...prismaMock.signedDocuments,
+        update: jest.fn().mockResolvedValue({ id: 'signed_1', status: 'SIGNED' }),
+      },
+    };
+    const transactionRunner = jest.fn(
+      async (callback: (client: typeof transaction) => Promise<void>) =>
+        callback(transaction),
+    );
+    (prismaMock as typeof prismaMock & {
+      $transaction: typeof transactionRunner;
+    }).$transaction = transactionRunner;
+    syncChildRegistrationConsentStatusMock.mockImplementationOnce(
+      async (params: { client?: unknown }) => {
+        expect(params.client).toBe(transaction);
+      },
+    );
+
+    await POST(jsonPost('http://localhost/api/documents/record-signature', {
+      templateId: 'template_1',
+      documentId: 'document_1',
+      eventId: 'event_1',
+      userId: 'parent_1',
+      childUserId: 'child_1',
+      signerContext: 'parent_guardian',
+      type: 'TEXT',
+    }));
+
+    expect(transactionRunner).toHaveBeenCalledTimes(1);
+    expect(transaction.signedDocuments.update).toHaveBeenCalled();
+    expect(prismaMock.signedDocuments.update).not.toHaveBeenCalled();
+  });
+
 
   it('derives required roles from the template signer type when roles are absent', async () => {
     prismaMock.templateDocuments.findUnique.mockResolvedValue({
@@ -313,16 +349,19 @@ describe('POST /api/documents/record-signature', () => {
       eventId: 'event_1',
       childUserId: 'child_1',
       parentUserId: 'parent_1',
+      client: prismaMock,
     });
     expect(syncChildRegistrationConsentStatusMock).toHaveBeenCalledWith({
       eventId: 'event_2',
       childUserId: 'child_1',
       parentUserId: 'parent_1',
+      client: prismaMock,
     });
     expect(syncChildRegistrationConsentStatusMock).toHaveBeenCalledWith({
       eventId: 'event_3',
       childUserId: 'child_1',
       parentUserId: undefined,
+      client: prismaMock,
     });
   });
 

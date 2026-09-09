@@ -1,9 +1,8 @@
 import type {
-  OfficialSchedulingMode,
   StaffingPriority,
 } from "@/server/officials/config";
 
-export type { OfficialSchedulingMode, StaffingPriority };
+export type { StaffingPriority };
 
 import { formatDisplayDate, formatDisplayTime, parseLocalDateTime } from '@/lib/dateUtils';
 import { normalizeEnumValue } from '@/lib/enumUtils';
@@ -528,6 +527,7 @@ export interface Match {
   phaseDivisionId?: string | null;
   fieldId?: string | null;
   locked?: boolean;
+  placementState?: string | null;
   status?: MatchLifecycleStatus | string | null;
   resultStatus?: MatchResultStatus | string | null;
   resultType?: MatchResultType | string | null;
@@ -793,7 +793,7 @@ export interface Field {
   rentalSlots?: TimeSlot[];
 }
 
-export type EventType = 'EVENT' | 'TOURNAMENT' | 'LEAGUE' | 'WEEKLY_EVENT' | 'TRYOUT' | 'AFFILIATE';
+export type EventType = 'EVENT' | 'TOURNAMENT' | 'LEAGUE' | 'WEEKLY_EVENT' | 'TRYOUT';
 export type RegistrationPaymentMode = 'ONLINE' | 'MANUAL';
 export type ManualPaymentProvider = 'CASH_APP' | 'VENMO' | 'PAYPAL' | 'STRIPE' | 'ZELLE' | 'OTHER';
 
@@ -885,20 +885,30 @@ export interface OrganizationTag {
   isSystem?: boolean;
 }
 
+export interface EventOccurrencePreview {
+  slotId: string;
+  occurrenceDate: string;
+  start: string;
+  end: string;
+  timeZone?: string;
+}
+
 // Core Event interface with relationships
 export interface Event {
+  sourceTemplateId?: string | null;
   $id: string;
   name: string;
   description: string;
   affiliateUrl?: string | null;
   affiliateActionUrl?: string | null;
   sourceUrl?: string | null;
-  organizerName?: string | null;
-  scheduleText?: string | null;
+  nextOccurrence?: EventOccurrencePreview | null;
   dateDisplayMode?: 'SCHEDULED' | 'DATE_ONLY' | 'NO_FIXED_DATE' | 'ONGOING' | string | null;
   dateDisplayText?: string | null;
   priceText?: string | null;
   statusText?: string | null;
+  organizerName?: string | null;
+  scheduleText?: string | null;
   tags?: EventTag[];
   start: string;
   end: string | null;
@@ -920,6 +930,7 @@ export interface Event {
   imageId: string | null;
   hostId: string | null;
   noFixedEndDateTime?: boolean;
+  isAutomatedScheduling?: boolean;
   state: EventState;
   maxParticipants: number;
   teamSizeLimit: number;
@@ -933,7 +944,6 @@ export interface Event {
   fieldIds?: string[];
   timeSlotIds?: string[];
   officialIds?: string[];
-  officialSchedulingMode?: OfficialSchedulingMode;
   staffingPriority?: StaffingPriority;
   officialPositions?: EventOfficialPosition[];
   eventOfficials?: EventOfficial[];

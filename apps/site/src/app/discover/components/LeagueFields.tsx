@@ -25,6 +25,10 @@ import type { WeeklySlotConflict } from '@/lib/leagueService';
 import { formatDisplayDate, formatLocalDateTime, parseLocalDateTime } from '@/lib/dateUtils';
 import { getFacilityScopedFieldDisplayName, getFieldDisplayName } from '@/lib/fieldUtils';
 import { applySportResourceLabels, GENERIC_RESOURCE_LABELS, type SportResourceLabels } from '@/lib/sportResourceLabels';
+import {
+  formatOvernightWeekdayWarning,
+  repeatingTimeSlotHasOvernightWindow,
+} from '@/lib/repeatingTimeSlotAvailability';
 
 const DROPDOWN_PROPS = { withinPortal: true, zIndex: 1800 };
 const MAX_STANDARD_NUMBER = 99_999;
@@ -53,6 +57,7 @@ const DAYS_OF_WEEK = [
   { value: '5', label: 'Saturday' },
   { value: '6', label: 'Sunday' },
 ];
+
 
 const formatClockTime = (date: Date): string => new Intl.DateTimeFormat('en-US', {
   hour: 'numeric',
@@ -1275,8 +1280,10 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
               slotEndDate &&
               slotEndDate.getTime() <= slotStartDate.getTime(),
             );
+            const hasOvernightWindow = isRepeating
+              && repeatingTimeSlotHasOvernightWindow(slot.startTimeMinutes, slot.endTimeMinutes);
             const divisionsReadOnly = readOnly && !allowDivisionEditsWhenReadOnly;
-            const resourcesReadOnly = readOnly && !allowResourceEditsWhenReadOnly;
+            const resourcesReadOnly = slot.rentalLocked === true || (readOnly && !allowResourceEditsWhenReadOnly);
             const resourceError = isRentalSlotMismatchError(slot.error) ? slot.error : null;
             const hasConflicts = conflictCount > 0;
             const slotTimingReadOnly = readOnly || slot.rentalLocked === true;
@@ -1307,7 +1314,7 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
                         variant="subtle"
                         color="red"
                         onClick={() => onRemoveSlot(index)}
-                        disabled={slots.length === 1 || readOnly}
+                        disabled={slots.length === 1 || slotTimingReadOnly}
                       >
                         Remove
                       </Button>}
@@ -1519,6 +1526,11 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
                               error={endMissing && !slotTimingReadOnly ? 'Select an end time' : undefined}
                             />
                           </div>
+                          {hasOvernightWindow ? (
+                            <Text size="xs" c="orange" mt={4}>
+                              {formatOvernightWeekdayWarning(selectedDays)}
+                            </Text>
+                          ) : null}
                         </>
                       ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:items-end">

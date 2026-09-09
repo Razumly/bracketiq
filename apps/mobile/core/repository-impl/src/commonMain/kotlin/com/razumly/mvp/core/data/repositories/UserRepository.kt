@@ -249,6 +249,18 @@ interface IUserRepository : IMVPRepository {
         userIds: List<String>,
         visibilityContext: UserVisibilityContext = UserVisibilityContext(),
     ): Result<List<UserData>>
+
+    /**
+     * Fetches remote user rows without changing the local cache.
+     *
+     * The default keeps existing repository fakes source-compatible. The concrete repository
+     * overrides this method for acceptance flows that must defer all Room writes to one
+     * transaction.
+     */
+    suspend fun fetchUsers(
+        userIds: List<String>,
+        visibilityContext: UserVisibilityContext = UserVisibilityContext(),
+    ): Result<List<UserData>> = getUsers(userIds, visibilityContext)
     fun getUsersFlow(
         userIds: List<String>,
         visibilityContext: UserVisibilityContext = UserVisibilityContext(),
@@ -1303,6 +1315,18 @@ class UserRepository(
             saveData = { usersData -> databaseService.getUserDataDao.upsertUsersData(usersData) },
             deleteData = { databaseService.getUserDataDao.deleteUsersById(it) },
         )
+    }
+
+    override suspend fun fetchUsers(
+        userIds: List<String>,
+        visibilityContext: UserVisibilityContext,
+    ): Result<List<UserData>> {
+        val ids = userIds.distinct().filter(String::isNotBlank)
+        if (ids.isEmpty()) return Result.success(emptyList())
+
+        return runCatching {
+            fetchUsersByIds(ids, visibilityContext)
+        }
     }
 
     override fun getUsersFlow(

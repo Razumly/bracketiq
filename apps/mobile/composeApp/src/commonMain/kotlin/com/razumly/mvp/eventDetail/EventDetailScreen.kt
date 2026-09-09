@@ -11,6 +11,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
@@ -41,6 +44,7 @@ import com.razumly.mvp.core.data.dataTypes.usesTeamOfficialScheduling
 import com.razumly.mvp.core.data.dataTypes.withDoTeamsOfficiate
 import com.razumly.mvp.core.data.dataTypes.withStaffingPriority
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceOperation
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.presentation.EventDetailInitialTab
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
@@ -82,6 +86,7 @@ fun EventDetailScreen(
     val divisionTypeParameters by component.divisionTypeParameters.collectAsState()
     val currentUser by component.currentUser.collectAsState()
     val notificationPermissionPrimer by component.notificationPermissionPrimer.collectAsState()
+    val protectedMatchDeletionConfirmation by component.protectedMatchDeletionConfirmation.collectAsState()
     val showEventTeamCheckInDialog by component.showEventTeamCheckInDialog.collectAsState()
     val eventTeamCheckInSaving by component.eventTeamCheckInSaving.collectAsState()
     val currentUserManagedEventTeamId by component.currentUserManagedEventTeamId.collectAsState()
@@ -98,6 +103,9 @@ fun EventDetailScreen(
     val eventEditorControlLocks by component.eventEditorControlLocks.collectAsState()
     val eventTypeTransitionConfirmation by
         component.eventTypeTransitionConfirmation.collectAsState()
+    val eventEditorSnapshot by component.eventEditorSnapshot.collectAsState()
+    val scheduleMaintenanceReview by component.scheduleMaintenanceReview.collectAsState()
+    val scheduleMaintenanceOptions by component.scheduleMaintenanceOptions.collectAsState()
     val showMap by mapComponent.showMap.collectAsState()
     val editableMatches by component.editableMatches.collectAsState()
     val eventFields by component.eventFields.collectAsState()
@@ -184,7 +192,9 @@ fun EventDetailScreen(
     val isCaptain by component.isUserCaptain.collectAsState()
     val isDark = isSystemInDarkTheme()
     val isEditingMatches by component.isEditingMatches.collectAsState()
+    val authorityVerified by component.authorityVerified.collectAsState()
     val accessPresentation = remember(
+        authorityVerified,
         selectedEvent,
         editedEvent,
         sports,
@@ -194,6 +204,7 @@ fun EventDetailScreen(
         isEditingMatches,
     ) {
         buildEventDetailAccessPresentation(
+            authorityVerified = authorityVerified,
             selectedEvent = selectedEvent,
             editedEvent = editedEvent,
             sports = sports,
@@ -643,6 +654,7 @@ fun EventDetailScreen(
                                 topInset = innerPadding.calculateTopPadding(),
                                 editView = isEditing,
                                 eventEditorControlLocks = eventEditorControlLocks,
+                                eventEditorSnapshot = eventEditorSnapshot,
                                 showOfficialsPanel = showOfficialsPanel,
                                 showMap = showMap,
                                 imageScheme = imageScheme,
@@ -896,6 +908,17 @@ fun EventDetailScreen(
                 ) {
                     Column(Modifier.padding(innerPadding).padding(top = 4.dp)) {
                         EventDetailTabsRouteHost(
+                            scheduleActions = {
+                                EventScheduleMaintenanceScreen(
+                                    canRequest = showScheduleMatchManagement && !isEditingMatches && !isEditing &&
+                                        selectedEvent.event.isAutomatedScheduling &&
+                                        !selectedEvent.event.isArchived() && !isTemplateEvent,
+                                    options = scheduleMaintenanceOptions,
+                                    onOpen = component::openScheduleMaintenance,
+                                    onDismiss = component::dismissScheduleMaintenanceOptions,
+                                    onSelect = component::selectScheduleMaintenanceOperation,
+                                )
+                            },
                             state = EventDetailTabsRouteState(
                                 initialTab = initialTab,
                                 showDetails = showDetails,
@@ -1024,6 +1047,7 @@ fun EventDetailScreen(
                     isUserInEvent = isUserInEvent,
                     directionsEnabled = hasDirectionsTarget,
                     selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
+                    isArchivedEvent = selectedEvent.event.isArchived(),
                 ),
                 actions = EventDetailOverviewStickyActionActions(
                     onAffiliateJoin = component::joinEvent,
@@ -1083,8 +1107,10 @@ fun EventDetailScreen(
                 eventRegistrationQuestionDialog = eventRegistrationQuestionDialog,
                 paymentPlanPreviewDialog = paymentPlanPreviewDialog,
                 showStandingsConfirmDialog = showStandingsConfirmDialog,
+                scheduleMaintenanceReview = scheduleMaintenanceReview,
                 eventTypeTransitionConfirmation = eventTypeTransitionConfirmation,
-                buildScheduleIsRebuild = selectedEvent.matches.isNotEmpty(),
+                buildScheduleIsRebuild = EventEditorMaintenanceOperation.BUILD !in
+                    eventEditorSnapshot?.scheduleState?.availableMaintenanceOperations.orEmpty(),
                 showBuildScheduleConfirmDialog = showBuildScheduleConfirmDialog,
                 showRebuildWithoutPlaceholdersConfirmDialog =
                     showRebuildWithoutPlaceholdersConfirmDialog,
@@ -1180,6 +1206,12 @@ fun EventDetailScreen(
                 onDismissEventTypeTransitionConfirmation =
                     component::dismissEventTypeTransitionConfirmation,
                 onConfirmEventTypeTransition = component::confirmEventTypeTransition,
+                onAcceptScheduleMaintenanceProposal = component::acceptScheduleMaintenanceProposal,
+                onRejectScheduleMaintenanceProposal = component::rejectScheduleMaintenanceProposal,
+                onDismissScheduleMaintenanceReview = component::dismissScheduleMaintenanceReview,
+                onRequestFreshScheduleMaintenanceProposal =
+                    component::requestFreshScheduleMaintenanceProposal,
+                onRetryAcceptedScheduleSync = component::retryAcceptedScheduleSync,
                 onDismissBuildScheduleConfirmation = {
                     showBuildScheduleConfirmDialog = false
                 },
@@ -1266,6 +1298,24 @@ fun EventDetailScreen(
                 onDismissBillingAddress = component::dismissBillingAddressPrompt,
             ),
         )
+        protectedMatchDeletionConfirmation?.let { message ->
+            AlertDialog(
+                onDismissRequest = component::dismissProtectedMatchDeletionConfirmation,
+                title = { Text("Delete protected Match history?") },
+                text = { Text(message) },
+                confirmButton = {
+                    TextButton(onClick = component::confirmProtectedMatchDeletion) {
+                        Text("Delete protected Matches")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = component::dismissProtectedMatchDeletionConfirmation) {
+                        Text("Cancel")
+                    }
+                },
+            )
+        }
+
         notificationPermissionPrimer?.let { state ->
             PermissionPrimerDialog(
                 state = state,

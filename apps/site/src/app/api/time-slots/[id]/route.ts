@@ -11,14 +11,17 @@ import {
   TimeSlotValidationError,
 } from '@/lib/timeSlotAvailability';
 import {
-  localDatePartsInTimeZone,
+  assertRepeatingTimeSlotsResolvable,
+} from '@/lib/repeatingTimeSlotAvailability';
+import { repeatingTimeSlotValidationResponse } from '@/server/repeatingTimeSlotValidationResponse';
+import {
   parseDateInputInTimeZone,
   resolveTimeZone,
   resolveTimeZoneFromFieldOrOrganization,
 } from '@/server/timeZones';
 import { deleteOrArchiveTimeSlot, toDeleteOrArchiveResponse } from '@/server/deletion/archivePolicy';
 import { canManageScheduledFields, canManageTimeSlot } from '@/server/timeSlotAccess';
-import { acquireEventLock } from '@/server/repositories/locks';
+import { acquireEventLock, acquireFieldLocks, acquireTimeSlotLocks } from '@/server/repositories/locks';
 
 export const dynamic = 'force-dynamic';
 
@@ -60,28 +63,6 @@ const normalizeDaysOfWeek = (input: { dayOfWeek?: number | null; daysOfWeek?: nu
   ).sort((a, b) => a - b);
 };
 
-const toDateOnlyValue = (value: Date, timeZone: string): number => {
-  const parts = localDatePartsInTimeZone(value, timeZone);
-  if (!parts) {
-    return Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate());
-  }
-  return Date.UTC(parts.year, parts.month - 1, parts.day);
-};
-
-const normalizeRepeatingEndDate = (
-  startDate: Date,
-  endDate: Date | null,
-  repeating: boolean,
-  timeZone: string,
-): Date | null => {
-  if (!repeating) {
-    return endDate;
-  }
-  if (!(endDate instanceof Date) || Number.isNaN(endDate.getTime())) {
-    return null;
-  }
-  return toDateOnlyValue(endDate, timeZone) > toDateOnlyValue(startDate, timeZone) ? endDate : null;
-};
 
 const resolveSlotTimeZone = async (
   scheduledFieldIds: string[],
@@ -182,6 +163,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       endDate: true,
       timeZone: true,
       repeating: true,
+      dayOfWeek: true,
+      daysOfWeek: true,
       scheduledFieldId: true,
       scheduledFieldIds: true,
       startTimeMinutes: true,
@@ -293,12 +276,31 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     ? requestedEndDate
     : currentEndDate;
   if (effectiveRepeating) {
-    payload.endDate = normalizeRepeatingEndDate(
-      effectiveStartDate,
-      endDateCandidate,
-      true,
-      effectiveTimeZone,
-    );
+    payload.endDate = endDateCandidate;
+    try {
+      assertRepeatingTimeSlotsResolvable({
+        slots: [{
+          ...existingSlot,
+          ...payload,
+          id,
+          repeating: true,
+          startDate: effectiveStartDate,
+          endDate: payload.endDate,
+          timeZone: effectiveTimeZone,
+          scheduledFieldId: effectiveScheduledFieldIds[0] ?? null,
+          scheduledFieldIds: effectiveScheduledFieldIds,
+          divisions: payloadDivisions ?? existingSlot.divisions,
+        }],
+        eventStart: effectiveStartDate,
+        eventEnd: null,
+      });
+    } catch (error) {
+      const repeatingTimeSlotResponse = repeatingTimeSlotValidationResponse(error);
+      if (repeatingTimeSlotResponse) {
+        return repeatingTimeSlotResponse;
+      }
+      throw error;
+    }
   } else {
     try {
       const resolved = resolveOneTimeTimeSlot({
@@ -386,6 +388,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           timeSlotIds: true,
         },
       });
+      const fieldIdsToLock = new Set<string>([
+        ...normalizeFieldIds(existingSlot.scheduledFieldIds ?? (
+          existingSlot.scheduledFieldId ? [existingSlot.scheduledFieldId] : []
+        )),
+        ...effectiveScheduledFieldIds,
+        ...referencingEvents.flatMap((event) => event.fieldIds),
+      ]);
+      await acquireFieldLocks(tx, Array.from(fieldIdsToLock).sort());
+      await acquireTimeSlotLocks(tx, [id]);
       if (referencingEvents.length) {
         const allSlotIds = Array.from(new Set(
           referencingEvents.flatMap((event) => event.timeSlotIds),
@@ -528,12 +539,11 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (!(await canManageTimeSlot(session, existing))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
-
-  const result = await deleteOrArchiveTimeSlot({
-    client: prisma,
+  const result = await prisma.$transaction((tx) => deleteOrArchiveTimeSlot({
+    client: tx,
     entity: existing,
     actorUserId: session.userId,
     reason: 'delete_requested',
-  });
+  }));
   return NextResponse.json(toDeleteOrArchiveResponse(result), { status: 200 });
 }

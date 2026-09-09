@@ -3,6 +3,7 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.isRentalBacked
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
 import com.razumly.mvp.core.data.repositories.RentalResourceOption
 import com.razumly.mvp.core.util.resolvedTimeZone
@@ -17,6 +18,8 @@ internal data class RentalResourceDraftSyncResult(
 )
 
 internal class EventRentalResourcesCoordinator {
+    private var attachedResourceIds: Set<String> = emptySet()
+    private var attachedSlots: List<TimeSlot> = emptyList()
     private val _availableResources = MutableStateFlow<List<RentalResourceOption>>(emptyList())
     val availableResources = _availableResources.asStateFlow()
 
@@ -26,6 +29,7 @@ internal class EventRentalResourcesCoordinator {
     fun setSelected(optionId: String, selected: Boolean): Boolean {
         val normalizedOptionId = optionId.trim()
         if (normalizedOptionId.isEmpty()) return false
+        if (!selected && normalizedOptionId in attachedResourceIds) return false
         _availableResources.value.firstOrNull { option -> option.id == normalizedOptionId } ?: return false
         val nextSelected = if (selected) {
             _selectedResourceIds.value + normalizedOptionId
@@ -41,11 +45,13 @@ internal class EventRentalResourcesCoordinator {
         slots: List<TimeSlot>,
         eventId: String,
     ): Boolean {
+        attachedSlots = slots.filter(TimeSlot::isRentalBacked)
         val nextSelected = resolveAttachedResourceIds(
             options = _availableResources.value,
             slots = slots,
             eventId = eventId,
         )
+        attachedResourceIds = nextSelected
         if (nextSelected == _selectedResourceIds.value) return false
         _selectedResourceIds.value = nextSelected
         return true
@@ -59,6 +65,8 @@ internal class EventRentalResourcesCoordinator {
         _availableResources.value = options
         val availableIds = options.map { option -> option.id }.toSet()
         val attachedIds = resolveAttachedResourceIds(options, slots, eventId)
+        attachedSlots = slots.filter(TimeSlot::isRentalBacked)
+        attachedResourceIds = attachedIds
         val normalizedSelected = (_selectedResourceIds.value.filter(availableIds::contains) + attachedIds).toSet()
         if (normalizedSelected == _selectedResourceIds.value) return false
         _selectedResourceIds.value = normalizedSelected
@@ -89,15 +97,10 @@ internal class EventRentalResourcesCoordinator {
             .filter { slot -> slot.isRentalBacked() }
             .mapNotNull { slot -> slot.rentalBookingItemId?.trim()?.takeIf(String::isNotBlank) }
             .toSet()
-        val rentalSlotBookingIds = slots
-            .filter { slot -> slot.isRentalBacked() }
-            .mapNotNull { slot -> slot.rentalBookingId?.trim()?.takeIf(String::isNotBlank) }
-            .toSet()
         return options
             .filter { option ->
-                option.eventId == eventId ||
-                    rentalSlotItemIds.contains(option.bookingItemId) ||
-                    rentalSlotBookingIds.contains(option.bookingId)
+                (eventId.isNotBlank() && option.eventId == eventId) ||
+                    rentalSlotItemIds.contains(option.bookingItemId)
             }
             .map { option -> option.id }
             .toSet()
@@ -153,7 +156,9 @@ internal class EventRentalResourcesCoordinator {
         defaultDivisionIds: List<String>,
     ): RentalResourceDraftSyncResult {
         val selectedOptions = selectedOptions()
-        val rentalFields = selectedFields(selectedOptions)
+        val attachedFieldIds = attachedSlots.flatMap { it.normalizedScheduledFieldIds() }.toSet()
+        val rentalFields = (currentFields.filter { it.id in attachedFieldIds } + selectedFields(selectedOptions))
+            .distinctBy { it.id }
         val selectedRentalFieldIds = rentalFields
             .map { field -> field.id.trim() }
             .filter(String::isNotBlank)
@@ -167,12 +172,19 @@ internal class EventRentalResourcesCoordinator {
             .distinctBy { field -> field.id.trim() }
             .mapIndexed { index, field -> field.copy(fieldNumber = index + 1) }
 
-        val rentalSlots = selectedOptions.map { option ->
-            option.toRentalTimeSlot(
-                event = event,
-                defaultDivisionIds = defaultDivisionIds,
-            )
+        val retainedSlots = attachedSlots.map { booked ->
+            booked.copy(divisions = currentSlots.firstOrNull { it.id == booked.id }?.divisions ?: booked.divisions)
         }
+        val rentalSlots = retainedSlots + selectedOptions
+            .filterNot { option -> attachedSlots.any { it.rentalBookingItemId == option.bookingItemId } }
+            .map { option ->
+                option.toRentalTimeSlot(
+                    event = event,
+                    defaultDivisionIds = currentSlots.firstOrNull {
+                        it.rentalBookingItemId == option.bookingItemId
+                    }?.divisions ?: defaultDivisionIds,
+                )
+            }
         val rentalSlotIds = rentalSlots.map { slot -> slot.id }.toSet()
         val validFieldIds = nextFields.map { field -> field.id }.toSet()
         val customSlots = currentSlots
