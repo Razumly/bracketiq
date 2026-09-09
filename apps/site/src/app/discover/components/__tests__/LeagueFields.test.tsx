@@ -285,6 +285,32 @@ describe("LeagueFields", () => {
     expect(onAddSlot).toHaveBeenNthCalledWith(1, true);
     expect(onAddSlot).toHaveBeenNthCalledWith(2, false);
   });
+  it("can remove the duplicate timeslot heading while keeping its actions", () => {
+    renderWithMantine(
+      <LeagueFields
+        leagueData={{
+          gamesPerOpponent: 1,
+          includePlayoffs: false,
+          usesSets: false,
+          restTimeMinutes: 0,
+        }}
+        onLeagueDataChange={noop}
+        slots={[baseSlot]}
+        onAddSlot={noop}
+        onUpdateSlot={noop}
+        onRemoveSlot={noop}
+        fields={[field]}
+        fieldsLoading={false}
+        timeslotMode="MIXED"
+        showTimeslotHeading={false}
+        unstyled
+      />,
+    );
+
+    expect(screen.queryByRole("heading", { name: "Schedule Timeslots" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add Weekly Timeslot" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add One-time Timeslot" })).toBeInTheDocument();
+  });
 
   it("shows fixed-window resource assignment without editable time controls or an outer paper", () => {
     const { container } = renderWithMantine(

@@ -674,6 +674,7 @@ interface LeagueFieldsProps {
   configurationTitle?: string;
   showPlayoffSettings?: boolean;
   showTimeslots?: boolean;
+  showTimeslotHeading?: boolean;
   unstyled?: boolean;
   emptyFieldsMessage?: string;
 }
@@ -704,6 +705,7 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
   configurationTitle = 'League Configuration',
   showPlayoffSettings = true,
   showTimeslots = true,
+  showTimeslotHeading = true,
   unstyled = false,
   emptyFieldsMessage,
 }) => {
@@ -1118,45 +1120,49 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
 
         {showTimeslots && (
         <div>
-          <div className="flex items-center justify-between mb-4 gap-3">
-            <Title order={4} className="m-0">
-              {timeslotMode === 'FIXED_WINDOW'
-                ? 'Fixed event window'
-                : timeslotMode === 'FIXED'
-                  ? 'One-time Timeslots'
-                  : timeslotMode === 'MIXED'
-                    ? 'Schedule Timeslots'
-                    : 'Weekly Timeslots'}
-            </Title>
-            {timeslotMode === 'FIXED_WINDOW' ? null : timeslotMode === 'MIXED' ? (
-              <Group gap="xs">
-                <Button variant="light" onClick={() => onAddSlot(true)} disabled={readOnly}>
-                  Add Weekly Timeslot
+          {showTimeslotHeading || timeslotMode !== 'FIXED_WINDOW' ? (
+            <div className={`mb-4 flex items-center gap-3 ${showTimeslotHeading ? 'justify-between' : 'justify-end'}`}>
+              {showTimeslotHeading ? (
+                <Title order={4} className="m-0">
+                  {timeslotMode === 'FIXED_WINDOW'
+                    ? 'Fixed event window'
+                    : timeslotMode === 'FIXED'
+                      ? 'One-time Timeslots'
+                      : timeslotMode === 'MIXED'
+                        ? 'Schedule Timeslots'
+                        : 'Weekly Timeslots'}
+                </Title>
+              ) : null}
+              {timeslotMode === 'FIXED_WINDOW' ? null : timeslotMode === 'MIXED' ? (
+                <Group gap="xs">
+                  <Button variant="light" onClick={() => onAddSlot(true)} disabled={readOnly}>
+                    Add Weekly Timeslot
+                  </Button>
+                  <Button variant="light" onClick={() => onAddSlot(false)} disabled={readOnly}>
+                    Add One-time Timeslot
+                  </Button>
+                </Group>
+              ) : (
+                <Button
+                  variant="light"
+                  onClick={() => {
+                    if (timeslotMode === 'ALL') {
+                      onAddSlot();
+                      return;
+                    }
+                    onAddSlot(timeslotMode !== 'FIXED');
+                  }}
+                  disabled={readOnly}
+                >
+                  {timeslotMode === 'ALL'
+                    ? 'Add Timeslot'
+                    : timeslotMode === 'FIXED'
+                      ? 'Add One-time Timeslot'
+                      : 'Add Weekly Timeslot'}
                 </Button>
-                <Button variant="light" onClick={() => onAddSlot(false)} disabled={readOnly}>
-                  Add One-time Timeslot
-                </Button>
-              </Group>
-            ) : (
-              <Button
-                variant="light"
-                onClick={() => {
-                  if (timeslotMode === 'ALL') {
-                    onAddSlot();
-                    return;
-                  }
-                  onAddSlot(timeslotMode !== 'FIXED');
-                }}
-                disabled={readOnly}
-              >
-                {timeslotMode === 'ALL'
-                  ? 'Add Timeslot'
-                  : timeslotMode === 'FIXED'
-                    ? 'Add One-time Timeslot'
-                    : 'Add Weekly Timeslot'}
-              </Button>
-            )}
-          </div>
+              )}
+            </div>
+          ) : null}
 
           {fieldsLoading && (
             <div className="flex items-center gap-2 mb-4 text-sm text-gray-600">

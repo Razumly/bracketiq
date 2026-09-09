@@ -231,8 +231,8 @@ describe("SimpleSetupPlanningPage operations plan", () => {
     expect(onNoFixedEndDateTimeChange).toHaveBeenCalledWith(true);
   });
 
-  it("preserves generated end-date mode when automated scheduling is disabled", () => {
-    const onNoFixedEndDateTimeChange = jest.fn();
+  it("delegates automation-off to the fixed planned-end transition", () => {
+    const onAutomatedSchedulingChange = jest.fn();
     const leagueCapabilities = resolveEventSetupCapabilities({
       eventType: "LEAGUE",
       isExternalRegistration: false,
@@ -270,7 +270,8 @@ describe("SimpleSetupPlanningPage operations plan", () => {
           onIncludePlayoffsChange={jest.fn()}
           onIncludePoolPlayChange={jest.fn()}
           onSplitLeaguePlayoffDivisionsChange={jest.fn()}
-          onNoFixedEndDateTimeChange={onNoFixedEndDateTimeChange}
+          onNoFixedEndDateTimeChange={jest.fn()}
+          onAutomatedSchedulingChange={onAutomatedSchedulingChange}
           onConnectStripe={jest.fn()}
           onRegistrationPaymentModeChange={jest.fn()}
           isImmutableField={() => false}
@@ -282,8 +283,7 @@ describe("SimpleSetupPlanningPage operations plan", () => {
 
     fireEvent.click(screen.getByLabelText("Automated Scheduling"));
 
-    expect(onNoFixedEndDateTimeChange).not.toHaveBeenCalled();
-    expect(screen.getByLabelText("Set end date during match generation")).toBeChecked();
+    expect(onAutomatedSchedulingChange).toHaveBeenCalledWith(false);
   });
 });
 

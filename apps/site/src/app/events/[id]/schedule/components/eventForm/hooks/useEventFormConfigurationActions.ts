@@ -112,6 +112,12 @@ export const useEventFormConfigurationActions = ({
     setValue,
     tournamentData,
 }: UseEventFormConfigurationActionsParams) => {
+    const handleAutomatedSchedulingChange = useCallback((checked: boolean) => {
+        setValue('isAutomatedScheduling', checked, { shouldDirty: true, shouldValidate: true });
+        if (!checked) {
+            setValue('noFixedEndDateTime', false, { shouldDirty: true, shouldValidate: true });
+        }
+    }, [setValue]);
     const handleLeagueScoringConfigChange = useCallback((
         key: keyof LeagueScoringConfig,
         value: LeagueScoringConfig[keyof LeagueScoringConfig],
@@ -308,6 +314,7 @@ export const useEventFormConfigurationActions = ({
 
     return {
         handleAffiliateEventChange,
+        handleAutomatedSchedulingChange,
         handleEndChange,
         handleEventTypeChange,
         handleIncludePlayoffsToggle,

@@ -129,6 +129,25 @@ describe('useEventFormConfigurationActions', () => {
         expect(result.current.eventData.noFixedEndDateTime).toBe(false);
         expect(result.current.eventData.end).toBe('');
     });
+    it('switches competition events to a fixed planned end without clearing it', async () => {
+        const { result } = renderHook(() => useConfigurationActionsHarness(
+            buildEventData({
+                eventType: 'LEAGUE',
+                isAutomatedScheduling: true,
+                noFixedEndDateTime: true,
+                end: '2026-07-20T12:00',
+            }),
+            jest.fn(),
+        ));
+
+        act(() => result.current.actions.handleAutomatedSchedulingChange(false));
+
+        await waitFor(() => {
+            expect(result.current.eventData.isAutomatedScheduling).toBe(false);
+            expect(result.current.eventData.noFixedEndDateTime).toBe(false);
+            expect(result.current.eventData.end).toBe('2026-07-20T12:00');
+        });
+    });
 
     it('applies league event-type invariants as one action', async () => {
         const clearLeagueSlotErrors = jest.fn();

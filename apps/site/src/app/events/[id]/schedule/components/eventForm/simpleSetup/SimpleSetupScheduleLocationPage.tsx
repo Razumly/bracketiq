@@ -123,6 +123,27 @@ export const SimpleSetupScheduleLocationPage = ({
       error={errors.fieldCount?.message as string | undefined}
     />
   ) : null;
+  const localResourceControls = showLocalFieldCreationControls ? (
+    <EventDetailsResourceControls
+      control={control}
+      showOrganizationFields={showOrganizationFieldsInEventDetails}
+      organizationResourcePool={organizationResourcePool}
+      resourceSelectorLoading={resourceSelectorLoading}
+      organizationHostedEventId={organizationHostedEventId}
+      isImmutableField={isImmutableField}
+      rentalResourcesError={rentalResourcesError}
+      showLocalFieldCreationControls={showLocalFieldCreationControls}
+      eventLocalFields={eventLocalFields}
+      fieldNamesCollapsed={fieldNamesCollapsed}
+      setFieldNamesCollapsed={setFieldNamesCollapsed}
+      maxResourceNameLength={MAX_MEDIUM_TEXT_LENGTH}
+      embedded
+      resourceLabels={resourceLabels}
+      showOrganizationResourceControls={false}
+      localFieldCreationControl={localFieldCreationControl}
+      onLocalFieldNameChange={handleLocalFieldNameChange}
+    />
+  ) : null;
 
   return (
     <Stack gap="xl">
@@ -135,31 +156,43 @@ export const SimpleSetupScheduleLocationPage = ({
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-12 md:items-start">
-        <EventDetailsTimingControls
-          control={control}
-          eventType={eventData.eventType}
-          startValue={eventData.start}
-          noFixedEndDateTime={Boolean(eventData.noFixedEndDateTime)}
-          supportsNoFixedEndDateTime={
-            model.presentation.supportsNoFixedEndDateTime
-          }
-          automaticRefundsAvailable={
-            model.paymentController.automaticRefundsAvailable
-          }
-          manualPaymentsEnabled={model.paymentController.manualPaymentsEnabled}
-          todaysDate={new Date(new Date().setHours(0, 0, 0, 0))}
-          maxStandardNumber={MAX_STANDARD_NUMBER}
-          dateTimePickerStyles={alignedDetailsFieldStyles}
-          numberInputStyles={alignedDetailsFieldStyles}
-          popoverProps={sharedPopoverProps}
-          isImmutableField={isImmutableField}
-          onStartChange={handleStartChange}
-          onEndChange={handleEndChange}
-          onNoFixedEndDateTimeChange={handleNoFixedEndDateTimeChange}
-          showScheduleControls
-          showRegistrationControls={false}
-          showGeneratedEndDateControl={eventData.eventType === "WEEKLY_EVENT"}
-        />
+        <div
+          className={`min-w-0 ${
+            localResourceControls
+              ? "md:col-span-6"
+              : "md:col-span-12"
+          } grid grid-cols-1 gap-4 md:grid-cols-6 md:items-start`}
+        >
+          <EventDetailsTimingControls
+            control={control}
+            eventType={eventData.eventType}
+            startValue={eventData.start}
+            noFixedEndDateTime={Boolean(eventData.noFixedEndDateTime)}
+            supportsNoFixedEndDateTime={
+              model.presentation.supportsNoFixedEndDateTime
+            }
+            automaticRefundsAvailable={
+              model.paymentController.automaticRefundsAvailable
+            }
+            manualPaymentsEnabled={model.paymentController.manualPaymentsEnabled}
+            todaysDate={new Date(new Date().setHours(0, 0, 0, 0))}
+            maxStandardNumber={MAX_STANDARD_NUMBER}
+            dateTimePickerStyles={alignedDetailsFieldStyles}
+            numberInputStyles={alignedDetailsFieldStyles}
+            popoverProps={sharedPopoverProps}
+            isImmutableField={isImmutableField}
+            onStartChange={handleStartChange}
+            onEndChange={handleEndChange}
+            onNoFixedEndDateTimeChange={handleNoFixedEndDateTimeChange}
+            showAutomatedSchedulingControl={false}
+            showScheduleControls
+            showRegistrationControls={false}
+            showGeneratedEndDateControl={eventData.eventType === "WEEKLY_EVENT"}
+          />
+        </div>
+        {localResourceControls ? (
+          <div className="min-w-0 md:col-span-6">{localResourceControls}</div>
+        ) : null}
       </div>
 
       <EventDetailsLocationControls
@@ -203,29 +236,6 @@ export const SimpleSetupScheduleLocationPage = ({
               resourceLabels={resourceLabels}
               embedded
               showLocalFieldNameControls={false}
-              onLocalFieldNameChange={handleLocalFieldNameChange}
-            />
-          ) : null
-        }
-        localFieldNameControls={
-          showLocalFieldCreationControls ? (
-            <EventDetailsResourceControls
-              control={control}
-              showOrganizationFields={showOrganizationFieldsInEventDetails}
-              organizationResourcePool={organizationResourcePool}
-              resourceSelectorLoading={resourceSelectorLoading}
-              organizationHostedEventId={organizationHostedEventId}
-              isImmutableField={isImmutableField}
-              rentalResourcesError={rentalResourcesError}
-              showLocalFieldCreationControls={showLocalFieldCreationControls}
-              eventLocalFields={eventLocalFields}
-              fieldNamesCollapsed={fieldNamesCollapsed}
-              setFieldNamesCollapsed={setFieldNamesCollapsed}
-              maxResourceNameLength={MAX_MEDIUM_TEXT_LENGTH}
-              embedded
-              resourceLabels={resourceLabels}
-              showOrganizationResourceControls={false}
-              localFieldCreationControl={localFieldCreationControl}
               onLocalFieldNameChange={handleLocalFieldNameChange}
             />
           ) : null
@@ -279,6 +289,7 @@ export const SimpleSetupScheduleLocationPage = ({
                     ? "FIXED"
                     : "MIXED"
             }
+            showTimeslotHeading={false}
             lockSlotDivisions={Boolean(eventData.singleDivision)}
             lockedDivisionKeys={slotDivisionKeys}
             readOnly={hasImmutableTimeSlots}
