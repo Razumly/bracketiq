@@ -10,13 +10,14 @@ type TimingHarnessProps = {
   supportsNoFixedEndDateTime?: boolean;
   hasGeneratedEnd?: boolean;
   onPolicyChange?: (value: boolean) => void;
+  showAutomatedSchedulingControl?: boolean;
 };
-
 const TimingHarness = ({
   eventType = "LEAGUE",
   supportsNoFixedEndDateTime = true,
   hasGeneratedEnd = false,
   onPolicyChange = jest.fn(),
+  showAutomatedSchedulingControl = true,
 }: TimingHarnessProps = {}) => {
   const form = useForm<EventFormValues>({
     defaultValues: {
@@ -43,6 +44,7 @@ const TimingHarness = ({
       onStartChange={jest.fn()}
       onEndChange={jest.fn()}
       onNoFixedEndDateTimeChange={onPolicyChange}
+      showAutomatedSchedulingControl={showAutomatedSchedulingControl}
       showRegistrationControls={false}
       showGeneratedEndDateControl
     />
@@ -50,14 +52,24 @@ const TimingHarness = ({
 };
 
 describe("EventDetailsTimingControls", () => {
-  it.each(['LEAGUE', 'TOURNAMENT'] as const)('preserves the selected policy when %s automation is disabled', (eventType) => {
-    const onPolicyChange = jest.fn();
-    renderWithMantine(<TimingHarness eventType={eventType} hasGeneratedEnd onPolicyChange={onPolicyChange} />);
+  it.each(['LEAGUE', 'TOURNAMENT'] as const)('keeps the event end visible after %s automation is disabled', (eventType) => {
+    renderWithMantine(<TimingHarness eventType={eventType} hasGeneratedEnd />);
     fireEvent.click(screen.getByLabelText('Automated Scheduling'));
-    expect(screen.getByLabelText('Automated Scheduling')).not.toBeChecked();
-    expect(screen.getByLabelText('Set the end date during match generation')).toBeChecked();
-    expect(onPolicyChange).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByLabelText('Set the end date during match generation'));
-    expect(onPolicyChange).toHaveBeenCalledWith(false);
+
+    expect(screen.getByRole('button', { name: 'Start Date & Time' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'End Date & Time' })).toBeInTheDocument();
+    expect(
+      screen.queryByLabelText('Set the end date during match generation'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('can hide the automated scheduling control when the page already owns it', () => {
+    renderWithMantine(
+      <TimingHarness showAutomatedSchedulingControl={false} />,
+    );
+
+    expect(screen.queryByLabelText('Automated Scheduling')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start Date & Time' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'End Date & Time' })).toBeInTheDocument();
   });
 });

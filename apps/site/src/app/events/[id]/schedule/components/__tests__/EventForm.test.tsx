@@ -1281,10 +1281,14 @@ describe('EventForm dirty state', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Next' }));
       expect(await screen.findByRole('heading', { name: pageName })).toBeInTheDocument();
     }
+    expect(screen.queryByLabelText('Automated Scheduling')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start Date & Time' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'End Date & Time' })).toBeInTheDocument();
     await waitFor(() => {
       const latestScheduleProps = mockLeagueFieldsProps.at(-1);
       expect(latestScheduleProps?.timeslotMode).toBe('FIXED_WINDOW');
       expect(latestScheduleProps?.unstyled).toBe(true);
+      expect(latestScheduleProps?.showTimeslotHeading).toBe(false);
       expect(latestScheduleProps?.slots).toEqual([
         expect.objectContaining({
           repeating: false,
@@ -1294,6 +1298,45 @@ describe('EventForm dirty state', () => {
       ]);
     });
     confirmSpy.mockRestore();
+  });
+
+  it('keeps event dates and custom courts when automated scheduling is disabled', async () => {
+    renderForm(jest.fn(), undefined, {
+      eventType: 'LEAGUE',
+      isAutomatedScheduling: true,
+      noFixedEndDateTime: false,
+      start: '2026-03-12T10:00:00',
+      end: '2026-03-12T12:00:00',
+    }, null, {
+      isCreateMode: true,
+      initialSetupMode: 'SIMPLE',
+    });
+
+    fireEvent.click(screen.getByLabelText('Automated Scheduling'));
+    await waitFor(() => {
+      expect(screen.getByLabelText('Automated Scheduling')).not.toBeChecked();
+    });
+
+    for (const pageName of ['Basics', 'Divisions', 'Schedule & Location']) {
+      fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+      expect(await screen.findByRole('heading', { name: pageName })).toBeInTheDocument();
+    }
+
+    expect(screen.queryByLabelText('Automated Scheduling')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start Date & Time' })).toHaveAttribute(
+      'data-value',
+      '2026-03-12T10:00',
+    );
+    expect(screen.getByRole('button', { name: 'End Date & Time' })).toHaveAttribute(
+      'data-value',
+      '2026-03-12T12:00',
+    );
+    expect(screen.queryByRole('heading', { name: 'Schedule' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('league-fields')).not.toBeInTheDocument();
+
+    const customCourts = await screen.findByText('Custom Courts');
+    const location = screen.getByLabelText('Location');
+    expect(customCourts.compareDocumentPosition(location) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('defaults bracket teams to three and rejects smaller counts', async () => {

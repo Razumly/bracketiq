@@ -44,6 +44,7 @@ type ScheduleConfigBodyProps = {
     divisionOptions: DivisionOption[];
     eventStartDate?: string;
     timeslotMode?: LeagueTimeslotMode;
+    showTimeslotHeading?: boolean;
     lockSlotDivisions: boolean;
     lockedDivisionKeys: string[];
     readOnly: boolean;
@@ -78,6 +79,7 @@ export const ScheduleConfigBody = ({
     divisionOptions,
     eventStartDate,
     timeslotMode,
+    showTimeslotHeading = true,
     lockSlotDivisions,
     lockedDivisionKeys,
     readOnly,
@@ -158,6 +160,7 @@ export const ScheduleConfigBody = ({
                     divisionOptions={divisionOptions}
                     eventStartDate={eventStartDate}
                     timeslotMode={timeslotMode}
+                    showTimeslotHeading={showTimeslotHeading}
                     lockSlotDivisions={lockSlotDivisions}
                     lockedDivisionKeys={lockedDivisionKeys}
                     readOnly={readOnly}

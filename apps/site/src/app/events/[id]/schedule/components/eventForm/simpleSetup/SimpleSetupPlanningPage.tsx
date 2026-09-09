@@ -53,6 +53,7 @@ type SimpleSetupPlanningPageProps = {
     applyValue: (checked: boolean) => void,
   ) => void;
   onNoFixedEndDateTimeChange: (checked: boolean) => void;
+  onAutomatedSchedulingChange?: (checked: boolean) => void;
   onConnectStripe: () => void;
   onRegistrationPaymentModeChange: (mode: "ONLINE" | "MANUAL") => void;
   isImmutableField: (key: keyof Event) => boolean;
@@ -106,6 +107,7 @@ export const SimpleSetupPlanningPage = ({
   onIncludePoolPlayChange,
   onSplitLeaguePlayoffDivisionsChange,
   onNoFixedEndDateTimeChange,
+  onAutomatedSchedulingChange,
   onConnectStripe,
   onRegistrationPaymentModeChange,
   isImmutableField,
@@ -406,11 +408,14 @@ export const SimpleSetupPlanningPage = ({
                 label="Automated Scheduling"
                 description="Build the match schedule from the event setup when you create it."
                 checked={Boolean(field.value)}
-                disabled={isImmutableField("isAutomatedScheduling")}
                 onChange={(event) => {
                   if (isImmutableField("isAutomatedScheduling")) return;
                   const checked = event.currentTarget.checked;
-                  field.onChange(checked);
+                  if (onAutomatedSchedulingChange) {
+                    onAutomatedSchedulingChange(checked);
+                  } else {
+                    field.onChange(checked);
+                  }
                 }}
               />
             )}

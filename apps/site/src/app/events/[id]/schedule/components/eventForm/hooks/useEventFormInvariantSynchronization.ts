@@ -40,10 +40,23 @@ export const useEventFormInvariantSynchronization = ({
         }
     }, [eventData.eventType, isRentalCreateFlow, setValue]);
     useEffect(() => {
-        if (eventData.eventType === 'TRYOUT' && eventData.noFixedEndDateTime) {
+        const generatedEndRequiresAutomation =
+            eventData.eventType === 'LEAGUE' || eventData.eventType === 'TOURNAMENT';
+        if (
+            eventData.noFixedEndDateTime
+            && (
+                eventData.eventType === 'TRYOUT'
+                || (generatedEndRequiresAutomation && eventData.isAutomatedScheduling === false)
+            )
+        ) {
             setValue('noFixedEndDateTime', false, { shouldDirty: true, shouldValidate: true });
         }
-    }, [eventData.eventType, eventData.noFixedEndDateTime, setValue]);
+    }, [
+        eventData.eventType,
+        eventData.isAutomatedScheduling,
+        eventData.noFixedEndDateTime,
+        setValue,
+    ]);
 
 
     useEffect(() => {

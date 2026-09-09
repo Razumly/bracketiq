@@ -52,6 +52,7 @@ type EventDetailsPanelProps = {
     onStartChange: (value: Date) => void;
     onEndChange: (value: Date) => void;
     onNoFixedEndDateTimeChange: (checked: boolean) => void;
+    onAutomatedSchedulingChange?: (checked: boolean) => void;
     coordinatesSelected: boolean;
     defaultCoordinates?: [number, number];
     onSelectedAddressChange: (coordinates: [number, number], address: string) => void;
@@ -119,6 +120,7 @@ export const EventDetailsPanel = ({
     onStartChange,
     onEndChange,
     onNoFixedEndDateTimeChange,
+    onAutomatedSchedulingChange,
     coordinatesSelected,
     defaultCoordinates,
     onSelectedAddressChange,
@@ -197,6 +199,7 @@ export const EventDetailsPanel = ({
                 onStartChange={onStartChange}
                 onEndChange={onEndChange}
                 onNoFixedEndDateTimeChange={onNoFixedEndDateTimeChange}
+                onAutomatedSchedulingChange={onAutomatedSchedulingChange}
                 showScheduleControls={showScheduleTimingControls}
                 showRegistrationControls={showRegistrationTimingControls}
             /> : null}

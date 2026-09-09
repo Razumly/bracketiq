@@ -346,6 +346,7 @@ export const EventFormSections = ({
                 onIncludePoolPlayChange={handleIncludePoolPlayChange}
                 onStartChange={handleStartChange}
                 onEndChange={handleEndChange}
+                onAutomatedSchedulingChange={configurationActions.handleAutomatedSchedulingChange}
                 onNoFixedEndDateTimeChange={handleNoFixedEndDateTimeChange}
                 coordinatesSelected={coordinatesAreSet(eventData.coordinates)}
                 defaultCoordinates={defaultCoordinates}

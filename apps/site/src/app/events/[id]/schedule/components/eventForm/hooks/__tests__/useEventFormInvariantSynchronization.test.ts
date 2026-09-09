@@ -92,6 +92,17 @@ describe('useEventFormInvariantSynchronization', () => {
 
         await waitFor(() => expect(result.current.noFixedEndDateTime).toBe(false));
     });
+    it('clears generated-end mode for unscheduled competition events', async () => {
+        const { result } = renderHook(() => useInvariantSynchronizationHarness({
+            eventData: buildEventData({
+                eventType: 'LEAGUE',
+                isAutomatedScheduling: false,
+                noFixedEndDateTime: true,
+            }),
+        }));
+
+        await waitFor(() => expect(result.current.noFixedEndDateTime).toBe(false));
+    });
 
     it('enforces team registration and removes duplicate creator participation', async () => {
         const { result } = renderHook(() => useInvariantSynchronizationHarness({

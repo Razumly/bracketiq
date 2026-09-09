@@ -26,11 +26,13 @@ type EventDetailsTimingControlsProps = {
   onStartChange: (value: Date) => void;
   onEndChange: (value: Date) => void;
   onNoFixedEndDateTimeChange: (checked: boolean) => void;
+  onAutomatedSchedulingChange?: (checked: boolean) => void;
+  showAutomatedSchedulingControl?: boolean;
   showScheduleControls?: boolean;
   showRegistrationControls?: boolean;
   showGeneratedEndDateControl?: boolean;
-};
 
+};
 export const EventDetailsTimingControls = ({
   control,
   eventType,
@@ -48,6 +50,8 @@ export const EventDetailsTimingControls = ({
   onStartChange,
   onEndChange,
   onNoFixedEndDateTimeChange,
+  onAutomatedSchedulingChange,
+  showAutomatedSchedulingControl = true,
   showScheduleControls = true,
   showRegistrationControls = true,
   showGeneratedEndDateControl = true,
@@ -57,8 +61,10 @@ export const EventDetailsTimingControls = ({
     control,
     name: "isAutomatedScheduling",
   });
-  const showAutomatedSchedulingControl =
-    showScheduleControls && (eventType === "LEAGUE" || eventType === "TOURNAMENT");
+  const shouldShowAutomatedSchedulingControl =
+    showAutomatedSchedulingControl &&
+    showScheduleControls &&
+    (eventType === "LEAGUE" || eventType === "TOURNAMENT");
   const isAutomatedSchedulingDisablesScheduleConstruction =
     eventType === "LEAGUE" || eventType === "TOURNAMENT";
   const showScheduleConstructionControls =
@@ -67,7 +73,7 @@ export const EventDetailsTimingControls = ({
       isAutomatedScheduling !== false);
   return (
     <>
-      {showAutomatedSchedulingControl ? (
+      {shouldShowAutomatedSchedulingControl ? (
         <div className="md:col-span-2">
           <Controller
             name="isAutomatedScheduling"
@@ -81,14 +87,18 @@ export const EventDetailsTimingControls = ({
                 onChange={(event) => {
                   if (isImmutableField("isAutomatedScheduling")) return;
                   const checked = event.currentTarget.checked;
-                  field.onChange(checked);
+                  if (onAutomatedSchedulingChange) {
+                    onAutomatedSchedulingChange(checked);
+                  } else {
+                    field.onChange(checked);
+                  }
                 }}
               />
             )}
           />
         </div>
       ) : null}
-      {showScheduleConstructionControls ? (
+      {showScheduleControls ? (
         <div className="md:col-span-2">
           <Controller
             name="start"
@@ -134,7 +144,7 @@ export const EventDetailsTimingControls = ({
             control={control}
             render={({ field, fieldState }) => (
               <div className="space-y-2">
-                {!noFixedEndDateTime || !supportsNoFixedEndDateTime ? (
+                {!noFixedEndDateTime || !supportsNoFixedEndDateTime || isAutomatedScheduling === false ? (
                   <DateTimePicker
                     label="End Date & Time"
                     valueFormat="MM/DD/YYYY hh:mm A"
@@ -160,7 +170,7 @@ export const EventDetailsTimingControls = ({
                   />
                 ) : null}
                 {supportsNoFixedEndDateTime
-                  && (showScheduleConstructionControls || noFixedEndDateTime)
+                  && showScheduleConstructionControls
                   && showGeneratedEndDateControl ? (
                   <div className="space-y-1">
                     <Checkbox

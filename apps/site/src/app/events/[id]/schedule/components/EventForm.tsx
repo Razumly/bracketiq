@@ -1706,6 +1706,9 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
           onNoFixedEndDateTimeChange={
             configurationActions.handleNoFixedEndDateTimeChange
           }
+          onAutomatedSchedulingChange={
+            configurationActions.handleAutomatedSchedulingChange
+          }
           onConnectStripe={paymentController.connectStripe}
           onRegistrationPaymentModeChange={(mode) => {
             paymentController.setManualPaymentsEnabled(mode === "MANUAL");
