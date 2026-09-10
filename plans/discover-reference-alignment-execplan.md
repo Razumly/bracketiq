@@ -149,3 +149,5 @@ Revision note (2026-09-10 05:02Z): Code review found and fixed the controlled Da
 Revision note (2026-09-10 05:09Z): Final review also identified a non-blocking prop-clump smell. The compact desktop control now picks only the filter fields it reads from the shared panel props.
 
 Revision note (2026-09-10 05:12Z): Final review found that shared card tokens were scoped only to organization ancestors. Added `.discover-shell` to that token scope so Discover card borders, accents, and keyboard focus outlines resolve.
+
+Revision note (2026-09-10 05:16Z): Final review found two location-picker accessibility and reflow gaps. The Discover location dropdown now aligns to the action group's safe edge, and Escape returns focus to the Set Location trigger.
