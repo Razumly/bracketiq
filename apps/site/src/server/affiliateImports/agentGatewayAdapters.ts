@@ -433,6 +433,7 @@ export interface AffiliateAgentWorkerHealthWriter {
 export type AffiliateAgentClaimAdmissionContext = Readonly<{
   role: AffiliateAgentRole;
   workerId: string;
+  jobId?: string;
 }>;
 
 export type AffiliateAgentBoundedAdmissionRole =
@@ -445,6 +446,7 @@ export type AffiliateAgentBoundedAdmissionLeaseRequest = Readonly<{
   workerId: string;
   leaseSeconds: number;
   roleCredential?: string;
+  jobId?: string;
 }>;
 
 export type AffiliateAgentBoundedAdmissionLease = Readonly<{
@@ -452,6 +454,7 @@ export type AffiliateAgentBoundedAdmissionLease = Readonly<{
   workerId: string;
   expiresAt: string;
   remainingClaims: number;
+  jobId?: string;
 }>;
 
 
@@ -462,7 +465,7 @@ export interface AffiliateAgentClaimAdmission {
     request: AffiliateAgentBoundedAdmissionLeaseRequest,
   ): Promise<AffiliateAgentBoundedAdmissionLease>;
   withClaim<T>(
-    operation: () => Promise<T>,
+    operation: (jobId?: string) => Promise<T>,
     context?: AffiliateAgentClaimAdmissionContext,
   ): Promise<T>;
 }
@@ -3260,6 +3263,9 @@ const productionProducerRepairEffect = (
         : [],
     }),
   )(effectInput);
+  if (effectInput.claim.executionBudget === "SINGLE_CLAIM") {
+    return { ...lifecycleResult, repairIssues, repairBudgetExhausted: true };
+  }
   const repair = await enqueueProducerRepairJob(
     input,
     effectInput,

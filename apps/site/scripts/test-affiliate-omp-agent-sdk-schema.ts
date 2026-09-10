@@ -54,6 +54,7 @@ const claimForProbe = () => {
     promptTemplateVersion: roleContract.promptTemplateVersion,
     promptTemplateHash: roleContract.promptTemplateHash,
     executionClass: "PRODUCTION_OMP",
+    executionBudget: "SINGLE_CLAIM",
     workerId: "worker-sdk-schema-probe",
     invocationId: "invocation-sdk-schema-probe",
     workspaceId: "workspace-sdk-schema-probe",

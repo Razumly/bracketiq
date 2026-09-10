@@ -56,6 +56,9 @@ import type {
 } from "./agentGatewayAdapters";
 import { verifyAffiliateAgentLegacySportRepair } from "./agentGatewayAdapters";
 import {
+  AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX,
+  AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX,
+  isAffiliateAgentSingleClaimJob,
   AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION,
   AFFILIATE_AGENT_ROLE_CONTRACT_VERSION,
   AFFILIATE_AGENT_PROMPT_TEMPLATES,
@@ -119,24 +122,35 @@ export type AffiliateAgentClaimAdmissionController =
     ): Promise<AffiliateAgentBoundedAdmissionLease>;
   }>;
 
+const MAX_BOUNDED_ADMISSION_JOB_ID_LENGTH = 200;
 type ActiveBoundedAdmissionLease = Readonly<{
   role: AffiliateAgentBoundedAdmissionLeaseRequest["role"];
   workerId: string;
+  jobId?: string;
   expiresAt: Date;
   remainingClaims: number;
 }>;
 
-const isClaimedAdmissionResult = (value: unknown): boolean => (
-  value !== null
-  && typeof value === "object"
-  && !Array.isArray(value)
-  && "kind" in value
-  && value.kind === "CLAIMED"
-);
+const normalizedBoundedAdmissionJobId = (
+  value: unknown,
+): string | undefined => {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") {
+    throw new Error("The bounded admission lease is invalid.");
+  }
+  const jobId = value.trim();
+  if (!jobId || jobId.length > MAX_BOUNDED_ADMISSION_JOB_ID_LENGTH) {
+    throw new Error("The bounded admission lease is invalid.");
+  }
+  return jobId;
+};
 
-const normalizedBoundedAdmissionWorkerId = (
+const normalizedBoundedAdmissionRequest = (
   request: AffiliateAgentBoundedAdmissionLeaseRequest,
-): string => {
+): Readonly<{
+  workerId: string;
+  jobId?: string;
+}> => {
   const workerId = request.workerId.trim();
   if (
     !workerId
@@ -146,18 +160,35 @@ const normalizedBoundedAdmissionWorkerId = (
   ) {
     throw new Error("The bounded admission lease is invalid.");
   }
-  return workerId;
+  const jobId = normalizedBoundedAdmissionJobId(request.jobId);
+  return jobId === undefined ? { workerId } : { workerId, jobId };
 };
+
+const isClaimedAdmissionResult = (value: unknown): boolean => (
+  value !== null
+  && typeof value === "object"
+  && !Array.isArray(value)
+  && "kind" in value
+  && value.kind === "CLAIMED"
+);
 
 const activeBoundedAdmissionLeaseResult = (
   lease: ActiveBoundedAdmissionLease,
   request: AffiliateAgentBoundedAdmissionLeaseRequest,
   workerId: string,
+  jobId: string | undefined,
 ): AffiliateAgentBoundedAdmissionLease => {
-  if (lease.role === request.role && lease.workerId === workerId) {
+  if (
+    lease.role === request.role
+    && lease.workerId === workerId
+    && lease.jobId === jobId
+  ) {
     return {
-      ...lease,
+      role: lease.role,
+      workerId: lease.workerId,
+      ...(lease.jobId === undefined ? {} : { jobId: lease.jobId }),
       expiresAt: lease.expiresAt.toISOString(),
+      remainingClaims: lease.remainingClaims,
     };
   }
   throw new Error("A bounded admission lease is already active.");
@@ -193,6 +224,7 @@ export const createAffiliateAgentClaimAdmission = (
     return (
       context.role === boundedAdmissionLease.role
       && context.workerId === boundedAdmissionLease.workerId
+      && context.jobId === boundedAdmissionLease.jobId
     );
   };
   const enqueue = <T>(operation: () => Promise<T>): Promise<T> => {
@@ -207,11 +239,15 @@ export const createAffiliateAgentClaimAdmission = (
     isOpen: isAdmissionOpen,
     isOpenFor: isAdmissionOpenFor,
     withClaim: (operation, context) => enqueue(async () => {
-      const result = await operation();
+      expireBoundedAdmissionLease();
+      const jobId = boundedAdmissionLease?.jobId;
+      const result = await operation(jobId);
       if (
         boundedAdmissionLease !== null
         && context?.role === boundedAdmissionLease.role
         && context.workerId === boundedAdmissionLease.workerId
+        && (context.jobId === undefined || context.jobId === jobId)
+        && boundedAdmissionLease.jobId === jobId
         && isClaimedAdmissionResult(result)
       ) {
         boundedAdmissionLease = {
@@ -229,7 +265,7 @@ export const createAffiliateAgentClaimAdmission = (
       }),
     openBoundedLease: (request) =>
       enqueue(async () => {
-        const workerId = normalizedBoundedAdmissionWorkerId(request);
+        const normalized = normalizedBoundedAdmissionRequest(request);
         expireBoundedAdmissionLease();
         if (
           boundedAdmissionLease !== null
@@ -238,7 +274,8 @@ export const createAffiliateAgentClaimAdmission = (
           return activeBoundedAdmissionLeaseResult(
             boundedAdmissionLease,
             request,
-            workerId,
+            normalized.workerId,
+            normalized.jobId,
           );
         }
         if (open && boundedAdmissionLease === null) {
@@ -247,14 +284,16 @@ export const createAffiliateAgentClaimAdmission = (
         const expiresAt = new Date(Date.now() + request.leaseSeconds * 1_000);
         boundedAdmissionLease = {
           role: request.role,
-          workerId,
+          workerId: normalized.workerId,
+          ...(normalized.jobId === undefined ? {} : { jobId: normalized.jobId }),
           expiresAt,
           remainingClaims: 1,
         };
         open = true;
         return {
           role: request.role,
-          workerId,
+          workerId: normalized.workerId,
+          ...(normalized.jobId === undefined ? {} : { jobId: normalized.jobId }),
           expiresAt: expiresAt.toISOString(),
           remainingClaims: 1,
         };
@@ -1400,24 +1439,21 @@ type ClaimAdmissionTiming = Readonly<{
 }>;
 
 const findClaimReplayOrClosed = async (
-  dependencies: AffiliateAgentGatewayDependencies,
   transaction: Prisma.TransactionClient,
   idempotencyKey: string,
-  admissionContext: AffiliateAgentClaimAdmissionContext,
+  admissionOpen: boolean,
+  admissionJobId?: string,
 ): Promise<ClaimTransactionResult | null> => {
   const replay = await transaction.affiliateAgentGatewayClaims.findUnique({
     where: { claimRequestId: idempotencyKey },
   });
-  if (replay) return { kind: "REPLAY", claim: replay };
-  const admission = dependencies.claimAdmission;
-  if (
-    admission
-    && !(admission.isOpenFor
-      ? admission.isOpenFor(admissionContext)
-      : admission.isOpen())
-  ) {
-    return { kind: "CLOSED" };
+  if (replay) {
+    if (admissionJobId !== undefined && replay.jobId !== admissionJobId) {
+      return { kind: "CLOSED" };
+    }
+    return { kind: "REPLAY", claim: replay };
   }
+  if (!admissionOpen) return { kind: "CLOSED" };
   return null;
 };
 
@@ -1530,20 +1566,37 @@ const findHaltedClaimLanes = async (
   return [...new Set(haltedJobs.map(({ lane }) => lane))];
 };
 
+const claimQueueForRole: Readonly<Record<AffiliateAgentClaimRequest["role"], string>> = {
+  COVERAGE_PLANNER: "AFFILIATE_COVERAGE",
+  MAPPING_PRODUCER: "AFFILIATE_MAPPING",
+  SUPPLY_REVIEWER: "AFFILIATE_REVIEW",
+  HUMAN_DIRECTED_EXECUTOR: "AFFILIATE_HUMAN_DIRECTED",
+};
+
 const findClaimableJob = async (
   transaction: Prisma.TransactionClient,
   input: AffiliateAgentClaimRequest,
   now: Date,
   haltedLanes: readonly string[],
+  admissionJobId?: string,
 ): Promise<AffiliateAgentGatewayJobs | null> =>
   transaction.affiliateAgentGatewayJobs.findFirst({
     where: {
       role: input.role,
+      queue: claimQueueForRole[input.role],
       status: { in: ["QUEUED", "RETRY_WAIT"] },
       activeClaimId: null,
       nextAttemptAt: { lte: now },
       lane:
         haltedLanes.length === 0 ? undefined : { notIn: [...haltedLanes] },
+      ...(admissionJobId === undefined
+        ? {
+          NOT: [
+            { dedupeKey: { startsWith: AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX } },
+            { dedupeKey: { startsWith: AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX } },
+          ],
+        }
+        : { id: admissionJobId }),
     },
     orderBy: [
       { priority: "desc" },
@@ -2189,6 +2242,7 @@ const createClaimEnvelope = (
     promptTemplateHash: roleContract.promptTemplateHash,
     role: input.role,
     executionClass: "PRODUCTION_OMP",
+    ...(isAffiliateAgentSingleClaimJob(job.dedupeKey) ? { executionBudget: "SINGLE_CLAIM" } : {}),
     workerId: input.workerId,
     invocationId: input.invocationId,
     workspaceId: input.workspaceAttestation.workspaceId,
@@ -2370,6 +2424,9 @@ const persistClaim = async (
   claim: AffiliateAgentGatewayClaims;
   envelope: AffiliateAgentClaimEnvelope;
 }> > => {
+  if (isAffiliateAgentSingleClaimJob(job.dedupeKey) && job.claimGeneration !== 0) {
+    throw gatewayError("PIPELINE_BLOCKED", "The one-time continuation claim has already been consumed.");
+  }
   const envelope = createClaimEnvelope(
     input,
     bundle,
@@ -2444,14 +2501,16 @@ const executeClaimTransaction = (
   claimId: string,
   tokenNonce: string,
   attestationExpiresAt: Date,
+  admissionOpen: boolean,
+  admissionJobId?: string,
 ): Promise<ClaimTransactionResult> =>
   dependencies.prisma.$transaction(
     async (transaction) => {
       const replayOrClosed = await findClaimReplayOrClosed(
-        dependencies,
         transaction,
         input.idempotencyKey,
-        { role: input.role, workerId: input.workerId },
+        admissionOpen,
+        admissionJobId,
       );
       if (replayOrClosed) return replayOrClosed;
       const timing = assertClaimAdmissionTiming(
@@ -2466,6 +2525,7 @@ const executeClaimTransaction = (
         input,
         timing.now,
         haltedLanes,
+        admissionJobId,
       );
       if (!job) return { kind: "NO_WORK" as const };
       const queuedSubject = parseQueuedSubject(job, input.role);
@@ -2527,7 +2587,20 @@ const claimResultToGrant = (
   requestHash: string,
   bundle: AffiliateAgentContractBundle,
   roleContract: AffiliateAgentRoleContract,
+  admissionJobId?: string,
 ): AffiliateAgentClaimGrant | null => {
+  if (admissionJobId !== undefined) {
+    if (
+      (stored.kind === "REPLAY" && stored.claim.jobId !== admissionJobId)
+      || (stored.kind === "CLAIMED"
+        && (
+          stored.claim.jobId !== admissionJobId
+          || stored.envelope.jobId !== admissionJobId
+        ))
+    ) {
+      return null;
+    }
+  }
   switch (stored.kind) {
     case "CLOSED":
     case "NO_WORK":
@@ -2551,14 +2624,14 @@ const claimResultToGrant = (
         heartbeatIntervalSeconds: AFFILIATE_AGENT_HEARTBEAT_INTERVAL_SECONDS,
         leaseExpiresAt: stored.claim.leaseExpiresAt.toISOString(),
         hardDeadlineAt: stored.claim.hardDeadlineAt.toISOString(),
-      };
+        };
   }
 };
-
 const isClaimRaceOrSerializationConflict = (error: unknown): boolean =>
   error instanceof AffiliateAgentClaimRaceError ||
   isSerializableTransactionConflict(error) ||
   isClaimJobRaceUniqueConflict(error);
+
 
 const claimAffiliateAgentJob = async (
   dependencies: AffiliateAgentGatewayDependencies,
@@ -2570,6 +2643,8 @@ const claimAffiliateAgentJob = async (
   const claimId = dependencies.identifiers.create("claim");
   const tokenNonce = dependencies.tokens.createNonce();
   const attestationExpiresAt = new Date(input.workspaceAttestation.expiresAt);
+  let admissionScopeCaptured = false;
+  let admissionJobId: string | undefined;
 
   for (
     let attempt = 1;
@@ -2577,8 +2652,23 @@ const claimAffiliateAgentJob = async (
     attempt += 1
   ) {
     try {
-      const runClaimTransaction = () =>
-        executeClaimTransaction(
+      const runClaimTransaction = (jobId?: string) => {
+        if (admissionScopeCaptured && jobId !== admissionJobId) {
+          return Promise.resolve({ kind: "CLOSED" as const });
+        }
+        if (!admissionScopeCaptured) {
+          admissionScopeCaptured = true;
+          admissionJobId = jobId;
+        }
+        const admissionContext: AffiliateAgentClaimAdmissionContext = {
+          role: input.role,
+          workerId: input.workerId,
+          ...(jobId === undefined ? {} : { jobId }),
+        };
+        const admissionOpen = dependencies.claimAdmission?.isOpenFor
+          ? dependencies.claimAdmission.isOpenFor(admissionContext)
+          : dependencies.claimAdmission?.isOpen() ?? true;
+        return executeClaimTransaction(
           dependencies,
           input,
           bundle,
@@ -2587,11 +2677,20 @@ const claimAffiliateAgentJob = async (
           claimId,
           tokenNonce,
           attestationExpiresAt,
+          admissionOpen,
+          admissionJobId,
         );
+      };
       const stored = dependencies.claimAdmission
         ? await dependencies.claimAdmission.withClaim(
           runClaimTransaction,
-          { role: input.role, workerId: input.workerId },
+          {
+            role: input.role,
+            workerId: input.workerId,
+            ...(admissionScopeCaptured && admissionJobId !== undefined
+              ? { jobId: admissionJobId }
+              : {}),
+          },
         )
         : await runClaimTransaction();
       return claimResultToGrant(
@@ -2600,6 +2699,7 @@ const claimAffiliateAgentJob = async (
         requestHash,
         bundle,
         roleContract,
+        admissionJobId,
       );
     } catch (error) {
       const retryableConflict =
@@ -12427,12 +12527,14 @@ const upsertMappingReviewerJob = async (
   const reviewPass = result.disposition === "BOUNDED_REPAIR_SUBMITTED"
     ? result.payload.repairPass
     : 1;
-  const reviewerJobDedupeKey = [
-    "mapping-review",
-    authorized.claim.id,
-    result.payload.packageHash,
-    reviewPass,
-  ].join(":");
+  const reviewerJobDedupeKey = isAffiliateAgentSingleClaimJob(authorized.job.dedupeKey)
+    ? `${AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX}${authorized.claim.id}`
+    : [
+        "mapping-review",
+        authorized.claim.id,
+        result.payload.packageHash,
+        reviewPass,
+      ].join(":");
   return gatewayDomainRecord(await gatewayJobs.upsert?.({
     where: { dedupeKey: reviewerJobDedupeKey },
     create: {

@@ -13,6 +13,7 @@ import {
 import type { AffiliateAgentGatewayDependencies } from "./agentGatewayAdapters";
 import {
   canonicalizeAffiliateAgentValue,
+  isAffiliateAgentSingleClaimJob,
   hashAffiliateAgentValue,
 } from "./agentGatewayContracts";
 
@@ -64,7 +65,7 @@ export const recordInvocationFailureTransition = async (
   const retryDelay = affiliateAgentRetryDelaySeconds(
     invocationFailureCount as 1 | 2 | 3,
   );
-  const isPipelineBlocked = retryDelay === null;
+  const isPipelineBlocked = retryDelay === null || isAffiliateAgentSingleClaimJob(input.job.dedupeKey);
   const nextAttemptAt = isPipelineBlocked
     ? null
     : new Date(input.failedAt.getTime() + retryDelay! * 1_000);

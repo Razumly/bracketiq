@@ -1043,7 +1043,7 @@ describe("production Affiliate Agent activation effect", () => {
     }
     expect(lifecycleCommand).not.toHaveBeenCalled();
   });
-  it("binds producer repair jobs to the committing lifecycle generation", async () => {
+  it.each([false, true])("bounds producer repair follow-up for single-claim review=%s", async (singleClaim) => {
     const packageHash = "a".repeat(64);
     const repairContext = {
       kind: "LEGACY_SPORT_REPAIR" as const,
@@ -1151,6 +1151,7 @@ describe("production Affiliate Agent activation effect", () => {
       supplySourceId: "supply-source-1",
       lifecycleGeneration: 8,
       role: "SUPPLY_REVIEWER",
+      ...(singleClaim ? { executionBudget: "SINGLE_CLAIM" } : {}),
       subject: {
         type: "SUPPLY_REVIEWER",
         supplySourceId: "supply-source-1",
@@ -1186,22 +1187,25 @@ describe("production Affiliate Agent activation effect", () => {
       supplyContractHash: "g".repeat(64),
     } as unknown as AffiliateAgentReviewerTerminalResult;
 
-    await expect(adapters.terminalEffects.PRODUCER_REPAIR_REQUIRED.execute({
+    const output = await adapters.terminalEffects.PRODUCER_REPAIR_REQUIRED.execute({
       receiptId: "repair-receipt-1",
       claim,
       result,
-    })).resolves.toEqual(expect.objectContaining({
-      lifecycleGeneration: 9,
-      repairJobId: "repair-job-1",
-      repairPass: 2,
-    }));
+    });
+    expect(output).toMatchObject({ lifecycleGeneration: 9 });
     expect(lifecycleCommand).toHaveBeenCalledTimes(1);
-    expect(repairJobUpsert).toHaveBeenCalledWith(expect.objectContaining({
-      create: expect.objectContaining({
-        expectedLifecycleGeneration: 9,
-        subjectJson: expect.objectContaining({ repairContext }),
-      }),
-    }));
+    if (singleClaim) {
+      expect(output).toMatchObject({ repairBudgetExhausted: true });
+      expect(repairJobUpsert).not.toHaveBeenCalled();
+    } else {
+      expect(output).toMatchObject({ repairJobId: "repair-job-1", repairPass: 2 });
+      expect(repairJobUpsert).toHaveBeenCalledWith(expect.objectContaining({
+        create: expect.objectContaining({
+          expectedLifecycleGeneration: 9,
+          subjectJson: expect.objectContaining({ repairContext }),
+        }),
+      }));
+    }
     expect(supplySourceFindUnique).toHaveBeenCalledTimes(1);
   });
   it("persists approval evidence and queues a lineage-bound activation job", async () => {

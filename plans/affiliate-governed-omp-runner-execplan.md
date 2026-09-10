@@ -1168,3 +1168,70 @@ and the throwaway probe are removed after this record is saved. The original
 production artifacts and completed attempts remain unchanged. This
 correction is source-only; a new deployment and an explicitly approved,
 bounded Softball recovery are still required before further production work.
+
+## Authorized one-time Softball continuation
+
+
+The operator explicitly authorized a scoped continuation after the ordinary
+three-pass limit. The scope permits implementation and verification of the
+audited operation, integration and image publication, replacement of only
+the governed Gateway, runner, mapper 1, reviewer 1, model gateway, and auth
+broker, and at most one producer claim and one independent reviewer claim.
+Preserve all completed attempts. Keep publication and automatic scraping
+disabled. Do not change Boomtown's data. Stop the trial workers afterward.
+
+This is a separate authorization, not an ordinary retry. Its producer job
+retains pass 3 as the bounded repair-stage value and uses the unique
+`legacy-sport-repair-continuation:<rootId>` key. The audit identifies the
+exhausted parent, exact retained hashes, current deployment and evidence,
+operator, reason, and single producer/reviewer limits. The global pass and
+invocation retry limits remain unchanged. A root can receive this one-time
+grant only once; a continuation cannot recursively authorize another grant.
+
+Use operator-only `POST /legacy-repair/continuation` with strict PREVIEW and
+APPLY modes and one Gateway parent job ID. PREVIEW must not write. APPLY
+requires the deterministic reviewed hash and closed admission. Reuse the
+existing legacy retry eligibility and immutable audit checks, including the
+complete historical pass chain, rather than create a weaker admission path.
+Exact replay returns the same child with zero writes after normal progress.
+
+The Gateway derives `executionBudget: SINGLE_CLAIM` in the signed claim from
+the trusted continuation job key. A consumed job cannot receive another
+claim. The common failure and expiry transition blocks after the first
+actual failed invocation, with an honest failure count of one. Do not seed
+fake failures. The generated reviewer job has its own single-claim key.
+If that reviewer requests producer repair, record the request and hold the
+source without creating another producer job.
+
+Verify zero-write preview, stale and tampered report rejection, one child
+under concurrent apply, replay after source progress, recursive grant denial,
+single-claim failure and expiry for both roles, and no producer follow-up
+after the one-time review. Run the complete affected suites and independent
+Standards/Spec review before integration. Preview the exact production scope
+before its authorized apply. Use a fresh deployment-6 bundle with the
+reviewed role/prompt-5 source; preserve every production safety hold.
+
+## Exact continuation source gate (2026-09-10)
+
+The authorized one-time continuation source gate passed without production
+writes. The exact scoped admission controller now carries an optional,
+normalized job ID through the bounded lease, freezes that scope across
+serialization retries, filters claims by the exact job plus role and queue,
+excludes continuation markers from unscoped claims, and rejects mismatched
+replays and grants. The HTTP admission boundary accepts and returns the
+normalized job scope while retaining strict unknown-field and value checks.
+
+Verification completed against the local prepared PostgreSQL database
+`bracketiq_e2e_70_recovery_final` on `mvp-site-db` port 5433:
+
+- `npx tsc --noEmit`: passed.
+- The pinned 15-suite set: **15 suites / 558 tests passed**.
+- Targeted ESLint over every changed TypeScript file: passed.
+- `npx --yes bun@1.3.14 run scripts/test-affiliate-omp-agent-sdk-schema.ts`:
+  passed with no provider call.
+- `/tmp/softball-continuation-preview-build.cjs`: rebuilt successfully.
+
+The focused admission proofs cover exact lower-priority producer and reviewer
+selection, unscoped continuation denial, active-lease retarget rejection,
+same-request replay without a second claim, scope changes during a
+serialization retry, and lease expiry without fallback to unrelated work.

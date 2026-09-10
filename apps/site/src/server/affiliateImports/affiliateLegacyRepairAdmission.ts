@@ -15,6 +15,8 @@ import {
   type AffiliateAgentLegacySportRepairContext,
   type AffiliateAgentListingKind,
   hashAffiliateAgentValue,
+  AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX,
+  AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX,
 } from './agentGatewayContracts';
 import type { AffiliateAgentArtifactStore } from './agentGatewayAdapters';
 import {
@@ -284,6 +286,139 @@ export type ApplyAffiliateLegacyRepairRetryInput = Readonly<{
   prisma: PrismaClient;
   bundle: AffiliateAgentContractBundle;
   gatewayJobIds: readonly string[];
+  reason: string;
+  expectedReportHash: string;
+  operatorId: string;
+  artifactStore?: AffiliateAgentArtifactStore;
+}>;
+export const AFFILIATE_LEGACY_REPAIR_CONTINUATION_MAX_REASON_BYTES = 1_000;
+export const AFFILIATE_LEGACY_REPAIR_CONTINUATION_SCHEMA_VERSION = 1 as const;
+export const AFFILIATE_LEGACY_REPAIR_CONTINUATION_PRODUCER_LIMIT = 1 as const;
+export const AFFILIATE_LEGACY_REPAIR_CONTINUATION_REVIEWER_LIMIT = 1 as const;
+
+export type AffiliateLegacyRepairContinuationLimits = Readonly<{
+  producerClaims: 1;
+  reviewerClaims: 1;
+}>;
+
+export type AffiliateLegacyRepairContinuationWrite = Readonly<{
+  gatewayJobId: string;
+  parentClaimId: string;
+  parentReceiptId: string;
+  parentResultHash: string;
+  parentDeploymentContractHash: string;
+  parentClaimGeneration: number;
+  parentLifecycleGeneration: number;
+  mappingJobId: string;
+  intakeId: string;
+  sourceKey: string;
+  sourceId: string;
+  mappingId: string | null;
+  rootId: string;
+  rootIdentityKey: string;
+  rootLifecycleGeneration: number;
+  parentPass: 3;
+  continuationPass: 3;
+  listingKind: AffiliateAgentListingKind;
+  evidenceRunId: string;
+  sportsCatalogSha256: string;
+  currentDeploymentContractHash: string;
+  repairContext: Readonly<Record<string, unknown>>;
+  manifestHash: string;
+  manifest: Readonly<Record<string, unknown>>;
+  artifactIds: readonly string[];
+  producerDedupeKey: string;
+  reviewerDedupePrefix: string;
+  writes: readonly string[];
+}>;
+
+export type AffiliateLegacyRepairContinuationRow = Readonly<{
+  gatewayJobId: string;
+  parentClaimId: string | null;
+  mappingJobId: string | null;
+  intakeId: string | null;
+  sourceKey: string | null;
+  sourceId: string | null;
+  mappingId: string | null;
+  rootId: string | null;
+  rootIdentityKey: string | null;
+  parentPass: 3 | null;
+  continuationPass: 3 | null;
+  parentReceiptId: string | null;
+  parentResultHash: string | null;
+  parentDeploymentContractHash: string | null;
+  currentDeploymentContractHash: string;
+  evidenceRunId: string | null;
+  sportsCatalogSha256: string | null;
+  sportsCatalogCapturedAt: string | null;
+  stateFingerprint: string;
+  artifacts: readonly AffiliateLegacyRepairAdmissionArtifact[];
+  producerDedupeKey: string | null;
+  reviewerDedupePrefix: string;
+  childGatewayJobId: string | null;
+  eligible: boolean;
+  alreadyContinued: boolean;
+  reason: string;
+  reasonCodes: readonly string[];
+  write?: AffiliateLegacyRepairContinuationWrite;
+  outcome?: 'HELD' | 'PROPOSED' | 'APPLIED' | 'ALREADY_CONTINUED';
+}>;
+
+export type AffiliateLegacyRepairContinuationCounts = Readonly<{
+  total: 1;
+  eligible: 0 | 1;
+  held: 0 | 1;
+  selected: 0 | 1;
+  alreadyContinued: 0 | 1;
+}>;
+
+export type AffiliateLegacyRepairContinuationReport = Readonly<{
+  schemaVersion: 1;
+  operation: 'LEGACY_SPORT_REPAIR_CONTINUATION';
+  mode: 'PREVIEW' | 'APPLY';
+  evaluatedAt: string;
+  contractVersion: number;
+  contractHash: string;
+  deploymentContractVersion: number;
+  deploymentContractHash: string;
+  reason: string;
+  gatewayJobId: string;
+  requestedGatewayJobIds: readonly [string];
+  selectedGatewayJobIds: readonly [] | readonly [string];
+  parentPass: 3;
+  continuationPass: 3;
+  limits: AffiliateLegacyRepairContinuationLimits;
+  counts: AffiliateLegacyRepairContinuationCounts;
+  row: AffiliateLegacyRepairContinuationRow;
+  rows: readonly [AffiliateLegacyRepairContinuationRow];
+  proposedWrites: readonly [] | readonly [AffiliateLegacyRepairContinuationWrite];
+  childGatewayJobId: string | null;
+  producerDedupeKey: string | null;
+  reviewerDedupePrefix: string;
+  reportHash: string;
+  reviewedReportHash: string | null;
+  writeCount: 0 | 1;
+  appliedGatewayJobIds: readonly [] | readonly [string];
+  replayed: boolean;
+}>;
+
+export type AffiliateLegacyRepairContinuationPreview =
+  AffiliateLegacyRepairContinuationReport & { mode: 'PREVIEW' };
+export type AffiliateLegacyRepairContinuationApplyReport =
+  AffiliateLegacyRepairContinuationReport & { mode: 'APPLY' };
+
+export type PreviewAffiliateLegacyRepairContinuationInput = Readonly<{
+  prisma: PrismaClient;
+  bundle: AffiliateAgentContractBundle;
+  gatewayJobId: string;
+  reason: string;
+  artifactStore?: AffiliateAgentArtifactStore;
+}>;
+
+export type ApplyAffiliateLegacyRepairContinuationInput = Readonly<{
+  prisma: PrismaClient;
+  bundle: AffiliateAgentContractBundle;
+  gatewayJobId: string;
   reason: string;
   expectedReportHash: string;
   operatorId: string;
@@ -1679,6 +1814,7 @@ const retryHistoricalSportEvidenceValid = async (
   }
 };
 
+
 const stateFingerprintFor = (input: Readonly<{
   job: MappingJobRow;
   intake?: IntakeRow | null;
@@ -2826,6 +2962,46 @@ const retryGatewayJobIds = (value: readonly string[] | undefined): string[] => {
   }
   return [...normalized].sort();
 };
+const continuationGatewayJobId = (value: unknown): string => {
+  if (typeof value !== 'string') {
+    throw new AffiliateLegacyRepairAdmissionError(
+      'INVALID_GATEWAY_JOB_ID',
+      'gatewayJobId must be a non-blank string.',
+    );
+  }
+  const normalized = value.trim();
+  if (!normalized || normalized.length > 200) {
+    throw new AffiliateLegacyRepairAdmissionError(
+      'INVALID_GATEWAY_JOB_ID',
+      'gatewayJobId must be between 1 and 200 characters.',
+    );
+  }
+  return normalized;
+};
+
+const continuationReason = (value: unknown): string => {
+  if (typeof value !== 'string') {
+    throw new AffiliateLegacyRepairAdmissionError(
+      'CONTINUATION_REASON_REQUIRED',
+      'reason is required for legacy sport repair continuation.',
+    );
+  }
+  const normalized = value.trim();
+  if (!normalized) {
+    throw new AffiliateLegacyRepairAdmissionError(
+      'CONTINUATION_REASON_REQUIRED',
+      'reason is required for legacy sport repair continuation.',
+    );
+  }
+  if (Buffer.byteLength(normalized, 'utf8') > AFFILIATE_LEGACY_REPAIR_CONTINUATION_MAX_REASON_BYTES) {
+    throw new AffiliateLegacyRepairAdmissionError(
+      'CONTINUATION_REASON_TOO_LONG',
+      `reason must not exceed ${AFFILIATE_LEGACY_REPAIR_CONTINUATION_MAX_REASON_BYTES} UTF-8 bytes.`,
+    );
+  }
+  return normalized;
+};
+
 
 const retryGatewayJobSelect = {
   id: true,
@@ -2981,10 +3157,69 @@ const retryAuditForParent = (
   gatewayJobId: string,
 ): JsonRecord[] => retryAuditEntries(mappingJob.resultSummary)
   .filter((entry) => stringValue(entry.parentGatewayJobId) === gatewayJobId);
+const continuationAuditEntries = (summary: unknown): JsonRecord[] => {
+  const history = recordValue(summary).legacyRepairContinuationHistory;
+  return Array.isArray(history)
+    ? history.map(recordValue)
+      .filter((entry) => entry.operation === 'LEGACY_SPORT_REPAIR_CONTINUATION')
+    : [];
+};
+
+const continuationAuditForParent = (
+  mappingJob: MappingJobRow,
+  gatewayJobId: string,
+): JsonRecord[] => continuationAuditEntries(mappingJob.resultSummary)
+  .filter((entry) => stringValue(entry.parentGatewayJobId) === gatewayJobId);
+
+type RetryParentPartsOptions = Readonly<{
+  allowPass3?: boolean;
+}>;
+
+const readContinuationSnapshot = async (
+  client: AdmissionClient,
+  gatewayJobId: string,
+): Promise<RetrySnapshot> => {
+  const snapshot = await readRetrySnapshot(client, [gatewayJobId]);
+  const parent = snapshot.gatewayJobs.find((job) => job.id === gatewayJobId);
+  const rootId = stringValue(recordValue(parent?.subjectJson).supplySourceId);
+  if (!rootId) return snapshot;
+  const rootJobs = retryRowsFor<GatewayJobRow>(
+    await client.affiliateAgentGatewayJobs.findMany({
+      where: { supplySourceId: rootId },
+      select: retryGatewayJobSelect,
+      orderBy: { id: 'asc' },
+    }),
+  );
+  const gatewayJobs = Array.from(new Map(
+    [...snapshot.gatewayJobs, ...rootJobs].map((job) => [job.id, job]),
+  ).values()).sort(compareById);
+  const gatewayJobIds = sortedUnique(gatewayJobs.map((job) => job.id));
+  const gatewayClaims = retryRowsFor<RetryGatewayClaimRow>(
+    await client.affiliateAgentGatewayClaims.findMany({
+      where: { jobId: { in: gatewayJobIds } },
+      select: retryGatewayClaimSelect,
+      orderBy: { id: 'asc' },
+    }),
+  );
+  const claimIds = sortedUnique(gatewayClaims.map((claim) => claim.id));
+  const gatewayReceipts = retryRowsFor<RetryGatewayReceiptRow>(
+    await client.affiliateAgentGatewayOperationReceipts.findMany({
+      where: { claimId: { in: claimIds } },
+      select: retryGatewayReceiptSelect,
+      orderBy: { id: 'asc' },
+    }),
+  );
+  return { ...snapshot, gatewayJobs, gatewayClaims, gatewayReceipts };
+};
+
+type RetryEvaluationOptions = Readonly<{
+  mode?: 'RETRY' | 'CONTINUATION';
+}>;
 
 const retryParentPartsFor = (
   snapshot: RetrySnapshot,
   gatewayJobId: string,
+  options: RetryParentPartsOptions = {},
 ): { parts: RetryParentParts | null; reasonCodes: string[] } => {
   const reasons: string[] = [];
   const gatewayJob = snapshot.gatewayJobs.find((job) => job.id === gatewayJobId) ?? null;
@@ -3164,7 +3399,7 @@ const retryParentPartsFor = (
     !subject
     || !Number.isInteger(subject.pass)
     || subject.pass < 1
-    || subject.pass > 2
+    || subject.pass > (options.allowPass3 ? 3 : 2)
   ) reasons.push('RETRY_PASS_EXHAUSTED');
   if (reasons.length > 0 || !claim || !receipt || !envelope || !subject || !result) {
     return { parts: null, reasonCodes: sortedUnique(reasons) };
@@ -3186,6 +3421,7 @@ const retryParentLineageValid = (
   snapshot: RetrySnapshot,
   parent: RetryParentParts,
   seen = new Set<string>(),
+  options: RetryParentPartsOptions = {},
 ): boolean => {
   if (seen.has(parent.gatewayJob.id)) return false;
   seen.add(parent.gatewayJob.id);
@@ -3197,7 +3433,7 @@ const retryParentLineageValid = (
     ? snapshot.gatewayJobs.find((job) => job.id === ancestorClaim.jobId)
     : null;
   if (!ancestorClaim || !ancestorJob) return false;
-  const ancestorParts = retryParentPartsFor(snapshot, ancestorJob.id).parts;
+  const ancestorParts = retryParentPartsFor(snapshot, ancestorJob.id, options).parts;
   if (!ancestorParts || ancestorParts.subject.pass !== parent.subject.pass - 1) return false;
   const mappingJob = snapshot.admission.jobs.find((job) => job.id === parent.subject.mappingJobId) ?? null;
   const intake = mappingJob
@@ -3210,7 +3446,7 @@ const retryParentLineageValid = (
     && mappingJob !== null
     && intake !== null
     && retryAuditMatchesEdge(snapshot, mappingJob, intake, ancestorParts, parent.gatewayJob, parent.subject.pass)
-    && retryParentLineageValid(snapshot, ancestorParts, seen);
+    && retryParentLineageValid(snapshot, ancestorParts, seen, options);
 };
 
 const retryAncestorGatewayJobIds = (
@@ -3536,6 +3772,68 @@ const retryAuditMatchesEdge = (
     && sameAdmissionValue(reportWrite.manifest, audit.manifest);
 };
 
+const continuationDeterministicRow = (
+  row: AffiliateLegacyRepairContinuationRow,
+): Record<string, unknown> => ({
+  gatewayJobId: row.gatewayJobId,
+  parentClaimId: row.parentClaimId,
+  mappingJobId: row.mappingJobId,
+  intakeId: row.intakeId,
+  sourceKey: row.sourceKey,
+  sourceId: row.sourceId,
+  mappingId: row.mappingId,
+  rootId: row.rootId,
+  rootIdentityKey: row.rootIdentityKey,
+  parentPass: row.parentPass,
+  continuationPass: row.continuationPass,
+  parentReceiptId: row.parentReceiptId,
+  parentResultHash: row.parentResultHash,
+  parentDeploymentContractHash: row.parentDeploymentContractHash,
+  currentDeploymentContractHash: row.currentDeploymentContractHash,
+  evidenceRunId: row.evidenceRunId,
+  sportsCatalogSha256: row.sportsCatalogSha256,
+  stateFingerprint: row.stateFingerprint,
+  artifacts: row.artifacts,
+  producerDedupeKey: row.producerDedupeKey,
+  reviewerDedupePrefix: row.reviewerDedupePrefix,
+  write: row.write ?? null,
+});
+
+const continuationReportHashFor = (input: Readonly<{
+  schemaVersion: 1;
+  contractVersion: number;
+  contractHash: string;
+  deploymentContractVersion: number;
+  deploymentContractHash: string;
+  reason: string;
+  gatewayJobId: string;
+  requestedGatewayJobIds: readonly string[];
+  selectedGatewayJobIds: readonly string[];
+  parentPass: 3;
+  continuationPass: 3;
+  limits: AffiliateLegacyRepairContinuationLimits;
+  counts: AffiliateLegacyRepairContinuationCounts;
+  rows: readonly AffiliateLegacyRepairContinuationRow[];
+  proposedWrites: readonly AffiliateLegacyRepairContinuationWrite[];
+}>): string => hashAffiliateAgentValue(normalizeAdmissionHashValue({
+  schemaVersion: input.schemaVersion,
+  operation: 'LEGACY_SPORT_REPAIR_CONTINUATION',
+  contractVersion: input.contractVersion,
+  contractHash: input.contractHash,
+  deploymentContractVersion: input.deploymentContractVersion,
+  deploymentContractHash: input.deploymentContractHash,
+  reason: input.reason,
+  gatewayJobId: input.gatewayJobId,
+  requestedGatewayJobIds: [...input.requestedGatewayJobIds].sort(),
+  selectedGatewayJobIds: [...input.selectedGatewayJobIds].sort(),
+  parentPass: input.parentPass,
+  continuationPass: input.continuationPass,
+  limits: input.limits,
+  counts: input.counts,
+  rows: [...input.rows].map(continuationDeterministicRow),
+  proposedWrites: [...input.proposedWrites],
+}) ?? null);
+
 const retryStateFingerprintFor = (input: Readonly<Record<string, unknown>>): string => (
   hashAffiliateAgentValue(normalizeAdmissionHashValue(input) ?? null)
 );
@@ -3611,6 +3909,181 @@ const retryAuditedChildMatches = (
     && sameAdmissionValue(parsedSubject.repairContext, audit.repairContext)
     && sameAdmissionValue(child.evidenceManifestJson, manifest);
 };
+const continuationLimitsValid = (
+  auditLimits: JsonRecord,
+  reportLimits: JsonRecord,
+): boolean => (
+  auditLimits.producerClaims === AFFILIATE_LEGACY_REPAIR_CONTINUATION_PRODUCER_LIMIT
+  && auditLimits.reviewerClaims === AFFILIATE_LEGACY_REPAIR_CONTINUATION_REVIEWER_LIMIT
+  && reportLimits.producerClaims === AFFILIATE_LEGACY_REPAIR_CONTINUATION_PRODUCER_LIMIT
+  && reportLimits.reviewerClaims === AFFILIATE_LEGACY_REPAIR_CONTINUATION_REVIEWER_LIMIT
+  && sameAdmissionValue(auditLimits, reportLimits)
+);
+
+const continuationAuditedChildMatches = (
+  parent: RetryParentParts,
+  audit: JsonRecord,
+  child: GatewayJobRow | null,
+  mappingJob: MappingJobRow,
+  root: SupplyRootRow,
+  manifest: Record<string, unknown>,
+): boolean => {
+  if (!child) return false;
+  const report = recordValue(audit.reportSnapshot);
+  const reportRows = Array.isArray(report.rows) ? report.rows.map(recordValue) : [];
+  const reportWrites = Array.isArray(report.proposedWrites)
+    ? report.proposedWrites.map(recordValue)
+    : [];
+  const row = reportRows.find((value) => value.gatewayJobId === parent.gatewayJob.id);
+  const write = reportWrites.find((value) => value.gatewayJobId === parent.gatewayJob.id);
+  const parsedSubject = affiliateAgentSubjectSchema.safeParse(child.subjectJson);
+  const reportRequested = stringArrayValue(report.requestedGatewayJobIds);
+  const reportSelected = stringArrayValue(report.selectedGatewayJobIds);
+  const reportApplied = stringArrayValue(report.appliedGatewayJobIds);
+  const reportCounts = recordValue(report.counts);
+  const reportLimits = recordValue(report.limits);
+  const auditLimits = recordValue(audit.limits);
+  let reportHashValid = false;
+  try {
+    reportHashValid = typeof report.reportHash === 'string'
+      && continuationReportHashFor(report as unknown as AffiliateLegacyRepairContinuationReport)
+        === report.reportHash;
+  } catch {
+    reportHashValid = false;
+  }
+  const producerDedupeKey = `${AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX}${root.id}`;
+  const reviewerDedupePrefix = AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX;
+  const childSubject = parsedSubject.success && parsedSubject.data.type === 'MAPPING_PRODUCER'
+    ? parsedSubject.data
+    : null;
+  const parsedManifest = affiliateAgentEvidenceManifestSchema.safeParse(manifest);
+  return (
+    audit.operation === 'LEGACY_SPORT_REPAIR_CONTINUATION'
+    && audit.kind === 'LEGACY_SPORT_REPAIR_CONTINUATION'
+    && audit.schemaVersion === AFFILIATE_LEGACY_REPAIR_CONTINUATION_SCHEMA_VERSION
+    && reportHashValid
+    && report.operation === 'LEGACY_SPORT_REPAIR_CONTINUATION'
+    && report.schemaVersion === AFFILIATE_LEGACY_REPAIR_CONTINUATION_SCHEMA_VERSION
+    && report.mode === 'APPLY'
+    && report.reportHash === audit.reportHash
+    && report.reviewedReportHash === audit.reportHash
+    && report.replayed === false
+    && report.writeCount === 1
+    && report.gatewayJobId === parent.gatewayJob.id
+    && report.parentPass === 3
+    && report.continuationPass === 3
+    && reportRequested !== null
+    && reportSelected !== null
+    && reportApplied !== null
+    && sameAdmissionValue(reportRequested, [parent.gatewayJob.id])
+    && sameAdmissionValue(reportSelected, [parent.gatewayJob.id])
+    && reportApplied.length === 1
+    && continuationLimitsValid(auditLimits, reportLimits)
+    && reportCounts.total === 1
+    && reportCounts.eligible === 1
+    && reportCounts.held === 0
+    && reportCounts.selected === 1
+    && reportCounts.alreadyContinued === 0
+    && reportRows.length === 1
+    && reportWrites.length === 1
+    && row !== undefined
+    && write !== undefined
+    && row.gatewayJobId === parent.gatewayJob.id
+    && row.childGatewayJobId === child.id
+    && row.parentPass === 3
+    && row.continuationPass === 3
+    && row.eligible === true
+    && row.alreadyContinued === false
+    && row.outcome === 'APPLIED'
+    && row.parentClaimId === parent.claim.id
+    && row.mappingJobId === mappingJob.id
+    && row.intakeId === mappingJob.intakeId
+    && row.sourceId === mappingJob.sourceId
+    && row.rootId === root.id
+    && row.rootIdentityKey === root.identityKey
+    && row.parentReceiptId === parent.receipt.id
+    && row.parentResultHash === parent.gatewayJob.resultHash
+    && row.parentDeploymentContractHash === parent.claim.deploymentContractHash
+    && row.evidenceRunId === parent.subject.repairContext.evidenceRunId
+    && row.sportsCatalogSha256 === write.sportsCatalogSha256
+    && row.currentDeploymentContractHash === write.currentDeploymentContractHash
+    && write.gatewayJobId === parent.gatewayJob.id
+    && write.parentClaimId === parent.claim.id
+    && write.parentReceiptId === parent.receipt.id
+    && write.parentResultHash === parent.gatewayJob.resultHash
+    && write.parentDeploymentContractHash === parent.claim.deploymentContractHash
+    && write.mappingJobId === mappingJob.id
+    && write.rootId === root.id
+    && write.parentPass === 3
+    && write.continuationPass === 3
+    && write.producerDedupeKey === producerDedupeKey
+    && write.reviewerDedupePrefix === reviewerDedupePrefix
+    && write.currentDeploymentContractHash === report.deploymentContractHash
+    && write.intakeId === mappingJob.intakeId
+    && write.sourceKey === row.sourceKey
+    && write.sourceId === mappingJob.sourceId
+    && write.mappingId === row.mappingId
+    && write.rootIdentityKey === root.identityKey
+    && write.rootLifecycleGeneration === parent.claim.lifecycleGeneration
+    && write.evidenceRunId === parent.subject.repairContext.evidenceRunId
+    && write.sportsCatalogSha256 === row.sportsCatalogSha256
+    && sameRepairContext(write.repairContext, parent.subject.repairContext)
+    && write.manifestHash === manifest.hash
+    && parsedManifest.success
+    && sameAdmissionValue(
+      write.artifactIds,
+      sortedUnique(parsedManifest.data.entries.map((entry) => entry.artifactId)),
+    )
+    && sameAdmissionValue(write.writes, continuationWrites)
+    && audit.reportHash === report.reportHash
+    && audit.operation === report.operation
+    && audit.reason === report.reason
+    && audit.parentClaimGeneration === parent.claim.claimGeneration
+    && audit.parentLifecycleGeneration === parent.claim.lifecycleGeneration
+    && stringValue(audit.operatorId) !== null
+    && audit.parentGatewayJobId === parent.gatewayJob.id
+    && audit.parentClaimId === parent.claim.id
+    && audit.parentMappingJobId === mappingJob.id
+    && audit.childGatewayJobId === child.id
+    && audit.producerDedupeKey === producerDedupeKey
+    && audit.reviewerDedupePrefix === reviewerDedupePrefix
+    && audit.rootLifecycleGeneration === parent.claim.lifecycleGeneration
+    && audit.intakeId === mappingJob.intakeId
+    && audit.sourceId === mappingJob.sourceId
+    && audit.sourceKey === row.sourceKey
+    && audit.rootIdentityKey === root.identityKey
+    && audit.currentDeploymentContractVersion === report.deploymentContractVersion
+    && audit.currentDeploymentContractHash === report.deploymentContractHash
+    && audit.sportsCatalogSha256 === row.sportsCatalogSha256
+    && audit.manifestHash === manifest.hash
+    && sameAdmissionValue(
+      audit.artifactIds,
+      parsedManifest.success
+        ? sortedUnique(parsedManifest.data.entries.map((entry) => entry.artifactId))
+        : [],
+    )
+    && sameAdmissionValue(audit.writes, continuationWrites)
+    && audit.mappingId === write.mappingId
+    && audit.evidenceRunId === parent.subject.repairContext.evidenceRunId
+    && sameRepairContext(audit.repairContext, childSubject?.repairContext)
+    && sameRepairContext(audit.repairContext, parent.subject.repairContext)
+    && sameAdmissionValue(audit.manifest, manifest)
+    && sameAdmissionValue(child.evidenceManifestJson, manifest)
+    && child.role === 'MAPPING_PRODUCER'
+    && child.queue === 'AFFILIATE_MAPPING'
+    && child.lane === 'MAPPING_PRODUCTION'
+    && child.subjectType === 'MAPPING_PRODUCER'
+    && child.subjectId === mappingJob.id
+    && child.parentClaimId === parent.claim.id
+    && child.supplySourceId === root.id
+    && child.expectedLifecycleGeneration === parent.claim.lifecycleGeneration
+    && child.dedupeKey === producerDedupeKey
+    && childSubject?.mappingJobId === mappingJob.id
+    && childSubject.supplySourceId === root.id
+    && childSubject.pass === 3
+  );
+};
+
 
 const retryEvaluateJob = async (
   snapshot: RetrySnapshot,
@@ -3618,9 +4091,11 @@ const retryEvaluateJob = async (
   bundle: ParsedBundle,
   requestedReason: string,
   artifactStore?: AffiliateAgentArtifactStore,
+  options: RetryEvaluationOptions = {},
 ): Promise<{ row: AffiliateLegacyRepairRetryRow; plan: RetryPlan | null }> => {
+  const continuation = options.mode === 'CONTINUATION';
   const currentDeploymentContractHash = bundle.deploymentContract.hash;
-  const partsResult = retryParentPartsFor(snapshot, gatewayJobId);
+  const partsResult = retryParentPartsFor(snapshot, gatewayJobId, { allowPass3: continuation });
   if (!partsResult.parts) {
     return {
       row: retryEmptyRow(gatewayJobId, currentDeploymentContractHash, partsResult.reasonCodes),
@@ -3629,6 +4104,9 @@ const retryEvaluateJob = async (
   }
   const parent = partsResult.parts;
   const reasons: string[] = [];
+  if (continuation && parent.subject.pass !== 3) {
+    reasons.push('CONTINUATION_PARENT_PASS_INVALID');
+  }
   if (!await retryHistoricalSportEvidenceValid(parent, artifactStore)) {
     reasons.push('PARENT_SPORT_EVIDENCE_INVALID');
   }
@@ -3656,7 +4134,12 @@ const retryEvaluateJob = async (
     && approval.subjectKey === mappingJob.id
     && ACTIVE_APPROVAL_STATUSES.has(normalizedUpper(approval.status))
   ))) reasons.push('ACTIVE_APPROVAL_PRESENT');
-  if (!retryParentLineageValid(snapshot, parent)) reasons.push('MALFORMED_PARENT_LINEAGE');
+  if (!retryParentLineageValid(
+    snapshot,
+    parent,
+    new Set<string>(),
+    { allowPass3: continuation },
+  )) reasons.push('MALFORMED_PARENT_LINEAGE');
   if (
     parent.claim.deploymentContractVersion === bundle.deploymentContract.version
     || parent.claim.deploymentContractHash === currentDeploymentContractHash
@@ -3665,7 +4148,7 @@ const retryEvaluateJob = async (
     parent.claim.supplyContractVersion !== bundle.supplyContract.version
     || parent.claim.supplyContractHash !== bundle.supplyContract.hash
   ) reasons.push('PARENT_SUPPLY_CONTRACT_DRIFT');
-  const retryPass = parent.subject.pass + 1;
+  const retryPass = continuation ? 3 : parent.subject.pass + 1;
   if (retryPass > 3) reasons.push('RETRY_PASS_EXHAUSTED');
   let source: SourceRow | null = null;
   let mapping: MappingRow | null = null;
@@ -3875,53 +4358,132 @@ const retryEvaluateJob = async (
       }
     }
   }
-  const auditEntries = mappingJob ? retryAuditForParent(mappingJob, parent.gatewayJob.id) : [];
+  const auditEntries = mappingJob
+    ? continuation
+      ? continuationAuditForParent(mappingJob, parent.gatewayJob.id)
+      : retryAuditForParent(mappingJob, parent.gatewayJob.id)
+    : [];
   const currentAudit = auditEntries.length === 1 ? auditEntries[0] : null;
-  if (auditEntries.length > 1) reasons.push('CONFLICTING_RETRY_AUDIT');
-  const gatewayDedupeKey = retryPass <= 3
-    ? retryDedupeKeyFor(parent.gatewayJob.id)
-    : null;
+  if (auditEntries.length > 1) {
+    reasons.push(continuation ? 'CONFLICTING_CONTINUATION_AUDIT' : 'CONFLICTING_RETRY_AUDIT');
+  }
+  const gatewayDedupeKey: string | null = continuation
+    ? root
+      ? `${AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX}${root.id}`
+      : null
+    : retryPass <= 3
+      ? retryDedupeKeyFor(parent.gatewayJob.id)
+      : null;
   let childGatewayJob: GatewayJobRow | null = null;
   const ancestorIds = retryAncestorGatewayJobIds(snapshot, parent);
   if (mappingJob) {
     const sameScopeJobs = retryGatewayJobsForMapping(snapshot, mappingJob.id)
       .filter((candidate) => candidate.id !== parent.gatewayJob.id && !ancestorIds.has(candidate.id));
-    const activeChild = sameScopeJobs.find((candidate) => (
-      candidate.parentClaimId === parent.claim.id
-      && ['QUEUED', 'CLAIMED', 'RETRY_WAIT', 'PIPELINE_BLOCKED', 'RECONCILIATION_REQUIRED'].includes(normalizedUpper(candidate.status))
-    ));
-    if (activeChild) reasons.push('ACTIVE_RETRY_DESCENDANT');
-    if (currentAudit) {
-      const auditedChildId = stringValue(currentAudit.childGatewayJobId);
-      const auditedChild = auditedChildId
-        ? snapshot.gatewayJobs.find((candidate) => candidate.id === auditedChildId) ?? null
-        : null;
-      if (
-        !auditedChild
-        || !sameScopeJobs.includes(auditedChild)
-        || !root
-        || !manifest
-        || !retryAuditedChildMatches(
-          auditedChild,
-          parent,
-          currentAudit,
-          mappingJob,
-          root,
-          manifest,
-          retryPass,
+    if (continuation) {
+      const continuationJobs = snapshot.gatewayJobs.filter((candidate) => (
+        root !== null
+        && candidate.supplySourceId === root.id
+        && (
+          candidate.dedupeKey.startsWith(AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX)
+          || candidate.dedupeKey.startsWith(AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX)
         )
-      ) {
-        reasons.push('MALFORMED_RETRY_AUDIT');
-      } else {
-        childGatewayJob = auditedChild;
-        if (activeChild?.id === auditedChild.id) reasons.push('ACTIVE_RETRY_DESCENDANT');
+      ));
+      const continuationProducerJobs = continuationJobs.filter((candidate) => (
+        candidate.dedupeKey.startsWith(AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX)
+      ));
+      const continuationReviewerJobs = continuationJobs.filter((candidate) => (
+        candidate.dedupeKey.startsWith(AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX)
+      ));
+      const continuationReviewerKeys = new Set(
+        snapshot.gatewayClaims
+          .filter((claim) => continuationProducerJobs.some((candidate) => candidate.id === claim.jobId))
+          .map((claim) => `${AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX}${claim.id}`),
+      );
+      if (continuationProducerJobs.length > 1) reasons.push('CONTINUATION_DEDUPE_CONFLICT');
+      if (
+        continuationReviewerJobs.length > AFFILIATE_LEGACY_REPAIR_CONTINUATION_REVIEWER_LIMIT
+        || continuationReviewerJobs.some((candidate) => !continuationReviewerKeys.has(candidate.dedupeKey))
+      ) reasons.push('CONTINUATION_REVIEWER_LIMIT');
+      const activeContinuationChild = continuationJobs.find((candidate) => (
+        candidate.parentClaimId === parent.claim.id
+        && ['QUEUED', 'CLAIMED', 'RETRY_WAIT', 'PIPELINE_BLOCKED', 'RECONCILIATION_REQUIRED']
+          .includes(normalizedUpper(candidate.status))
+      ));
+      if (activeContinuationChild) reasons.push('ACTIVE_CONTINUATION_DESCENDANT');
+      if (currentAudit) {
+        const auditedChildId = stringValue(currentAudit.childGatewayJobId);
+        const auditedChild = auditedChildId
+          ? snapshot.gatewayJobs.find((candidate) => candidate.id === auditedChildId) ?? null
+          : null;
+        if (
+          !root
+          || !auditedChild
+          || !manifest
+          || !continuationAuditedChildMatches(parent, currentAudit, auditedChild, mappingJob, root, manifest)
+        ) {
+          reasons.push('MALFORMED_CONTINUATION_AUDIT');
+        } else {
+          childGatewayJob = auditedChild;
+          if (activeContinuationChild?.id === auditedChild.id) reasons.push('ACTIVE_CONTINUATION_DESCENDANT');
+        }
+      } else if (continuationJobs.length > 0) {
+        reasons.push('CONTINUATION_DEDUPE_CONFLICT');
       }
-    } else if (sameScopeJobs.some((candidate) => candidate.subjectId === mappingJob.id)) {
-      reasons.push('COMPETING_RETRY_CHILD');
+    } else {
+      const activeChild = sameScopeJobs.find((candidate) => (
+        candidate.parentClaimId === parent.claim.id
+        && ['QUEUED', 'CLAIMED', 'RETRY_WAIT', 'PIPELINE_BLOCKED', 'RECONCILIATION_REQUIRED'].includes(normalizedUpper(candidate.status))
+      ));
+      if (activeChild) reasons.push('ACTIVE_RETRY_DESCENDANT');
+      if (currentAudit) {
+        const auditedChildId = stringValue(currentAudit.childGatewayJobId);
+        const auditedChild = auditedChildId
+          ? snapshot.gatewayJobs.find((candidate) => candidate.id === auditedChildId) ?? null
+          : null;
+        if (
+          !auditedChild
+          || !sameScopeJobs.includes(auditedChild)
+          || !root
+          || !manifest
+          || !retryAuditedChildMatches(
+            auditedChild,
+            parent,
+            currentAudit,
+            mappingJob,
+            root,
+            manifest,
+            retryPass,
+          )
+        ) {
+          reasons.push('MALFORMED_RETRY_AUDIT');
+        } else {
+          childGatewayJob = auditedChild;
+          if (activeChild?.id === auditedChild.id) reasons.push('ACTIVE_RETRY_DESCENDANT');
+        }
+      } else if (sameScopeJobs.some((candidate) => candidate.subjectId === mappingJob.id)) {
+        reasons.push('COMPETING_RETRY_CHILD');
+      }
     }
   }
+  const currentAuditReport = recordValue(currentAudit?.reportSnapshot);
   if (currentAudit) {
-    if (
+    if (continuation) {
+      if (
+        currentAudit.operation !== 'LEGACY_SPORT_REPAIR_CONTINUATION'
+        || currentAudit.reason !== requestedReason
+        || !gatewayDedupeKey
+        || currentAudit.producerDedupeKey !== gatewayDedupeKey
+        || currentAudit.parentPass !== 3
+        || currentAuditReport.operation !== 'LEGACY_SPORT_REPAIR_CONTINUATION'
+        || currentAuditReport.schemaVersion !== AFFILIATE_LEGACY_REPAIR_CONTINUATION_SCHEMA_VERSION
+        || currentAuditReport.reportHash !== currentAudit.reportHash
+        || currentAuditReport.contractVersion !== contractVersion(bundle)
+        || currentAuditReport.contractHash !== contractHash(bundle)
+        || currentAuditReport.deploymentContractVersion !== bundle.deploymentContract.version
+        || currentAuditReport.deploymentContractHash !== bundle.deploymentContract.hash
+        || currentAudit.continuationPass !== 3
+      ) reasons.push('CONTINUATION_REQUEST_DRIFT');
+    } else if (
       currentAudit.reason !== requestedReason
       || !gatewayDedupeKey
       || currentAudit.gatewayDedupeKey !== gatewayDedupeKey
@@ -3933,7 +4495,9 @@ const retryEvaluateJob = async (
     && candidate.dedupeKey === gatewayDedupeKey
     && candidate.id !== parent.gatewayJob.id
     && candidate.id !== stringValue(currentAudit?.childGatewayJobId)
-  ))) reasons.push('RETRY_DEDUPE_CONFLICT');
+  ))) {
+    reasons.push(continuation ? 'CONTINUATION_DEDUPE_CONFLICT' : 'RETRY_DEDUPE_CONFLICT');
+  }
   const currentCatalog = snapshot.admission.sportsCatalog;
   const freshRepairContext: AffiliateAgentLegacySportRepairContext = {
     kind: 'LEGACY_SPORT_REPAIR',
@@ -4113,6 +4677,225 @@ const retryEvaluateJob = async (
     childGatewayJob,
   };
   return { row, plan: { row, parent: retryParent, write } };
+};
+
+type ContinuationPlan = Readonly<{
+  row: AffiliateLegacyRepairContinuationRow;
+  parent: RetryParentContext;
+  write: AffiliateLegacyRepairContinuationWrite;
+}>;
+
+const continuationWrites = [
+  'AFFILIATE_LEGACY_MAPPING_JOB_QUEUE',
+  'AFFILIATE_GATEWAY_MAPPING_PRODUCER_CONTINUATION_JOB',
+  'AFFILIATE_LEGACY_REPAIR_CONTINUATION_AUDIT',
+] as const;
+
+const continuationWriteFor = (
+  write: AffiliateLegacyRepairRetryWrite,
+): AffiliateLegacyRepairContinuationWrite => {
+  if (write.parentPass !== 3 || write.retryPass !== 3) {
+    throw new AffiliateLegacyRepairAdmissionError(
+      'CONTINUATION_PASS_INVALID',
+      'A continuation must retain parent and child pass three.',
+    );
+  }
+  return {
+    gatewayJobId: write.gatewayJobId,
+    parentClaimId: write.parentClaimId,
+    parentReceiptId: write.parentReceiptId,
+    parentResultHash: write.parentResultHash,
+    parentDeploymentContractHash: write.parentDeploymentContractHash,
+    parentClaimGeneration: write.parentClaimGeneration,
+    parentLifecycleGeneration: write.parentLifecycleGeneration,
+    mappingJobId: write.mappingJobId,
+    intakeId: write.intakeId,
+    sourceKey: write.sourceKey,
+    sourceId: write.sourceId,
+    mappingId: write.mappingId,
+    rootId: write.rootId,
+    rootIdentityKey: write.rootIdentityKey,
+    rootLifecycleGeneration: write.rootLifecycleGeneration,
+    parentPass: 3,
+    continuationPass: 3,
+    listingKind: write.listingKind,
+    evidenceRunId: write.evidenceRunId,
+    sportsCatalogSha256: write.sportsCatalogSha256,
+    currentDeploymentContractHash: write.currentDeploymentContractHash,
+    repairContext: write.repairContext,
+    manifestHash: write.manifestHash,
+    manifest: write.manifest,
+    artifactIds: write.artifactIds,
+    producerDedupeKey: write.gatewayDedupeKey,
+    reviewerDedupePrefix: AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX,
+    writes: continuationWrites,
+  };
+};
+
+const continuationRowFor = (
+  row: AffiliateLegacyRepairRetryRow,
+  write?: AffiliateLegacyRepairContinuationWrite,
+): AffiliateLegacyRepairContinuationRow => ({
+  gatewayJobId: row.gatewayJobId,
+  parentClaimId: row.parentClaimId,
+  mappingJobId: row.mappingJobId,
+  intakeId: row.intakeId,
+  sourceKey: row.sourceKey,
+  sourceId: row.sourceId,
+  mappingId: row.mappingId,
+  rootId: row.rootId,
+  rootIdentityKey: row.rootIdentityKey,
+  parentPass: row.parentPass === null ? null : row.parentPass === 3 ? 3 : null,
+  continuationPass: row.retryPass === null ? null : row.retryPass === 3 ? 3 : null,
+  parentReceiptId: row.parentReceiptId,
+  parentResultHash: row.parentResultHash,
+  parentDeploymentContractHash: row.parentDeploymentContractHash,
+  currentDeploymentContractHash: row.currentDeploymentContractHash,
+  evidenceRunId: row.evidenceRunId,
+  sportsCatalogSha256: row.sportsCatalogSha256,
+  sportsCatalogCapturedAt: row.sportsCatalogCapturedAt,
+  stateFingerprint: row.stateFingerprint,
+  artifacts: row.artifacts,
+  producerDedupeKey: write?.producerDedupeKey ?? row.gatewayDedupeKey,
+  reviewerDedupePrefix: AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX,
+  childGatewayJobId: row.childGatewayJobId,
+  eligible: row.eligible,
+  alreadyContinued: row.alreadyRetried,
+  reason: row.reason === 'ALREADY_RETRIED' ? 'ALREADY_CONTINUED' : row.reason,
+  reasonCodes: row.reasonCodes.map((code) => code === 'ALREADY_RETRIED' ? 'ALREADY_CONTINUED' : code),
+  write,
+  outcome: row.outcome === 'ALREADY_RETRIED'
+    ? 'ALREADY_CONTINUED'
+    : row.outcome === 'APPLIED'
+      ? 'APPLIED'
+      : row.outcome === 'PROPOSED'
+        ? 'PROPOSED'
+        : 'HELD',
+});
+
+const continuationEvaluationFor = async (
+  snapshot: RetrySnapshot,
+  gatewayJobId: string,
+  bundle: ParsedBundle,
+  requestedReason: string,
+  artifactStore?: AffiliateAgentArtifactStore,
+): Promise<{ row: AffiliateLegacyRepairContinuationRow; plan: ContinuationPlan | null }> => {
+  const evaluated = await retryEvaluateJob(
+    snapshot,
+    gatewayJobId,
+    bundle,
+    requestedReason,
+    artifactStore,
+    { mode: 'CONTINUATION' },
+  );
+  const write = evaluated.plan ? continuationWriteFor(evaluated.plan.write) : undefined;
+  const row = continuationRowFor(evaluated.row, write);
+  return {
+    row,
+    plan: evaluated.plan && write
+      ? { row, parent: evaluated.plan.parent, write }
+      : null,
+  };
+};
+
+const continuationCountsFor = (
+  row: AffiliateLegacyRepairContinuationRow,
+  selected: boolean,
+): AffiliateLegacyRepairContinuationCounts => ({
+  total: 1,
+  eligible: row.eligible ? 1 : 0,
+  held: row.eligible || row.alreadyContinued ? 0 : 1,
+  selected: selected ? 1 : 0,
+  alreadyContinued: row.alreadyContinued ? 1 : 0,
+});
+
+const buildContinuationReport = async (
+  client: AdmissionClient,
+  bundle: ParsedBundle,
+  gatewayJobId: string,
+  requestedReason: string,
+  mode: 'PREVIEW' | 'APPLY',
+  artifactStore?: AffiliateAgentArtifactStore,
+): Promise<{
+  report: AffiliateLegacyRepairContinuationReport;
+  plans: readonly ContinuationPlan[];
+  snapshot: RetrySnapshot;
+}> => {
+  const snapshot = await readContinuationSnapshot(client, gatewayJobId);
+  const evaluated = await continuationEvaluationFor(
+    snapshot,
+    gatewayJobId,
+    bundle,
+    requestedReason,
+    artifactStore,
+  );
+  const selected = evaluated.row.eligible && evaluated.plan !== null;
+  const selectedGatewayJobIds = selected ? [gatewayJobId] as const : [] as const;
+  const plans = selected && evaluated.plan ? [evaluated.plan] as const : [] as const;
+  const proposedWrites = selected ? [evaluated.plan!.write] as const : [] as const;
+  const counts = continuationCountsFor(evaluated.row, selected);
+  const reportHash = continuationReportHashFor({
+    schemaVersion: AFFILIATE_LEGACY_REPAIR_CONTINUATION_SCHEMA_VERSION,
+    contractVersion: contractVersion(bundle),
+    contractHash: contractHash(bundle),
+    deploymentContractVersion: bundle.deploymentContract.version,
+    deploymentContractHash: bundle.deploymentContract.hash,
+    reason: requestedReason,
+    gatewayJobId,
+    requestedGatewayJobIds: [gatewayJobId],
+    selectedGatewayJobIds,
+    parentPass: 3,
+    continuationPass: 3,
+    limits: {
+      producerClaims: AFFILIATE_LEGACY_REPAIR_CONTINUATION_PRODUCER_LIMIT,
+      reviewerClaims: AFFILIATE_LEGACY_REPAIR_CONTINUATION_REVIEWER_LIMIT,
+    },
+    counts,
+    rows: [evaluated.row],
+    proposedWrites,
+  });
+  const row = selected
+    ? {
+      ...evaluated.row,
+      outcome: mode === 'APPLY' ? 'APPLIED' as const : 'PROPOSED' as const,
+    }
+    : evaluated.row;
+  return {
+    snapshot,
+    plans,
+    report: {
+      schemaVersion: AFFILIATE_LEGACY_REPAIR_CONTINUATION_SCHEMA_VERSION,
+      operation: 'LEGACY_SPORT_REPAIR_CONTINUATION',
+      mode,
+      evaluatedAt: new Date().toISOString(),
+      contractVersion: contractVersion(bundle),
+      contractHash: contractHash(bundle),
+      deploymentContractVersion: bundle.deploymentContract.version,
+      deploymentContractHash: bundle.deploymentContract.hash,
+      reason: requestedReason,
+      gatewayJobId,
+      requestedGatewayJobIds: [gatewayJobId],
+      selectedGatewayJobIds,
+      parentPass: 3,
+      continuationPass: 3,
+      limits: {
+        producerClaims: AFFILIATE_LEGACY_REPAIR_CONTINUATION_PRODUCER_LIMIT,
+        reviewerClaims: AFFILIATE_LEGACY_REPAIR_CONTINUATION_REVIEWER_LIMIT,
+      },
+      counts,
+      row,
+      rows: [row],
+      proposedWrites,
+      childGatewayJobId: null,
+      producerDedupeKey: row.producerDedupeKey,
+      reviewerDedupePrefix: AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX,
+      reportHash,
+      reviewedReportHash: null,
+      writeCount: mode === 'APPLY' && selected ? 1 : 0,
+      appliedGatewayJobIds: [],
+      replayed: false,
+    },
+  };
 };
 
 const buildRetryReport = async (
@@ -4359,6 +5142,404 @@ const applyRetryPlan = async (
   });
   return childGatewayJobId;
 };
+const appendContinuationAudit = (
+  summary: unknown,
+  evidence: Readonly<Record<string, unknown>>,
+): Record<string, unknown> => {
+  const envelope = recordValue(summary);
+  const history = continuationAuditEntries(summary);
+  const existing = history.find((entry) => (
+    entry.parentGatewayJobId === evidence.parentGatewayJobId
+    && entry.operation === evidence.operation
+  ));
+  if (existing) {
+    if (sameAdmissionValue(existing, evidence)) return envelope;
+    throw new AffiliateLegacyRepairAdmissionError(
+      'CONTINUATION_AUDIT_CONFLICT',
+      'The existing continuation audit does not match the requested continuation.',
+    );
+  }
+  return {
+    ...envelope,
+    legacyRepairContinuationHistory: [...history, evidence],
+  };
+};
+
+const applyContinuationPlan = async (
+  client: Prisma.TransactionClient,
+  plan: ContinuationPlan,
+  reportSnapshot: AffiliateLegacyRepairContinuationApplyReport,
+  reportHash: string,
+  reasonText: string,
+  operatorId: string,
+  childGatewayJobId: string,
+): Promise<void> => {
+  const currentParent = await client.affiliateAgentGatewayJobs.findUnique({
+    where: { id: plan.parent.gatewayJob.id },
+    select: retryGatewayJobSelect,
+  }) as unknown as GatewayJobRow | null;
+  if (
+    !currentParent
+    || currentParent.status !== 'COMPLETED'
+    || currentParent.activeClaimId !== null
+    || currentParent.terminalReceiptId !== plan.parent.receipt.id
+    || currentParent.resultHash !== plan.parent.gatewayJob.resultHash
+    || currentParent.parentClaimId !== (plan.parent.gatewayJob.parentClaimId ?? null)
+    || currentParent.subjectId !== plan.parent.mappingJob.id
+    || currentParent.supplySourceId !== plan.write.rootId
+  ) {
+    throw new AffiliateLegacyRepairAdmissionError(
+      'CONTINUATION_STATE_DRIFT',
+      `Parent Gateway job ${plan.parent.gatewayJob.id} changed after preview.`,
+    );
+  }
+  const currentMappingJob = await client.affiliateSourceMappingJobs.findUnique({
+    where: { id: plan.parent.mappingJob.id },
+  }) as unknown as MappingJobRow | null;
+  if (
+    !currentMappingJob
+    || currentMappingJob.status !== 'REVIEW_REQUIRED'
+    || currentMappingJob.intakeId !== plan.parent.mappingJob.intakeId
+    || currentMappingJob.sourceId !== plan.parent.mappingJob.sourceId
+    || currentMappingJob.mappingId !== plan.parent.mappingJob.mappingId
+    || currentMappingJob.supplySourceId !== plan.parent.mappingJob.supplySourceId
+    || currentMappingJob.claimedAt
+    || currentMappingJob.workerId
+    || currentMappingJob.leaseExpiresAt
+  ) {
+    throw new AffiliateLegacyRepairAdmissionError(
+      'CONTINUATION_STATE_DRIFT',
+      `Mapping job ${plan.parent.mappingJob.id} changed after preview.`,
+    );
+  }
+  const existingByDedupe = await client.affiliateAgentGatewayJobs.findUnique({
+    where: { dedupeKey: plan.write.producerDedupeKey },
+    select: retryGatewayJobSelect,
+  }) as unknown as GatewayJobRow | null;
+  if (existingByDedupe) {
+    throw new AffiliateLegacyRepairAdmissionError(
+      'CONTINUATION_DEDUPE_CONFLICT',
+      `Continuation producer key ${plan.write.producerDedupeKey} is already occupied.`,
+    );
+  }
+  const continuationAudit = {
+    schemaVersion: AFFILIATE_LEGACY_REPAIR_CONTINUATION_SCHEMA_VERSION,
+    operation: 'LEGACY_SPORT_REPAIR_CONTINUATION',
+    kind: 'LEGACY_SPORT_REPAIR_CONTINUATION',
+    reportHash,
+    reportSnapshot,
+    requestedGatewayJobId: plan.parent.gatewayJob.id,
+    requestedGatewayJobIds: [plan.parent.gatewayJob.id],
+    reason: reasonText,
+    operatorId,
+    limits: {
+      producerClaims: AFFILIATE_LEGACY_REPAIR_CONTINUATION_PRODUCER_LIMIT,
+      reviewerClaims: AFFILIATE_LEGACY_REPAIR_CONTINUATION_REVIEWER_LIMIT,
+    },
+    parentGatewayJobId: plan.parent.gatewayJob.id,
+    parentClaimId: plan.parent.claim.id,
+    parentClaimGeneration: plan.parent.claim.claimGeneration,
+    parentLifecycleGeneration: plan.parent.claim.lifecycleGeneration,
+    parentMappingJobId: plan.parent.mappingJob.id,
+    parentReceiptId: plan.parent.receipt.id,
+    parentResultHash: plan.parent.gatewayJob.resultHash,
+    parentDeploymentContractHash: plan.parent.claim.deploymentContractHash,
+    parentPass: 3,
+    continuationPass: 3,
+    childGatewayJobId,
+    producerDedupeKey: plan.write.producerDedupeKey,
+    childDedupeKey: plan.write.producerDedupeKey,
+    reviewerDedupePrefix: plan.write.reviewerDedupePrefix,
+    sourceKey: plan.write.sourceKey,
+    intakeId: plan.write.intakeId,
+    sourceId: plan.write.sourceId,
+    mappingId: plan.write.mappingId,
+    rootId: plan.write.rootId,
+    rootIdentityKey: plan.write.rootIdentityKey,
+    rootLifecycleGeneration: plan.write.rootLifecycleGeneration,
+    currentDeploymentContractVersion: reportSnapshot.deploymentContractVersion,
+    currentDeploymentContractHash: plan.write.currentDeploymentContractHash,
+    evidenceRunId: plan.write.evidenceRunId,
+    sportsCatalogSha256: plan.write.sportsCatalogSha256,
+    repairContext: plan.write.repairContext,
+    manifest: plan.write.manifest,
+    manifestHash: plan.write.manifestHash,
+    artifactIds: [...plan.write.artifactIds],
+    writes: [...plan.write.writes],
+  };
+  const nextMappingSummary = appendContinuationAudit(
+    plan.parent.mappingJob.resultSummary,
+    continuationAudit,
+  );
+  const mappingUpdate = await client.affiliateSourceMappingJobs.updateMany({
+    where: {
+      id: plan.parent.mappingJob.id,
+      intakeId: plan.parent.mappingJob.intakeId,
+      status: 'REVIEW_REQUIRED',
+      sourceId: plan.parent.mappingJob.sourceId,
+      mappingId: plan.parent.mappingJob.mappingId,
+      supplySourceId: plan.parent.mappingJob.supplySourceId,
+      claimedAt: null,
+      workerId: null,
+      leaseExpiresAt: null,
+    },
+    data: {
+      status: 'QUEUED',
+      claimedAt: null,
+      leaseExpiresAt: null,
+      workerId: null,
+      errorMessage: null,
+      finishedAt: null,
+      resultSummary: asPrismaJson(nextMappingSummary),
+    },
+  });
+  if (mappingUpdate.count !== 1) {
+    throw new AffiliateLegacyRepairAdmissionError(
+      'CONTINUATION_MAPPING_JOB_CAS_FAILED',
+      `Mapping job ${plan.parent.mappingJob.id} could not be queued for continuation.`,
+    );
+  }
+  await client.affiliateAgentGatewayJobs.create({
+    data: {
+      id: childGatewayJobId,
+      dedupeKey: plan.write.producerDedupeKey,
+      queue: 'AFFILIATE_MAPPING',
+      lane: 'MAPPING_PRODUCTION',
+      role: 'MAPPING_PRODUCER',
+      subjectType: 'MAPPING_PRODUCER',
+      subjectId: plan.write.mappingJobId,
+      subjectJson: asPrismaJson({
+        type: 'MAPPING_PRODUCER',
+        supplySourceId: plan.write.rootId,
+        mappingJobId: plan.write.mappingJobId,
+        listingKind: plan.write.listingKind,
+        pass: 3,
+        repairContext: plan.parent.freshRepairContext,
+      }),
+      evidenceManifestJson: asPrismaJson(plan.write.manifest),
+      supplySourceId: plan.write.rootId,
+      expectedLifecycleGeneration: plan.write.rootLifecycleGeneration,
+      status: 'QUEUED',
+      priority: 0,
+      nextAttemptAt: new Date(),
+      claimGeneration: 0,
+      activeClaimId: null,
+      parentClaimId: plan.write.parentClaimId,
+    },
+  });
+};
+
+const continuationReplayReport = async (
+  snapshot: RetrySnapshot,
+  bundle: ParsedBundle,
+  gatewayJobId: string,
+  reasonText: string,
+  expectedReportHash: string,
+  operatorId: string,
+  artifactStore?: AffiliateAgentArtifactStore,
+): Promise<AffiliateLegacyRepairContinuationApplyReport | null> => {
+  const parent = retryParentPartsFor(snapshot, gatewayJobId, { allowPass3: true }).parts;
+  const mappingJobId = parent?.subject.mappingJobId;
+  const mappingJob = mappingJobId
+    ? snapshot.admission.jobs.find((job) => job.id === mappingJobId) ?? null
+    : null;
+  if (!parent || !mappingJob) return null;
+  const audits = continuationAuditForParent(mappingJob, gatewayJobId);
+  if (audits.length === 0) return null;
+  if (audits.length !== 1) {
+    throw new AffiliateLegacyRepairAdmissionError(
+      'CONTINUATION_AUDIT_CONFLICT',
+      'Multiple continuation audits exist for one parent Gateway job.',
+    );
+  }
+  const audit = audits[0];
+  const storedReport = recordValue(audit.reportSnapshot);
+  const storedRequested = stringArrayValue(storedReport.requestedGatewayJobIds);
+  const storedSelected = stringArrayValue(storedReport.selectedGatewayJobIds);
+  const storedApplied = stringArrayValue(storedReport.appliedGatewayJobIds);
+  const storedRows = Array.isArray(storedReport.rows)
+    ? storedReport.rows.map(recordValue)
+    : [];
+  const storedWrites = Array.isArray(storedReport.proposedWrites)
+    ? storedReport.proposedWrites.map(recordValue)
+    : [];
+  const storedCounts = recordValue(storedReport.counts);
+  const storedLimits = recordValue(storedReport.limits);
+  const auditLimits = recordValue(audit.limits);
+  let storedHash: string | null = null;
+  try {
+    storedHash = continuationReportHashFor(
+      storedReport as unknown as AffiliateLegacyRepairContinuationReport,
+    );
+  } catch {
+    storedHash = null;
+  }
+  const childGatewayJobId = stringValue(audit.childGatewayJobId);
+  const child = childGatewayJobId
+    ? snapshot.gatewayJobs.find((job) => job.id === childGatewayJobId) ?? null
+    : null;
+  const rootId = stringValue(audit.rootId) ?? parent.subject.supplySourceId;
+  const root = rootId
+    ? snapshot.admission.roots.find((candidate) => candidate.id === rootId) ?? null
+    : null;
+  const sourceId = stringValue(audit.sourceId);
+  const source = sourceId
+    ? snapshot.admission.sources.find((candidate) => candidate.id === sourceId) ?? null
+    : null;
+  const intakeId = stringValue(audit.intakeId);
+  const intake = intakeId
+    ? snapshot.admission.intakes.find((candidate) => candidate.id === intakeId) ?? null
+    : null;
+  const mapping = stringValue(audit.mappingId)
+    ? snapshot.admission.mappings.find((candidate) => candidate.id === audit.mappingId) ?? null
+    : null;
+  const manifest = recordValue(audit.manifest);
+  const producerDedupeKey = `${AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX}${rootId ?? ''}`;
+  const reportRow = storedRows.find((row) => row.gatewayJobId === gatewayJobId);
+  const reportWrite = storedWrites.find((write) => write.gatewayJobId === gatewayJobId);
+  const childClaims = child
+    ? snapshot.gatewayClaims.filter((claim) => claim.jobId === child.id)
+    : [];
+  const continuationJobs = rootId
+    ? snapshot.gatewayJobs.filter((candidate) => (
+      candidate.supplySourceId === rootId
+      && (
+        candidate.dedupeKey.startsWith(AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX)
+        || candidate.dedupeKey.startsWith(AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX)
+      )
+    ))
+    : [];
+  const producerJobs = continuationJobs.filter((candidate) => (
+    candidate.dedupeKey.startsWith(AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX)
+  ));
+  const reviewerJobs = continuationJobs.filter((candidate) => (
+    candidate.dedupeKey.startsWith(AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX)
+  ));
+  const expectedReviewerKeys = new Set(
+    childClaims.map((claim) => `${AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX}${claim.id}`),
+  );
+  const childMatches = root
+    && affiliateAgentEvidenceManifestSchema.safeParse(manifest).success
+    && continuationAuditedChildMatches(
+      parent,
+      audit,
+      child,
+      mappingJob,
+      root,
+      manifest,
+    );
+  const replayStateValid = (
+    childMatches === true
+    && child !== null
+    && (child.status !== 'COMPLETED' || child.terminalReceiptId !== null)
+  );
+  if (
+    storedReport.operation !== 'LEGACY_SPORT_REPAIR_CONTINUATION'
+    || storedReport.schemaVersion !== AFFILIATE_LEGACY_REPAIR_CONTINUATION_SCHEMA_VERSION
+    || storedReport.mode !== 'APPLY'
+    || storedReport.reportHash !== expectedReportHash
+    || audit.operation !== 'LEGACY_SPORT_REPAIR_CONTINUATION'
+    || audit.kind !== 'LEGACY_SPORT_REPAIR_CONTINUATION'
+    || audit.schemaVersion !== AFFILIATE_LEGACY_REPAIR_CONTINUATION_SCHEMA_VERSION
+    || audit.reportHash !== expectedReportHash
+    || audit.reason !== reasonText
+    || audit.operatorId !== operatorId
+    || storedReport.reason !== reasonText
+    || storedReport.gatewayJobId !== gatewayJobId
+    || !storedRequested
+    || !sameAdmissionValue(storedRequested, [gatewayJobId])
+    || !storedSelected
+    || !sameAdmissionValue(storedSelected, [gatewayJobId])
+    || !storedApplied
+    || storedApplied.length !== 1
+    || storedApplied[0] !== childGatewayJobId
+    || storedRows.length !== 1
+    || storedWrites.length !== 1
+    || storedCounts.total !== 1
+    || storedCounts.eligible !== 1
+    || storedCounts.held !== 0
+    || storedCounts.selected !== 1
+    || storedCounts.alreadyContinued !== 0
+    || storedLimits.producerClaims !== AFFILIATE_LEGACY_REPAIR_CONTINUATION_PRODUCER_LIMIT
+    || storedLimits.reviewerClaims !== AFFILIATE_LEGACY_REPAIR_CONTINUATION_REVIEWER_LIMIT
+    || !continuationLimitsValid(auditLimits, storedLimits)
+    || storedHash !== expectedReportHash
+    || storedReport.contractVersion !== bundle.supplyContract.version
+    || storedReport.contractHash !== bundle.supplyContract.hash
+    || storedReport.deploymentContractVersion !== bundle.deploymentContract.version
+    || storedReport.deploymentContractHash !== bundle.deploymentContract.hash
+    || audit.parentGatewayJobId !== gatewayJobId
+    || audit.parentClaimId !== parent.claim.id
+    || audit.parentMappingJobId !== mappingJob.id
+    || audit.parentReceiptId !== parent.receipt.id
+    || audit.parentResultHash !== parent.gatewayJob.resultHash
+    || audit.parentDeploymentContractHash !== parent.claim.deploymentContractHash
+    || audit.parentPass !== 3
+    || audit.continuationPass !== 3
+    || audit.childGatewayJobId !== childGatewayJobId
+    || audit.producerDedupeKey !== producerDedupeKey
+    || audit.reviewerDedupePrefix !== AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX
+    || audit.rootId !== rootId
+    || audit.rootIdentityKey !== root?.identityKey
+    || audit.intakeId !== intake?.id
+    || audit.sourceId !== source?.id
+    || !mapping
+    || audit.mappingId !== mapping.id
+    || audit.evidenceRunId !== parent.subject.repairContext.evidenceRunId
+    || !sameAdmissionValue(audit.manifest, parent.gatewayJob.evidenceManifestJson)
+    || !sameAdmissionValue(storedReport.row, reportRow)
+    || !root
+    || !source
+    || !intake
+    || (intake.affiliateSourceId !== source.id)
+    || (intake.supplySourceId !== root.id)
+    || (source.supplySourceId !== root.id)
+    || (mapping && (mapping.sourceId !== source.id || mapping.supplySourceId !== root.id))
+    || !reportRow
+    || reportRow.gatewayJobId !== gatewayJobId
+    || reportRow.childGatewayJobId !== childGatewayJobId
+    || reportRow.parentPass !== 3
+    || reportRow.continuationPass !== 3
+    || reportRow.outcome !== 'APPLIED'
+    || reportRow.producerDedupeKey !== producerDedupeKey
+    || !reportWrite
+    || reportWrite.gatewayJobId !== gatewayJobId
+    || reportWrite.parentPass !== 3
+    || reportWrite.continuationPass !== 3
+    || reportWrite.producerDedupeKey !== producerDedupeKey
+    || !replayStateValid
+    || producerJobs.length !== 1
+    || producerJobs[0]?.id !== childGatewayJobId
+    || reviewerJobs.length > 1
+    || reviewerJobs.some((job) => !expectedReviewerKeys.has(job.dedupeKey))
+    || !await retryHistoricalSportEvidenceValid(parent, artifactStore)
+  ) {
+    throw new AffiliateLegacyRepairAdmissionError(
+      'CONTINUATION_STATE_DRIFT',
+      'The persisted continuation child no longer matches its parent audit.',
+      { expectedReportHash },
+    );
+  }
+  const replayRow = {
+    ...(reportRow as unknown as AffiliateLegacyRepairContinuationRow),
+    childGatewayJobId,
+    outcome: 'APPLIED' as const,
+  };
+  return {
+    ...(storedReport as unknown as AffiliateLegacyRepairContinuationReport),
+    mode: 'APPLY',
+    row: replayRow,
+    rows: [replayRow],
+    childGatewayJobId,
+    producerDedupeKey,
+    reviewerDedupePrefix: AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX,
+    reviewedReportHash: expectedReportHash,
+    writeCount: 0,
+    appliedGatewayJobIds: [childGatewayJobId],
+    replayed: true,
+  };
+};
+
 const retryReplayReport = async (
   snapshot: RetrySnapshot,
   bundle: ParsedBundle,
@@ -4611,6 +5792,7 @@ export const applyAffiliateLegacyRepairRetry = async (
     );
     if (current.report.reportHash !== expectedReportHash) {
       throw new AffiliateLegacyRepairAdmissionError(
+
         'ADMISSION_REPORT_DRIFT',
         'The reviewed retry report no longer matches current identity, evidence, state, or contract.',
         { expectedReportHash, observedReportHash: current.report.reportHash },
@@ -4660,6 +5842,142 @@ export const applyAffiliateLegacyRepairRetry = async (
     return appliedReport;
   });
 };
+export const previewAffiliateLegacyRepairContinuation = async (
+  input: PreviewAffiliateLegacyRepairContinuationInput,
+): Promise<AffiliateLegacyRepairContinuationPreview> => {
+  const bundle = parseBundle(input.bundle);
+  const gatewayJobId = continuationGatewayJobId(input.gatewayJobId);
+  const reasonText = continuationReason(input.reason);
+  const { report } = await buildContinuationReport(
+    input.prisma,
+    bundle,
+    gatewayJobId,
+    reasonText,
+    'PREVIEW',
+    input.artifactStore,
+  );
+  return report as AffiliateLegacyRepairContinuationPreview;
+};
+
+export const applyAffiliateLegacyRepairContinuation = async (
+  input: ApplyAffiliateLegacyRepairContinuationInput,
+): Promise<AffiliateLegacyRepairContinuationApplyReport> => {
+  const bundle = parseBundle(input.bundle);
+  const gatewayJobId = continuationGatewayJobId(input.gatewayJobId);
+  const reasonText = continuationReason(input.reason);
+  const operatorId = stringValue(input.operatorId);
+  if (!operatorId) {
+    throw new AffiliateLegacyRepairAdmissionError(
+      'OPERATOR_REQUIRED',
+      'operatorId is required for continuation apply.',
+    );
+  }
+  const expectedReportHash = normalizeHash(input.expectedReportHash);
+  if (!expectedReportHash) {
+    throw new AffiliateLegacyRepairAdmissionError(
+      'REPORT_HASH_REQUIRED',
+      'expectedReportHash must be a SHA-256 hash.',
+    );
+  }
+  return withSerializableTransaction(input.prisma, async (transaction) => {
+    await assertActiveContract(transaction, bundle);
+    const continuationSnapshot = await readContinuationSnapshot(transaction, gatewayJobId);
+    if (
+      continuationSnapshot.admission.gatewayClaims.some((claim) => normalizedUpper(claim.status) === 'ACTIVE')
+      || continuationSnapshot.gatewayClaims.some((claim) => normalizedUpper(claim.status) === 'ACTIVE')
+      || continuationSnapshot.admission.gatewayJobs.some((gatewayJob) => gatewayJob.activeClaimId !== null)
+      || continuationSnapshot.gatewayJobs.some((gatewayJob) => gatewayJob.activeClaimId !== null)
+    ) {
+      throw new AffiliateLegacyRepairAdmissionError(
+        'CLAIM_DRIFT',
+        'An active gateway claim exists; legacy sport repair continuation is paused.',
+      );
+    }
+    const replay = await continuationReplayReport(
+      continuationSnapshot,
+      bundle,
+      gatewayJobId,
+      reasonText,
+      expectedReportHash,
+      operatorId,
+      input.artifactStore,
+    );
+    if (replay) return replay;
+    const current = await buildContinuationReport(
+      transaction,
+      bundle,
+      gatewayJobId,
+      reasonText,
+      'APPLY',
+      input.artifactStore,
+    );
+    if (current.report.reportHash !== expectedReportHash) {
+      throw new AffiliateLegacyRepairAdmissionError(
+        'ADMISSION_REPORT_DRIFT',
+        'The reviewed continuation report no longer matches current identity, evidence, state, or contract.',
+        { expectedReportHash, observedReportHash: current.report.reportHash },
+      );
+    }
+    if (current.plans.length !== 1) {
+      throw new AffiliateLegacyRepairAdmissionError(
+        'CONTINUATION_SCOPE_NOT_ELIGIBLE',
+        'The requested parent Gateway job is not eligible for continuation; no continuation writes were made.',
+        {
+          requestedGatewayJobId: gatewayJobId,
+          reasonCodes: current.report.row.reasonCodes,
+        },
+      );
+    }
+    const childGatewayJobId = createId();
+    const appliedRow = {
+      ...current.report.row,
+      childGatewayJobId,
+      outcome: 'APPLIED' as const,
+    };
+    const appliedReport: AffiliateLegacyRepairContinuationApplyReport = {
+      ...current.report,
+      mode: 'APPLY',
+      row: appliedRow,
+      rows: [appliedRow],
+      childGatewayJobId,
+      reviewedReportHash: expectedReportHash,
+      writeCount: 1,
+      appliedGatewayJobIds: [childGatewayJobId],
+      replayed: false,
+    };
+    await applyContinuationPlan(
+      transaction,
+      current.plans[0],
+      appliedReport,
+      expectedReportHash,
+      reasonText,
+      operatorId,
+      childGatewayJobId,
+    );
+    return appliedReport;
+  });
+};
+
+export const calculateAffiliateLegacyRepairContinuationReportHash = (
+  report: Pick<
+    AffiliateLegacyRepairContinuationReport,
+    | 'schemaVersion'
+    | 'contractVersion'
+    | 'contractHash'
+    | 'deploymentContractVersion'
+    | 'deploymentContractHash'
+    | 'reason'
+    | 'gatewayJobId'
+    | 'requestedGatewayJobIds'
+    | 'selectedGatewayJobIds'
+    | 'parentPass'
+    | 'continuationPass'
+    | 'limits'
+    | 'counts'
+    | 'rows'
+    | 'proposedWrites'
+  >,
+): string => continuationReportHashFor(report);
 
 export const calculateAffiliateLegacyRepairRetryReportHash = (
   report: Pick<

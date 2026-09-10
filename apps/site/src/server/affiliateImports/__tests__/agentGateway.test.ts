@@ -7,6 +7,8 @@ import type { PrismaClient } from "@/generated/prisma/client";
 import { buildAffiliateSportsCatalogSnapshot } from "../affiliateSportsCatalog";
 
 import {
+  AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX,
+  AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX,
   AFFILIATE_AGENT_MAX_MANIFEST_ENTRIES,
   AFFILIATE_AGENT_MAX_SET_ITEMS,
   AFFILIATE_AGENT_ROLE_CONTRACTS,
@@ -1204,6 +1206,18 @@ const gatewayTestMatchesObjectFilter = (
   filter: GatewayTestRow,
 ): boolean => {
   if (!gatewayTestMatchesFilterMembership(actual, filter)) return false;
+  if (
+    typeof filter.startsWith === "string"
+    && (typeof actual !== "string" || !actual.startsWith(filter.startsWith))
+  ) {
+    return false;
+  }
+  if (filter.not !== undefined) {
+    const matchesNot = gatewayTestIsObjectFilter(filter.not)
+      ? gatewayTestMatchesObjectFilter(actual, filter.not)
+      : actual === filter.not;
+    if (matchesNot) return false;
+  }
   if (!gatewayTestMatchesDateFilter(actual, filter, "lte")) return false;
   if (!gatewayTestMatchesDateFilter(actual, filter, "lt")) return false;
   return true;
@@ -1224,6 +1238,14 @@ const gatewayTestMatchesExpectedValue = (
     return expected.some((alternative) =>
       gatewayTestMatchesAlternative(row, alternative),
     );
+  }
+  if (key === "NOT") {
+    if (Array.isArray(expected)) {
+      return expected.every((alternative) =>
+        !gatewayTestMatchesAlternative(row, alternative),
+      );
+    }
+    return !gatewayTestMatchesAlternative(row, expected);
   }
   const actual = row[key];
   if (expected instanceof Date) {
@@ -2945,6 +2967,118 @@ describe("Prisma affiliate Agent Gateway", () => {
     expect(state.claims[0]?.tokenHash).toMatch(/^[a-f0-9]{64}$/);
     expect(JSON.stringify(state)).not.toContain(grant?.token);
   });
+  it("rejects retargeting an active bounded lease and reuses only its exact scope", async () => {
+    const admission = createAffiliateAgentClaimAdmission();
+    const firstLease = await admission.openBoundedLease({
+      role: "MAPPING_PRODUCER",
+      workerId: "producer-worker",
+      jobId: "producer-job-a",
+      leaseSeconds: 60,
+    });
+    await expect(admission.openBoundedLease({
+      role: "MAPPING_PRODUCER",
+      workerId: "producer-worker",
+      jobId: "producer-job-b",
+      leaseSeconds: 60,
+    })).rejects.toThrow("A bounded admission lease is already active.");
+    await expect(admission.openBoundedLease({
+      role: "MAPPING_PRODUCER",
+      workerId: "producer-worker",
+      jobId: " producer-job-a ",
+      leaseSeconds: 60,
+    })).resolves.toEqual(firstLease);
+  });
+
+  it("scopes a producer lease to its exact lower-priority continuation job and replays that job only", async () => {
+    const admission = createAffiliateAgentClaimAdmission();
+    const harness = createGatewayClaimHarness({ claimAdmission: admission });
+    const request = configureLegacySportProducerScenario(harness).request;
+    const targetJob = harness.state.jobs[0]!;
+    const targetJobId = String(targetJob.id);
+    targetJob.dedupeKey = `${AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX}scoped-target`;
+    targetJob.priority = 1;
+    const unrelatedJob = {
+      ...targetJob,
+      id: "producer-unrelated-job",
+      dedupeKey: "ordinary-producer-high-priority",
+      priority: 100,
+      claimGeneration: 0,
+      activeClaimId: null,
+      eventSequence: 0,
+    };
+    harness.state.jobs.push(unrelatedJob);
+
+    await admission.openBoundedLease({
+      role: request.role,
+      workerId: request.workerId,
+      jobId: targetJobId,
+      leaseSeconds: 1_200,
+    });
+    const grant = await harness.gateway.claim(request);
+    expect(grant?.envelope.jobId).toBe(targetJobId);
+    expect(unrelatedJob).toMatchObject({
+      status: "QUEUED",
+      activeClaimId: null,
+      claimGeneration: 0,
+    });
+
+    await expect(harness.gateway.claim(request)).resolves.toEqual(grant);
+    expect(harness.state.claims.filter((claim) => claim.jobId === targetJobId)).toHaveLength(1);
+  });
+
+  it("scopes a reviewer lease to its exact lower-priority continuation job", async () => {
+    const admission = createAffiliateAgentClaimAdmission();
+    const harness = createGatewayClaimHarness({ claimAdmission: admission });
+    configureStandaloneReviewerScenario(harness);
+    const request = standaloneReviewerRequest();
+    const targetJob = harness.state.jobs[0]!;
+    const targetJobId = String(targetJob.id);
+    targetJob.dedupeKey = `${AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX}scoped-target`;
+    targetJob.priority = 1;
+    const unrelatedJob = {
+      ...targetJob,
+      id: "reviewer-unrelated-job",
+      dedupeKey: "ordinary-reviewer-high-priority",
+      priority: 100,
+      claimGeneration: 0,
+      activeClaimId: null,
+      eventSequence: 0,
+    };
+    harness.state.jobs.push(unrelatedJob);
+
+    await admission.openBoundedLease({
+      role: request.role,
+      workerId: request.workerId,
+      jobId: targetJobId,
+      leaseSeconds: 1_200,
+    });
+    const grant = await harness.gateway.claim(request);
+    expect(grant?.envelope.jobId).toBe(targetJobId);
+    expect(unrelatedJob).toMatchObject({
+      status: "QUEUED",
+      activeClaimId: null,
+      claimGeneration: 0,
+    });
+  });
+
+  it.each([
+    ["MAPPING_PRODUCER", AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX],
+    ["SUPPLY_REVIEWER", AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX],
+  ] as const)("does not let an unscoped %s claim a continuation marker", async (role, prefix) => {
+    const harness = createGatewayClaimHarness();
+    const request = role === "MAPPING_PRODUCER"
+      ? configureLegacySportProducerScenario(harness).request
+      : (configureStandaloneReviewerScenario(harness), standaloneReviewerRequest());
+    const job = harness.state.jobs[0]!;
+    job.dedupeKey = `${prefix}unscoped`;
+
+    await expect(harness.gateway.claim(request)).resolves.toBeNull();
+    expect(job).toMatchObject({
+      status: "QUEUED",
+      activeClaimId: null,
+      claimGeneration: 0,
+    });
+  });
   it("records a healthy worker heartbeat through the production claim boundary", async () => {
     const { gateway, request, state } = createGatewayClaimHarness();
 
@@ -3135,6 +3269,109 @@ describe("Prisma affiliate Agent Gateway", () => {
       status: "QUEUED",
       activeClaimId: null,
     });
+  });
+  it("does not retarget a claim after its scoped admission changes during a serialization retry", async () => {
+    let scope = "producer-target-a";
+    let withClaimCalls = 0;
+    const admission: AffiliateAgentClaimAdmission = {
+      isOpen: () => true,
+      isOpenFor: (context) => context.jobId === scope,
+      withClaim: async (operation) => {
+        try {
+          return await operation(scope);
+        } finally {
+          withClaimCalls += 1;
+          if (withClaimCalls === 1) scope = "producer-target-b";
+        }
+      },
+    };
+    const harness = createGatewayClaimHarness({ claimAdmission: admission });
+    const request = configureLegacySportProducerScenario(harness).request;
+    const targetJob = harness.state.jobs[0]!;
+    Object.assign(targetJob, {
+      id: scope,
+      dedupeKey: `${AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX}target-a`,
+      priority: 1,
+    });
+    const retargetedJob = {
+      ...targetJob,
+      id: scope.replace("-a", "-b"),
+      dedupeKey: `${AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX}target-b`,
+      priority: 100,
+      claimGeneration: 0,
+      activeClaimId: null,
+      eventSequence: 0,
+    };
+    harness.state.jobs.push(retargetedJob);
+    harness.setNextTransactionConflicts(1);
+
+    await expect(harness.gateway.claim(request)).resolves.toBeNull();
+    expect(withClaimCalls).toBe(2);
+    expect(harness.state.claims).toHaveLength(0);
+    expect(retargetedJob).toMatchObject({
+      status: "QUEUED",
+      activeClaimId: null,
+      claimGeneration: 0,
+    });
+  });
+
+  it("does not fall back to an unrelated job after a scoped lease expires during retry", async () => {
+    jest.useFakeTimers({ now: new Date("2026-08-20T18:00:00.000Z") });
+    try {
+      let resolveClaimTransactionEntered: () => void = () => {};
+      const claimTransactionEntered = new Promise<void>((resolve) => {
+        resolveClaimTransactionEntered = resolve;
+      });
+      let releaseClaimTransaction: () => void = () => {};
+      const claimTransactionReleased = new Promise<void>((resolve) => {
+        releaseClaimTransaction = resolve;
+      });
+      const admission = createAffiliateAgentClaimAdmission();
+      const harness = createGatewayClaimHarness({
+        claimAdmission: admission,
+        claimTransactionBarrier: {
+          entered: resolveClaimTransactionEntered,
+          released: claimTransactionReleased,
+        },
+      });
+      const request = configureLegacySportProducerScenario(harness).request;
+      const targetJob = harness.state.jobs[0]!;
+      const targetJobId = String(targetJob.id);
+      targetJob.dedupeKey = `${AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX}expiring-target`;
+      targetJob.priority = 1;
+      const unrelatedJob = {
+        ...targetJob,
+        id: "expiring-unrelated-job",
+        dedupeKey: "ordinary-producer-high-priority",
+        priority: 100,
+        claimGeneration: 0,
+        activeClaimId: null,
+        eventSequence: 0,
+      };
+      harness.state.jobs.push(unrelatedJob);
+      await admission.openBoundedLease({
+        role: request.role,
+        workerId: request.workerId,
+        jobId: targetJobId,
+        leaseSeconds: 1,
+      });
+      harness.setNextTransactionConflicts(1);
+
+      const claimPromise = harness.gateway.claim(request);
+      await claimTransactionEntered;
+      jest.advanceTimersByTime(1_001);
+      releaseClaimTransaction();
+
+      await expect(claimPromise).resolves.toBeNull();
+      expect(harness.state.claims).toHaveLength(0);
+      expect(unrelatedJob).toMatchObject({
+        status: "QUEUED",
+        activeClaimId: null,
+        claimGeneration: 0,
+      });
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it("rejects an exact claim replay after an active contract changes", async () => {
@@ -7072,6 +7309,78 @@ describe("Prisma affiliate Agent Gateway", () => {
       status: "UNKNOWN",
       safeErrorCode: "GATEWAY_ADMISSION_HALTED",
     });
+  });
+
+  it.each([
+    ["MAPPING_PRODUCER", "failure"],
+    ["MAPPING_PRODUCER", "expiry"],
+    ["SUPPLY_REVIEWER", "failure"],
+    ["SUPPLY_REVIEWER", "expiry"],
+  ] as const)("does not retry a single-claim %s continuation after %s", async (role, outcome) => {
+    const admission = createAffiliateAgentClaimAdmission();
+    const harness = createGatewayClaimHarness({ claimAdmission: admission });
+    let request: AffiliateAgentClaimRequest;
+    if (role === "MAPPING_PRODUCER") {
+      request = configureLegacySportProducerScenario(harness).request;
+    } else {
+      configureStandaloneReviewerScenario(harness);
+      request = standaloneReviewerRequest();
+    }
+    const job = harness.state.jobs[0]!;
+    job.dedupeKey = `${role === "MAPPING_PRODUCER"
+      ? AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX
+      : AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX}single-use`;
+    await admission.openBoundedLease({
+      role,
+      workerId: request.workerId,
+      jobId: job.id as string,
+      leaseSeconds: 1_200,
+    });
+    const grant = await harness.gateway.claim(request);
+    if (!grant) throw new Error("Expected the one authorized continuation claim.");
+    if (outcome === "expiry") {
+      harness.setNow("2026-08-20T18:05:00.000Z");
+      await harness.gateway.reconcile({ limit: 10 });
+    } else {
+      await expect(harness.reconciler.reconcileInvocation(failureOperationFor(
+        grant, "continuation-failure", "PROCESS_CRASH", "2026-08-20T18:00:00.000Z",
+      ))).resolves.toMatchObject({
+        isPipelineBlocked: true,
+        invocationFailureCount: 1,
+        nextAttemptAt: null,
+      });
+    }
+    expect(job).toMatchObject({
+      status: "PIPELINE_BLOCKED",
+      invocationFailureCount: 1,
+      activeClaimId: null,
+      nextAttemptAt: null,
+    });
+    const nextRequest = {
+      ...request,
+      idempotencyKey: "continuation-second-claim",
+      invocationId: "continuation-second-invocation",
+      workspaceAttestation: {
+        ...request.workspaceAttestation,
+        workspaceId: "continuation-second-workspace",
+        invocationId: "continuation-second-invocation",
+        issuedAt: "2026-08-20T18:29:00.000Z",
+        expiresAt: "2026-08-20T19:00:00.000Z",
+      },
+    };
+    harness.setNow("2026-08-20T18:30:00.000Z");
+    expect(await harness.gateway.claim(nextRequest)).toBeNull();
+    expect(harness.state.claims.filter((claim) => claim.jobId === job.id)).toHaveLength(1);
+    job.status = "QUEUED";
+    job.nextAttemptAt = new Date("2026-08-20T18:30:00.000Z");
+    await admission.openBoundedLease({
+      role,
+      workerId: request.workerId,
+      jobId: job.id as string,
+      leaseSeconds: 1_200,
+    });
+    await expect(harness.gateway.claim(nextRequest)).rejects.toMatchObject({ code: "PIPELINE_BLOCKED" });
+    expect(harness.state.claims.filter((claim) => claim.jobId === job.id)).toHaveLength(1);
   });
 
   it("reconciles each expired lease once through plus five, plus fifteen, then Pipeline Blocked", async () => {

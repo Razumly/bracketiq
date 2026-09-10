@@ -487,6 +487,12 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
     selectedGatewayJobIds: ["gateway-parent-boomtown", "gateway-parent-softball"],
     reportHash: "a".repeat(64),
   }));
+  const legacyRepairContinuation = jest.fn(async () => ({
+    operation: "LEGACY_SPORT_REPAIR_CONTINUATION",
+    reportHash: "a".repeat(64),
+    selectedGatewayJobIds: ["gateway-parent-softball"],
+    writeCount: 0,
+  }));
   const reviewerEffectRecovery = jest.fn(async (
     request: AffiliateAgentReviewerEffectRecoveryRequest,
   ): Promise<AffiliateAgentReviewerEffectRecoveryReport> => ({
@@ -518,6 +524,7 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
     readinessValue = false;
     await admission.close();
     running = await startServer(createAffiliateAgentGatewayRequestHandler({
+      legacyRepairContinuation,
       legacyRepairAdmission,
       legacyRepairRetry,
       replenishment: gateway.replenishment,
@@ -816,6 +823,57 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
       error: { code: "ADMISSION_REPORT_DRIFT", isRetryable: false },
     });
   });
+  it("dispatches the singular continuation route only for a closed operator request", async () => {
+    let response = await request("/legacy-repair/continuation", WORKER_ROLE_CREDENTIAL, "POST", {
+      mode: "PREVIEW",
+      gatewayJobId: "gateway-parent-softball",
+      reason: "continue exhausted legacy repair",
+    });
+    expect(response.status).toBe(401);
+
+    response = await request("/legacy-repair/continuation", OPERATOR_TOKEN, "POST", {
+      mode: "PREVIEW",
+      gatewayJobId: "gateway-parent-softball",
+      reason: "continue exhausted legacy repair",
+      expectedReportHash: "a".repeat(64),
+    });
+    expect(response.status).toBe(400);
+
+    response = await request("/legacy-repair/continuation", OPERATOR_TOKEN, "POST", {
+      mode: "APPLY",
+      gatewayJobId: "gateway-parent-softball",
+      reason: "continue exhausted legacy repair",
+    });
+    expect(response.status).toBe(400);
+
+    response = await request("/legacy-repair/continuation", OPERATOR_TOKEN, "POST", {
+      mode: "PREVIEW",
+      gatewayJobId: "gateway-parent-softball",
+      reason: "  continue exhausted legacy repair  ",
+    });
+    expect(response.status).toBe(200);
+    expect(legacyRepairContinuation).toHaveBeenCalledWith({
+      mode: "PREVIEW",
+      gatewayJobId: "gateway-parent-softball",
+      reason: "continue exhausted legacy repair",
+    });
+
+    legacyRepairContinuation.mockRejectedValueOnce(new AffiliateLegacyRepairAdmissionError(
+      "CONTINUATION_STATE_DRIFT",
+      "The continuation state changed.",
+    ));
+    response = await request("/legacy-repair/continuation", OPERATOR_TOKEN, "POST", {
+      mode: "APPLY",
+      gatewayJobId: "gateway-parent-softball",
+      reason: "continue exhausted legacy repair",
+      expectedReportHash: "a".repeat(64),
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: { code: "CONTINUATION_STATE_DRIFT", isRetryable: false },
+    });
+  });
+
 
   it("rejects routes outside the configured prefix before dispatching and dispatches prefixed routes", async () => {
     const gatewayRoutes = [
@@ -1586,6 +1644,48 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
     );
     expect(verifyWorkerCredential).toHaveBeenCalledWith(humanLease);
   });
+  it("accepts and returns a normalized exact job scope while rejecting invalid scope fields", async () => {
+    readinessValue = true;
+    const scopedLease = {
+      ...leaseRequest,
+      role: "MAPPING_PRODUCER" as const,
+      workerId: "mapping-producer",
+      jobId: "  continuation-job-1  ",
+    };
+    let response = await request(
+      "/admission/open",
+      OPERATOR_TOKEN,
+      "POST",
+      scopedLease,
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      status: "open",
+      lease: {
+        role: scopedLease.role,
+        workerId: scopedLease.workerId,
+        jobId: "continuation-job-1",
+        remainingClaims: 1,
+      },
+    });
+    await admission.close();
+
+    for (const invalid of [
+      { ...scopedLease, jobId: " " },
+      { ...scopedLease, jobId: "j".repeat(201) },
+      { ...scopedLease, jobId: 42 },
+      { ...scopedLease, unexpected: true },
+    ]) {
+      response = await request(
+        "/admission/open",
+        OPERATOR_TOKEN,
+        "POST",
+        invalid,
+      );
+      expect(response.status).toBe(400);
+    }
+  });
+
 
 
   it("starts a fresh process admission closed", async () => {

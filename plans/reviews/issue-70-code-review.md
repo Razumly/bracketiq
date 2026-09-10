@@ -74,3 +74,28 @@ the safe report is preserved at
 Deployment, actual guarded recovery, and the authorized Softball retry remain
 pending. This verification performed no production write, token revival,
 claim creation, or retry.
+
+## Authorized one-time continuation exact-scope re-review
+
+Final Standards review: **PASS** (C1MD citation finding fixed and
+re-reviewed).
+
+Final Specification review: **PASS** (C2 audit-limits and C3 exact-job-scope
+findings fixed and re-reviewed).
+
+The source gate ran on 2026-09-10 against the local prepared PostgreSQL
+database `bracketiq_e2e_70_recovery_final` on `mvp-site-db` port 5433:
+
+- `npx tsc --noEmit`: passed.
+- The pinned complete set: **15 suites / 558 tests passed**.
+- Targeted ESLint over all changed TypeScript files: passed.
+- `npx --yes bun@1.3.14 run scripts/test-affiliate-omp-agent-sdk-schema.ts`:
+  passed with no provider call.
+- `/tmp/softball-continuation-preview-build.cjs`: rebuilt successfully.
+
+The exact-job-scope evidence covers producer and reviewer leases selecting
+their lower-priority continuation target, unrelated queued work remaining
+untouched, active-lease retarget rejection, unscoped marker denial,
+same-request replay without a second claim, serialization scope freezing, and
+lease expiry without an unscoped fallback. No production write, deployment,
+or push was performed by this gate.

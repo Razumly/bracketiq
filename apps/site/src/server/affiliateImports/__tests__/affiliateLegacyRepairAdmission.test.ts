@@ -16,10 +16,13 @@ import * as affiliateSupplyPersistence from '../affiliateSupplyPersistence';
 import {
   applyAffiliateLegacyRepairAdmission,
   applyAffiliateLegacyRepairRetry,
+  applyAffiliateLegacyRepairContinuation,
   calculateAffiliateLegacyRepairAdmissionReportHash,
   calculateAffiliateLegacyRepairRetryReportHash,
+  calculateAffiliateLegacyRepairContinuationReportHash,
   previewAffiliateLegacyRepairAdmission,
   previewAffiliateLegacyRepairRetry,
+  previewAffiliateLegacyRepairContinuation,
 } from '../affiliateLegacyRepairAdmission';
 
 const manifest = buildAffiliateSupplyContractManifest({
@@ -794,20 +797,28 @@ const retryFixtureWithAdmission = async (): Promise<RetryFixtureState> => (
 const completeRetryChild = (
   state: RetryFixtureState,
   suffix: 'softball' | 'boomtown',
+  parentClaimIdOverride?: string,
+  childClaimIdOverride?: string,
+  childReceiptIdOverride?: string,
+  deploymentOverride?: Readonly<{ version: number; hash: string }>,
 ): string => {
-  const parentClaimId = `claim-parent-${suffix}`;
+  const parentClaimId = parentClaimIdOverride ?? `claim-parent-${suffix}`;
   const child = state.gatewayJobs.find((candidate) => (
     candidate.parentClaimId === parentClaimId
     && candidate.id !== `gateway-parent-${suffix}`
   ));
   if (!child) throw new Error(`Retry child for ${suffix} was not created.`);
+  const deployment = deploymentOverride ?? {
+    version: 3,
+    hash: '15c37807d319b38b1c8558bfb3b1b84a16e5a85e4734aaf861d2f1259e4a7679',
+  };
   const childSubject = child.subjectJson as Record<string, unknown>;
   const repairContext = childSubject.repairContext as Record<string, unknown>;
   const evidenceManifest = child.evidenceManifestJson as Record<string, unknown>;
   const evidenceEntries = Array.isArray(evidenceManifest.entries)
     ? evidenceManifest.entries.map((entry) => entry as Record<string, unknown>)
     : [];
-  const citationEntry = evidenceEntries[0];
+  const citationEntry = evidenceEntries.find((entry) => entry.kind === 'PAGE_MARKDOWN');
   if (!citationEntry) throw new Error(`Retry evidence manifest for ${suffix} is empty.`);
   const sportDetermination = {
     sourceLabels: ['Grass Soccer'],
@@ -823,8 +834,8 @@ const completeRetryChild = (
       excerpt: 'Grass Soccer',
     }],
   };
-  const childClaimId = `claim-retry-${suffix}`;
-  const childReceiptId = `receipt-retry-${suffix}`;
+  const childClaimId = childClaimIdOverride ?? `claim-retry-${suffix}`;
+  const childReceiptId = childReceiptIdOverride ?? `receipt-retry-${suffix}`;
   const roleContract = AFFILIATE_AGENT_ROLE_CONTRACTS.MAPPING_PRODUCER;
   const promptTemplate = AFFILIATE_AGENT_PROMPT_TEMPLATES.MAPPING_PRODUCER;
   const claimEnvelope = {
@@ -837,8 +848,11 @@ const completeRetryChild = (
     supplySourceId: child.supplySourceId,
     claimGeneration: 1,
     lifecycleGeneration: child.expectedLifecycleGeneration,
-    deploymentContractVersion: 3,
-    deploymentContractHash: '15c37807d319b38b1c8558bfb3b1b84a16e5a85e4734aaf861d2f1259e4a7679',
+    deploymentContractVersion: deployment.version,
+    deploymentContractHash: deployment.hash,
+    ...(String(child.dedupeKey).startsWith('legacy-sport-repair-continuation:')
+      ? { executionBudget: 'SINGLE_CLAIM' }
+      : {}),
     supplyContractVersion: manifest.supplyContract.version,
     supplyContractHash: manifest.supplyContract.hash,
     roleContractVersion: roleContract.version,
@@ -861,8 +875,8 @@ const completeRetryChild = (
     claimId: childClaimId,
     claimGeneration: 1,
     lifecycleGeneration: child.expectedLifecycleGeneration,
-    deploymentContractVersion: 3,
-    deploymentContractHash: '15c37807d319b38b1c8558bfb3b1b84a16e5a85e4734aaf861d2f1259e4a7679',
+    deploymentContractVersion: deployment.version,
+    deploymentContractHash: deployment.hash,
     supplyContractVersion: manifest.supplyContract.version,
     supplyContractHash: manifest.supplyContract.hash,
     roleContractVersion: roleContract.version,
@@ -914,8 +928,8 @@ const completeRetryChild = (
     invocationId: `retry-invocation-${suffix}`,
     workspaceId: `retry-workspace-${suffix}`,
     status: 'COMPLETED',
-    deploymentContractVersion: 3,
-    deploymentContractHash: '15c37807d319b38b1c8558bfb3b1b84a16e5a85e4734aaf861d2f1259e4a7679',
+    deploymentContractVersion: deployment.version,
+    deploymentContractHash: deployment.hash,
     roleContractVersion: roleContract.version,
     roleContractHash: roleContract.hash,
     promptTemplateVersion: promptTemplate.version,
@@ -947,6 +961,28 @@ const completeRetryChild = (
   if (!mappingJob) throw new Error(`Mapping job for ${suffix} was not found.`);
   mappingJob.status = 'REVIEW_REQUIRED';
   return child.id;
+};
+
+const exhaustedContinuationFixture = async () => {
+  const state = await retryFixtureWithAdmission();
+  const passTwoPreview = await previewAffiliateLegacyRepairRetry(state.input);
+  await applyAffiliateLegacyRepairRetry({
+    ...state.input,
+    operatorId: 'affiliate-gateway-operator',
+    expectedReportHash: passTwoPreview.reportHash,
+  });
+  const passTwoChildId = completeRetryChild(state, 'softball');
+  const passThreeInput = { ...state.input, gatewayJobIds: [passTwoChildId] };
+  const passThreePreview = await previewAffiliateLegacyRepairRetry(passThreeInput);
+  await applyAffiliateLegacyRepairRetry({
+    ...passThreeInput,
+    operatorId: 'affiliate-gateway-operator',
+    expectedReportHash: passThreePreview.reportHash,
+  });
+  const gatewayJobId = completeRetryChild(
+    state, 'softball', 'claim-retry-softball', 'claim-retry-pass3-softball', 'receipt-retry-pass3-softball',
+  );
+  return { state, input: { ...state.input, gatewayJobId, reason: 'continue exhausted legacy repair' } };
 };
 
 describe('legacy repair admission with real contract validators', () => {
@@ -1589,10 +1625,177 @@ describe('legacy repair admission with real contract validators', () => {
     });
     expect(applied.writeCount).toBe(1);
     expect(applied.appliedGatewayJobIds).toHaveLength(1);
+
     expect(state.gatewayJobs.some((job) => (
       job.parentClaimId === 'claim-retry-softball'
       && job.dedupeKey === `legacy-sport-repair-retry:${childId}`
     ))).toBe(true);
+  });
+  it('continues an exhausted pass-three parent with one producer and replays without writes', async () => {
+    const { state, input: continuationInput } = await exhaustedContinuationFixture();
+    const passThreeChildId = continuationInput.gatewayJobId;
+    const preview = await previewAffiliateLegacyRepairContinuation(continuationInput);
+    expect(preview.operation).toBe('LEGACY_SPORT_REPAIR_CONTINUATION');
+    expect(preview.counts).toEqual({
+      total: 1,
+      eligible: 1,
+      held: 0,
+      selected: 1,
+      alreadyContinued: 0,
+    });
+    expect(preview.rows[0]).toMatchObject({
+      gatewayJobId: passThreeChildId,
+      parentPass: 3,
+      continuationPass: 3,
+      producerDedupeKey: 'legacy-sport-repair-continuation:root-retry-softball',
+      eligible: true,
+    });
+    expect(calculateAffiliateLegacyRepairContinuationReportHash(preview)).toBe(preview.reportHash);
+
+    const applied = await applyAffiliateLegacyRepairContinuation({
+      ...continuationInput,
+      operatorId: 'affiliate-gateway-operator',
+      expectedReportHash: preview.reportHash,
+    });
+    expect(applied.writeCount).toBe(1);
+    expect(applied.replayed).toBe(false);
+    expect(applied.appliedGatewayJobIds).toHaveLength(1);
+    expect(applied.childGatewayJobId).toBe(applied.appliedGatewayJobIds[0]);
+    const continuationHistoryBeforeReplay = (
+      state.mappingJobs.find((job) => job.id === 'mapping-retry-softball')
+        ?.resultSummary as Record<string, unknown>
+    ).legacyRepairContinuationHistory as readonly unknown[];
+    expect(continuationHistoryBeforeReplay).toHaveLength(1);
+    expect(state.gatewayJobs.filter((job) => (
+      job.dedupeKey === 'legacy-sport-repair-continuation:root-retry-softball'
+    ))).toHaveLength(1);
+
+    const mappingJob = state.mappingJobs.find((job) => job.id === 'mapping-retry-softball')!;
+    const source = state.sources.find((row) => row.id === mappingJob.sourceId)!;
+    const previousMapping = state.mappings.find((row) => row.id === mappingJob.mappingId)!;
+    const nextMapping = { ...previousMapping, id: 'softball-continuation-mapping-v2', version: 2 };
+    state.mappings.push(nextMapping);
+    mappingJob.mappingId = nextMapping.id;
+    source.activeMappingId = nextMapping.id;
+    state.roots.find((root) => root.id === 'root-retry-softball')!.lifecycleGeneration = 2;
+    const replay = await applyAffiliateLegacyRepairContinuation({
+      ...continuationInput,
+      operatorId: 'affiliate-gateway-operator',
+      expectedReportHash: preview.reportHash,
+    });
+    expect(replay.replayed).toBe(true);
+    expect(replay.writeCount).toBe(0);
+    expect(replay.childGatewayJobId).toBe(applied.childGatewayJobId);
+    const continuationHistoryAfterReplay = (
+      state.mappingJobs.find((job) => job.id === 'mapping-retry-softball')
+        ?.resultSummary as Record<string, unknown>
+    ).legacyRepairContinuationHistory as readonly unknown[];
+    expect(continuationHistoryAfterReplay).toHaveLength(1);
+  });
+
+  it('holds continuation when the current HTML artifact is missing despite retained Markdown sport citation', async () => {
+    const { state, input } = await exhaustedContinuationFixture();
+    const htmlArtifacts = state.artifacts.filter((artifact) => (
+      artifact.intakeId === 'intake-retry-softball' && artifact.kind === 'PAGE_HTML'
+    ));
+    expect(htmlArtifacts).toHaveLength(1);
+    const htmlIndex = state.artifacts.indexOf(htmlArtifacts[0]!);
+    state.artifacts.splice(htmlIndex, 1);
+
+    const report = await previewAffiliateLegacyRepairContinuation(input);
+    expect(report.rows[0]).toMatchObject({
+      gatewayJobId: input.gatewayJobId,
+      eligible: false,
+    });
+    expect(report.rows[0]?.reasonCodes).toContain('MISSING_PAGE_HTML');
+    expect(report.selectedGatewayJobIds).toEqual([]);
+    expect(report.writeCount).toBe(0);
+  });
+
+  it('rejects stale continuation authorization and preserves prior attempts', async () => {
+    const { state, input } = await exhaustedContinuationFixture();
+    const before = JSON.stringify({ jobs: state.gatewayJobs, claims: state.gatewayClaims, receipts: state.gatewayReceipts });
+    const preview = await previewAffiliateLegacyRepairContinuation(input);
+    expect(JSON.stringify({ jobs: state.gatewayJobs, claims: state.gatewayClaims, receipts: state.gatewayReceipts })).toBe(before);
+    await expect(applyAffiliateLegacyRepairContinuation({
+      ...input,
+      reason: 'different authorization reason',
+      operatorId: 'affiliate-gateway-operator',
+      expectedReportHash: preview.reportHash,
+    })).rejects.toMatchObject({ code: 'ADMISSION_REPORT_DRIFT' });
+    expect(JSON.stringify({ jobs: state.gatewayJobs, claims: state.gatewayClaims, receipts: state.gatewayReceipts })).toBe(before);
+  });
+
+  it('rejects a tampered continuation claim limit even with a recomputed report hash', async () => {
+    const { state, input } = await exhaustedContinuationFixture();
+    const preview = await previewAffiliateLegacyRepairContinuation(input);
+    await applyAffiliateLegacyRepairContinuation({
+      ...input, operatorId: 'affiliate-gateway-operator', expectedReportHash: preview.reportHash,
+    });
+    const mappingJob = state.mappingJobs.find((job) => job.id === 'mapping-retry-softball')!;
+    const history = (mappingJob.resultSummary as Record<string, unknown>).legacyRepairContinuationHistory as Record<string, unknown>[];
+    const audit = history[0]!;
+    const report = audit.reportSnapshot as Record<string, unknown>;
+    report.limits = { producerClaims: 2, reviewerClaims: 1 };
+    audit.limits = report.limits;
+    const changedHash = calculateAffiliateLegacyRepairContinuationReportHash(
+      report as Parameters<typeof calculateAffiliateLegacyRepairContinuationReportHash>[0],
+    );
+    report.reportHash = changedHash;
+    report.reviewedReportHash = changedHash;
+    audit.reportHash = changedHash;
+    const before = JSON.stringify(state.gatewayJobs);
+    await expect(applyAffiliateLegacyRepairContinuation({
+      ...input, operatorId: 'affiliate-gateway-operator', expectedReportHash: changedHash,
+    })).rejects.toMatchObject({ code: 'CONTINUATION_STATE_DRIFT' });
+    expect(JSON.stringify(state.gatewayJobs)).toBe(before);
+  });
+
+  it('rejects continuation replay when only the persisted audit limits drift', async () => {
+    const { state, input } = await exhaustedContinuationFixture();
+    const preview = await previewAffiliateLegacyRepairContinuation(input);
+    await applyAffiliateLegacyRepairContinuation({
+      ...input, operatorId: 'affiliate-gateway-operator', expectedReportHash: preview.reportHash,
+    });
+    const mappingJob = state.mappingJobs.find((job) => job.id === 'mapping-retry-softball')!;
+    const history = (mappingJob.resultSummary as Record<string, unknown>).legacyRepairContinuationHistory as Record<string, unknown>[];
+    history[0]!.limits = { producerClaims: 2, reviewerClaims: 1 };
+    const before = JSON.stringify({
+      jobs: state.gatewayJobs,
+      mappingJobs: state.mappingJobs,
+    });
+
+    await expect(applyAffiliateLegacyRepairContinuation({
+      ...input, operatorId: 'affiliate-gateway-operator', expectedReportHash: preview.reportHash,
+    })).rejects.toMatchObject({ code: 'CONTINUATION_STATE_DRIFT' });
+    expect(JSON.stringify({ jobs: state.gatewayJobs, mappingJobs: state.mappingJobs })).toBe(before);
+  });
+
+  it('does not authorize a continuation of the one-time continuation', async () => {
+    const { state, input } = await exhaustedContinuationFixture();
+    const preview = await previewAffiliateLegacyRepairContinuation(input);
+    await applyAffiliateLegacyRepairContinuation({
+      ...input, operatorId: 'affiliate-gateway-operator', expectedReportHash: preview.reportHash,
+    });
+    const childId = completeRetryChild(
+      state, 'softball', 'claim-retry-pass3-softball', 'claim-continuation-softball', 'receipt-continuation-softball',
+      input.bundle.deploymentContract,
+    );
+    const before = JSON.stringify(state.gatewayJobs);
+    const { hash: _oldHash, ...deploymentPreimage } = input.bundle.deploymentContract;
+    const nextDeployment = { ...deploymentPreimage, version: deploymentPreimage.version + 1 };
+    const denied = await previewAffiliateLegacyRepairContinuation({
+      ...input,
+      gatewayJobId: childId,
+      bundle: {
+        ...input.bundle,
+        deploymentContract: { ...nextDeployment, hash: hashAffiliateAgentValue(nextDeployment) },
+      },
+    });
+    expect(denied.row.eligible).toBe(false);
+    expect(denied.selectedGatewayJobIds).toEqual([]);
+    expect(denied.writeCount).toBe(0);
+    expect(JSON.stringify(state.gatewayJobs)).toBe(before);
   });
   it('holds pass-three retry when its incoming pass-two audit is deleted', async () => {
     const state = await retryFixtureWithAdmission();

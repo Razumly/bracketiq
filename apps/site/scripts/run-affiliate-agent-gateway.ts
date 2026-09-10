@@ -6,6 +6,8 @@ import {
   applyAffiliateLegacyRepairAdmission,
   previewAffiliateLegacyRepairRetry,
   applyAffiliateLegacyRepairRetry,
+  previewAffiliateLegacyRepairContinuation,
+  applyAffiliateLegacyRepairContinuation,
   AffiliateLegacyRepairAdmissionError,
 } from '../src/server/affiliateImports/affiliateLegacyRepairAdmission';
 import {
@@ -43,6 +45,7 @@ import {
   type AffiliateAgentBoundedAdmissionLease,
   type AffiliateAgentBoundedAdmissionLeaseRequest,
   type AffiliateAgentBoundedAdmissionRole,
+  type AffiliateAgentClaimAdmissionContext,
   type AffiliateAgentInvocationReconciler,
   type AffiliateAgentWorkerHealthWriter,
 } from '../src/server/affiliateImports/agentGatewayAdapters';
@@ -471,14 +474,15 @@ const toHttpResult = (result: unknown): unknown => {
 };
 export type AffiliateAgentGatewayAdmission = Readonly<{
   isOpen(): boolean;
+  isOpenFor?(context: AffiliateAgentClaimAdmissionContext): boolean;
   open(): Promise<void>;
   openBoundedLease(
     request: AffiliateAgentBoundedAdmissionLeaseRequest,
   ): Promise<AffiliateAgentBoundedAdmissionLease>;
   close(): Promise<void>;
   withClaim<T>(
-    operation: () => Promise<T>,
-    context?: Readonly<{ role: AffiliateAgentRole; workerId: string }>,
+    operation: (jobId?: string) => Promise<T>,
+    context?: AffiliateAgentClaimAdmissionContext,
   ): Promise<T>;
 }>;
 export type AffiliateAgentClaimAdmissionDecision =
@@ -528,11 +532,13 @@ const workerHeartbeatRequestFrom = (
     roleCredential,
   };
 };
+const MAX_BOUNDED_ADMISSION_JOB_ID_LENGTH = 200;
 type BoundedAdmissionRequest = Readonly<{
   role: AffiliateAgentBoundedAdmissionRole;
   workerId: string;
   roleCredential: string;
   leaseSeconds: number;
+  jobId?: string;
 }>;
 
 const BOUNDED_ADMISSION_ROLES: readonly AffiliateAgentBoundedAdmissionRole[] = [
@@ -573,18 +579,37 @@ const boundedAdmissionRequestFrom = (
 ): BoundedAdmissionRequest | null => {
   const record = objectRecordFrom(body);
   if (record === null) return null;
+  const allowedKeys = [
+    "role",
+    "workerId",
+    "roleCredential",
+    "leaseSeconds",
+    "jobId",
+  ];
+  if (Object.keys(record).some((key) => !allowedKeys.includes(key))) return null;
   const role = boundedAdmissionRoleFrom(record.role);
   const workerId = trimmedStringFrom(record.workerId);
   const roleCredential = trimmedStringFrom(record.roleCredential);
+  const jobId = record.jobId === undefined
+    ? undefined
+    : trimmedStringFrom(record.jobId);
   if (
     role === null
     || !workerId
     || !roleCredential
     || !validBoundedLeaseSeconds(record.leaseSeconds)
+    || (record.jobId !== undefined
+      && (!jobId || jobId.length > MAX_BOUNDED_ADMISSION_JOB_ID_LENGTH))
   ) {
     return null;
   }
-  return { role, workerId, roleCredential, leaseSeconds: record.leaseSeconds };
+  return {
+    role,
+    workerId,
+    roleCredential,
+    leaseSeconds: record.leaseSeconds,
+    ...(jobId === undefined ? {} : { jobId }),
+  };
 };
 
 
@@ -649,6 +674,7 @@ const workerRequestAuthorized = async (
 export type AffiliateAgentGatewayHttpDependencies = Readonly<{
   legacyRepairAdmission?: (request: LegacyRepairAdmissionRequest) => Promise<unknown>;
   legacyRepairRetry?: (request: LegacyRepairRetryRequest) => Promise<unknown>;
+  legacyRepairContinuation: (request: LegacyRepairContinuationRequest) => Promise<unknown>;
   reviewerEffectRecovery: (
     request: AffiliateAgentReviewerEffectRecoveryRequest,
   ) => Promise<AffiliateAgentReviewerEffectRecoveryReport>;
@@ -1193,6 +1219,32 @@ const legacyRepairRetryRequestSchema = z.object({
   }
 });
 export type LegacyRepairRetryRequest = z.infer<typeof legacyRepairRetryRequestSchema>;
+const legacyRepairContinuationRequestSchema = z.object({
+  mode: z.enum(['PREVIEW', 'APPLY']),
+  gatewayJobId: z.string().trim().min(1).max(200),
+  reason: z.string().trim().min(1).max(1_000).refine(
+    (value) => Buffer.byteLength(value, 'utf8') <= 1_000,
+    'reason must not exceed 1,000 UTF-8 bytes.',
+  ),
+  expectedReportHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+}).strict().superRefine((value, context) => {
+  if (value.mode === 'APPLY' && !value.expectedReportHash) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['expectedReportHash'],
+      message: 'Apply requires a reviewed report hash.',
+    });
+  }
+  if (value.mode === 'PREVIEW' && value.expectedReportHash !== undefined) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['expectedReportHash'],
+      message: 'Preview does not accept a reviewed report hash.',
+    });
+  }
+});
+export type LegacyRepairContinuationRequest = z.infer<typeof legacyRepairContinuationRequestSchema>;
+
 
 const handleLegacyRepairAdmissionRequest = async (
   request: IncomingMessage,
@@ -1251,6 +1303,41 @@ const handleLegacyRepairRetryRequest = async (
   }
   return true;
 };
+const handleLegacyRepairContinuationRequest = async (
+  request: IncomingMessage,
+  httpRequest: AffiliateAgentGatewayHttpRequest,
+  response: ServerResponse,
+  input: AffiliateAgentGatewayHttpDependencies,
+  body: unknown,
+): Promise<boolean> => {
+  if (httpRequest.route !== '/legacy-repair/continuation') return false;
+  if (!authorizeOperatorRequest(request, response, input.operatorToken)) return true;
+  const parsed = legacyRepairContinuationRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    sendJson(response, 400, { error: 'Invalid legacy repair continuation request.' });
+    return true;
+  }
+  if (input.admission.isOpen()) {
+    sendJson(response, 409, {
+      error: {
+        code: 'CONTINUATION_ADMISSION_OPEN',
+        safeMessage: 'Gateway admission must be closed before legacy repair continuation.',
+        isRetryable: false,
+      },
+    });
+    return true;
+  }
+  try {
+    sendGatewayResult(response, await input.legacyRepairContinuation(parsed.data));
+  } catch (error) {
+    if (!(error instanceof AffiliateLegacyRepairAdmissionError)) throw error;
+    sendJson(response, 409, {
+      error: { code: error.code, safeMessage: error.message, isRetryable: false, details: error.details },
+    });
+  }
+  return true;
+};
+
 
 const handlePostRoute = async (
   request: IncomingMessage,
@@ -1310,6 +1397,7 @@ const handlePostRequest = async (
   if (await handleReplenishmentRequest(request, httpRequest, response, input)) return;
   if (await handleLegacyRepairAdmissionRequest(request, httpRequest, response, input, body)) return;
   if (await handleLegacyRepairRetryRequest(request, httpRequest, response, input, body)) return;
+  if (await handleLegacyRepairContinuationRequest(request, httpRequest, response, input, body)) return;
   await handlePostRoute(request, httpRequest, response, input, body);
 };
 
@@ -1447,6 +1535,7 @@ export const createAffiliateAgentGatewayRequestHandler = (
 type AffiliateAgentGatewayRuntime = Readonly<{
   legacyRepairAdmission: (request: LegacyRepairAdmissionRequest) => Promise<unknown>;
   legacyRepairRetry: (request: LegacyRepairRetryRequest) => Promise<unknown>;
+  legacyRepairContinuation: (request: LegacyRepairContinuationRequest) => Promise<unknown>;
   reviewerEffectRecovery: (
     request: AffiliateAgentReviewerEffectRecoveryRequest,
   ) => Promise<AffiliateAgentReviewerEffectRecoveryReport>;
@@ -1666,6 +1755,32 @@ const createGateway = async (): Promise<AffiliateAgentGatewayRuntime> => {
         ...options,
         expectedReportHash: request.expectedReportHash,
         operatorId: 'affiliate-gateway-operator',
+      });
+    }),
+    legacyRepairContinuation: (request) => admission.withClaim(async () => {
+      if (admission.isOpen()) {
+        throw new Error('Close claim admission before legacy repair continuation.');
+      }
+      const bundle = await contracts.loadActiveBundle();
+      const options = {
+        prisma,
+        bundle,
+        gatewayJobId: request.gatewayJobId,
+        reason: request.reason,
+        artifactStore,
+      };
+      if (request.mode === 'PREVIEW') {
+        return previewAffiliateLegacyRepairContinuation(options);
+      }
+      if (!request.expectedReportHash) {
+        throw new Error('Legacy repair continuation apply requires a reviewed hash.');
+      }
+      const active = await loadActiveAffiliateSupplyContract({ db: database, rolloutCohort });
+      assertStartupPreflight(active);
+      return applyAffiliateLegacyRepairContinuation({
+        ...options,
+        expectedReportHash: request.expectedReportHash,
+        operatorId: AFFILIATE_AGENT_GATEWAY_OPERATOR_ID,
       });
     }),
     reviewerEffectRecovery: (request) => admission.withClaim(async () => {

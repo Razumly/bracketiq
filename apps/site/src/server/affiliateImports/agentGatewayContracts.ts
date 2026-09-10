@@ -717,6 +717,14 @@ export type AffiliateAgentRole = (typeof AFFILIATE_AGENT_ROLES)[number];
 export const AFFILIATE_AGENT_ROLE_CONTRACT_VERSION = 5 as const;
 export const AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION = 5 as const;
 
+export const AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX = "legacy-sport-repair-continuation:";
+export const AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX = "legacy-sport-repair-continuation-review:";
+export const isAffiliateAgentSingleClaimJob = (dedupeKey: unknown): boolean => (
+  typeof dedupeKey === "string"
+  && (dedupeKey.startsWith(AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX)
+    || dedupeKey.startsWith(AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX))
+);
+
 const AFFILIATE_AGENT_TERMINAL_RESULT_PAYLOAD_SHAPES: Readonly<
   Record<AffiliateAgentRole, readonly string[]>
 > = {
@@ -796,7 +804,7 @@ const ROLE_PROMPT_INSTRUCTIONS: Readonly<
     ...LEGACY_SPORT_EVIDENCE_INSTRUCTIONS,
     "For every legacy sport repair validation, put sportEvidence inside candidatePackage. Extract the exact resolved sport union: use a CONSTANT sportName field when the source label needs canonical normalization, or an evidence-backed selector that emits the exact catalog name. A sport citation alone does not create an extracted sport field. Include every sport citation's manifest evidenceRef in package evidenceRefs.",
     "Every legacy sport repair CONTRACT_GAP must include payload.sportEvidence and all cited evidenceRefs, even when reasonCodes are generic. A sport-related gap must use the matching SPORT_ reason codes. A non-sport gap may carry verified RESOLVED sports and explain the separate obstacle.",
-    "Use the Gateway message to correct the package. If CSS extraction requires PAGE_HTML, select the claim-owned HTML listing. If extracted sports do not match the resolved evidence, fix the sport field. Neither error means the stored citation is unavailable. Revalidate only after changing the rejected input.",
+    "Use the Gateway message to correct the package. If CSS extraction requires PAGE_HTML, select the claim-owned HTML listing. If extracted sports do not match the resolved evidence, fix the sport field. Neither error means the stored citation is unavailable. After either input error, change the rejected input before revalidating.",
     "Use execute_command({command}) only with a non-terminal command listed in the Authority Projection.",
     "Return one evidence-backed terminal disposition through submit_result(...). Use only the listed terminal dispositions.",
   ],
@@ -1583,6 +1591,7 @@ const claimEnvelopeBase = {
   promptTemplateVersion: positiveIntegerSchema,
   promptTemplateHash: sha256Schema,
   executionClass: z.literal("PRODUCTION_OMP"),
+  executionBudget: z.literal("SINGLE_CLAIM").optional(),
   workerId: identifierSchema,
   invocationId: identifierSchema,
   workspaceId: identifierSchema,
