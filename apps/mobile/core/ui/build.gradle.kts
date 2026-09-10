@@ -5,6 +5,11 @@ plugins {
     alias(libs.plugins.androidLibrary)
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
+    alias(libs.plugins.compose.vectorize)
+}
+
+composeVectorize {
+    packageName.set("com.razumly.mvp.icons.generated")
 }
 
 kotlin {
@@ -37,6 +42,7 @@ kotlin {
                 implementation(libs.coil.compose.core)
                 implementation(libs.coil.mp)
                 implementation(libs.kotlinx.datetime)
+                implementation(libs.compose.vectorize.core)
             }
         }
         androidMain {

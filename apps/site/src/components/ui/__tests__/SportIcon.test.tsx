@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import userEvent from "@testing-library/user-event";
@@ -13,10 +13,17 @@ import {
   SportIcon,
 } from "../SportIcon";
 
-const SPORT_ICON_ASSET_DIRECTORY = path.resolve(
+const SHARED_SPORT_ICON_DIRECTORY = path.resolve(
+  process.cwd(),
+  "../../shared/icons/sports",
+);
+const GENERATED_SPORT_ICON_DIRECTORY = path.resolve(
   process.cwd(),
   "public/icons/sports",
 );
+
+const sportIconAssetPath = (directory: string, fileName: string): string =>
+  path.join(directory, fileName);
 
 describe("sport icon set", () => {
   it("provides a standalone asset for every seeded sport", () => {
@@ -25,10 +32,33 @@ describe("sport icon set", () => {
     expect(sportNames).toHaveLength(24);
     expect(SPORT_ICON_KEYS).toHaveLength(24);
     SPORT_ICON_KEYS.forEach((iconKey) => {
-      expect(
-        existsSync(path.join(SPORT_ICON_ASSET_DIRECTORY, `${iconKey}.svg`)),
-      ).toBe(true);
+      const fileName = `${iconKey}.svg`;
+      const sharedPath = sportIconAssetPath(
+        SHARED_SPORT_ICON_DIRECTORY,
+        fileName,
+      );
+      const generatedPath = sportIconAssetPath(
+        GENERATED_SPORT_ICON_DIRECTORY,
+        fileName,
+      );
+
+      expect(existsSync(sharedPath)).toBe(true);
+      expect(existsSync(generatedPath)).toBe(true);
+      expect(readFileSync(generatedPath, "utf8")).toBe(
+        readFileSync(sharedPath, "utf8"),
+      );
     });
+    expect(
+      readFileSync(
+        sportIconAssetPath(SHARED_SPORT_ICON_DIRECTORY, "LICENSE"),
+        "utf8",
+      ),
+    ).toBe(
+      readFileSync(
+        sportIconAssetPath(GENERATED_SPORT_ICON_DIRECTORY, "LICENSE"),
+        "utf8",
+      ),
+    );
     sportNames
       .filter((sportName) => sportName !== "Other")
       .forEach((sportName) => {

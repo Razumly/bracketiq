@@ -1,34 +1,14 @@
 import type { ReactNode, SVGProps } from "react";
 import { Check } from "lucide-react";
 
-export const SPORT_ICON_KEYS = [
-  "indoor-volleyball",
-  "beach-volleyball",
-  "grass-volleyball",
-  "basketball",
-  "indoor-soccer",
-  "grass-soccer",
-  "beach-soccer",
-  "tennis",
-  "pickleball",
-  "badminton",
-  "racquetball",
-  "football",
-  "flag-football",
-  "hockey",
-  "field-hockey",
-  "lacrosse",
-  "australian-football",
-  "ball-hockey",
-  "futsal",
-  "baseball",
-  "softball",
-  "table-tennis",
-  "ultimate-frisbee",
-  "other",
-] as const;
+import {
+  SPORT_ICON_ASSET_HREFS,
+  SPORT_ICON_KEYS,
+  type SportIconKey,
+} from "./sharedIconManifest.generated";
 
-export type SportIconKey = (typeof SPORT_ICON_KEYS)[number];
+export { SPORT_ICON_KEYS };
+export type { SportIconKey };
 
 const normalizeSportName = (value: unknown): string =>
   String(value ?? "")
@@ -93,7 +73,7 @@ export const getSportIconKey = (sport: unknown): SportIconKey => {
 };
 
 const getSportIconAssetHref = (iconKey: SportIconKey): string =>
-  `/icons/sports/${iconKey}.svg#sport-icon`;
+  SPORT_ICON_ASSET_HREFS[iconKey];
 
 export type SportIconProps = Omit<
   SVGProps<SVGSVGElement>,

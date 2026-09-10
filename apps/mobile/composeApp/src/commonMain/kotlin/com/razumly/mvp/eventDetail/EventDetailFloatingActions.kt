@@ -65,8 +65,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.eventDetail.composables.ParticipantsSection
-import com.razumly.mvp.icons.Groups
-import com.razumly.mvp.icons.MVPIcons
+import com.razumly.mvp.icons.SharedIcons
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -794,7 +793,7 @@ internal fun ParticipantsFloatingBar(
                 ) {
                     Icon(
                         imageVector = if (inviteActionLabel.contains("Team", ignoreCase = true)) {
-                            MVPIcons.Groups
+                            SharedIcons.Groups
                         } else {
                             Icons.Default.PersonAdd
                         },

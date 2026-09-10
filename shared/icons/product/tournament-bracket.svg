@@ -1,0 +1,11 @@
+<!-- Source: Existing mobile MVPIcons.TournamentBracket vector from apps/mobile/core/ui; geometry is preserved. -->
+<!-- Original mobile resource attribution: Uploaded to SVG Repo, www.svgrepo.com, Generator: SVG Repo Mixer Tools. -->
+<svg id="shared-icon"
+  xmlns="http://www.w3.org/2000/svg"
+  width="24"
+  height="24"
+  viewBox="0 0 24 24"
+  fill="currentColor"
+>
+  <path d="M0 21.428h3.429v-4.285h3.428v4.285h3.429v-7.714H6.857v-3.428h10.286v3.428h-3.429v7.714h3.429v-4.285h3.428v4.285H24v-7.714h-3.429V6.857h-6.857V2.572h-3.428v4.285H3.429v6.857H0v7.714z" />
+</svg>
