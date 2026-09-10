@@ -6009,6 +6009,191 @@ describe("Prisma affiliate Agent Gateway", () => {
     });
   });
 
+  it("reports the invalid terminal field without exposing its value", async () => {
+    const harness = createGatewayClaimHarness();
+    const fixture = configureLegacySportProducerScenario(harness);
+    const grant = await harness.gateway.claim(fixture.request);
+    if (!grant) throw new Error("Expected one legacy sport producer claim.");
+    const privateValue = "private-terminal-reason-value";
+    const outcome = await harness.gateway.perform({
+      kind: "SUBMIT_RESULT",
+      idempotencyKey: "terminal-feedback-invalid-reason",
+      authorization: gatewayAuthorizationFor(grant),
+      result: legacySportContractGapResultFor(grant, fixture.sportEvidence, {
+        reasonCodes: [privateValue],
+      }),
+    });
+    expect(outcome).toMatchObject({
+      kind: "SCHEMA_CORRECTION_REQUIRED",
+      submissionNumber: 1,
+      remainingSubmissions: 2,
+      issues: [{
+        path: ["reasonCodes", 0],
+        code: "INVALID_VALUE",
+      }],
+    });
+    expect(JSON.stringify(outcome)).not.toContain(privateValue);
+    await expect(harness.gateway.perform({
+      kind: "SUBMIT_RESULT",
+      idempotencyKey: "terminal-feedback-corrected-reason",
+      authorization: gatewayAuthorizationFor(grant),
+      result: legacySportContractGapResultFor(grant, fixture.sportEvidence),
+    })).resolves.toMatchObject({
+      kind: "TERMINAL_ACCEPTED",
+      disposition: "CONTRACT_GAP",
+    });
+  });
+
+  it("does not expose unknown terminal object keys or values", async () => {
+    const harness = createGatewayClaimHarness();
+    const fixture = configureLegacySportProducerScenario(harness);
+    const grant = await harness.gateway.claim(fixture.request);
+    if (!grant) throw new Error("Expected one legacy sport producer claim.");
+    const privateKey = "private-terminal-key";
+    const privateValue = "private-terminal-value";
+    const invalidResult = Object.assign({}, legacySportContractGapResultFor(grant, fixture.sportEvidence), {
+      [privateKey]: privateValue,
+    });
+    const outcome = await harness.gateway.perform({
+      kind: "SUBMIT_RESULT",
+      idempotencyKey: "terminal-feedback-unknown-key",
+      authorization: gatewayAuthorizationFor(grant),
+      result: invalidResult,
+    });
+    expect(outcome).toMatchObject({
+      kind: "SCHEMA_CORRECTION_REQUIRED",
+      issues: [{ path: [], code: "UNKNOWN_KEY" }],
+    });
+    expect(JSON.stringify(outcome)).not.toContain(privateKey);
+    expect(JSON.stringify(outcome)).not.toContain(privateValue);
+    await harness.gateway.perform({
+      kind: "SUBMIT_RESULT",
+      idempotencyKey: "terminal-feedback-unknown-key-2",
+      authorization: gatewayAuthorizationFor(grant),
+      result: invalidResult,
+    });
+    await expect(harness.gateway.perform({
+      kind: "SUBMIT_RESULT",
+      idempotencyKey: "terminal-feedback-unknown-key-3",
+      authorization: gatewayAuthorizationFor(grant),
+      result: invalidResult,
+    })).resolves.toMatchObject({
+      kind: "INVOCATION_FAILED",
+      failureCode: "SCHEMA_CORRECTIONS_EXHAUSTED",
+    });
+    const summary = harness.state.claims[0]?.safeFailureSummary;
+    expect(summary).toContain("UNKNOWN_KEY");
+    expect(summary).not.toContain(privateKey);
+    expect(summary).not.toContain(privateValue);
+  });
+
+  it("bounds terminal diagnostics and retained failure detail", async () => {
+    const harness = createGatewayClaimHarness();
+    const fixture = configureLegacySportProducerScenario(harness);
+    const grant = await harness.gateway.claim(fixture.request);
+    if (!grant) throw new Error("Expected one legacy sport producer claim.");
+    const result = legacySportContractGapResultFor(grant, fixture.sportEvidence, {
+      reasonCodes: Array.from({ length: 64 }, (_, index) => `private-reason-${String(index).padStart(2, "0")}`),
+    });
+    for (let submission = 1; submission <= 3; submission += 1) {
+      const outcome = await harness.gateway.perform({
+        kind: "SUBMIT_RESULT",
+        idempotencyKey: `terminal-feedback-bounded-${submission}`,
+        authorization: gatewayAuthorizationFor(grant),
+        result,
+      });
+      if (submission < 3) {
+        if (outcome.kind !== "SCHEMA_CORRECTION_REQUIRED") throw new Error("Expected bounded correction.");
+        expect(outcome.issues.length).toBeLessThanOrEqual(8);
+        expect(JSON.stringify(outcome)).not.toContain("private-reason-");
+      } else {
+        expect(outcome).toMatchObject({
+          kind: "INVOCATION_FAILED",
+          failureCode: "SCHEMA_CORRECTIONS_EXHAUSTED",
+        });
+      }
+    }
+    const summary = harness.state.claims[0]?.safeFailureSummary;
+    expect(summary).toContain("reasonCodes");
+    expect(summary?.length).toBeLessThanOrEqual(2_000);
+    expect(summary).not.toContain("private-reason-");
+  });
+
+  it.each([
+    { field: "pageUrl" as const, value: "https://private-provenance.example.test/private-path" },
+    { field: "artifactSha256" as const, value: "b".repeat(64) },
+    { field: "excerpt" as const, value: "private-excerpt-not-in-the-artifact" },
+  ])("reports and replays the exact citation $field correction", async ({ field, value }) => {
+    const harness = createGatewayClaimHarness();
+    const fixture = configureLegacySportProducerScenario(harness);
+    const grant = await harness.gateway.claim(fixture.request);
+    if (!grant) throw new Error("Expected one legacy sport producer claim.");
+    const sportEvidence: AffiliateAgentSportEvidence = JSON.parse(JSON.stringify(fixture.sportEvidence));
+    sportEvidence.sportDeterminations[0].evidence[0][field] = value;
+    const operation = {
+      kind: "SUBMIT_RESULT" as const,
+      idempotencyKey: `terminal-feedback-citation-${field}`,
+      authorization: gatewayAuthorizationFor(grant),
+      result: legacySportContractGapResultFor(grant, sportEvidence),
+    };
+    const outcome = await harness.gateway.perform(operation);
+    expect(outcome).toMatchObject({
+      kind: "SCHEMA_CORRECTION_REQUIRED",
+      submissionNumber: 1,
+      issues: [{
+        path: ["payload", "sportEvidence", "sportDeterminations", 0, "evidence", 0, field],
+        code: "INVALID_VALUE",
+      }],
+    });
+    expect(JSON.stringify(outcome)).not.toContain(value);
+    await expect(harness.gateway.perform(operation)).resolves.toEqual(outcome);
+    expect(harness.state.claims[0]?.schemaCorrectionCount).toBe(1);
+    await expect(harness.gateway.perform({
+      kind: "SUBMIT_RESULT",
+      idempotencyKey: `terminal-feedback-citation-${field}-fixed`,
+      authorization: gatewayAuthorizationFor(grant),
+      result: legacySportContractGapResultFor(grant, fixture.sportEvidence),
+    })).resolves.toMatchObject({
+      kind: "TERMINAL_ACCEPTED",
+      disposition: "CONTRACT_GAP",
+    });
+  });
+
+  it("identifies the reason-code mismatch for an unsupported sport", async () => {
+    const harness = createGatewayClaimHarness();
+    const fixture = configureLegacySportProducerScenario(harness);
+    const grant = await harness.gateway.claim(fixture.request);
+    if (!grant) throw new Error("Expected one legacy sport producer claim.");
+    const sportEvidence: AffiliateAgentSportEvidence = JSON.parse(JSON.stringify(fixture.sportEvidence));
+    Object.assign(sportEvidence.sportDeterminations[0], {
+      sourceLabels: ["Fencing"],
+      status: "UNSUPPORTED",
+      canonicalSportNames: [],
+      rationale: "The source sport is absent from the claim catalog.",
+    });
+    const outcome = await harness.gateway.perform({
+      kind: "SUBMIT_RESULT",
+      idempotencyKey: "terminal-feedback-missing-sport-reason",
+      authorization: gatewayAuthorizationFor(grant),
+      result: legacySportContractGapResultFor(grant, sportEvidence),
+    });
+    expect(outcome).toMatchObject({
+      kind: "SCHEMA_CORRECTION_REQUIRED",
+      issues: [{ path: ["reasonCodes"], code: "INVALID_VALUE" }],
+    });
+    await expect(harness.gateway.perform({
+      kind: "SUBMIT_RESULT",
+      idempotencyKey: "terminal-feedback-sport-reason-fixed",
+      authorization: gatewayAuthorizationFor(grant),
+      result: legacySportContractGapResultFor(grant, sportEvidence, {
+        reasonCodes: ["SPORT_NOT_IN_CATALOG"],
+      }),
+    })).resolves.toMatchObject({
+      kind: "TERMINAL_ACCEPTED",
+      disposition: "CONTRACT_GAP",
+    });
+  });
+
   it("routes a generic legacy sport contract gap without evidence to bounded correction", async () => {
     const harness = createGatewayClaimHarness();
     const fixture = configureLegacySportProducerScenario(harness);
@@ -6022,16 +6207,7 @@ describe("Prisma affiliate Agent Gateway", () => {
     });
     expect(outcome).toMatchObject({
       kind: "SCHEMA_CORRECTION_REQUIRED",
-      issues: expect.arrayContaining([
-        expect.objectContaining({
-          path: ["payload", "sportEvidence"],
-          message: expect.stringContaining("structured sportEvidence"),
-        }),
-        expect.objectContaining({
-          path: ["evidenceRefs"],
-          message: expect.stringContaining("every sport citation"),
-        }),
-      ]),
+      issues: [{ path: ["payload", "sportEvidence"], code: "MISSING_VALUE" }],
     });
     expect(harness.state.claims[0]).toMatchObject({
       status: "ACTIVE",
@@ -6073,11 +6249,10 @@ describe("Prisma affiliate Agent Gateway", () => {
       kind: "SCHEMA_CORRECTION_REQUIRED",
       submissionNumber: 1,
       remainingSubmissions: 2,
-      issues: expect.arrayContaining([
-        expect.objectContaining({
-          path: ["payload", "sportEvidence"],
-        }),
-      ]),
+      issues: [{
+        path: ["payload", "sportEvidence", "sportDeterminations"],
+        code: "MISSING_VALUE",
+      }],
     });
     expect(harness.state.claims[0]).toMatchObject({
       status: "ACTIVE",
@@ -6169,11 +6344,12 @@ describe("Prisma affiliate Agent Gateway", () => {
       });
       expect(outcome).toMatchObject({
         kind: "SCHEMA_CORRECTION_REQUIRED",
-        issues: expect.arrayContaining([
-          expect.objectContaining({
-            path: ["payload", "sportEvidence"],
-          }),
-        ]),
+        issues: [{
+          path: failure === "WRONG_OWNED_EVIDENCE"
+            ? ["payload", "sportEvidence", "sportDeterminations", 0, "evidence", 0, "artifactId"]
+            : ["payload", "sportEvidence", "sportsCatalogSha256"],
+          code: "INVALID_VALUE",
+        }],
       });
       expect(harness.state.claims[0]).toMatchObject({
         status: "ACTIVE",
@@ -7803,20 +7979,11 @@ describe("Prisma affiliate Agent Gateway", () => {
     };
 
     const first = await harness.gateway.perform(firstOperation);
-    expect(first).toEqual({
+    expect(first).toMatchObject({
       kind: "SCHEMA_CORRECTION_REQUIRED",
-      receiptId: expect.any(String),
       submissionNumber: 1,
       remainingSubmissions: 2,
-      issues: [
-        {
-          path: [],
-          code: "INVALID_VALUE",
-          message: "The result does not match an allowed terminal schema.",
-        },
-      ],
-      correctionPrompt:
-        'Correct terminal result submission 1. Remaining submissions: 2.\n{"issues":[{"code":"INVALID_VALUE","message":"The result does not match an allowed terminal schema.","path":[]}]}',
+      issues: [{ path: ["role"], code: "INVALID_VALUE" }],
     });
     expect(await harness.gateway.perform(firstOperation)).toEqual(first);
     expect(harness.state.claims[0]?.schemaCorrectionCount).toBe(1);
@@ -7830,6 +7997,7 @@ describe("Prisma affiliate Agent Gateway", () => {
       kind: "SCHEMA_CORRECTION_REQUIRED",
       submissionNumber: 2,
       remainingSubmissions: 1,
+      issues: [{ path: ["disposition"], code: "INVALID_VALUE" }],
     });
 
     const third = await harness.gateway.perform({

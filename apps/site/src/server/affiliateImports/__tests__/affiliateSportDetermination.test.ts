@@ -264,14 +264,20 @@ describe('affiliate sport determinations', () => {
         ...catalog.sports,
         { id: '4', name: 'Futsal' },
       ], '2026-08-10T00:00:00.000Z'),
-    }, {})).rejects.toThrow('SPORT_CATALOG_MISMATCH');
+    }, {})).rejects.toMatchObject({ name: 'SPORT_CATALOG_MISMATCH' });
     await expect(verifyAffiliateSportCompletion({
       ...input,
       artifacts: [{ ...input.artifacts[0], runId: 'other-run' }],
-    }, {})).rejects.toThrow(/different evidence run/i);
+    }, {})).rejects.toMatchObject({
+      name: 'AffiliateSportVerificationError',
+      path: ['sportDeterminations', 0, 'evidence', 0, 'artifactId'],
+    });
     await expect(verifyAffiliateSportCompletion({
       ...input,
       artifacts: [{ ...input.artifacts[0], bytes: Buffer.from('tampered', 'utf8') }],
-    }, {})).rejects.toThrow(/bytes do not match/i);
+    }, {})).rejects.toMatchObject({
+      name: 'AffiliateSportVerificationError',
+      path: ['sportDeterminations', 0, 'evidence', 0, 'artifactSha256'],
+    });
   });
 });

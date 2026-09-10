@@ -1444,3 +1444,46 @@ Final read-only safety checks passed:
 
 The exact final proof is `run/small-batch-final-safety.json` under the private
 batch directory. Another claim needs a new bounded recovery decision.
+
+### Authorized terminal feedback correction
+
+The operator selected "Fix feedback and retry." This authorizes precise,
+safe terminal-validation feedback, review, the six-service image update,
+and one more Mission producer claim. Continue the batch only after the
+schema-correction failure is resolved. Keep all claim limits, evidence
+checks, holds, and publication controls unchanged.
+
+A new Gateway regression reproduced the feedback defect. A result with an
+invalid `reasonCodes[0]` received only the generic sport-evidence issues.
+The actual terminal union error already identifies `reasonCodes[0]` in
+the registered MAPPING_PRODUCER/CONTRACT_GAP branch. The Gateway discards
+that detail. The sport verifier also replaces distinct evidence failures
+with a generic error.
+
+Use the existing terminal schemas to select and report safe field paths.
+Use schema-owned expected values and fixed messages. Do not report submitted
+values, unknown object keys, source URLs, excerpts, or credentials. Preserve
+typed field paths for sport verification failures. Test correction, error
+redaction, receipt replay, and the unchanged exhaustion limit through the
+Gateway interface before publication.
+
+The implementation selects the registered terminal schema branch and retains
+safe parser field issues. Sport verification errors carry typed field paths.
+The existing failed-claim summary retains the final safe issue text within
+its unchanged 2,000-character limit. Unknown keys, submitted values, source
+URLs, excerpts, and arbitrary error messages are not copied into feedback.
+
+The complete affected gate passed 632 tests in 22 suites. TypeScript and
+targeted ESLint passed. The original field-error regression is green.
+Tests cover citation URL/hash/excerpt errors, unsupported-sport reason
+codes, unknown-key redaction, exact receipt replay, diagnostic bounds, and
+failure on the third invalid submission.
+
+Both review axes found one shared issue: the new adapter helper default
+hid specific public messages from existing one-argument reviewer calls.
+The helper's original signature and behavior are restored. New field
+errors use the typed constructor directly. The public ACTIVATED adapter
+smoke returned the original legacy activation prohibition with zero
+database or provider access. All 632 tests passed again after the fix.
+Both focused re-reviews passed. The shared finding is fixed, re-reviewed,
+and verified. Standards and Spec have no remaining blockers.

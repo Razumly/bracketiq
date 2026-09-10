@@ -54,7 +54,14 @@ import type {
   AffiliateAgentTerminalEffectAdapterInput,
   AffiliateAgentTerminalEffectHandler,
 } from "./agentGatewayAdapters";
-import { verifyAffiliateAgentLegacySportRepair } from "./agentGatewayAdapters";
+import {
+  AffiliateAgentSportEvidenceError,
+  verifyAffiliateAgentLegacySportRepair,
+} from "./agentGatewayAdapters";
+import {
+  AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_MAX_ISSUES,
+  issueCodeFor,
+} from "./affiliateAgentCommandDiagnostics";
 import {
   AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX,
   AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX,
@@ -965,6 +972,8 @@ const claimAuthorizationInputSchema = z
     supplyContractHash: gatewayInputStringSchema.max(64),
   })
   .strict();
+const MAX_INVOCATION_FAILURE_SUMMARY_CHARACTERS = 2_000;
+
 const invocationFailureInputSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -986,7 +995,7 @@ const invocationFailureInputSchema = z
     ]),
     occurredAt: gatewayInputStringSchema,
     evidenceRefs: z.array(gatewayIdentifierSchema).max(100),
-    safeSummary: gatewayInputStringSchema.max(2_000),
+    safeSummary: gatewayInputStringSchema.max(MAX_INVOCATION_FAILURE_SUMMARY_CHARACTERS),
   })
   .strict();
 
@@ -7376,33 +7385,128 @@ const schemaCorrectionIssues = [
   },
 ] as const;
 
-const legacySportSchemaCorrectionIssues: AffiliateAgentSchemaCorrectionResult["issues"] = [
-  {
-    path: ["payload", "sportEvidence"],
-    code: "INVALID_VALUE",
-    message: "Legacy sport repair contract gaps require structured sportEvidence with manifest-owned citations.",
-  },
-  {
-    path: ["evidenceRefs"],
-    code: "INVALID_VALUE",
-    message: "Terminal evidenceRefs must include every sport citation's manifest evidenceRef.",
-  },
-];
+const terminalSchemaIssuePath = (
+  schema: z.core.$ZodType,
+  path: readonly PropertyKey[],
+): (string | number)[] => {
+  const safePath: (string | number)[] = [];
+  let current = schema;
+  for (const segment of path) {
+    while (current instanceof z.ZodOptional || current instanceof z.ZodNullable) {
+      current = current.unwrap();
+    }
+    if (current instanceof z.ZodObject
+      && typeof segment === "string"
+      && Object.prototype.hasOwnProperty.call(current.shape, segment)) {
+      safePath.push(segment);
+      current = current.shape[segment];
+    } else if (current instanceof z.ZodArray
+      && typeof segment === "number"
+      && Number.isSafeInteger(segment)
+      && segment >= 0) {
+      safePath.push(segment);
+      current = current.element;
+    } else {
+      break;
+    }
+  }
+  return safePath;
+};
 
-const terminalResultCorrectionIssuesFor = (
+const terminalRefinementMessages = new Set([
+  "Set-like arrays must be sorted and unique.",
+  "Only RESOLVED determinations may contain canonical sport names, and RESOLVED needs at least one.",
+  "Unresolved, unsupported, and blacklisted determinations must use source evidence.",
+  "User decisions may only resolve a prior determination.",
+  "User decisions must identify the prior determination hash.",
+  "Source-evidence determinations cannot contain a user-resolution hash.",
+  "Sport determinations must be sorted by status, source labels, names, then hash.",
+  "Every sport determination needs stored evidence.",
+  "Determination citations must be sorted uniquely by their canonical tuple.",
+  "sourceLabels must contain nonblank, unpadded strings.",
+  "sourceLabels must be sorted uniquely by code unit order.",
+  "canonicalSportNames must contain nonblank, unpadded strings.",
+  "canonicalSportNames must be sorted uniquely by code unit order.",
+]);
+
+const terminalSchemaIssueMessage = (issue: z.core.$ZodIssue): string => {
+  switch (issue.code) {
+    case "invalid_value": {
+      const message = `Use one of these allowed values: ${issue.values.map(value => JSON.stringify(value)).join(", ")}.`;
+      return message.length <= 500 ? message : "Use a permitted value from the terminal schema.";
+    }
+    case "invalid_type":
+      return ["string", "number", "boolean", "object", "array", "int", "null"].includes(issue.expected)
+        ? `Provide the required ${issue.expected} value.`
+        : "Provide the value type required by the terminal schema.";
+    case "unrecognized_keys":
+      return "Remove fields that this terminal object does not allow.";
+    case "too_small":
+      return "Meet the minimum size or value required by this terminal field.";
+    case "too_big":
+      return "Do not exceed the maximum size or value for this terminal field.";
+    case "invalid_format":
+      return "Use the format required by this terminal field.";
+    case "custom":
+      if (terminalRefinementMessages.has(issue.message)) return issue.message;
+      if (issue.message.startsWith("Duplicate sport determination ")) {
+        return "Remove duplicate sport determinations.";
+      }
+      if (issue.message.startsWith("Invalid affiliate sport citation URL: ")) {
+        return "Use a valid public HTTP or HTTPS citation URL.";
+      }
+      return "Match the terminal schema constraints for this field.";
+    default:
+      return "Match the terminal schema for this field.";
+  }
+};
+
+const terminalResultSchemaCorrectionIssues = (
   authorized: AuthorizedClaim,
   result: unknown,
+  error: z.ZodError,
 ): AffiliateAgentSchemaCorrectionResult["issues"] => {
-  if (
-    authorized.envelope.subject.type === "MAPPING_PRODUCER"
-    && authorized.envelope.subject.repairContext?.kind === "LEGACY_SPORT_REPAIR"
-    && isGatewayRecord(result)
-    && result.role === "MAPPING_PRODUCER"
-    && result.disposition === "CONTRACT_GAP"
-  ) {
-    return legacySportSchemaCorrectionIssues;
+  if (!isGatewayRecord(result)) {
+    return [{ path: [], code: "INVALID_TYPE", message: "Provide a terminal result object." }];
   }
-  return schemaCorrectionIssues;
+  if (result.role !== authorized.envelope.role) {
+    return [{ path: ["role"], code: "INVALID_VALUE", message: "Use the role from the claim." }];
+  }
+  const variantIndex = affiliateAgentTerminalResultEnvelopeSchema.options.findIndex(
+    variant => variant.shape.role.value === authorized.envelope.role
+      && variant.shape.disposition.value === result.disposition,
+  );
+  const variant = affiliateAgentTerminalResultEnvelopeSchema.options[variantIndex];
+  if (!variant) {
+    return [{
+      path: ["disposition"],
+      code: "INVALID_VALUE",
+      message: "Use a terminal disposition permitted by the claim role.",
+    }];
+  }
+  const unionIssue = error.issues.find(issue => issue.code === "invalid_union");
+  const issues = unionIssue?.errors[variantIndex] ?? error.issues;
+  return issues.slice(0, AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_MAX_ISSUES).map(issue => ({
+    path: terminalSchemaIssuePath(variant, issue.path),
+    code: issueCodeFor(issue),
+    message: terminalSchemaIssueMessage(issue),
+  }));
+};
+
+const terminalResultEvidenceCorrectionIssues = (
+  error: unknown,
+): AffiliateAgentSchemaCorrectionResult["issues"] => {
+  if (error instanceof AffiliateAgentSportEvidenceError) {
+    return error.issues.map(issue => ({
+      ...issue,
+      path: issue.path[0] === "sportEvidence" ? ["payload", ...issue.path] : issue.path,
+    }));
+  }
+  return [{
+    path: ["payload", "sportEvidence"],
+    code: "INVALID_VALUE",
+    message: "Verify the sport evidence against the claim catalog and stored artifacts.",
+  }];
 };
 const INVOCATION_FAILURE_PENDING_EFFECT_MESSAGE =
   "The invocation failure has a pending external effect.";
@@ -9882,24 +9986,35 @@ const verifyLegacySportRepairTerminal = async (
   ) return;
   const sportEvidence = result.payload.sportEvidence;
   if (!sportEvidence || sportEvidence.sportDeterminations.length === 0) {
-    throw gatewayError(
-      "EVIDENCE_REFERENCE_NOT_PERMITTED",
-      "Legacy sport repair contract gaps require structured sport evidence.",
-    );
+    throw new AffiliateAgentSportEvidenceError([{
+      path: sportEvidence ? ["sportEvidence", "sportDeterminations"] : ["sportEvidence"],
+      code: "MISSING_VALUE",
+      message: "Provide a nonempty sport assessment with claim-owned citations.",
+    }]);
   }
   const resultEvidenceRefs = new Set(result.evidenceRefs);
-  for (const determination of sportEvidence.sportDeterminations) {
-    for (const citation of determination.evidence) {
+  for (let determinationIndex = 0; determinationIndex < sportEvidence.sportDeterminations.length; determinationIndex += 1) {
+    const citations = sportEvidence.sportDeterminations[determinationIndex].evidence;
+    for (let citationIndex = 0; citationIndex < citations.length; citationIndex += 1) {
+      const citation = citations[citationIndex];
       const manifestEntry = authorized.envelope.evidenceManifest.entries.find(
-        (entry) =>
-          entry.artifactId === citation.artifactId
-          && entry.kind === citation.artifactKind,
+        (entry) => entry.artifactId === citation.artifactId && entry.kind === citation.artifactKind,
       );
-      if (!manifestEntry || !resultEvidenceRefs.has(manifestEntry.evidenceRef)) {
-        throw gatewayError(
-          "EVIDENCE_REFERENCE_NOT_PERMITTED",
-          "Legacy sport repair terminal evidenceRefs must include every cited manifest artifact.",
-        );
+      if (!manifestEntry) {
+        throw new AffiliateAgentSportEvidenceError([{
+          path: ["sportEvidence", "sportDeterminations", determinationIndex, "evidence", citationIndex,
+            authorized.envelope.evidenceManifest.entries.some(entry => entry.artifactId === citation.artifactId)
+              ? "artifactKind" : "artifactId"],
+          code: "INVALID_VALUE",
+          message: "Use the artifact identifier and kind from the claim manifest.",
+        }]);
+      }
+      if (!resultEvidenceRefs.has(manifestEntry.evidenceRef)) {
+        throw new AffiliateAgentSportEvidenceError([{
+          path: ["evidenceRefs"],
+          code: "MISSING_VALUE",
+          message: "Include the manifest evidenceRef for every cited artifact.",
+        }]);
       }
     }
   }
@@ -10425,8 +10540,13 @@ const recordExhaustedSchemaCorrection = async (
   requestHash: string,
   now: Date,
   submissionNumber: number,
+  correctionIssues: AffiliateAgentSchemaCorrectionResult["issues"],
 ): Promise<AffiliateAgentInvocationFailedResult> => {
   await assertNoPendingClaimEffects(transaction, authorized.claim.id);
+  const safeSummary = [
+    "The invocation exhausted its schema-correction budget.",
+    ...correctionIssues.map(issue => `${JSON.stringify(issue.path)} ${issue.code}: ${issue.message}`),
+  ].join("\n").slice(0, MAX_INVOCATION_FAILURE_SUMMARY_CHARACTERS);
   const result = await recordInvocationFailureTransition({
     dependencies,
     transaction,
@@ -10437,7 +10557,7 @@ const recordExhaustedSchemaCorrection = async (
     requestHash,
     failureCode: "SCHEMA_CORRECTIONS_EXHAUSTED",
     failedAt: now,
-    safeSummary: "The invocation exhausted its schema-correction budget.",
+    safeSummary,
     evidenceRefs: [],
     claimCasFailure: "GATEWAY_ERROR",
     claimStatus: "FAILED",
@@ -10452,7 +10572,7 @@ const recordExhaustedSchemaCorrection = async (
     invocationFailureAlertContextForAuthorizedClaim(authorized),
     result,
     "SCHEMA_CORRECTIONS_EXHAUSTED",
-    "The invocation exhausted its schema-correction budget.",
+    safeSummary,
   );
   return result;
 };
@@ -10573,6 +10693,7 @@ const handleInvalidTerminalResult = async (
       requestHash,
       now,
       submissionNumber,
+      correctionIssues,
     );
   }
   return persistSchemaCorrection(
@@ -13074,9 +13195,10 @@ const executePreparedTerminalResultTransaction = (
           preparation.input,
           preparation.requestHash,
           now,
-          terminalResultCorrectionIssuesFor(
+          terminalResultSchemaCorrectionIssues(
             authorized,
             preparation.input.result,
+            parsedResult.error,
           ),
         );
       }
@@ -13097,7 +13219,7 @@ const executePreparedTerminalResultTransaction = (
           preparation.input,
           preparation.requestHash,
           now,
-          terminalResultCorrectionIssuesFor(authorized, parsedResult.data),
+          terminalResultEvidenceCorrectionIssues(error),
         );
       }
       await assertReviewerTerminalEffectCompleted(

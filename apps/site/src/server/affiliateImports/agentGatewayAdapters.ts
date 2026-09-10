@@ -18,6 +18,7 @@ import type {
   AffiliateAgentLegacySportRepairContext,
   AffiliateAgentProducerClaimEnvelopeForHistoricalRead,
   AffiliateAgentRole,
+  AffiliateAgentSchemaIssue,
   AffiliateAgentSportEvidence,
   AffiliateAgentTerminalResultEnvelope,
 } from "./agentGatewayContracts";
@@ -68,6 +69,7 @@ import {
 } from "./types";
 import { loadAffiliateSportsCatalogSnapshot } from "./affiliateSportsCatalog";
 import {
+  AffiliateSportVerificationError,
   sortUniqueAffiliateSportNames,
   verifyAffiliateSportCompletion,
   type AffiliateSportCitation,
@@ -1090,8 +1092,23 @@ export type AffiliateAgentLegacySportRepairVerificationInput = Readonly<{
   observedSportNames?: readonly string[];
 }>;
 
+const LEGACY_SPORT_EVIDENCE_FAILURE_MESSAGE = "Legacy sport repair sport evidence could not be verified.";
+
+export class AffiliateAgentSportEvidenceError extends AffiliateAgentGatewayError {
+  constructor(
+    readonly issues: readonly AffiliateAgentSchemaIssue[],
+    safeMessage = LEGACY_SPORT_EVIDENCE_FAILURE_MESSAGE,
+  ) {
+    super({
+      code: "EVIDENCE_REFERENCE_NOT_PERMITTED",
+      isRetryable: false,
+      safeMessage,
+    });
+  }
+}
+
 const legacySportRepairEvidenceError = (
-  message = "Legacy sport repair sport evidence could not be verified.",
+  message = LEGACY_SPORT_EVIDENCE_FAILURE_MESSAGE,
 ): AffiliateAgentGatewayError => new AffiliateAgentGatewayError({
   code: "EVIDENCE_REFERENCE_NOT_PERMITTED",
   isRetryable: false,
@@ -1123,16 +1140,44 @@ const legacySportRepairContextFor = (
 const legacySportRepairArtifactFor = async (
   input: AffiliateAgentLegacySportRepairVerificationInput,
   citation: AffiliateSportCitation,
+  determinationIndex: number,
+  citationIndex: number,
 ): Promise<AffiliateSportCompletionStoredArtifact> => {
   const context = legacySportRepairContextFor(input.claim);
   const entry = input.claim.evidenceManifest.entries.find(
     (candidate) => candidate.artifactId === citation.artifactId,
   );
   if (!entry) {
-    throw legacySportRepairEvidenceError();
+    throw new AffiliateAgentSportEvidenceError([
+      {
+        path: [
+          "sportEvidence",
+          "sportDeterminations",
+          determinationIndex,
+          "evidence",
+          citationIndex,
+          "artifactId",
+        ],
+        code: "INVALID_VALUE",
+        message: "Use an artifact owned by the claim manifest.",
+      },
+    ]);
   }
   if (entry.kind !== citation.artifactKind) {
-    throw legacySportRepairEvidenceError();
+    throw new AffiliateAgentSportEvidenceError([
+      {
+        path: [
+          "sportEvidence",
+          "sportDeterminations",
+          determinationIndex,
+          "evidence",
+          citationIndex,
+          "artifactKind",
+        ],
+        code: "INVALID_VALUE",
+        message: "Use the artifact kind recorded in the claim manifest.",
+      },
+    ]);
   }
   const artifact = await input.artifacts.readImmutable({
     fileId: entry.artifactId,
@@ -1141,17 +1186,44 @@ const legacySportRepairArtifactFor = async (
   try {
     verifyProductionArtifact(entry, artifact);
   } catch {
-    throw legacySportRepairEvidenceError();
+    throw new AffiliateAgentSportEvidenceError([
+      {
+        path: [
+          "sportEvidence",
+          "sportDeterminations",
+          determinationIndex,
+          "evidence",
+          citationIndex,
+          "artifactId",
+        ],
+        code: "INVALID_VALUE",
+        message: "The stored artifact no longer matches the claim manifest.",
+      },
+    ]);
   }
   const artifactRunId = artifact.runId;
   const artifactIntakeId = artifact.intakeId;
   if (
-    typeof artifactRunId !== "string"
-    || artifactRunId !== context.evidenceRunId
-    || typeof artifactIntakeId !== "string"
-    || artifactIntakeId !== context.intakeId
+    typeof artifactRunId !== "string" ||
+    artifactRunId !== context.evidenceRunId ||
+    typeof artifactIntakeId !== "string" ||
+    artifactIntakeId !== context.intakeId
   ) {
-    throw legacySportRepairEvidenceError();
+    throw new AffiliateAgentSportEvidenceError([
+      {
+        path: [
+          "sportEvidence",
+          "sportDeterminations",
+          determinationIndex,
+          "evidence",
+          citationIndex,
+          "artifactId",
+        ],
+        code: "INVALID_VALUE",
+        message:
+          "The stored artifact does not belong to the claim intake and evidence run.",
+      },
+    ]);
   }
   return {
     artifactId: entry.artifactId,
@@ -1177,37 +1249,74 @@ export const verifyAffiliateAgentLegacySportRepair = async (
   }
   let sportEvidence: AffiliateAgentSportEvidence;
   try {
-    sportEvidence = affiliateAgentSportEvidenceSchema.parse(input.sportEvidence);
+    sportEvidence = affiliateAgentSportEvidenceSchema.parse(
+      input.sportEvidence,
+    );
   } catch {
     throw legacySportRepairEvidenceError();
   }
   if (sportEvidence.evidenceRunId !== context.evidenceRunId) {
-    throw legacySportRepairEvidenceError();
+    throw new AffiliateAgentSportEvidenceError([
+      {
+        path: ["sportEvidence", "evidenceRunId"],
+        code: "INVALID_VALUE",
+        message: "Use the evidence run from the claim repair context.",
+      },
+    ]);
   }
-  if (sportEvidence.sportsCatalogSha256.toLowerCase() !== context.sportsCatalog.sha256.toLowerCase()) {
-    throw legacySportRepairEvidenceError();
+  if (
+    sportEvidence.sportsCatalogSha256.toLowerCase() !==
+    context.sportsCatalog.sha256.toLowerCase()
+  ) {
+    throw new AffiliateAgentSportEvidenceError([
+      {
+        path: ["sportEvidence", "sportsCatalogSha256"],
+        code: "INVALID_VALUE",
+        message: "Use the sports catalog hash from the claim repair context.",
+      },
+    ]);
   }
-  const citations = sportEvidence.sportDeterminations.flatMap(
-    (determination) => determination.evidence,
-  );
   const artifacts = new Map<string, AffiliateSportCompletionStoredArtifact>();
-  for (const citation of citations) {
-    const key = `${citation.artifactId}:${citation.artifactKind}`;
-    if (!artifacts.has(key)) {
-      artifacts.set(
-        key,
-        await legacySportRepairArtifactFor(input, citation),
-      );
+  for (
+    let determinationIndex = 0;
+    determinationIndex < sportEvidence.sportDeterminations.length;
+    determinationIndex += 1
+  ) {
+    const citations =
+      sportEvidence.sportDeterminations[determinationIndex].evidence;
+    for (
+      let citationIndex = 0;
+      citationIndex < citations.length;
+      citationIndex += 1
+    ) {
+      const citation = citations[citationIndex];
+      const key = `${citation.artifactId}:${citation.artifactKind}`;
+      if (!artifacts.has(key)) {
+        artifacts.set(
+          key,
+          await legacySportRepairArtifactFor(
+            input,
+            citation,
+            determinationIndex,
+            citationIndex,
+          ),
+        );
+      }
     }
   }
-  if (input.resultKind === "REVIEW_REQUIRED" && input.observedSportNames === undefined) {
+  if (
+    input.resultKind === "REVIEW_REQUIRED" &&
+    input.observedSportNames === undefined
+  ) {
     throw legacySportRepairEvidenceError();
   }
   const currentCatalog = await loadAffiliateSportsCatalogSnapshot(input.prisma);
   let observedSportNames: readonly string[] | undefined;
   if (input.observedSportNames !== undefined) {
     try {
-      observedSportNames = sortUniqueAffiliateSportNames(input.observedSportNames);
+      observedSportNames = sortUniqueAffiliateSportNames(
+        input.observedSportNames,
+      );
     } catch {
       throw legacySportRepairEvidenceError();
     }
@@ -1218,14 +1327,15 @@ export const verifyAffiliateAgentLegacySportRepair = async (
       evidenceRunId: sportEvidence.evidenceRunId,
       sportsCatalogSha256: sportEvidence.sportsCatalogSha256,
       sportDeterminations: sportEvidence.sportDeterminations,
-      humanReviewRequired: input.resultKind === "HUMAN_REVIEW_REQUIRED"
-        ? {
-          reasonCodes: [...(input.reasonCodes ?? [])],
-          sourceSportLabels: sportEvidence.sportDeterminations.flatMap(
-            (determination) => determination.sourceLabels,
-          ),
-        }
-        : null,
+      humanReviewRequired:
+        input.resultKind === "HUMAN_REVIEW_REQUIRED"
+          ? {
+              reasonCodes: [...(input.reasonCodes ?? [])],
+              sourceSportLabels: sportEvidence.sportDeterminations.flatMap(
+                (determination) => determination.sourceLabels,
+              ),
+            }
+          : null,
     },
     resultKind: input.resultKind,
     reasonCodes: input.reasonCodes,
@@ -1243,12 +1353,49 @@ export const verifyAffiliateAgentLegacySportRepair = async (
   try {
     return await verifyAffiliateSportCompletion(verificationInput);
   } catch (error) {
-    if (error instanceof Error && error.name === "SPORT_CATALOG_MISMATCH") {
-      throw legacySportRepairEvidenceError("The current sports catalog differs from the claim catalog.");
+    if (error instanceof AffiliateSportVerificationError) {
+      throw new AffiliateAgentSportEvidenceError([
+        {
+          path:
+            error.path[0] === "reasonCodes"
+              ? [...error.path]
+              : ["sportEvidence", ...error.path],
+          code: "INVALID_VALUE",
+          message: error.message,
+        },
+      ]);
     }
-    if (error instanceof Error
-      && error.message === "Disposable sport quality did not prove the exact determination sport union.") {
-      throw legacySportRepairEvidenceError("Extracted sports do not match the resolved sport evidence.");
+    if (error instanceof Error && error.name === "SPORT_CATALOG_MISMATCH") {
+      const message =
+        "The current sports catalog differs from the claim catalog.";
+      throw new AffiliateAgentSportEvidenceError(
+        [
+          {
+            path: ["sportEvidence", "sportsCatalogSha256"],
+            code: "INVALID_VALUE",
+            message: message,
+          },
+        ],
+        message,
+      );
+    }
+    if (
+      error instanceof Error &&
+      error.message ===
+        "Disposable sport quality did not prove the exact determination sport union."
+    ) {
+      const message =
+        "Extracted sports do not match the resolved sport evidence.";
+      throw new AffiliateAgentSportEvidenceError(
+        [
+          {
+            path: ["sportEvidence", "sportDeterminations"],
+            code: "INVALID_VALUE",
+            message: message,
+          },
+        ],
+        message,
+      );
     }
     throw legacySportRepairEvidenceError();
   }

@@ -480,6 +480,16 @@ export const assertAffiliateHumanSportResolutionMatchesDeterminations = ({
   }
 };
 
+export class AffiliateSportVerificationError extends Error {
+  constructor(
+    readonly path: readonly (string | number)[],
+    message: string,
+  ) {
+    super(message);
+    this.name = 'AffiliateSportVerificationError';
+  }
+}
+
 export const assertAffiliateSportDeterminationReasonStatusConsistency = ({
   determinations,
   reasonCodes,
@@ -499,20 +509,20 @@ export const assertAffiliateSportDeterminationReasonStatusConsistency = ({
     if (requiredReason
       && !(allowBlacklistedExclusion && determination.status === 'BLACKLISTED')
       && !reasonCodes.includes(requiredReason)) {
-      throw new Error(`${determination.status} requires reason code ${requiredReason}.`);
+      throw new AffiliateSportVerificationError(['reasonCodes'], `${determination.status} requires reason code ${requiredReason}.`);
     }
   }
   if (reasonCodes.includes('SPORT_VARIANT_UNRESOLVED')
     && !determinations.some((d) => d.status === 'VARIANT_UNRESOLVED')) {
-    throw new Error('SPORT_VARIANT_UNRESOLVED requires a matching determination.');
+    throw new AffiliateSportVerificationError(['reasonCodes', reasonCodes.indexOf('SPORT_VARIANT_UNRESOLVED')], 'SPORT_VARIANT_UNRESOLVED requires a matching determination.');
   }
   if (reasonCodes.includes('SPORT_NOT_IN_CATALOG')
     && !determinations.some((d) => d.status === 'UNSUPPORTED')) {
-    throw new Error('SPORT_NOT_IN_CATALOG requires a matching determination.');
+    throw new AffiliateSportVerificationError(['reasonCodes', reasonCodes.indexOf('SPORT_NOT_IN_CATALOG')], 'SPORT_NOT_IN_CATALOG requires a matching determination.');
   }
   if (reasonCodes.includes('SPORT_BLACKLISTED')
     && !determinations.some((d) => d.status === 'BLACKLISTED')) {
-    throw new Error('SPORT_BLACKLISTED requires a matching determination.');
+    throw new AffiliateSportVerificationError(['reasonCodes', reasonCodes.indexOf('SPORT_BLACKLISTED')], 'SPORT_BLACKLISTED requires a matching determination.');
   }
 };
 
@@ -530,35 +540,38 @@ export const assertAffiliateSportCompletionReady = ({
   reasonCodes?: readonly string[];
   humanResolution?: AffiliateHumanSportResolution;
 }): void => {
-  if (determinations.length > 50) throw new Error('A mapping result may contain at most 50 determinations.');
+  if (determinations.length > 50) throw new AffiliateSportVerificationError(['sportDeterminations'], 'A mapping result may contain at most 50 determinations.');
   const parsedDeterminations = determinations.map((determination) => (
     affiliateSportDeterminationSchema.parse(determination)
   ));
   const sortedDeterminations = sortAffiliateSportDeterminations(parsedDeterminations);
   if (JSON.stringify(parsedDeterminations.map(affiliateSportDeterminationSha256))
     !== JSON.stringify(sortedDeterminations.map(affiliateSportDeterminationSha256))) {
-    throw new Error('Sport determinations must be sorted by status, source labels, names, then hash.');
+    throw new AffiliateSportVerificationError(['sportDeterminations'], 'Sport determinations must be sorted by status, source labels, names, then hash.');
   }
   const catalogNames = new Set(
     isCatalogSnapshot(catalog) ? catalog.sports.map((sport) => sport.name) : catalog,
   );
   const hashes = new Set<string>();
-  for (const parsed of parsedDeterminations) {
+  for (let index = 0; index < parsedDeterminations.length; index += 1) {
+    const parsed = parsedDeterminations[index];
     const hash = affiliateSportDeterminationSha256(parsed);
-    if (hashes.has(hash)) throw new Error(`Duplicate sport determination ${hash}.`);
+    if (hashes.has(hash)) throw new AffiliateSportVerificationError(['sportDeterminations', index], 'Duplicate sport determinations are not permitted.');
     hashes.add(hash);
     if (parsed.status === 'RESOLVED' && parsed.canonicalSportNames.some(
       (name) => !catalogNames.has(name) || isAffiliateSportBlacklisted(name),
     )) {
-      throw new Error('Resolved determination contains a missing or blacklisted catalog sport.');
+      throw new AffiliateSportVerificationError(['sportDeterminations', index, 'canonicalSportNames'], 'Resolved determination contains a missing or blacklisted catalog sport.');
     }
     if (parsed.status === 'BLACKLISTED' && parsed.sourceLabels.every((name) => !isAffiliateSportBlacklisted(name))) {
-      throw new Error('Blacklisted determination does not identify a blacklisted source label.');
+      throw new AffiliateSportVerificationError(['sportDeterminations', index, 'sourceLabels'], 'Blacklisted determination does not identify a blacklisted source label.');
     }
   }
-  if (parsedDeterminations.some((determination) => determination.resolutionBasis === 'USER_DECISION')
-    && !humanResolution) {
-    throw new Error('USER_DECISION determinations require a matching authenticated human sport resolution.');
+  const userDecisionIndex = parsedDeterminations.findIndex(
+    determination => determination.resolutionBasis === 'USER_DECISION',
+  );
+  if (userDecisionIndex >= 0 && !humanResolution) {
+    throw new AffiliateSportVerificationError(['sportDeterminations', userDecisionIndex, 'resolutionBasis'], 'USER_DECISION determinations require a matching authenticated human sport resolution.');
   }
 
   if (humanResolution) {
@@ -577,15 +590,15 @@ export const assertAffiliateSportCompletionReady = ({
 
   if (resultKind === 'REVIEW_REQUIRED') {
     if (!parsedDeterminations.some((d) => d.status === 'RESOLVED')) {
-      throw new Error('Review-ready mappings require at least one resolved determination.');
+      throw new AffiliateSportVerificationError(['sportDeterminations'], 'Review-ready mappings require at least one resolved determination.');
     }
     if (parsedDeterminations.some((d) => !['RESOLVED', 'BLACKLISTED'].includes(d.status))) {
-      throw new Error('Review-ready mappings cannot contain unresolved or unsupported determinations.');
+      throw new AffiliateSportVerificationError(['sportDeterminations'], 'Review-ready mappings cannot contain unresolved or unsupported determinations.');
     }
   } else if (reasonCodes.some((code) => (
     ['SPORT_VARIANT_UNRESOLVED', 'SPORT_NOT_IN_CATALOG', 'SPORT_BLACKLISTED'].includes(code)
   )) && parsedDeterminations.length === 0) {
-    throw new Error('Sport-coded human review requires determinations.');
+    throw new AffiliateSportVerificationError(['sportDeterminations'], 'Sport-coded human review requires determinations.');
   }
 };
 
@@ -706,36 +719,48 @@ const artifactText = (
   return decoded;
 };
 
+const sportCitationVerificationError = (
+  determinationIndex: number,
+  citationIndex: number,
+  field: keyof AffiliateSportCitation,
+  message: string,
+): AffiliateSportVerificationError => new AffiliateSportVerificationError(
+  ['sportDeterminations', determinationIndex, 'evidence', citationIndex, field],
+  message,
+);
+
 const assertArtifactCitation = (
   artifact: AffiliateSportCompletionStoredArtifact,
   citation: AffiliateSportCitation,
   evidenceRunId: string,
-  expectedIntakeId?: string,
+  expectedIntakeId: string | undefined,
+  determinationIndex: number,
+  citationIndex: number,
 ): void => {
   const id = artifactIdentifier(artifact);
-  if (!id || id !== citation.artifactId) throw new Error(`Citation artifact ${citation.artifactId} was not owned by the claimed run.`);
-  if (artifact.runId !== evidenceRunId) throw new Error(`Citation artifact ${id} belongs to a different evidence run.`);
+  if (!id || id !== citation.artifactId) throw sportCitationVerificationError(determinationIndex, citationIndex, 'artifactId', 'The citation artifact is not owned by the claimed run.');
+  if (artifact.runId !== evidenceRunId) throw sportCitationVerificationError(determinationIndex, citationIndex, 'artifactId', 'The citation artifact belongs to a different evidence run.');
   if (expectedIntakeId && artifact.intakeId && artifact.intakeId !== expectedIntakeId) {
-    throw new Error(`Citation artifact ${id} belongs to a different intake.`);
+    throw sportCitationVerificationError(determinationIndex, citationIndex, 'artifactId', 'The citation artifact belongs to a different intake.');
   }
-  if (artifact.kind !== citation.artifactKind) throw new Error(`Citation artifact ${id} kind does not match.`);
+  if (artifact.kind !== citation.artifactKind) throw sportCitationVerificationError(determinationIndex, citationIndex, 'artifactKind', 'The citation artifact kind does not match.');
   const expectedUrl = canonicalizeAffiliateSportCitationPageUrl(citation.pageUrl);
   const artifactUrls = [artifact.sourceUrl, artifact.finalUrl]
     .filter((url): url is string => Boolean(url))
     .map(canonicalizeAffiliateSportCitationPageUrl);
-  if (!artifactUrls.includes(expectedUrl)) throw new Error(`Citation artifact ${id} page URL does not match.`);
+  if (!artifactUrls.includes(expectedUrl)) throw sportCitationVerificationError(determinationIndex, citationIndex, 'pageUrl', 'The citation page URL does not match the stored artifact provenance.');
   const bytes = artifactBytes(artifact);
   const hash = createHash('sha256').update(bytes).digest('hex');
   const storedHash = (artifact.contentHash ?? artifact.artifactSha256 ?? '').toLowerCase();
   if (hash !== citation.artifactSha256.toLowerCase() || (storedHash && hash !== storedHash)) {
-    throw new Error(`Citation artifact ${id} bytes do not match its claimed SHA-256.`);
+    throw sportCitationVerificationError(determinationIndex, citationIndex, 'artifactSha256', 'The citation artifact bytes do not match the claimed SHA-256.');
   }
   if (citation.artifactKind !== 'PAGE_SCREENSHOT') {
     const text = normalizeCitationText(artifactText(artifact, bytes));
     const excerpt = normalizeCitationText(citation.excerpt);
-    if (!excerpt || !text.includes(excerpt)) throw new Error(`Citation excerpt is not present in stored artifact ${id}.`);
+    if (!excerpt || !text.includes(excerpt)) throw sportCitationVerificationError(determinationIndex, citationIndex, 'excerpt', 'The citation excerpt is not present in the stored artifact.');
   } else if (!citation.excerpt.trim()) {
-    throw new Error(`Screenshot citation ${id} requires a visible observation.`);
+    throw sportCitationVerificationError(determinationIndex, citationIndex, 'excerpt', 'A screenshot citation requires a visible observation.');
   }
 };
 
@@ -802,10 +827,15 @@ const verifyAffiliateSportCompletionEvidence = async (
       artifacts.set(artifactId, await dependencies.readArtifact(result.evidenceRunId, artifactId));
     }
   }
-  determinations.forEach((determination) => determination.evidence.forEach((citation) => {
+  determinations.forEach((determination, determinationIndex) => determination.evidence.forEach((citation, citationIndex) => {
     const artifact = artifacts.get(citation.artifactId);
-    if (!artifact) throw new Error(`Stored citation artifact ${citation.artifactId} was not found.`);
-    assertArtifactCitation(artifact, citation, result.evidenceRunId, input.expectedIntakeId);
+    if (!artifact) {
+      throw new AffiliateSportVerificationError(
+        ['sportDeterminations', determinationIndex, 'evidence', citationIndex, 'artifactId'],
+        'The stored citation artifact was not found.',
+      );
+    }
+    assertArtifactCitation(artifact, citation, result.evidenceRunId, input.expectedIntakeId, determinationIndex, citationIndex);
   }));
 
   const expectedSportNames = [...(input.expectedSportNames ?? resolvedAffiliateSportNameUnion(determinations))]
