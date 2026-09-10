@@ -34,7 +34,7 @@ The operator selected OMP with two ChatGPT accounts. The governed affiliate work
 - [x] Run focused regressions and the recorded-evidence replay before source delivery.
 - [x] Add and verify the guarded completed-hold retry operation.
 - [x] Publish and deploy the reviewed retry-capable correction.
-- [ ] Complete both linked repairs and independent review. Boomtown is approved. Softball remains blocked after pass three exhausted the bounded retry limit.
+- [x] Complete both linked repairs and independent review. Boomtown and Softball are approved; Softball used the explicitly authorized one-time continuation.
 - [x] Verify final records, close admission, and stop trial workers.
 - [x] Carry the stored mapping kind into new producer claims.
 - [x] Preserve deterministic validation errors and server retryability.
@@ -1001,8 +1001,8 @@ Review the new operator boundary independently before publication.
 - [x] Deploy the reviewed source and generated role-4/deployment-5 bundle.
 - [x] Apply the guarded Boomtown recovery and verify the actual effect.
 - [x] Preview and apply the authorized Softball pass-three retry.
-- [ ] Complete Softball repair and review. Pass three returned CONTRACT_GAP;
-  the governed retry limit is exhausted.
+- [x] Complete Softball repair and review through the separately authorized
+  one-time continuation recorded below. The ordinary retry limit stayed intact.
 
 The source prerequisite passed before deployment. The following record
 describes the separately authorized production operation.
@@ -1090,8 +1090,9 @@ It includes deployment and preflight metadata, image probes, recovery
 preview/apply/replay, the preserved recovery audit, Softball retry evidence,
 command diagnostics, final safety records, and workspace/history checks.
 
-Boomtown's mapped repair and approval are complete. Softball is not repaired.
-Further production work requires a diagnosed validation correction and an
+At the deployment-five checkpoint, Boomtown's mapped repair and approval
+were complete and Softball was not repaired. Further production work required
+a diagnosed validation correction and an
 explicitly approved bounded continuation. Do not raise the retry limit or
 rewrite completed attempts merely to clear the queue.
 
@@ -1235,3 +1236,79 @@ The focused admission proofs cover exact lower-priority producer and reviewer
 selection, unscoped continuation denial, active-lease retarget rejection,
 same-request replay without a second claim, scope changes during a
 serialization retry, and lease expiry without fallback to unrelated work.
+
+## Completed one-time Softball repair (2026-09-10)
+
+
+Source `7a7eccc1b4151a2036bd43207ff533bb2fda736c` passed Site CI
+`34422065517` and image publication `34422584140`. Deployment 6 uses role
+and prompt version 5 and contract hash
+`19ec0cd180edb887e246b42f54b16e5f69e81559b9f39726517996a2945b5c0f`.
+The worker image is
+`ghcr.io/razumly/bracketiq-affiliate-governed@sha256:369bb467e3be8bdf639a5e71043dac55c1044dc5d4ef58a03a9b8a55f546f3b9`.
+The Gateway image is
+`ghcr.io/razumly/bracketiq-affiliate-gateway@sha256:d4f5b7a669bc76fead45b2106362a713a2a6bd66a1e4288cbac545cc52ab2bf5`.
+Both revision labels matched the reviewed source. Published-image bundle,
+producer/reviewer containment, and single-claim SDK probes passed.
+Fresh preflight passed without blockers or warnings, report hash
+`9c356c6c9723074c2ee955fe1721481a6a45baacad94ab14198bb32ef95bf882`.
+
+The deployed continuation PREVIEW was eligible for only parent
+`eabe21a7-a756-4957-9b25-f825a53f0e06`, with one producer and one reviewer
+claim permitted. Its hash was
+`9d508ba5db25a7ff5cda6bb0c7a6657d5ec0939c1f32eac59c53ff6e3388f2c1`.
+APPLY created producer job `de8c0c9a-75b0-4bee-bc9a-878a58f21ead`.
+Exact replay before claims and after approval returned that same child with
+zero writes. Neither the global retry limit nor prior attempts changed.
+
+The producer lease named that exact job ID. Claim
+`agw-claim-0d67b8d1-9096-4d9a-95a8-dd433265268f` had SINGLE_CLAIM budget,
+listingKind CLUB, role/prompt 5, and deployment 6. It validated and committed
+package `7c7afc0f0a256cac1683019901f8cf5ee9d45ee93a2d5e872d6920f52736b6e1`.
+Validation receipt `agw-receipt-72d5f79c-f1f2-447e-8ddb-1258f7f8e635`
+and commit receipt `agw-receipt-e8b8d450-4060-4649-9e4d-88c0703ea056`
+both succeeded. Terminal receipt
+`agw-receipt-0e0819f5-9b72-454b-b285-be1d0197c549` records PACKAGE_COMMITTED.
+The producer corrected two local schema errors. No Gateway validation error
+occurred during the successful continuation.
+
+The generated reviewer job was `0bcbfa5f-002e-43e9-8506-057ed35fdf3f`.
+Its lease also named the exact job ID. Claim
+`agw-claim-d26a8a83-7b4e-424a-888a-af72cf8c8b06` had SINGLE_CLAIM budget
+and a different worker, invocation, and workspace from the producer. It read
+all four reviewer artifacts successfully and approved the package. Effect
+receipt `agw-receipt-1b4eee42-758c-40be-8c17-14e29403e3d7` and terminal
+receipt `agw-receipt-90f0a6b5-460a-401b-bb89-ccfde8f15f03` succeeded.
+APPROVE transition `01f6c70c-829c-4410-9723-4ece52cc6a62` records generation 3.
+
+Softball now uses mapping `agw-artifact-a9dece4d-7f8d-40a2-a83b-136347645c4c`,
+version 2. The validated output contains Chicago Softball Camp, canonical
+Softball, the source-backed North Park University Helwig Rec Center address,
+the canonical source URL, and the camp's specific registration URL.
+The mapping remains inactive, with its approval validation time recorded.
+Its organization remains UNLISTED with public pages and widgets disabled.
+
+Exactly one producer claim and one reviewer claim were issued; both completed
+and their tokens are invalidated. Both source roots are APPROVED at generation
+3, with LEGACY_SPORT_REPAIR and disabled automation. No activation, public
+publication, or automatic scrape was performed.
+
+All 50 prior producer job, claim, and receipt fingerprints are unchanged.
+All seven captured Boomtown source, root, mapping, organization, candidate,
+and approval fingerprints are unchanged. Admission is closed. Mapper 1,
+reviewer 1, and the root runner are stopped. The workspace is empty. The
+Gateway and both model services remain healthy with restart policy no.
+There are zero active claims, zero queued/retry-wait jobs, and zero unresolved
+claim pointers. Dormant workers, coverage, replenishment, site, and mobile
+runtimes were not changed.
+
+Private evidence is retained in
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v6-continuation-7a7eccc1b/run`.
+It includes deployment/preflight probes, the audited continuation, exact-job
+leases, completed producer/reviewer results, final mapping and safety state,
+post-approval replay, and preservation checks. Temporary local monitor and
+preview programs were removed.
+
+Outcome: both requested mapped repairs and independent approvals are complete.
+Issue 70's broader fleet cutover and activation/publication scope remain
+separate from this bounded repair.
