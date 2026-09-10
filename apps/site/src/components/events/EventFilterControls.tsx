@@ -199,7 +199,7 @@ export function EventFilterControls<TEventType extends string>({
         className="w-40"
       />
       <Popover opened={datesOpen} onChange={setDatesOpen}>
-        <Popover.Target><Button variant="outline" aria-haspopup="dialog" aria-expanded={datesOpen} leftSection={<CalendarDays aria-hidden="true" className="size-4" />}>Dates</Button></Popover.Target>
+        <Popover.Target><Button variant="outline" aria-haspopup="dialog" aria-expanded={datesOpen} onClick={() => setDatesOpen((open) => !open)} leftSection={<CalendarDays aria-hidden="true" className="size-4" />}>Dates</Button></Popover.Target>
         <Popover.Dropdown>
           <Stack gap="sm">
             <DatePickerInput label="Start date" aria-label="Filter by start date" value={filterProps.selectedStartDate} clearable onChange={filterProps.setSelectedStartDate} />

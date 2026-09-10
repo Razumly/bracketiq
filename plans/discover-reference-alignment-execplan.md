@@ -52,7 +52,8 @@ The visible result is checked at `/discover` against the approved references in 
 - Added the shared `EventFilterControls` module. The organization event list now imports its common controls and active-filter rendering from that module.
 - Discover events now use one owned search and action shell, shared sports/date/event-type controls, Discover tag and division controls, `OrganizationEventCard`, and `.org-event-grid`.
 - `LocationSearch` now uses BracketIQ-owned primitives. Its location request, prediction, selection, failure, and clear behavior remain intact.
-- Focused validation passed: 3 suites and 16 tests. The site type check passed. The production build passed with the local `DATABASE_URL` validation value.
+- Focused validation passed: 4 suites and 18 tests. The site type check passed. The production build passed with the local `DATABASE_URL` validation value.
+- The shared date trigger is explicitly controlled and keyboard/click activation opens its date inputs. `OrganizationEventCard` uses the next occurrence and its time zone for recurring-event date and status display.
 - The full suite ran 882 suites. 371 suites and 2,664 tests passed. 511 suites and 36 tests failed during shared setup with `ReferenceError: MouseEvent is not defined` at `test/setupTests.ts:21`.
 - Live browser comparison was not performed. The existing local production server cannot be restarted without explicit runtime authorization. Static reference review and rendered component smoke tests were used instead.
 
@@ -143,3 +144,4 @@ Revision note (2026-09-10 04:09Z): Created this plan after confirming the approv
 Revision note (2026-09-10 04:49Z): Added `components/events/EventFilterControls.tsx` as the shared event filter seam. Discover now uses the organization event card and grid, places search, location, map, create, sports, and common filters in the shared composition, and migrates `LocationSearch` to owned primitives. Focused tests and TypeScript checks pass. Live browser comparison remains unavailable because the existing server must not be restarted without explicit authorization.
 
 Revision note (2026-09-10 04:55Z): Focused tests, typechecking, and the production build passed. The full suite exposed a shared `MouseEvent` setup failure in 511 suites; no Discover test failed in that run's reported failures. Live browser comparison remains unavailable under the runtime-state rule.
+Revision note (2026-09-10 05:02Z): Code review found and fixed the controlled Dates trigger and recurring-event card schedule regression. Shared filter props were also composed once in Discover. Focused validation now passes 4 suites and 18 tests.
