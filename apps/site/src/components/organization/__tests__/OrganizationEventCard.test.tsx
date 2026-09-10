@@ -68,7 +68,24 @@ describe('OrganizationEventCard schedule display', () => {
 
     expect(screen.getByText('Jul 15, 2099')).toBeInTheDocument();
     expect(screen.getByText('6:00 PM – 8:00 PM')).toBeInTheDocument();
-    expect(screen.queryByText(/Review-ready Summer 2026/i)).not.toBeInTheDocument();
-    expect(screen.getByText('Registration open')).toBeInTheDocument();
+    expect(screen.getByText(/Review-ready Summer 2026/i)).toBeInTheDocument();
+  });
+  it('does not invent a clock time for date-only events', () => {
+    renderWithMantine(
+      <OrganizationEventCard
+        event={createEvent({
+          dateDisplayMode: 'DATE_ONLY',
+          dateDisplayText: 'Jul 16, 2099',
+          start: '2099-07-16T01:00:00.000Z',
+          end: null,
+          timeZone: 'America/Los_Angeles',
+          statusText: 'Open',
+        })}
+        onClick={jest.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Jul 16, 2099')).toBeInTheDocument();
+    expect(screen.queryByText(/\b\d{1,2}:\d{2}\s(?:AM|PM)\b/)).not.toBeInTheDocument();
   });
 });

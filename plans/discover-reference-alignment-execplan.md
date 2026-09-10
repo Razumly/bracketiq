@@ -43,7 +43,7 @@ The visible result is checked at `/discover` against the approved references in 
 - Decision: Do not change the global navigation or backend routes in this task.
   Rationale: the user requested Discover alignment and reuse of the organization event setup. Global shell changes would affect unrelated surfaces and do not change the event filter contract.
   Date/Author: 2026-09-10 / Codex.
-- Decision: Do not restart the existing local production server during implementation.
+- Decision: Do not restart the existing local production server during the initial implementation. This was superseded by explicit relaunch authorization for visual verification.
   Rationale: repository rules require a current explicit request for a runtime state change. Build and focused tests can validate source changes; live browser comparison requires a later explicit server restart authorization.
   Date/Author: 2026-09-10 / Codex.
 
@@ -56,6 +56,8 @@ The visible result is checked at `/discover` against the approved references in 
 - The shared date trigger is explicitly controlled, compact and calendar date inputs restore focus after Escape, and `OrganizationEventCard` uses the next occurrence and its time zone for recurring-event date and status display. Discover card tokens and location panel sizing/edges now resolve at desktop and mobile breakpoints.
 - The full suite ran 882 suites. 371 suites and 2,664 tests passed. 511 suites and 36 tests failed during shared setup with `ReferenceError: MouseEvent is not defined` at `test/setupTests.ts:21`.
 - Browser smoke check completed after rebuilding and relaunching `site-ui-operations-prod`. `/discover` rendered at desktop and 390px mobile widths. Desktop showed the shared toolbar and event grid. Mobile document and body `scrollWidth` were both 390px, matching the viewport. The live location-popup click was incomplete because the browser click timed out after 8 seconds; the cause is unknown. Focused tests cover component behavior with mocked `useLocation`; they do not verify the real browser permission path.
+
+- Follow-up visual refinement changed the Discover tabs to reference-style underlined navigation, moved the mobile filter action into the toolbar as `More filters`, and rebuilt shared event cards with landscape media, stable metadata rows, and a compact footer.
 
 ## Context and Orientation
 
@@ -112,8 +114,8 @@ Run all commands from `apps/site` unless a command names a repository-root file.
        npm test -- --runInBand src/app/discover/components/__tests__/EventsTabContent.test.tsx src/app/discover/__tests__/page.test.tsx src/components/location/__tests__/LocationSearch.test.tsx src/app/organizations/[id]/__tests__/OrganizationEventsTabContent.test.tsx
 
    Interpret a passing result as proof that filtering, URL-driven loading, organization controls, retry, mobile filter access, and location selection still work. If the repository test script uses a different Jest argument form, use the existing script documented in `apps/site/package.json`.
-8. Run the site type check and production build from `apps/site` using the existing package scripts. Expect no TypeScript errors and a successful Next.js build. Do not restart a runtime in this task.
-9. If a current explicit runtime-start instruction is provided later, start the local site with the isolated database and local storage variables already used by this worktree, open `/discover` at desktop and mobile widths, and compare the rendered toolbar, cards, states, and overflow against the approved references. Until then, record that live comparison is not performed because the existing production process cannot be restarted under the repository rules.
+8. Run the site type check and production build from `apps/site` using the existing package scripts. Expect no TypeScript errors and a successful Next.js build.
+9. With explicit runtime authorization, rebuild the local bundle, relaunch the named local production process, open `/discover` at desktop and mobile widths, and compare the rendered toolbar, cards, states, and overflow against the approved references.
 
 ## Validation and Acceptance
 
@@ -163,3 +165,6 @@ Revision note (2026-09-10 05:31Z): Re-ran all five focused suites with Jest `--r
 Revision note (2026-09-10 05:40Z): Rebuilt the site, relaunched `site-ui-operations-prod`, and smoke-checked `/discover` at desktop and 390px mobile widths. The mobile document and body widths matched the viewport.
 
 Revision note (2026-09-10 05:52Z): Corrected the popup-check record. The browser click timed out after 8 seconds; no geolocation-permission cause was established. Focused tests use mocked `useLocation` and do not prove the real permission path.
+
+Revision note (2026-09-10 06:22Z): Applied the follow-up visual pass. Discover tabs now use the reference underline treatment, mobile filters use an in-toolbar `More filters` action, and shared event cards use landscape media with non-overlapping date, location, organizer, and attendance rows. The rebuilt and relaunched site was checked at 1365px, 815px, and 390px widths; focused UI suites passed 5 suites and 42 tests.
+Revision note (2026-09-10 06:29Z): Preserved source-provided event status text, preserved the event time zone for ordinary events, and kept date-only cards free of synthetic clock times. The final focused run passed 5 suites and 43 tests; TypeScript and the production build also passed.

@@ -16,7 +16,7 @@ type DisplaySchedule = {
 
 function getDisplaySchedule(event: Event): DisplaySchedule {
   if (!event.nextOccurrence) {
-    return { start: event.start, end: event.end };
+    return { start: event.start, end: event.end, timeZone: event.timeZone };
   }
 
   return {
@@ -48,9 +48,13 @@ function formatScheduleTime(value: string, timeZone?: string): string | null {
 }
 
 function eventDate(event: Event): string {
-  if (event.dateDisplayMode === 'NO_FIXED_DATE' || event.dateDisplayMode === 'ONGOING') return event.dateDisplayText || event.scheduleText || 'No fixed start date';
+  const displayMode = String(event.dateDisplayMode);
+  if (displayMode === 'NO_FIXED_DATE' || displayMode === 'ONGOING') {
+    return event.dateDisplayText || event.scheduleText || 'No fixed start date';
+  }
   const schedule = getDisplaySchedule(event);
   const first = formatScheduleDate(schedule.start, schedule.timeZone);
+  if (displayMode === 'DATE_ONLY') return event.dateDisplayText?.trim() || first || 'Date to be announced';
   if (!first) return 'Date to be announced';
   const last = schedule.end ? formatScheduleDate(schedule.end, schedule.timeZone) : null;
   if (!last || first === last) return first;
@@ -58,7 +62,7 @@ function eventDate(event: Event): string {
 }
 
 function eventTime(event: Event): string | null {
-  if (event.dateDisplayMode === 'NO_FIXED_DATE' || event.dateDisplayMode === 'ONGOING') return null;
+  if (['NO_FIXED_DATE', 'ONGOING', 'DATE_ONLY'].includes(String(event.dateDisplayMode))) return null;
   const schedule = getDisplaySchedule(event);
   const first = formatScheduleTime(schedule.start, schedule.timeZone);
   if (!first) return null;
@@ -79,8 +83,7 @@ function eventStatus(event: Event, capacity: number): string {
   if (end && Date.parse(end) < Date.now()) return 'Completed';
   if (capacity > 0 && event.attendees >= capacity) return 'Registration full';
   const statusText = event.statusText?.trim();
-  if (statusText && statusText.length <= 48 && !/[\r\n]/.test(statusText)) return statusText;
-  return 'Registration open';
+  return statusText || 'Registration open';
 }
 
 function eventAttendance(event: Event, capacity: number): string {
@@ -133,8 +136,8 @@ export default function OrganizationEventCard({ event, onClick }: { event: Event
           <span className="org-event-card-kind-sport"><CircleDot aria-hidden="true" />{sport}</span>
           <span>{formatEnumDisplayLabel(event.eventType, 'Event')}</span>
           <span>{registrationLabel}</span>
-          <span className="org-event-card-status">{eventStatus(event, capacity)}</span>
         </span>
+        <span className="org-event-card-status">{eventStatus(event, capacity)}</span>
         <span className="org-event-card-facts">
           <span className="org-event-card-fact">
             <CalendarDays aria-hidden="true" />
