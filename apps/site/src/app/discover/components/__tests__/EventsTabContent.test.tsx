@@ -70,7 +70,7 @@ it('opens the mobile filter sheet with filter controls', async () => {
   const user = userEvent.setup();
   render(<Harness selectedSports={['Basketball']} />);
 
-  await user.click(screen.getByRole('button', { name: 'Filters (1)' }));
+  await user.click(screen.getByRole('button', { name: 'More filters (1)' }));
 
   const filterDialog = screen.getByRole('dialog', { name: 'Filter Events' });
   expect(filterDialog).toBeInTheDocument();

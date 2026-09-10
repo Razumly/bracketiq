@@ -646,6 +646,20 @@ function EventsTabView<TEventType extends string>(
           {...sharedFilterProps}
         />
       </div>
+      <div className="discover-mobile-filter-row flex lg:hidden">
+        <Button
+          variant="outline"
+          leftSection={<SlidersHorizontal size={16} />}
+          onClick={() => setIsFiltersOpen(true)}
+        >
+          More filters{activeFilterCount ? ` (${activeFilterCount})` : ''}
+        </Button>
+        {activeFilterCount > 0 && (
+          <Button variant="ghost" aria-label="Clear all filters" onClick={resetFilters}>
+            Clear all
+          </Button>
+        )}
+      </div>
     </div>
   );
 
@@ -752,14 +766,6 @@ function EventsTabView<TEventType extends string>(
       </Sheet>
 
       <div className="discover-event-results">
-        <Button
-          variant="default"
-          leftSection={<SlidersHorizontal size={16} />}
-          onClick={() => setIsFiltersOpen(true)}
-          className="mb-4 lg:hidden"
-        >
-          Filters{activeFilterCount ? ` (${activeFilterCount})` : ''}
-        </Button>
         {renderResults()}
       </div>
     </>
