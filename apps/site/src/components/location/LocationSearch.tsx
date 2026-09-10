@@ -134,7 +134,7 @@ export default function LocationSearch() {
           </Button>
         </Popover.Target>
       </span>
-      <Popover.Dropdown className="location-search-dropdown w-[min(24rem,calc(100vw-2rem))]">
+      <Popover.Dropdown className="location-search-dropdown w-[min(24rem,calc(100vw-4rem))]">
         <Group mb="sm">
           <Button fullWidth onClick={handleUseCurrentLocation} disabled={loading} leftSection={<MapPin aria-hidden="true" size={16} />}>
             {loading ? <><Loader size="sm" aria-hidden="true" />Getting location…</> : 'Use Current Location'}
