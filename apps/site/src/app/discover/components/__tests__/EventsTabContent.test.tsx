@@ -105,6 +105,39 @@ it('opens More sports as a dropdown with remaining sports', async () => {
   expect(within(sportsDialog).getByRole('button', { name: 'Tennis', exact: true })).toBeInTheDocument();
 });
 
+it('keeps the Price maximum input focused while editing from More filters', async () => {
+  const clientWidthDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+  const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, value: 200 });
+  HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
+    if (this.matches('[data-overflow-item]') || this.matches('[data-overflow-more]')) {
+      return { width: 80 } as DOMRect;
+    }
+    return originalGetBoundingClientRect.call(this);
+  };
+  try {
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(screen.getByRole('button', { name: 'More filters', exact: true }));
+    const moreDialog = screen.getByRole('dialog', { name: 'More filters' });
+    await user.click(within(moreDialog).getByRole('button', { name: 'Price', exact: true }));
+    const priceDialog = screen.getByRole('dialog', { name: 'Price filter' });
+    const maximumInput = within(priceDialog).getByRole('textbox', { name: 'Maximum', exact: true });
+
+    await user.type(maximumInput, '25');
+
+    expect(maximumInput).toHaveValue('25');
+    expect(maximumInput).toHaveFocus();
+  } finally {
+    if (clientWidthDescriptor) {
+      Object.defineProperty(HTMLElement.prototype, 'clientWidth', clientWidthDescriptor);
+    } else {
+      delete (HTMLElement.prototype as Partial<HTMLElement>).clientWidth;
+    }
+    HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+  }
+});
+
 it('shows every event filter trigger when the toolbar has room', () => {
   const clientWidthDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
   Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, value: 2000 });

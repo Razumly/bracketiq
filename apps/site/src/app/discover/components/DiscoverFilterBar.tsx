@@ -90,13 +90,18 @@ function OverflowFilterRow({ items, contentKey, ariaLabel, moreLabel, trailing, 
   const rowRef = useRef<HTMLDivElement>(null);
   const [measurement, setMeasurement] = useState<{ key: string; count: number | null }>({ key: contentKey, count: null });
   const [moreOpen, setMoreOpen] = useState(false);
-  const visibleCount = measurement.key === contentKey ? measurement.count : null;
+  const measurementIsStale = measurement.key !== contentKey;
+  const measuredCount = measurementIsStale ? null : measurement.count;
+  const preserveOpenOverflow = moreOpen && measurement.count !== null;
+  // Keep the measured partition while an overflow control is open.
+  const visibleCount = measuredCount ?? (preserveOpenOverflow ? measurement.count : null);
   const isMeasuring = visibleCount === null;
-  const overflowItems = isMeasuring ? [] : items.slice(visibleCount);
+  const overflowItems = visibleCount === null ? [] : items.slice(visibleCount);
 
   /* eslint-disable react-hooks/set-state-in-effect -- The row width is a DOM measurement that controls overflow visibility. */
   useLayoutEffect(() => {
-    if (visibleCount !== null) return;
+    if (measurement.count !== null && measurement.key === contentKey) return;
+    if (preserveOpenOverflow) return;
     const row = rowRef.current;
     if (!row) return;
     const itemElements = Array.from(row.querySelectorAll<HTMLElement>('[data-overflow-item]'));
@@ -119,19 +124,20 @@ function OverflowFilterRow({ items, contentKey, ariaLabel, moreLabel, trailing, 
     const itemWidths = itemElements.map((item) => item.getBoundingClientRect().width);
     const visibleItemCount = calculateVisibleFilterCount(itemWidths, availableWidth, gap, moreWidth, trailingWidth);
     setMeasurement({ key: contentKey, count: visibleItemCount });
-  }, [contentKey, items.length, visibleCount]);
+  }, [contentKey, items.length, measurement.count, measurement.key, preserveOpenOverflow]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     const row = rowRef.current;
     if (!row || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(() => {
+      if (moreOpen) return;
       setMoreOpen(false);
       setMeasurement((current) => current.count === null ? current : { key: current.key, count: null });
     });
     observer.observe(row);
     return () => observer.disconnect();
-  }, []);
+  }, [moreOpen]);
 
   const showMore = isMeasuring || overflowItems.length > 0;
   const moreTrigger = (
