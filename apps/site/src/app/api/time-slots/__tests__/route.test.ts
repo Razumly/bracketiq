@@ -423,13 +423,15 @@ describe('time-slots routes', () => {
       hostRequiredTemplateIds: ['tmpl_host_contract'],
     }));
   });
-  it('POST rejects a repeating local time in a DST gap before persistence', async () => {
+  it('POST accepts a repeating local time in a DST gap and preserves local boundaries', async () => {
+    prismaMock.timeSlots.create.mockImplementationOnce(async ({ data }) => data);
+
     const res = await POST(jsonRequest('http://localhost/api/time-slots', {
       id: 'slot_dst_gap',
       scheduledFieldId: 'field_dst',
       daysOfWeek: [6],
       startTimeMinutes: 2 * 60 + 30,
-      endTimeMinutes: 3 * 60 + 30,
+      endTimeMinutes: 4 * 60,
       startDate: '2026-03-01T00:00:00',
       endDate: '2026-03-15T00:00:00',
       timeZone: 'America/New_York',
@@ -437,13 +439,23 @@ describe('time-slots routes', () => {
     }));
     const json = await res.json();
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(201);
+    expect(prismaMock.timeSlots.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          startTimeMinutes: 2 * 60 + 30,
+          endTimeMinutes: 4 * 60,
+          startDate: new Date('2026-03-01T05:00:00.000Z'),
+          endDate: new Date('2026-03-15T04:00:00.000Z'),
+          timeZone: 'America/New_York',
+        }),
+      }),
+    );
     expect(json).toEqual(expect.objectContaining({
-      code: 'INVALID_TIME_SLOT',
-      slotIds: ['slot_dst_gap'],
-      occurrenceDate: '2026-03-08',
+      startTimeMinutes: 2 * 60 + 30,
+      endTimeMinutes: 4 * 60,
+      timeZone: 'America/New_York',
     }));
-    expect(prismaMock.timeSlots.create).not.toHaveBeenCalled();
   });
 
   it('POST preserves a repeating end date on the same local date', async () => {
@@ -568,7 +580,7 @@ describe('time-slots routes', () => {
       }),
     );
   });
-  it('PATCH rejects a repeating local time in a DST gap before persistence', async () => {
+  it('PATCH accepts a repeating local time in a DST gap and persists local boundaries', async () => {
     prismaMock.timeSlots.findUnique.mockResolvedValueOnce({
       id: 'slot_dst_patch',
       dayOfWeek: 6,
@@ -583,13 +595,27 @@ describe('time-slots routes', () => {
       startTimeMinutes: 9 * 60,
       endTimeMinutes: 10 * 60,
     });
+    prismaMock.timeSlots.update.mockResolvedValueOnce({
+      id: 'slot_dst_patch',
+      dayOfWeek: 6,
+      daysOfWeek: [6],
+      scheduledFieldId: 'field_dst_patch',
+      scheduledFieldIds: ['field_dst_patch'],
+      divisions: [],
+      startDate: new Date('2026-03-01T05:00:00.000Z'),
+      endDate: new Date('2026-03-15T04:00:00.000Z'),
+      timeZone: 'America/New_York',
+      repeating: true,
+      startTimeMinutes: 2 * 60 + 30,
+      endTimeMinutes: 4 * 60,
+    });
 
     const res = await PATCH(
       jsonRequest('http://localhost/api/time-slots/slot_dst_patch', {
         slot: {
           daysOfWeek: [6],
           startTimeMinutes: 2 * 60 + 30,
-          endTimeMinutes: 3 * 60 + 30,
+          endTimeMinutes: 4 * 60,
           timeZone: 'America/New_York',
         },
       }, 'PATCH'),
@@ -597,13 +623,22 @@ describe('time-slots routes', () => {
     );
     const json = await res.json();
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
+    expect(prismaMock.timeSlots.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'slot_dst_patch' },
+        data: expect.objectContaining({
+          startTimeMinutes: 2 * 60 + 30,
+          endTimeMinutes: 4 * 60,
+          timeZone: 'America/New_York',
+        }),
+      }),
+    );
     expect(json).toEqual(expect.objectContaining({
-      code: 'INVALID_TIME_SLOT',
-      slotIds: ['slot_dst_patch'],
-      occurrenceDate: '2026-03-08',
+      startTimeMinutes: 2 * 60 + 30,
+      endTimeMinutes: 4 * 60,
+      timeZone: 'America/New_York',
     }));
-    expect(prismaMock.timeSlots.update).not.toHaveBeenCalled();
   });
   it('PATCH rejects a repeating end date before its start date', async () => {
     const response = await PATCH(

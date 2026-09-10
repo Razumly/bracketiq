@@ -121,19 +121,19 @@ class EventLifecycleMobileApiIntegrationTest {
                 end = Instant.parse("2035-06-12T12:00:00Z"),
             )
             val overnight = source.timeSlots.first().copy(
-                id = "${runId}_event_slot", repeating = false, timeZone = "UTC",
-                startDate = Instant.parse("2035-06-11T22:00:00Z"),
-                endDate = Instant.parse("2035-06-11T02:00:00Z"),
+                id = "${runId}_event_slot", repeating = false, timeZone = "America/Los_Angeles",
+                startDate = Instant.parse("2035-06-12T05:00:00Z"),
+                endDate = Instant.parse("2035-06-12T09:00:00Z"),
                 startTimeMinutes = 1320, endTimeMinutes = 120,
             )
             val event = host.createEventThroughEditor(
-                event = source.event.copy(timeZone = "UTC"),
+                event = source.event.copy(timeZone = "America/Los_Angeles"),
                 fields = source.fields, timeSlots = listOf(overnight),
                 operationId = "$runId-create",
             )
             createdEventIds += event.id
             val eventSlot = host.fieldRepository.getTimeSlots(event.timeSlotIds).getOrThrow().single()
-            assertEquals(Instant.parse("2035-06-12T02:00:00Z"), eventSlot.endDate)
+            assertEquals(Instant.parse("2035-06-12T09:00:00Z"), eventSlot.endDate)
 
             val createdSlotIds = mutableListOf<String>()
             try {
@@ -141,11 +141,11 @@ class EventLifecycleMobileApiIntegrationTest {
                     overnight.copy(id = "${runId}_rental_slot"),
                 ).getOrThrow()
                 createdSlotIds += created.id
-                assertEquals(Instant.parse("2035-06-12T02:00:00Z"), created.endDate)
+                assertEquals(Instant.parse("2035-06-12T09:00:00Z"), created.endDate)
                 val updated = host.fieldRepository.updateTimeSlot(
-                    created.copy(endTimeMinutes = 180, endDate = Instant.parse("2035-06-12T03:00:00Z")),
+                    created.copy(endTimeMinutes = 180, endDate = Instant.parse("2035-06-12T10:00:00Z")),
                 ).getOrThrow()
-                assertEquals(Instant.parse("2035-06-12T03:00:00Z"), updated.endDate)
+                assertEquals(Instant.parse("2035-06-12T10:00:00Z"), updated.endDate)
 
                 val repeating = host.fieldRepository.createTimeSlot(
                     overnight.copy(

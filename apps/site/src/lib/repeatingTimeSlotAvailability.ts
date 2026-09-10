@@ -43,8 +43,21 @@ export type RepeatingTimeSlotIntervalInput = {
 
 export type RepeatingTimeSlotValidationCode =
   | "INVALID_REPEATING_TIME_SLOT"
-  | "REPEATING_TIME_SLOT_TIME_GAP"
-  | "REPEATING_TIME_SLOT_TIME_AMBIGUOUS";
+  | "REPEATING_TIME_SLOT_TIME_GAP";
+
+export type RepeatingTimeSlotTimeAdjustmentKind =
+  | "GAP_SHIFT_FORWARD"
+  | "FOLD_EARLIER";
+
+export type RepeatingTimeSlotTimeAdjustment = {
+  boundary: "start" | "end";
+  kind: RepeatingTimeSlotTimeAdjustmentKind;
+  requestedDate: string;
+  requestedTimeMinutes: number;
+  effectiveDate: string;
+  effectiveTimeMinutes: number;
+  effectiveInstant: Date;
+};
 
 export class RepeatingTimeSlotValidationError extends Error {
   readonly code: RepeatingTimeSlotValidationCode;
@@ -76,8 +89,19 @@ export type ResolvedRepeatingTimeSlot = {
   timeZone: string;
   isOvernight: boolean;
   nextWeekday: string | null;
+  dstAdjustments: RepeatingTimeSlotTimeAdjustment[];
   resourceIds: string[];
   divisionIds: string[];
+};
+
+type LocalTimeAdjustment = Omit<
+  RepeatingTimeSlotTimeAdjustment,
+  "boundary"
+>;
+
+type LocalDateTimeResolution = {
+  instant: Date;
+  adjustment: LocalTimeAdjustment | null;
 };
 
 const WEEKDAY_NAMES = [
@@ -327,89 +351,129 @@ export type RepeatingTimeSlotValidationWindow = {
   start: Date;
   end: Date;
 };
+type LocalDateBounds = {
+  start: LocalDateParts | null;
+  end: LocalDateParts | null;
+};
+
+const isValidDateValue = (value: unknown): value is Date =>
+  value instanceof Date && !Number.isNaN(value.getTime());
+
+const readValidationDateBounds = (options: {
+  slot: RepeatingTimeSlotIntervalInput;
+  timeZone: string;
+  slotId: string;
+}): LocalDateBounds => {
+  const start = localDateFromInput(options.slot.startDate, options.timeZone);
+  const end = localDateFromInput(options.slot.endDate, options.timeZone);
+  if (hasLocalDateInput(options.slot.startDate) && !start) {
+    throw invalidConfiguredDateError(options.slotId, "start");
+  }
+  if (hasLocalDateInput(options.slot.endDate) && !end) {
+    throw invalidConfiguredDateError(options.slotId, "end");
+  }
+  if (start && end && compareLocalDates(end, start) < 0) {
+    throw new RepeatingTimeSlotValidationError(
+      "INVALID_REPEATING_TIME_SLOT",
+      `Repeating Time Slot "${options.slotId}" is invalid: the configured end date is before the configured start date.`,
+      { slotId: options.slotId },
+    );
+  }
+  return { start, end };
+};
+
+const resolveValidationWindowStart = (
+  eventStart: Date,
+  configuredStartDate: LocalDateParts | null,
+): { start: Date; anchor: Date } => {
+  const configuredStartInstant = configuredStartDate
+    ? localDateToUtcDate(configuredStartDate)
+    : null;
+  const anchor = configuredStartInstant
+    ? new Date(Math.max(eventStart.getTime(), configuredStartInstant.getTime()))
+    : new Date(eventStart.getTime());
+  const start = configuredStartInstant
+    ? new Date(
+        Math.max(
+          eventStart.getTime(),
+          configuredStartInstant.getTime() -
+            REPEATING_TIME_SLOT_VALIDATION_PADDING_MS,
+        ),
+      )
+    : new Date(eventStart.getTime());
+  return { start, anchor };
+};
+
+const resolveValidationEventEnd = (
+  eventEnd: Date | null | undefined,
+  eventStart: Date,
+): Date | null =>
+  isValidDateValue(eventEnd) && eventEnd.getTime() > eventStart.getTime()
+    ? new Date(eventEnd.getTime())
+    : null;
+
+const resolveValidationFallbackEnd = (anchor: Date): Date =>
+  new Date(
+    anchor.getTime() +
+      REPEATING_TIME_SLOT_VALIDATION_WINDOW_DAYS * DAY_MS +
+      REPEATING_TIME_SLOT_VALIDATION_PADDING_MS,
+  );
+
+const resolveConfiguredEndInstant = (
+  configuredEndDate: LocalDateParts | null,
+): Date | null =>
+  configuredEndDate
+    ? new Date(
+        localDateToUtcDate(configuredEndDate).getTime() +
+          REPEATING_TIME_SLOT_VALIDATION_PADDING_MS,
+      )
+    : null;
+
+const selectValidationWindowEnd = (
+  eventEnd: Date | null,
+  configuredEndInstant: Date | null,
+  fallbackEnd: Date,
+): Date => {
+  const boundedEnds = [eventEnd, configuredEndInstant].filter(isValidDateValue);
+  return boundedEnds.length
+    ? new Date(Math.min(...boundedEnds.map((value) => value.getTime())))
+    : fallbackEnd;
+};
+
 
 export const resolveRepeatingTimeSlotValidationWindow = (options: {
   slot: RepeatingTimeSlotIntervalInput;
   eventStart: Date;
   eventEnd?: Date | null;
 }): RepeatingTimeSlotValidationWindow | null => {
-  if (
-    !(options.eventStart instanceof Date) ||
-    Number.isNaN(options.eventStart.getTime())
-  ) {
+  if (!isValidDateValue(options.eventStart)) {
     return null;
   }
-
   const slotId = normalizeSlotId(options.slot);
   const timeZone = normalizeTimeZoneStrict(options.slot.timeZone, slotId);
-  const configuredStartDate = localDateFromInput(
-    options.slot.startDate,
+  const dateBounds = readValidationDateBounds({
+    slot: options.slot,
     timeZone,
+    slotId,
+  });
+  const windowStart = resolveValidationWindowStart(
+    options.eventStart,
+    dateBounds.start,
   );
-  const configuredEndDate = localDateFromInput(options.slot.endDate, timeZone);
-  if (hasLocalDateInput(options.slot.startDate) && !configuredStartDate) {
-    throw invalidConfiguredDateError(slotId, "start");
-  }
-  if (hasLocalDateInput(options.slot.endDate) && !configuredEndDate) {
-    throw invalidConfiguredDateError(slotId, "end");
-  }
-  if (
-    configuredStartDate &&
-    configuredEndDate &&
-    compareLocalDates(configuredEndDate, configuredStartDate) < 0
-  ) {
-    throw new RepeatingTimeSlotValidationError(
-      "INVALID_REPEATING_TIME_SLOT",
-      `Repeating Time Slot "${slotId}" is invalid: the configured end date is before the configured start date.`,
-      { slotId },
-    );
-  }
-
-  const configuredStartInstant = configuredStartDate
-    ? localDateToUtcDate(configuredStartDate)
+  const eventEnd = resolveValidationEventEnd(
+    options.eventEnd,
+    options.eventStart,
+  );
+  const fallbackEnd = resolveValidationFallbackEnd(windowStart.anchor);
+  const configuredEndInstant = resolveConfiguredEndInstant(dateBounds.end);
+  const end = selectValidationWindowEnd(
+    eventEnd,
+    configuredEndInstant,
+    fallbackEnd,
+  );
+  return end.getTime() > windowStart.start.getTime()
+    ? { start: windowStart.start, end }
     : null;
-  const validationAnchor = configuredStartInstant
-    ? new Date(
-        Math.max(
-          options.eventStart.getTime(),
-          configuredStartInstant.getTime(),
-        ),
-      )
-    : new Date(options.eventStart.getTime());
-  const start = configuredStartInstant
-    ? new Date(
-        Math.max(
-          options.eventStart.getTime(),
-          configuredStartInstant.getTime() -
-            REPEATING_TIME_SLOT_VALIDATION_PADDING_MS,
-        ),
-      )
-    : new Date(options.eventStart.getTime());
-  const eventEnd =
-    options.eventEnd instanceof Date &&
-    !Number.isNaN(options.eventEnd.getTime()) &&
-    options.eventEnd.getTime() > options.eventStart.getTime()
-      ? new Date(options.eventEnd.getTime())
-      : null;
-  const fallbackEnd = new Date(
-    validationAnchor.getTime() +
-      REPEATING_TIME_SLOT_VALIDATION_WINDOW_DAYS * DAY_MS +
-      REPEATING_TIME_SLOT_VALIDATION_PADDING_MS,
-  );
-  const configuredEndInstant = configuredEndDate
-    ? new Date(
-        localDateToUtcDate(configuredEndDate).getTime() +
-          REPEATING_TIME_SLOT_VALIDATION_PADDING_MS,
-      )
-    : null;
-  const boundedEnds = [eventEnd, configuredEndInstant].filter(
-    (value): value is Date => Boolean(value),
-  );
-  const end = boundedEnds.length
-    ? new Date(Math.min(...boundedEnds.map((value) => value.getTime())))
-    : fallbackEnd;
-
-  return end.getTime() > start.getTime() ? { start, end } : null;
 };
 
 const localDayIndex = (date: LocalDateParts): number => {
@@ -443,67 +507,299 @@ const offsetAt = (instant: Date, timeZone: string): number => {
   );
 };
 
-const resolveStrictLocalDateTime = (
-  date: LocalDateParts,
-  minutes: number,
-  timeZone: string,
-  slotId: string,
-): Date => {
-  const localDateTime = buildLocalDateTimeString(date, minutes);
-  const localAsUtcMs = Date.UTC(
-    date.year,
-    date.month - 1,
-    date.day,
-    Math.floor((minutes % MINUTES_PER_DAY) / 60),
-    minutes % 60,
-    0,
-  );
+const collectLocalDateTimeMatches = (options: {
+  date: LocalDateParts;
+  normalizedMinutes: number;
+  timeZone: string;
+  localAsUtcMs: number;
+  guessed: Date | null;
+}): Date[] => {
   const offsets = new Set<number>();
   for (let dayOffset = -3; dayOffset <= 3; dayOffset += 1) {
     for (let hourOffset = 0; hourOffset < 24; hourOffset += 6) {
       const probe = new Date(
-        localAsUtcMs + dayOffset * DAY_MS + hourOffset * 60 * MINUTE_MS,
+        options.localAsUtcMs + dayOffset * DAY_MS + hourOffset * 60 * MINUTE_MS,
       );
-      offsets.add(offsetAt(probe, timeZone));
+      offsets.add(offsetAt(probe, options.timeZone));
     }
   }
-  const guessed = zonedTimeToUtcDate(localDateTime, timeZone);
-  if (guessed) offsets.add(offsetAt(guessed, timeZone));
+  if (options.guessed) {
+    offsets.add(offsetAt(options.guessed, options.timeZone));
+  }
 
   const matches = Array.from(offsets)
-    .map((offset) => new Date(localAsUtcMs - offset))
+    .map((offset) => new Date(options.localAsUtcMs - offset))
     .filter((candidate) => {
-      const parts = getDateTimePartsInTimeZone(candidate, timeZone);
+      const parts = getDateTimePartsInTimeZone(candidate, options.timeZone);
       return Boolean(
         parts &&
-          parts.year === date.year &&
-          parts.month === date.month &&
-          parts.day === date.day &&
-          parts.hour === Math.floor((minutes % MINUTES_PER_DAY) / 60) &&
-          parts.minute === minutes % 60 &&
+          parts.year === options.date.year &&
+          parts.month === options.date.month &&
+          parts.day === options.date.day &&
+          parts.hour === Math.floor(options.normalizedMinutes / 60) &&
+          parts.minute === options.normalizedMinutes % 60 &&
           parts.second === 0,
       );
-    })
-    .filter(
-      (candidate, index, candidates) =>
-        candidates.findIndex(
-          (other) => other.getTime() === candidate.getTime(),
-        ) === index,
-    );
+    });
+  return matches.filter(
+    (candidate, index, candidates) =>
+      candidates.findIndex(
+        (other) => other.getTime() === candidate.getTime(),
+      ) === index,
+  );
+};
 
-  if (matches.length === 1) return matches[0];
-  if (matches.length === 0) {
-    throw new RepeatingTimeSlotValidationError(
-      "REPEATING_TIME_SLOT_TIME_GAP",
-      `Repeating Time Slot "${slotId}" uses a local time that does not exist on ${formatLocalDate(date)} in ${timeZone}.`,
-      { slotId, occurrenceDate: formatLocalDate(date) },
-    );
-  }
+const buildLocalTimeAdjustment = (options: {
+  kind: RepeatingTimeSlotTimeAdjustmentKind;
+  date: LocalDateParts;
+  normalizedMinutes: number;
+  instant: Date;
+  timeZone: string;
+}): LocalTimeAdjustment | null => {
+  const parts = getDateTimePartsInTimeZone(options.instant, options.timeZone);
+  if (!parts) return null;
+  return {
+    kind: options.kind,
+    requestedDate: formatLocalDate(options.date),
+    requestedTimeMinutes: options.normalizedMinutes,
+    effectiveDate: formatLocalDate(parts),
+    effectiveTimeMinutes: parts.hour * 60 + parts.minute,
+    effectiveInstant: options.instant,
+  };
+};
+
+const throwGapError = (
+  date: LocalDateParts,
+  timeZone: string,
+  slotId: string,
+): never => {
   throw new RepeatingTimeSlotValidationError(
-    "REPEATING_TIME_SLOT_TIME_AMBIGUOUS",
-    `Repeating Time Slot "${slotId}" uses an ambiguous local time on ${formatLocalDate(date)} in ${timeZone}. Choose a different time.`,
+    "REPEATING_TIME_SLOT_TIME_GAP",
+    `Repeating Time Slot "${slotId}" uses a local time that does not exist on ${formatLocalDate(date)} in ${timeZone}.`,
     { slotId, occurrenceDate: formatLocalDate(date) },
   );
+};
+
+const resolveGapLocalDateTime = (options: {
+  date: LocalDateParts;
+  normalizedMinutes: number;
+  localAsUtcMs: number;
+  guessed: Date | null;
+  timeZone: string;
+  slotId: string;
+}): LocalDateTimeResolution => {
+  const guessed = options.guessed
+    ?? throwGapError(options.date, options.timeZone, options.slotId);
+  const guessedParts =
+    getDateTimePartsInTimeZone(guessed, options.timeZone)
+    ?? throwGapError(options.date, options.timeZone, options.slotId);
+  const guessedLocalAsUtcMs = Date.UTC(
+    guessedParts.year,
+    guessedParts.month - 1,
+    guessedParts.day,
+    guessedParts.hour,
+    guessedParts.minute,
+    guessedParts.second,
+  );
+  if (guessedLocalAsUtcMs <= options.localAsUtcMs) {
+    throwGapError(options.date, options.timeZone, options.slotId);
+  }
+  const adjustment = buildLocalTimeAdjustment({
+    kind: "GAP_SHIFT_FORWARD",
+    date: options.date,
+    normalizedMinutes: options.normalizedMinutes,
+    instant: guessed,
+    timeZone: options.timeZone,
+  });
+  if (!adjustment) {
+    throwGapError(options.date, options.timeZone, options.slotId);
+  }
+  return { instant: guessed, adjustment };
+};
+
+const resolveLocalDateTime = (
+  date: LocalDateParts,
+  minutes: number,
+  timeZone: string,
+  slotId: string,
+): LocalDateTimeResolution => {
+  const normalizedMinutes =
+    ((minutes % MINUTES_PER_DAY) + MINUTES_PER_DAY) % MINUTES_PER_DAY;
+  const localDateTime = buildLocalDateTimeString(date, normalizedMinutes);
+  const localAsUtcMs = Date.UTC(
+    date.year,
+    date.month - 1,
+    date.day,
+    Math.floor(normalizedMinutes / 60),
+    normalizedMinutes % 60,
+    0,
+  );
+  const guessed = zonedTimeToUtcDate(localDateTime, timeZone);
+  const matches = collectLocalDateTimeMatches({
+    date,
+    normalizedMinutes,
+    timeZone,
+    localAsUtcMs,
+    guessed,
+  });
+
+  if (matches.length === 1) {
+    return { instant: matches[0]!, adjustment: null };
+  }
+  if (matches.length === 0) {
+    return resolveGapLocalDateTime({
+      date,
+      normalizedMinutes,
+      localAsUtcMs,
+      guessed,
+      timeZone,
+      slotId,
+    });
+  }
+  const instant = matches.reduce((earliest, candidate) =>
+    candidate.getTime() < earliest.getTime() ? candidate : earliest,
+  );
+  return {
+    instant,
+    adjustment: buildLocalTimeAdjustment({
+      kind: "FOLD_EARLIER",
+      date,
+      normalizedMinutes,
+      instant,
+      timeZone,
+    }),
+  };
+};
+
+type OccurrenceValidationFailure = (detail: string) => never;
+
+const parseOccurrenceDateOrThrow = (
+  slotId: string,
+  occurrenceDate: string,
+): LocalDateParts => {
+  const parsedOccurrenceDate = localDatePartsFromString(occurrenceDate);
+  if (parsedOccurrenceDate) {
+    return parsedOccurrenceDate;
+  }
+  throw new RepeatingTimeSlotValidationError(
+    "INVALID_REPEATING_TIME_SLOT",
+    `Repeating Time Slot "${slotId}" has an invalid occurrence date "${occurrenceDate}".`,
+    { slotId, occurrenceDate: null },
+  );
+};
+
+const throwOccurrenceValidationError = (
+  slotId: string,
+  occurrenceDate: LocalDateParts,
+  detail: string,
+): never => {
+  throw new RepeatingTimeSlotValidationError(
+    "INVALID_REPEATING_TIME_SLOT",
+    `Repeating Time Slot "${slotId}" is invalid: ${detail}`,
+    { slotId, occurrenceDate: formatLocalDate(occurrenceDate) },
+  );
+};
+
+const readConfiguredDateBounds = (options: {
+  slot: RepeatingTimeSlotIntervalInput;
+  timeZone: string;
+  slotId: string;
+  occurrenceDate: LocalDateParts;
+}): { start: LocalDateParts | null; end: LocalDateParts | null } => {
+  const configuredStartDate = localDateFromInput(
+    options.slot.startDate,
+    options.timeZone,
+  );
+  const configuredEndDate = localDateFromInput(
+    options.slot.endDate,
+    options.timeZone,
+  );
+  if (hasLocalDateInput(options.slot.startDate) && !configuredStartDate) {
+    throw invalidConfiguredDateError(options.slotId, "start");
+  }
+  if (hasLocalDateInput(options.slot.endDate) && !configuredEndDate) {
+    throw invalidConfiguredDateError(options.slotId, "end");
+  }
+  if (
+    configuredStartDate &&
+    configuredEndDate &&
+    compareLocalDates(configuredEndDate, configuredStartDate) < 0
+  ) {
+    throwOccurrenceValidationError(
+      options.slotId,
+      options.occurrenceDate,
+      "the configured end date is before the configured start date.",
+    );
+  }
+  return { start: configuredStartDate, end: configuredEndDate };
+};
+
+const validateOccurrenceDateBounds = (options: {
+  configuredStartDate: LocalDateParts | null;
+  configuredEndDate: LocalDateParts | null;
+  occurrenceDate: LocalDateParts;
+  fail: OccurrenceValidationFailure;
+}): void => {
+  if (
+    options.configuredStartDate &&
+    compareLocalDates(options.occurrenceDate, options.configuredStartDate) < 0
+  ) {
+    options.fail(
+      `the occurrence is before the configured start date ${formatLocalDate(options.configuredStartDate)}.`,
+    );
+  }
+  if (
+    options.configuredEndDate &&
+    compareLocalDates(options.occurrenceDate, options.configuredEndDate) > 0
+  ) {
+    options.fail(
+      `the occurrence is after the configured end date ${formatLocalDate(options.configuredEndDate)}.`,
+    );
+  }
+};
+
+const validateOccurrenceWeekday = (
+  days: number[],
+  occurrenceDate: LocalDateParts,
+  fail: OccurrenceValidationFailure,
+): void => {
+  if (!days.length) {
+    fail("select at least one weekday.");
+  }
+  if (!days.includes(localDayIndex(occurrenceDate))) {
+    fail(
+      `the date ${formatLocalDate(occurrenceDate)} is not one of its selected weekdays.`,
+    );
+  }
+};
+
+const requireOccurrenceMinutes = (
+  startMinutes: number | null,
+  endMinutes: number | null,
+  fail: OccurrenceValidationFailure,
+): { start: number; end: number } => ({
+  start: startMinutes ?? fail("select a start time."),
+  end: endMinutes ?? fail("select an end time."),
+});
+
+const buildDstAdjustments = (
+  startResolution: LocalDateTimeResolution,
+  endResolution: LocalDateTimeResolution,
+): RepeatingTimeSlotTimeAdjustment[] => {
+  const adjustments: RepeatingTimeSlotTimeAdjustment[] = [];
+  if (startResolution.adjustment) {
+    adjustments.push({
+      ...startResolution.adjustment,
+      boundary: "start",
+    });
+  }
+  if (endResolution.adjustment) {
+    adjustments.push({
+      ...endResolution.adjustment,
+      boundary: "end",
+    });
+  }
+  return adjustments;
 };
 
 export const resolveRepeatingTimeSlotOccurrence = (
@@ -511,88 +807,47 @@ export const resolveRepeatingTimeSlotOccurrence = (
   occurrenceDate: string,
 ): ResolvedRepeatingTimeSlot => {
   const slotId = normalizeSlotId(slot);
-  const parsedOccurrenceDate = localDatePartsFromString(occurrenceDate);
-  if (!parsedOccurrenceDate) {
-    throw new RepeatingTimeSlotValidationError(
-      "INVALID_REPEATING_TIME_SLOT",
-      `Repeating Time Slot "${slotId}" has an invalid occurrence date "${occurrenceDate}".`,
-      { slotId, occurrenceDate: null },
-    );
-  }
+  const parsedOccurrenceDate = parseOccurrenceDateOrThrow(slotId, occurrenceDate);
   const timeZone = normalizeTimeZoneStrict(slot.timeZone, slotId);
   const days = normalizeDays(slot);
   const startMinutes = normalizeMinutes(slot.startTimeMinutes, false);
   const endMinutes = normalizeMinutes(slot.endTimeMinutes, true);
-  const fail = (detail: string): never => {
-    throw new RepeatingTimeSlotValidationError(
-      "INVALID_REPEATING_TIME_SLOT",
-      `Repeating Time Slot "${slotId}" is invalid: ${detail}`,
-      { slotId, occurrenceDate: formatLocalDate(parsedOccurrenceDate) },
-    );
-  };
-  const configuredStartDate = localDateFromInput(slot.startDate, timeZone);
-  const configuredEndDate = localDateFromInput(slot.endDate, timeZone);
-  if (hasLocalDateInput(slot.startDate) && !configuredStartDate) {
-    throw invalidConfiguredDateError(slotId, "start");
-  }
-  if (hasLocalDateInput(slot.endDate) && !configuredEndDate) {
-    throw invalidConfiguredDateError(slotId, "end");
-  }
-  if (
-    configuredStartDate &&
-    configuredEndDate &&
-    compareLocalDates(configuredEndDate, configuredStartDate) < 0
-  ) {
-    fail("the configured end date is before the configured start date.");
-  }
-  if (
-    configuredStartDate &&
-    compareLocalDates(parsedOccurrenceDate, configuredStartDate) < 0
-  ) {
-    fail(
-      `the occurrence is before the configured start date ${formatLocalDate(configuredStartDate)}.`,
-    );
-  }
-  if (
-    configuredEndDate &&
-    compareLocalDates(parsedOccurrenceDate, configuredEndDate) > 0
-  ) {
-    fail(
-      `the occurrence is after the configured end date ${formatLocalDate(configuredEndDate)}.`,
-    );
-  }
-  if (!days.length) fail("select at least one weekday.");
-  if (!days.includes(localDayIndex(parsedOccurrenceDate))) {
-    fail(
-      `the date ${formatLocalDate(parsedOccurrenceDate)} is not one of its selected weekdays.`,
-    );
-  }
-  const requireMinutes = (value: number | null, detail: string): number =>
-    value ?? fail(detail);
-  const resolvedStartMinutes = requireMinutes(
-    startMinutes,
-    "select a start time.",
-  );
-  const resolvedEndMinutes = requireMinutes(endMinutes, "select an end time.");
-
+  const fail: OccurrenceValidationFailure = (detail) =>
+    throwOccurrenceValidationError(slotId, parsedOccurrenceDate, detail);
+  const configuredDateBounds = readConfiguredDateBounds({
+    slot,
+    timeZone,
+    slotId,
+    occurrenceDate: parsedOccurrenceDate,
+  });
+  validateOccurrenceDateBounds({
+    configuredStartDate: configuredDateBounds.start,
+    configuredEndDate: configuredDateBounds.end,
+    occurrenceDate: parsedOccurrenceDate,
+    fail,
+  });
+  validateOccurrenceWeekday(days, parsedOccurrenceDate, fail);
+  const resolvedMinutes = requireOccurrenceMinutes(startMinutes, endMinutes, fail);
   const isOvernight =
-    resolvedEndMinutes === MINUTES_PER_DAY ||
-    resolvedEndMinutes <= resolvedStartMinutes;
+    resolvedMinutes.end === MINUTES_PER_DAY ||
+    resolvedMinutes.end <= resolvedMinutes.start;
   const resolvedEndDate = isOvernight
     ? addLocalDays(parsedOccurrenceDate, 1)
     : parsedOccurrenceDate;
-  const start = resolveStrictLocalDateTime(
+  const startResolution = resolveLocalDateTime(
     parsedOccurrenceDate,
-    resolvedStartMinutes,
+    resolvedMinutes.start,
     timeZone,
     slotId,
   );
-  const end = resolveStrictLocalDateTime(
+  const endResolution = resolveLocalDateTime(
     resolvedEndDate,
-    resolvedEndMinutes === MINUTES_PER_DAY ? 0 : resolvedEndMinutes,
+    resolvedMinutes.end === MINUTES_PER_DAY ? 0 : resolvedMinutes.end,
     timeZone,
     slotId,
   );
+  const start = startResolution.instant;
+  const end = endResolution.instant;
   if (end.getTime() <= start.getTime()) {
     fail("the resolved end time is not after the resolved start time.");
   }
@@ -604,86 +859,88 @@ export const resolveRepeatingTimeSlotOccurrence = (
     start,
     end,
     durationMinutes: Math.round((end.getTime() - start.getTime()) / MINUTE_MS),
-    startTimeMinutes: resolvedStartMinutes,
-    endTimeMinutes: resolvedEndMinutes,
+    startTimeMinutes: resolvedMinutes.start,
+    endTimeMinutes: resolvedMinutes.end,
     timeZone,
     isOvernight,
     nextWeekday: isOvernight
       ? WEEKDAY_NAMES[localDayIndex(resolvedEndDate)]
       : null,
+    dstAdjustments: buildDstAdjustments(startResolution, endResolution),
     resourceIds: normalizeResourceIds(slot),
     divisionIds: normalizeIds(slot.divisions),
   };
 };
+
+const readValidOccurrenceWindow = (
+  windowStart: unknown,
+  windowEnd: unknown,
+): RepeatingTimeSlotValidationWindow | null => {
+  if (
+    !(windowStart instanceof Date) ||
+    Number.isNaN(windowStart.getTime()) ||
+    !(windowEnd instanceof Date) ||
+    Number.isNaN(windowEnd.getTime()) ||
+    windowEnd.getTime() <= windowStart.getTime()
+  ) {
+    return null;
+  }
+  return { start: windowStart, end: windowEnd };
+};
+
+
+const isWithinConfiguredDateBounds = (
+  date: LocalDateParts,
+  bounds: { start: LocalDateParts | null; end: LocalDateParts | null },
+): boolean =>
+  (!bounds.start || compareLocalDates(date, bounds.start) >= 0) &&
+  (!bounds.end || compareLocalDates(date, bounds.end) <= 0);
+
+const resolvedOccurrenceOverlapsWindow = (
+  occurrence: ResolvedRepeatingTimeSlot,
+  window: RepeatingTimeSlotValidationWindow,
+): boolean =>
+  occurrence.start.getTime() < window.end.getTime() &&
+  occurrence.end.getTime() > window.start.getTime();
 
 export const enumerateRepeatingTimeSlotOccurrences = (options: {
   slot: RepeatingTimeSlotIntervalInput;
   windowStart: Date;
   windowEnd: Date;
 }): ResolvedRepeatingTimeSlot[] => {
-  if (
-    !(options.windowStart instanceof Date) ||
-    Number.isNaN(options.windowStart.getTime()) ||
-    !(options.windowEnd instanceof Date) ||
-    Number.isNaN(options.windowEnd.getTime()) ||
-    options.windowEnd.getTime() <= options.windowStart.getTime()
-  ) {
-    return [];
-  }
-  const timeZone = normalizeTimeZoneStrict(
-    options.slot.timeZone,
-    normalizeSlotId(options.slot),
+  const window = readValidOccurrenceWindow(
+    options.windowStart,
+    options.windowEnd,
   );
-  const firstParts = localDateFromDate(options.windowStart, timeZone);
+  if (!window) return [];
+  const slotId = normalizeSlotId(options.slot);
+  const timeZone = normalizeTimeZoneStrict(options.slot.timeZone, slotId);
+  const firstParts = localDateFromDate(window.start, timeZone);
   if (!firstParts) return [];
   const days = normalizeDays(options.slot);
-  const configuredStartDate = localDateFromInput(
-    options.slot.startDate,
+  const bounds = readValidationDateBounds({
+    slot: options.slot,
     timeZone,
-  );
-  const configuredEndDate = localDateFromInput(options.slot.endDate, timeZone);
-  const slotId = normalizeSlotId(options.slot);
-  if (hasLocalDateInput(options.slot.startDate) && !configuredStartDate) {
-    throw invalidConfiguredDateError(slotId, "start");
-  }
-  if (hasLocalDateInput(options.slot.endDate) && !configuredEndDate) {
-    throw invalidConfiguredDateError(slotId, "end");
-  }
-  if (
-    configuredStartDate &&
-    configuredEndDate &&
-    compareLocalDates(configuredEndDate, configuredStartDate) < 0
-  ) {
-    throw new RepeatingTimeSlotValidationError(
-      "INVALID_REPEATING_TIME_SLOT",
-      `Repeating Time Slot "${slotId}" is invalid: the configured end date is before the configured start date.`,
-      { slotId },
-    );
-  }
+    slotId,
+  });
   if (!days.length) {
-    const firstDate = formatLocalDate(firstParts);
-    resolveRepeatingTimeSlotOccurrence(options.slot, firstDate);
+    resolveRepeatingTimeSlotOccurrence(options.slot, formatLocalDate(firstParts));
   }
-  const lastParts = localDateFromDate(options.windowEnd, timeZone);
+  const lastParts = localDateFromDate(window.end, timeZone);
   if (!lastParts) return [];
   let cursor = addLocalDays(firstParts, -1);
   const lastDate = addLocalDays(lastParts, 1);
   const occurrences: ResolvedRepeatingTimeSlot[] = [];
   while (compareLocalDates(cursor, lastDate) <= 0) {
-    const occurrenceDate = formatLocalDate(cursor);
-    const isInConfiguredBounds =
-      (!configuredStartDate ||
-        compareLocalDates(cursor, configuredStartDate) >= 0) &&
-      (!configuredEndDate || compareLocalDates(cursor, configuredEndDate) <= 0);
-    if (isInConfiguredBounds && days.includes(localDayIndex(cursor))) {
+    if (
+      isWithinConfiguredDateBounds(cursor, bounds) &&
+      days.includes(localDayIndex(cursor))
+    ) {
       const resolved = resolveRepeatingTimeSlotOccurrence(
         options.slot,
-        occurrenceDate,
+        formatLocalDate(cursor),
       );
-      if (
-        resolved.start.getTime() < options.windowEnd.getTime() &&
-        resolved.end.getTime() > options.windowStart.getTime()
-      ) {
+      if (resolvedOccurrenceOverlapsWindow(resolved, window)) {
         occurrences.push(resolved);
       }
     }
@@ -691,6 +948,40 @@ export const enumerateRepeatingTimeSlotOccurrences = (options: {
   }
   return occurrences;
 };
+export const listRepeatingTimeSlotDstAdjustments = (options: {
+  slot: RepeatingTimeSlotIntervalInput;
+  eventStart: Date;
+  finalGeneratedEnd?: Date | null;
+}): RepeatingTimeSlotTimeAdjustment[] => {
+  const finalGeneratedEnd = options.finalGeneratedEnd;
+  if (
+    !(options.eventStart instanceof Date) ||
+    Number.isNaN(options.eventStart.getTime()) ||
+    !(finalGeneratedEnd instanceof Date) ||
+    Number.isNaN(finalGeneratedEnd.getTime()) ||
+    finalGeneratedEnd.getTime() <= options.eventStart.getTime()
+  ) {
+    return [];
+  }
+  const validationWindow = resolveRepeatingTimeSlotValidationWindow({
+    slot: options.slot,
+    eventStart: options.eventStart,
+    eventEnd: finalGeneratedEnd,
+  });
+  if (!validationWindow) return [];
+  const finalGeneratedEndMs = finalGeneratedEnd.getTime();
+  return enumerateRepeatingTimeSlotOccurrences({
+    slot: options.slot,
+    windowStart: validationWindow.start,
+    windowEnd: validationWindow.end,
+  }).flatMap((occurrence) =>
+    occurrence.dstAdjustments.filter(
+      (adjustment) =>
+        adjustment.effectiveInstant.getTime() <= finalGeneratedEndMs,
+    ),
+  );
+};
+
 
 export const repeatingTimeSlotOccurrencesOverlap = (options: {
   firstSlot: RepeatingTimeSlotIntervalInput;
