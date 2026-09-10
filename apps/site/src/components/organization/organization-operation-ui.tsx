@@ -831,6 +831,13 @@ function CalendarDateControl({ value, onChange, id, label, description, error, e
   const [open, setOpen] = React.useState(false);
   const [viewDate, setViewDate] = React.useState(() => selectedDate ?? new Date());
   const containerRef = useDismissibleLayer(open, () => setOpen(false));
+  const wasDateOpenRef = React.useRef(false);
+  React.useEffect(() => {
+    if (wasDateOpenRef.current && !open) {
+      containerRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    }
+    wasDateOpenRef.current = open;
+  }, [open, containerRef]);
   const accessibleName = dateAccessibleName(label, ariaProps['aria-label']);
   const controlRadius = radiusClass(radius, 'control');
   const days = monthDays(viewDate);

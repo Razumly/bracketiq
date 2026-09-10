@@ -87,6 +87,19 @@ it('opens the shared date filter popover from the desktop filter row', async () 
   expect(screen.getByRole('button', { name: 'Dates', exact: true })).toHaveAttribute('aria-expanded', 'true');
   expect(screen.getByRole('button', { name: 'Filter by start date', exact: true })).toBeInTheDocument();
 });
+
+it('returns focus to Dates when its date controls close with Escape', async () => {
+  const user = userEvent.setup();
+  render(<Harness />);
+
+  const datesButton = screen.getByRole('button', { name: 'Dates', exact: true });
+  await user.click(datesButton);
+  const startDateButton = screen.getByRole('button', { name: 'Filter by start date', exact: true });
+  await user.click(startDateButton);
+  await user.keyboard('{Escape}');
+
+  await waitFor(() => expect(datesButton).toHaveFocus());
+});
 const originalFetch = globalThis.fetch;
 beforeEach(() => {
   jest.resetAllMocks();

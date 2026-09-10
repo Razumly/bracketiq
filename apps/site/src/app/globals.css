@@ -363,6 +363,20 @@ svg {
   aspect-ratio: 1.75;
 }
 
+@media (min-width: 48em) {
+  .discover-search-controls {
+    flex-wrap: nowrap;
+  }
+
+  .discover-search-form {
+    min-width: 0;
+  }
+
+  .discover-search-actions {
+    flex-shrink: 0;
+  }
+}
+
 @media (max-width: 47.99em) {
   .discover-search-controls {
     align-items: stretch;
