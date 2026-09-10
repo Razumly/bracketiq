@@ -22,6 +22,11 @@ The discover page should let someone search within the tab they are already view
 - [x] (2026-09-10) Passed the focused `DiscoverMapModal` Jest suite (12 tests), `npx tsc --noEmit --pretty false`, and `git -c core.whitespace=cr-at-eol diff --check`.
 - [x] (2026-09-10) Copied `.env` and `.env.local` from the sibling `site-ui-operations` worktree. The production build loaded both files, and the user-authorized `site-ui-operations-prod` restart became ready.
 - [x] (2026-09-10) Browser-verified the rebuilt page's Maps JavaScript request with the configured key, visible modal tabs, compact chrome, Nearby events rail, selected-event card, and close-to-rail restore. The selected-card summary clamp remained at three lines. The Google Maps canvas still showed `Oops! Something went wrong` with no tiles or markers, so map pixels and markers remain unverified. See `Artifacts and Notes`.
+- [x] (2026-09-10, filter-race fix) Committed `a7923e3f6`. A delayed close for the old filter no longer clears the new filter. The fix covers page-level and map-level filter owners.
+- [x] (2026-09-10, filter-race rerun) Passed all 14 tests in `DiscoverMapModal.test.tsx`. TypeScript, ESLint for the four touched Discover files, and the CRLF-aware diff check passed.
+- [x] (2026-09-10, filter-race rerun) Passed `npm run build`. Restarted the user-authorized `site-ui-operations-prod` runtime. It became ready on port 3001.
+- [x] (2026-09-10, filter-race rerun) Verified page-level Dates to Price and Event type to Event tags switching on rebuilt `/discover`. Verified map Tags to Sports switching. Each new filter stayed open while the prior filter closed.
+- [x] (2026-09-10, filter-race rerun) Verified map tiles, markers, and the selected-event card in the rebuilt browser. The summary clamp stayed at three lines. This result supersedes the earlier generic Google Maps error. No production deploy occurred.
 
 ## Surprises & Discoveries
 
@@ -33,6 +38,10 @@ The discover page should let someone search within the tab they are already view
   Evidence: The local data probe found co-located events. No database move or seed occurred.
 - Observation (2026-09-10 environment rerun): Key availability and Google Maps rendering are separate verification results.
   Evidence: After the environment copy, production rebuild, and ready restart, the browser loaded the Maps JavaScript request with the configured key. The canvas still showed the generic `Oops! Something went wrong` surface with no tiles or markers. This run did not establish a specific Google Cloud error.
+- Observation (2026-09-10, filter-race fix): A delayed close for an old filter could clear a newly selected filter.
+  Evidence: Commit `a7923e3f6` prevents this stale close in both page-level and map-level filter owners. The focused `DiscoverMapModal.test.tsx` suite passed all 14 tests.
+- Observation (2026-09-10, filter-race rerun): The earlier generic Google Maps error is historical evidence from before this rerun.
+  Evidence: The latest rebuilt `/discover` browser run rendered tiles and markers. Page-level and map-level filter switching left the new filter open.
 
 ## Decision Log
 
@@ -56,7 +65,13 @@ The discover page should let someone search within the tab they are already view
 
 2026-09-10 outcome: The reference-style map implementation is complete. Visible tabs replace the earlier map type dropdown. The map has compact search, location, count, and filter controls. It uses coral event dots and a halo around the user location. A grouped Nearby events rail opens by default. A floating detail card shows the selected event. The discover page passes `locationInfo` to the modal.
 
+Earlier reference-layout verification (2026-09-10; before the filter-race rerun):
+
 The focused Jest suite passed all 12 tests. TypeScript and diff checks also passed. The local data probe found co-located events, so no database move or seed occurred. After `.env` and `.env.local` were copied from the sibling `site-ui-operations` worktree, the production build loaded both files. Following the user's authorization, `site-ui-operations-prod` was restarted and became ready. The rebuilt browser run loaded the Maps JavaScript request with the configured key and verified the visible modal tabs, compact chrome, Nearby events rail, selected-event card, and close-to-rail restore. The selected-card summary clamp remained at three lines. The key is available, but the Google Maps canvas still showed its generic `Oops! Something went wrong` surface with no map tiles or markers; map pixels and markers remain unverified. No specific Google Cloud error was established by this run.
+
+2026-09-10 outcome (filter-race fix and rebuilt rerun): Commit `a7923e3f6` fixed the stale popover close race for page-level and map-level filter owners. A delayed close for the old filter no longer clears the newly selected filter. The focused suite passed 14 tests. TypeScript, ESLint for the four touched Discover files, and the CRLF-aware diff check passed. The build passed. The user-authorized runtime restart became ready on port 3001.
+
+The rebuilt browser verified page-level Dates to Price and Event type to Event tags switching, plus map Tags to Sports switching. Each new filter stayed open while the prior filter closed. The map rendered tiles and markers. Selecting a nearby event showed the selected-event card, hid the rail, and exposed the View event action. The summary clamp stayed at three lines. The earlier generic Google Maps error describes the pre-rerun state, not this result. No production deploy occurred.
 
 ## Context and Orientation
 
@@ -110,7 +125,7 @@ Earlier implementation artifacts (2026-05-14; preserved as historical evidence):
 - Browser verification at `http://localhost:3000/discover` confirmed Events/Organizations/Rentals/Teams tabs, the original discover target dropdown, the Teams search target switching to the Teams tab, the Map button, and the map modal search controls. The Google Maps script returned `RefererNotAllowedMapError` for `http://localhost:3000`.
 - Follow-up implementation removed the page-level dropdown so search is scoped by the active tab. This still needs post-follow-up rendered verification on a restarted production server or a fast enough local dev surface.
 
-Reference-layout and environment-rerun artifacts (2026-09-10):
+Reference-layout and environment-rerun artifacts (2026-09-10; historical evidence before the filter-race rerun):
 
 - Reference-layout implementation (2026-09-10): `DiscoverMapModal` now has visible tabs, compact search/location/count/filter controls, coral event dots, and a user halo. It also has a grouped Nearby events rail that opens by default and a floating selected-event detail card. `src/app/discover/page.tsx` passes `locationInfo` to the modal.
 - Reference-layout verification (2026-09-10): The focused `DiscoverMapModal` Jest suite passed all 12 tests. `npx tsc --noEmit --pretty false` and `git -c core.whitespace=cr-at-eol diff --check` passed.
@@ -119,6 +134,17 @@ Reference-layout and environment-rerun artifacts (2026-09-10):
 - Rebuilt-browser verification (2026-09-10): The rebuilt page loaded the Maps JavaScript request with the configured key. The visible modal tabs, compact chrome, Nearby events rail, selected-event card, and close-to-rail restore rendered.
 - Browser limitation (2026-09-10): Despite the configured key being available, the Google Maps canvas still showed the generic `Oops! Something went wrong` surface with no map tiles or markers. Map pixels and markers remain unverified; this run did not establish a specific Google Cloud error.
 - Selected-summary clamp (2026-09-10): The three-line selected-summary clamp was rebuilt and observed in the selected-event card. It remained at three lines in the browser rerun after copying the environment files.
+
+Filter-race fix and rebuilt-rerun artifacts (2026-09-10; latest evidence):
+
+- Commit `a7923e3f6` fixed the stale popover close race. It covers page-level and map-level filter owners. A delayed close for the old filter no longer clears the newly selected filter.
+- The focused `DiscoverMapModal.test.tsx` suite passed all 14 tests after the fix. The earlier 12-test result remains historical evidence.
+- `npx tsc --noEmit --pretty false` passed. ESLint passed for the four touched Discover files. The CRLF-aware `git -c core.whitespace=cr-at-eol diff --check` passed.
+- `npm run build` passed after the fix. Prisma generated successfully. Next compiled, TypeScript completed, and 127/127 static pages generated. The existing multiple-lockfile workspace-root warning remained.
+- The user-authorized `site-ui-operations-prod` runtime restarted and became ready on port 3001.
+- Rebuilt `/discover` browser verification passed. Page-level Dates to Price and Event type to Event tags switching kept the new filter open while closing the prior filter. Map Tags to Sports switching did the same.
+- The rebuilt map rendered tiles and markers. Selecting a nearby event showed the selected-event card and hid the rail. The View event action appeared. The selected-summary clamp stayed at three lines.
+- The generic Google Maps error above occurred before this rerun. It is historical evidence, not the latest map result. No production deploy occurred.
 
 ## Interfaces and Dependencies
 
@@ -131,3 +157,5 @@ Use `@react-google-maps/api` already present in `package.json`. Reuse `GOOGLE_MA
 Revision note (2026-09-10): Recorded the completed reference layout and its verification limits so the plan reflects the current implementation. Preserved earlier implementation and browser results as history.
 
 Revision note (2026-09-10, environment rerun): Replaced the current missing-key limitation with the copied-env production rebuild, ready authorized restart, and keyed browser evidence. Distinguished the available key from the unresolved Google Maps rendering failure, retained the three-line summary result, and preserved earlier verification history.
+
+Revision note (2026-09-10, filter-race rerun): Recorded commit `a7923e3f6`, the 14-test focused suite, code checks, build results, authorized runtime readiness, and rebuilt browser verification. Marked the earlier generic Maps error as pre-rerun history. The latest run rendered tiles and markers. Preserved earlier evidence and acceptance text. No production deploy occurred.
