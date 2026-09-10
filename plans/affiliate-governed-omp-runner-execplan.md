@@ -1312,3 +1312,63 @@ preview programs were removed.
 Outcome: both requested mapped repairs and independent approvals are complete.
 Issue 70's broader fleet cutover and activation/publication scope remain
 separate from this bounded repair.
+
+## Authorized three-source batch (2026-09-10)
+
+
+The operator authorized Mission Valley CYO League, TPH Academy Austin, and
+Ultimate Chicago as a small sequential repair batch. Use mapper 1, reviewer
+1, and the root runner with exact-job leases. Keep public surfaces and
+automatic scraping disabled. Preserve Softball and Boomtown. Stop at an
+unexpected failure.
+
+The operator separately approved refreshing only the internal Gateway to
+install fresh preflight. The same reviewed deployment-6 images and contracts
+were used. A stopped-Gateway preflight passed with hash
+`cd906810eaa799f5db656ceae581cd7cc9978b567647dab6d2ccaf5c5ac0492f`.
+No model, site, coverage, or secondary-worker runtime was changed.
+
+Closed-admission apply created the three exact queued producer jobs:
+Mission Valley `bb453a27-f14b-4e0e-8737-bc4ad2cb6a2c`, TPH
+`0ec7d3d8-eb20-4a51-989c-6bf59ec05974`, and Ultimate
+`2be12acf-1995-4ea5-a36c-3011e42aecaf`. Mission's retry replay returned
+zero writes. Initial-admission replay for TPH and Ultimate returned
+ADMISSION_REPORT_DRIFT. The batch stopped before any worker claim.
+
+Read-only diagnosis proved that the initial-admission writer omitted
+listingKind from both new queue subjects, while its replay checker used the
+strict current subject schema. Both stored sources and roots were correctly
+CLUB and had matching generation 1. The queued-subject decoder accepted
+both rows; strict subject parsing rejected only the missing listingKind.
+This was a replay contract mismatch, not a duplicate claim or root change.
+
+The operator authorized a reviewed correction and image-parity update of the
+six governed services, followed by resumption of these same queued jobs.
+Do not create replacement jobs or rewrite their existing audits.
+
+The correction adds the source-validated listingKind to new typed queue
+subjects and rejects unsupported source kinds before admission. Replay uses
+the existing queued-subject schema for historical omissions and rejects an
+explicit kind mismatch or a source/root kind conflict. It does not add
+listingKind to stored historical rows.
+
+The new initial-admission replay regressions failed before the correction
+and passed afterward. The complete admission suite passed 47 tests; the
+complete affected run passed 565 tests across 15 suites, including isolated
+PostgreSQL integration tests. TypeScript and targeted ESLint passed.
+A temporary process using the corrected source and PostgreSQL
+default_transaction_read_only=on replayed the exact production admission
+hash `6730164e83b919fbd1b8708dc3215b098b07f95fc6014e43a77e1f58689ba23f`
+with replayed true and writeCount zero.
+
+Review found that the added queue and lane checks needed both fields in
+the Prisma snapshot query. The query now selects both fields. The test
+delegate now applies the selected fields. The complete test run and the
+exact production read-only replay passed after this correction.
+
+The existing deployment-6/role-5 contract remains unchanged: this correction
+fulfills the current required subject schema and fixes only replay handling.
+A fresh reviewed image and preflight are required before resumption.
+The three jobs remain queued, claimGeneration zero, with admission closed.
+Private batch evidence is in
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v6-small-batch-20260910T032130340Z/run`.

@@ -7,6 +7,7 @@ import {
   affiliateAgentEvidenceManifestSchema,
   affiliateAgentSportEvidenceSchema,
   affiliateAgentSubjectSchema,
+  affiliateAgentQueuedMappingProducerSubjectSchema,
   parseAffiliateAgentProducerClaimEnvelopeForHistoricalRead,
   type AffiliateAgentProducerClaimEnvelopeForHistoricalRead,
   type AffiliateAgentTerminalResultEnvelope,
@@ -14,6 +15,7 @@ import {
   type AffiliateAgentHistoricalMappingProducerSubject,
   type AffiliateAgentLegacySportRepairContext,
   type AffiliateAgentListingKind,
+  type AffiliateAgentSubject,
   hashAffiliateAgentValue,
   AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX,
   AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX,
@@ -581,8 +583,8 @@ type GatewayJobRow = {
   supplySourceId: string | null;
   status: string;
   activeClaimId: string | null;
-  queue?: string;
-  lane?: string;
+  queue: string;
+  lane: string;
   parentClaimId?: string | null;
   terminalDisposition?: string | null;
   resultHash?: string | null;
@@ -1038,6 +1040,8 @@ const readSnapshot = async (
       select: {
         id: true,
         dedupeKey: true,
+        queue: true,
+        lane: true,
         role: true,
         subjectType: true,
         subjectId: true,
@@ -1556,12 +1560,17 @@ const gatewayIdentityMatches = (
   repairContext: unknown,
   manifest: unknown,
   dedupeKey: string | null,
+  expectedListingKind: AffiliateAgentListingKind | null,
 ): boolean => {
-  const parsedSubject = affiliateAgentSubjectSchema.safeParse(gatewayJob.subjectJson);
+  const parsedSubject = affiliateAgentQueuedMappingProducerSubjectSchema.safeParse(gatewayJob.subjectJson);
   if (!parsedSubject.success) return false;
   const subject = recordValue(parsedSubject.data);
   return gatewayJob.role === 'MAPPING_PRODUCER'
+    && gatewayJob.queue === 'AFFILIATE_MAPPING'
+    && gatewayJob.lane === 'MAPPING_PRODUCTION'
     && subject.type === 'MAPPING_PRODUCER'
+    && expectedListingKind !== null
+    && (subject.listingKind === undefined || subject.listingKind === expectedListingKind)
     && gatewayJob.subjectType === 'MAPPING_PRODUCER'
     && gatewayJob.subjectId === jobId
     && gatewayJob.supplySourceId === rootId
@@ -2019,6 +2028,7 @@ const evaluateJob = (
   const sourceState = sourceForJob(snapshot, intake, job, identity);
   reasons.push(...sourceState.reasonCodes);
   const source = sourceState.source;
+  if (source && !listingKindFor(source.targetKind)) reasons.push('SOURCE_LISTING_KIND_INVALID');
   const mappingState = mappingForIdentity(snapshot, source, identity);
   reasons.push(...mappingState.reasonCodes);
   const mapping = mappingState.mapping;
@@ -2146,6 +2156,7 @@ const evaluateJob = (
       candidateRepairContext,
       candidateManifest,
       gatewayDedupeKey,
+      listingKindFor(source?.targetKind),
     )
     && gatewayHistory !== null
   );
@@ -2400,6 +2411,10 @@ const applyPlan = async (
   requestedJobIds: readonly string[] | undefined,
   selectionLimit: number,
 ): Promise<void> => {
+  const sourceListingKind = listingKindFor(plan.source.targetKind);
+  if (!sourceListingKind) {
+    throw new AffiliateLegacyRepairAdmissionError('SOURCE_LISTING_KIND_INVALID', 'The source target kind is not supported.');
+  }
   const currentJob = await client.affiliateSourceMappingJobs.findUnique({ where: { id: plan.job.id } }) as unknown as MappingJobRow | null;
   if (!currentJob || currentJob.status !== 'QUEUED'
     || currentJob.sourceId !== plan.job.sourceId
@@ -2496,7 +2511,7 @@ const applyPlan = async (
     resolvedCanonicalUrl: plan.identity.canonicalUrl,
     isRedirectVerified: true,
     operatorDomain: new URL(plan.identity.canonicalUrl).hostname,
-    targetKind: plan.source.targetKind || plan.intake.targetKindHints[0] || 'EVENT',
+    targetKind: sourceListingKind,
     rolloutCohort: contractCohort(bundle),
     intakeId: plan.intake.id,
     expectedIntakeSupplySourceId: plan.intake.supplySourceId,
@@ -2685,10 +2700,11 @@ const applyPlan = async (
     });
     if (update.count !== 1) throw new AffiliateLegacyRepairAdmissionError('ARTIFACT_CAS_FAILED', `Artifact ${artifact.id} could not be pinned.`);
   }
-  const subject = {
+  const subject: AffiliateAgentSubject = {
     type: 'MAPPING_PRODUCER' as const,
     supplySourceId: root.id,
     mappingJobId: plan.job.id,
+    listingKind: sourceListingKind,
     pass: 1,
     repairContext: plan.repairContext,
   };
@@ -2837,10 +2853,14 @@ export const applyAffiliateLegacyRepairAdmission = async (
         const entry = evidenceByJobId.get(jobId);
         const gatewayCandidates = gatewayRepairJobsFor(current.snapshot, jobId);
         const gatewayJob = gatewayCandidates.length === 1 ? gatewayCandidates[0] : null;
+        const source = current.snapshot.sources.find((candidate) => candidate.id === entry?.sourceId);
+        const root = current.snapshot.roots.find((candidate) => candidate.id === entry?.rootId);
+        const expectedListingKind = listingKindFor(source?.targetKind);
         const rootLifecycleGeneration = typeof entry?.rootLifecycleGeneration === 'number'
           ? entry.rootLifecycleGeneration
           : null;
         if (!entry || !gatewayJob || gatewayJob.activeClaimId !== null
+          || !expectedListingKind || listingKindFor(root?.targetKind) !== expectedListingKind
           || current.snapshot.gatewayClaims.some((claim) => claim.jobId === gatewayJob.id && normalizedUpper(claim.status) === 'ACTIVE')) {
           return false;
         }
@@ -2852,6 +2872,7 @@ export const applyAffiliateLegacyRepairAdmission = async (
           entry.repairContext,
           entry.manifest,
           stringValue(entry.gatewayDedupeKey),
+          expectedListingKind,
         );
       }));
       const canReplay = selectedIdsMatch && evidenceConsistent && gatewayEvidenceMatches;

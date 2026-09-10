@@ -601,7 +601,13 @@ const retryFixture = () => {
     findUnique: jest.fn(async ({ where }: { where: Record<string, unknown> }) => findByWhere(organizations, where)),
   };
   const gatewayJobDelegate = {
-    findMany: jest.fn(async () => gatewayJobs),
+    findMany: jest.fn(async ({ select }: { select?: Record<string, boolean> } = {}) => (
+      select
+        ? gatewayJobs.map(row => Object.fromEntries(
+          Object.entries(row).filter(([key]) => select[key] === true),
+        ))
+        : gatewayJobs
+    )),
     findUnique: jest.fn(async ({ where }: { where: Record<string, unknown> }) => findByWhere(gatewayJobs, where)),
     create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
       gatewayJobs.push(data);
@@ -715,7 +721,7 @@ type RetryFixtureState = {
   roots: Record<string, unknown>[];
   organizations: Record<string, unknown>[];
 };
-const admitRetryFixture = async (state: RetryFixtureState): Promise<RetryFixtureState> => {
+const admitRetryFixture = async (state: RetryFixtureState, retainAdmissionJobs = false): Promise<RetryFixtureState> => {
   const historicalGatewayJobs = [...state.gatewayJobs];
   const historicalGatewayClaims = [...state.gatewayClaims];
   const historicalGatewayReceipts = [...state.gatewayReceipts];
@@ -784,6 +790,7 @@ const admitRetryFixture = async (state: RetryFixtureState): Promise<RetryFixture
   } finally {
     ensureSpy.mockRestore();
   }
+  if (retainAdmissionJobs) return state;
   state.gatewayJobs.splice(0, state.gatewayJobs.length, ...historicalGatewayJobs);
   state.gatewayClaims.splice(0, state.gatewayClaims.length, ...historicalGatewayClaims);
   state.gatewayReceipts.splice(0, state.gatewayReceipts.length, ...historicalGatewayReceipts);
@@ -995,6 +1002,61 @@ describe('legacy repair admission with real contract validators', () => {
     expect(first.rows[0].artifacts[0].artifactId).toMatch(/^intake-artifact:/);
     expect(first.reportHash).toBe(second.reportHash);
     expect(calculateAffiliateLegacyRepairAdmissionReportHash(first)).toBe(first.reportHash);
+  });
+
+  it.each([false, true])('replays initial admission without rewriting legacy queued subjects=%s', async (legacySubject) => {
+    const state = await admitRetryFixture(retryFixture(), true);
+    if (legacySubject) {
+      for (const job of state.gatewayJobs) delete (job.subjectJson as Record<string, unknown>).listingKind;
+    }
+    const history = (state.mappingJobs[0]!.resultSummary as Record<string, unknown>).legacyRepairAdmissionHistory as Record<string, unknown>[];
+    const expectedReportHash = String(history[0]!.reportHash);
+    const before = JSON.stringify({ jobs: state.gatewayJobs, mappings: state.mappingJobs, roots: state.roots, artifacts: state.artifacts });
+    const replay = await applyAffiliateLegacyRepairAdmission({
+      prisma: state.input.prisma,
+      bundle: state.input.bundle,
+      jobIds: state.mappingJobs.map(job => String(job.id)),
+      limit: 2,
+      operatorId: 'affiliate-gateway-operator',
+      expectedReportHash,
+    });
+    expect(replay).toMatchObject({ replayed: true, writeCount: 0 });
+    expect(replay.appliedJobIds).toEqual(state.mappingJobs.map(job => String(job.id)).sort());
+    expect(JSON.stringify({ jobs: state.gatewayJobs, mappings: state.mappingJobs, roots: state.roots, artifacts: state.artifacts })).toBe(before);
+  });
+
+  it.each(['SUBJECT_KIND', 'ROOT_KIND', 'QUEUE', 'LANE'])('rejects admission replay with conflicting %s', async (conflict) => {
+    const state = await admitRetryFixture(retryFixture(), true);
+    const queuedJob = state.gatewayJobs[0]!;
+    if (conflict === 'SUBJECT_KIND') {
+      (queuedJob.subjectJson as Record<string, unknown>).listingKind = 'EVENT';
+    } else if (conflict === 'ROOT_KIND') {
+      delete (queuedJob.subjectJson as Record<string, unknown>).listingKind;
+      state.roots.find(root => root.id === queuedJob.supplySourceId)!.targetKind = 'EVENT';
+    } else if (conflict === 'QUEUE') {
+      queuedJob.queue = 'AFFILIATE_REVIEW';
+    } else {
+      queuedJob.lane = 'SUPPLY_REVIEW';
+    }
+    const history = (state.mappingJobs[0]!.resultSummary as Record<string, unknown>).legacyRepairAdmissionHistory as Record<string, unknown>[];
+    const before = JSON.stringify(state.gatewayJobs);
+    await expect(applyAffiliateLegacyRepairAdmission({
+      prisma: state.input.prisma,
+      bundle: state.input.bundle,
+      jobIds: state.mappingJobs.map(job => String(job.id)),
+      limit: 2,
+      operatorId: 'affiliate-gateway-operator',
+      expectedReportHash: String(history[0]!.reportHash),
+    })).rejects.toMatchObject({ code: 'ADMISSION_REPORT_DRIFT' });
+    expect(JSON.stringify(state.gatewayJobs)).toBe(before);
+  });
+
+  it('does not admit an unsupported stored source kind using an intake fallback', async () => {
+    const { input, source } = fixture();
+    source.targetKind = 'TEAM';
+    const preview = await previewAffiliateLegacyRepairAdmission(input);
+    expect(preview.selectedJobIds).toEqual([]);
+    expect(preview.rows[0].reasonCodes).toContain('SOURCE_LISTING_KIND_INVALID');
   });
 
   it('holds a directory-visible organization even when its page and widgets are disabled', async () => {
