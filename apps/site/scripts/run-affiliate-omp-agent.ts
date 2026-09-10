@@ -17,14 +17,13 @@ import {
   type AffiliateAgentCommandRejectionDiagnostic,
 } from "../src/server/affiliateImports/affiliateAgentCommandDiagnostics";
 
-export const enableAffiliateOmpExecuteCommandLenientArgValidation = (
+export const enableAffiliateOmpBridgeArgValidation = (
   session: Pick<AgentSession, "agent">,
 ): void => {
-  const executeCommandTool = session.agent.state.tools.find(
-    (tool) => tool.name === "execute_command",
-  );
-  if (executeCommandTool !== undefined) {
-    executeCommandTool.lenientArgValidation = true;
+  for (const tool of session.agent.state.tools) {
+    if (tool.name === "execute_command" || tool.name === "check_result" || tool.name === "submit_result") {
+      tool.lenientArgValidation = true;
+    }
   }
 };
 
@@ -262,7 +261,7 @@ const run = async (): Promise<void> => {
       || session.sessionFile !== undefined
       || created.modelFallbackMessage
     ) throw new Error("OMP_SESSION_ISOLATION_INVALID");
-    enableAffiliateOmpExecuteCommandLenientArgValidation(session);
+    enableAffiliateOmpBridgeArgValidation(session);
     timeout = setTimeout(stop, Math.max(1, deadline - Date.now()));
     timeout.unref();
     try {

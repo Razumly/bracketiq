@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { JSDOM, VirtualConsole } from 'jsdom';
 import { z } from 'zod';
 import {
   affiliateSportsCatalogSnapshotSchema,
@@ -703,20 +704,92 @@ const artifactBytes = (artifact: AffiliateSportCompletionStoredArtifact): Uint8A
   throw new Error(`Stored artifact ${artifactIdentifier(artifact)} has no bytes.`);
 };
 
-const artifactText = (
-  artifact: AffiliateSportCompletionStoredArtifact,
-  bytes: Uint8Array,
-): string => {
-  if (typeof artifact.text === 'string') return artifact.text;
-  if (typeof artifact.body === 'string') return artifact.body;
-  const decoded = Buffer.from(bytes).toString('utf8');
-  if (artifact.kind === 'PAGE_HTML') {
-    return decoded
-      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
-      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
-      .replace(/<[^>]+>/g, ' ');
+const MAX_CITATION_ARTIFACT_BYTES = 8 * 1024 * 1024;
+const MAX_CITATION_HTML_MARKUP = 8_192;
+const MAX_CITATION_HTML_ATTRIBUTE_WORK = 32_768;
+const MAX_CITATION_TEXT_CHARACTERS = MAX_CITATION_ARTIFACT_BYTES * 8;
+const MAX_CACHED_CITATION_CHARACTERS = 2 * 1024 * 1024;
+const MAX_CACHED_CITATION_TEXTS = 4;
+
+export class AffiliateSportCitationTextLimitError extends Error {
+  constructor() {
+    super('The artifact exceeds the citation text parser limits. Use another claim-owned artifact.');
+    this.name = 'AffiliateSportCitationTextLimitError';
   }
-  return decoded;
+}
+
+const assertCitationHtmlComplexity = (html: string): void => {
+  let markup = 0;
+  let attributeWork = 0;
+  let inTag = false;
+  let quote = 0;
+  for (let index = 0; index < html.length; index += 1) {
+    const code = html.charCodeAt(index);
+    if (code === 60) {
+      markup += 1;
+      if (markup > MAX_CITATION_HTML_MARKUP) throw new AffiliateSportCitationTextLimitError();
+      if (!inTag) inTag = true;
+    }
+    if (!inTag) continue;
+    if (code === 61 || code === 47 || code === 9 || code === 10 || code === 12 || code === 13 || code === 32) {
+      attributeWork += 1;
+      if (attributeWork > MAX_CITATION_HTML_ATTRIBUTE_WORK) throw new AffiliateSportCitationTextLimitError();
+    }
+    if (quote !== 0) {
+      if (code === quote) quote = 0;
+    } else if (code === 34 || code === 39) {
+      quote = code;
+    } else if (code === 62) {
+      inTag = false;
+    }
+  }
+};
+
+export const affiliateSportCitationText = async (
+  artifact: Pick<AffiliateSportCompletionStoredArtifact, 'kind' | 'text' | 'body'>,
+  bytes: Uint8Array,
+): Promise<string> => {
+  if (bytes.byteLength > MAX_CITATION_ARTIFACT_BYTES) throw new AffiliateSportCitationTextLimitError();
+  const suppliedText = typeof artifact.text === 'string'
+    ? artifact.text
+    : typeof artifact.body === 'string' ? artifact.body : undefined;
+  if (suppliedText !== undefined && Buffer.byteLength(suppliedText, 'utf8') > MAX_CITATION_ARTIFACT_BYTES) {
+    throw new AffiliateSportCitationTextLimitError();
+  }
+  const decoded = suppliedText ?? new TextDecoder('utf-8').decode(bytes);
+  if (suppliedText !== undefined || artifact.kind !== 'PAGE_HTML') {
+    const text = normalizeCitationText(decoded);
+    if (text.length > MAX_CITATION_TEXT_CHARACTERS) throw new AffiliateSportCitationTextLimitError();
+    return text;
+  }
+  assertCitationHtmlComplexity(decoded);
+  const dom = new JSDOM('', { virtualConsole: new VirtualConsole() });
+  try {
+    const document = new dom.window.DOMParser().parseFromString(decoded, 'text/html');
+    const { NodeFilter } = dom.window;
+    const walker = document.createTreeWalker(document, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        if (node.nodeType === 1 && ['script', 'style', 'template'].includes(node.nodeName.toLowerCase())) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        return node.nodeType === 3 ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+      },
+    });
+    const parts: string[] = [];
+    let characters = 0;
+    while (walker.nextNode()) {
+      const value = walker.currentNode.nodeValue;
+      if (!value) continue;
+      characters += value.length + 1;
+      if (characters > MAX_CITATION_TEXT_CHARACTERS) throw new AffiliateSportCitationTextLimitError();
+      parts.push(value);
+    }
+    const text = normalizeCitationText(parts.join(' '));
+    if (text.length > MAX_CITATION_TEXT_CHARACTERS) throw new AffiliateSportCitationTextLimitError();
+    return text;
+  } finally {
+    dom.window.close();
+  }
 };
 
 const sportCitationVerificationError = (
@@ -729,14 +802,15 @@ const sportCitationVerificationError = (
   message,
 );
 
-const assertArtifactCitation = (
+const assertArtifactCitation = async (
   artifact: AffiliateSportCompletionStoredArtifact,
   citation: AffiliateSportCitation,
   evidenceRunId: string,
   expectedIntakeId: string | undefined,
   determinationIndex: number,
   citationIndex: number,
-): void => {
+  citationTexts: Map<string, string>,
+): Promise<void> => {
   const id = artifactIdentifier(artifact);
   if (!id || id !== citation.artifactId) throw sportCitationVerificationError(determinationIndex, citationIndex, 'artifactId', 'The citation artifact is not owned by the claimed run.');
   if (artifact.runId !== evidenceRunId) throw sportCitationVerificationError(determinationIndex, citationIndex, 'artifactId', 'The citation artifact belongs to a different evidence run.');
@@ -756,7 +830,22 @@ const assertArtifactCitation = (
     throw sportCitationVerificationError(determinationIndex, citationIndex, 'artifactSha256', 'The citation artifact bytes do not match the claimed SHA-256.');
   }
   if (citation.artifactKind !== 'PAGE_SCREENSHOT') {
-    const text = normalizeCitationText(artifactText(artifact, bytes));
+    let text = citationTexts.get(id);
+    if (text === undefined) {
+      try {
+        text = await affiliateSportCitationText(artifact, bytes);
+      } catch (error) {
+        if (!(error instanceof AffiliateSportCitationTextLimitError)) throw error;
+        throw sportCitationVerificationError(determinationIndex, citationIndex, 'artifactId', error.message);
+      }
+      if (text.length <= MAX_CACHED_CITATION_CHARACTERS) {
+        if (citationTexts.size >= MAX_CACHED_CITATION_TEXTS) {
+          const oldest = citationTexts.keys().next().value;
+          if (oldest !== undefined) citationTexts.delete(oldest);
+        }
+        citationTexts.set(id, text);
+      }
+    }
     const excerpt = normalizeCitationText(citation.excerpt);
     if (!excerpt || !text.includes(excerpt)) throw sportCitationVerificationError(determinationIndex, citationIndex, 'excerpt', 'The citation excerpt is not present in the stored artifact.');
   } else if (!citation.excerpt.trim()) {
@@ -827,16 +916,21 @@ const verifyAffiliateSportCompletionEvidence = async (
       artifacts.set(artifactId, await dependencies.readArtifact(result.evidenceRunId, artifactId));
     }
   }
-  determinations.forEach((determination, determinationIndex) => determination.evidence.forEach((citation, citationIndex) => {
-    const artifact = artifacts.get(citation.artifactId);
-    if (!artifact) {
-      throw new AffiliateSportVerificationError(
-        ['sportDeterminations', determinationIndex, 'evidence', citationIndex, 'artifactId'],
-        'The stored citation artifact was not found.',
-      );
+  const citationTexts = new Map<string, string>();
+  for (let determinationIndex = 0; determinationIndex < determinations.length; determinationIndex += 1) {
+    const citations = determinations[determinationIndex].evidence;
+    for (let citationIndex = 0; citationIndex < citations.length; citationIndex += 1) {
+      const citation = citations[citationIndex];
+      const artifact = artifacts.get(citation.artifactId);
+      if (!artifact) {
+        throw new AffiliateSportVerificationError(
+          ['sportDeterminations', determinationIndex, 'evidence', citationIndex, 'artifactId'],
+          'The stored citation artifact was not found.',
+        );
+      }
+      await assertArtifactCitation(artifact, citation, result.evidenceRunId, input.expectedIntakeId, determinationIndex, citationIndex, citationTexts);
     }
-    assertArtifactCitation(artifact, citation, result.evidenceRunId, input.expectedIntakeId, determinationIndex, citationIndex);
-  }));
+  }
 
   const expectedSportNames = [...(input.expectedSportNames ?? resolvedAffiliateSportNameUnion(determinations))]
     .sort(compareStrings)

@@ -58,10 +58,7 @@ import {
   AffiliateAgentSportEvidenceError,
   verifyAffiliateAgentLegacySportRepair,
 } from "./agentGatewayAdapters";
-import {
-  AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_MAX_ISSUES,
-  issueCodeFor,
-} from "./affiliateAgentCommandDiagnostics";
+import { terminalResultSchemaCorrectionIssues } from "./affiliateAgentTerminalValidation";
 import {
   AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX,
   AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX,
@@ -7385,113 +7382,6 @@ const schemaCorrectionIssues = [
   },
 ] as const;
 
-const terminalSchemaIssuePath = (
-  schema: z.core.$ZodType,
-  path: readonly PropertyKey[],
-): (string | number)[] => {
-  const safePath: (string | number)[] = [];
-  let current = schema;
-  for (const segment of path) {
-    while (current instanceof z.ZodOptional || current instanceof z.ZodNullable) {
-      current = current.unwrap();
-    }
-    if (current instanceof z.ZodObject
-      && typeof segment === "string"
-      && Object.prototype.hasOwnProperty.call(current.shape, segment)) {
-      safePath.push(segment);
-      current = current.shape[segment];
-    } else if (current instanceof z.ZodArray
-      && typeof segment === "number"
-      && Number.isSafeInteger(segment)
-      && segment >= 0) {
-      safePath.push(segment);
-      current = current.element;
-    } else {
-      break;
-    }
-  }
-  return safePath;
-};
-
-const terminalRefinementMessages = new Set([
-  "Set-like arrays must be sorted and unique.",
-  "Only RESOLVED determinations may contain canonical sport names, and RESOLVED needs at least one.",
-  "Unresolved, unsupported, and blacklisted determinations must use source evidence.",
-  "User decisions may only resolve a prior determination.",
-  "User decisions must identify the prior determination hash.",
-  "Source-evidence determinations cannot contain a user-resolution hash.",
-  "Sport determinations must be sorted by status, source labels, names, then hash.",
-  "Every sport determination needs stored evidence.",
-  "Determination citations must be sorted uniquely by their canonical tuple.",
-  "sourceLabels must contain nonblank, unpadded strings.",
-  "sourceLabels must be sorted uniquely by code unit order.",
-  "canonicalSportNames must contain nonblank, unpadded strings.",
-  "canonicalSportNames must be sorted uniquely by code unit order.",
-]);
-
-const terminalSchemaIssueMessage = (issue: z.core.$ZodIssue): string => {
-  switch (issue.code) {
-    case "invalid_value": {
-      const message = `Use one of these allowed values: ${issue.values.map(value => JSON.stringify(value)).join(", ")}.`;
-      return message.length <= 500 ? message : "Use a permitted value from the terminal schema.";
-    }
-    case "invalid_type":
-      return ["string", "number", "boolean", "object", "array", "int", "null"].includes(issue.expected)
-        ? `Provide the required ${issue.expected} value.`
-        : "Provide the value type required by the terminal schema.";
-    case "unrecognized_keys":
-      return "Remove fields that this terminal object does not allow.";
-    case "too_small":
-      return "Meet the minimum size or value required by this terminal field.";
-    case "too_big":
-      return "Do not exceed the maximum size or value for this terminal field.";
-    case "invalid_format":
-      return "Use the format required by this terminal field.";
-    case "custom":
-      if (terminalRefinementMessages.has(issue.message)) return issue.message;
-      if (issue.message.startsWith("Duplicate sport determination ")) {
-        return "Remove duplicate sport determinations.";
-      }
-      if (issue.message.startsWith("Invalid affiliate sport citation URL: ")) {
-        return "Use a valid public HTTP or HTTPS citation URL.";
-      }
-      return "Match the terminal schema constraints for this field.";
-    default:
-      return "Match the terminal schema for this field.";
-  }
-};
-
-const terminalResultSchemaCorrectionIssues = (
-  authorized: AuthorizedClaim,
-  result: unknown,
-  error: z.ZodError,
-): AffiliateAgentSchemaCorrectionResult["issues"] => {
-  if (!isGatewayRecord(result)) {
-    return [{ path: [], code: "INVALID_TYPE", message: "Provide a terminal result object." }];
-  }
-  if (result.role !== authorized.envelope.role) {
-    return [{ path: ["role"], code: "INVALID_VALUE", message: "Use the role from the claim." }];
-  }
-  const variantIndex = affiliateAgentTerminalResultEnvelopeSchema.options.findIndex(
-    variant => variant.shape.role.value === authorized.envelope.role
-      && variant.shape.disposition.value === result.disposition,
-  );
-  const variant = affiliateAgentTerminalResultEnvelopeSchema.options[variantIndex];
-  if (!variant) {
-    return [{
-      path: ["disposition"],
-      code: "INVALID_VALUE",
-      message: "Use a terminal disposition permitted by the claim role.",
-    }];
-  }
-  const unionIssue = error.issues.find(issue => issue.code === "invalid_union");
-  const issues = unionIssue?.errors[variantIndex] ?? error.issues;
-  return issues.slice(0, AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_MAX_ISSUES).map(issue => ({
-    path: terminalSchemaIssuePath(variant, issue.path),
-    code: issueCodeFor(issue),
-    message: terminalSchemaIssueMessage(issue),
-  }));
-};
 
 const terminalResultEvidenceCorrectionIssues = (
   error: unknown,
@@ -13196,7 +13086,7 @@ const executePreparedTerminalResultTransaction = (
           preparation.requestHash,
           now,
           terminalResultSchemaCorrectionIssues(
-            authorized,
+            authorized.envelope.role,
             preparation.input.result,
             parsedResult.error,
           ),

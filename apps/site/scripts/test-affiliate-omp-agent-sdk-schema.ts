@@ -26,7 +26,7 @@ import {
   type AffiliateOmpToolResult,
 } from "../src/server/affiliateImports/affiliateOmpGatewayTools";
 import {
-  enableAffiliateOmpExecuteCommandLenientArgValidation,
+  enableAffiliateOmpBridgeArgValidation,
 } from "./run-affiliate-omp-agent";
 import type { AffiliateAgentCommandRejectionDiagnostic } from "../src/server/affiliateImports/affiliateAgentCommandDiagnostics";
 
@@ -92,7 +92,7 @@ const modelForProbe = () => {
   return model;
 };
 
-const run = async (): Promise<void> => {
+const runScenario = async (toolName: "execute_command" | "check_result" | "submit_result"): Promise<void> => {
   if (process.versions.bun !== "1.3.14") throw new Error("This probe requires pinned Bun 1.3.14.");
 
   const workspace = await mkdtemp(join(tmpdir(), "affiliate-omp-sdk-schema-"));
@@ -128,6 +128,7 @@ const run = async (): Promise<void> => {
     const gatewayCalls: unknown[] = [];
     const diagnostics: AffiliateAgentCommandRejectionDiagnostic[] = [];
     let providerGuardCalls = 0;
+    let observedToolResult: AffiliateOmpToolResult | undefined;
     let activeSession: AgentSession | undefined;
     const bridge = createAffiliateOmpGatewayTools({
       claim,
@@ -153,7 +154,10 @@ const run = async (): Promise<void> => {
       parameters: fromJsonSchema(z.toJSONSchema(definition.parameters)),
       strict: false,
       async execute(_toolCallId, params, _onUpdate, _context, signal): Promise<AffiliateOmpToolResult> {
-        return bridge.execute(definition.name, params, signal);
+        const result = await bridge.execute(definition.name, params, signal);
+        observedToolResult = result;
+        activeSession?.agent.abort(TERMINAL_TOOL_RESULT_ABORT_REASON);
+        return result;
       },
     }));
     const toolNames = customTools.map((tool) => tool.name);
@@ -194,36 +198,39 @@ const run = async (): Promise<void> => {
     session = created.session;
     activeSession = session;
 
-    const executeCommandTool = session.agent.state.tools.find((tool) => tool.name === "execute_command");
-    assert(executeCommandTool !== undefined, "production tool activation did not expose execute_command");
-    const advertisedSchemaBefore = JSON.stringify(toolWireSchema(executeCommandTool));
-    enableAffiliateOmpExecuteCommandLenientArgValidation(session);
-    const executeCommandToolAfter = session.agent.state.tools.find((tool) => tool.name === "execute_command");
-    assert(executeCommandToolAfter === executeCommandTool, "helper did not mutate the final registered wrapper");
-    assert(executeCommandToolAfter.lenientArgValidation === true, "execute_command wrapper is not lenient");
+    const delegatedNames = ["execute_command", "check_result", "submit_result"];
+    const advertisedSchemas = new Map(session.agent.state.tools.map(tool => [
+      tool.name, JSON.stringify(toolWireSchema(tool)),
+    ]));
+    enableAffiliateOmpBridgeArgValidation(session);
+    for (const name of delegatedNames) {
+      const tool = session.agent.state.tools.find(tool => tool.name === name);
+      assert(tool !== undefined && tool.lenientArgValidation === true, `bridge validation is not active for ${name}`);
+      assert(JSON.stringify(toolWireSchema(tool)) === advertisedSchemas.get(name), `${name} advertised schema changed`);
+    }
     assert(
-      session.agent.state.tools
-        .filter((tool) => tool.name !== "execute_command")
-        .every((tool) => tool.lenientArgValidation !== true),
-      "helper changed a non-execute_command tool",
+      session.agent.state.tools.filter(tool => !delegatedNames.includes(tool.name))
+        .every(tool => tool.lenientArgValidation !== true),
+      "helper changed a tool outside the bridge validation set",
     );
-    assert(
-      JSON.stringify(toolWireSchema(executeCommandToolAfter)) === advertisedSchemaBefore,
-      "execute_command advertised schema changed",
-    );
+
+    const privateKey = "private-sdk-draft-key";
+    const privateValue = "private-sdk-draft-value";
+    const toolArguments = toolName === "execute_command" ? {
+      command: { type: "CAPTURE_CLAIM_URL", data: { urlRef: "", captureProfileRef: "profile-sdk-schema-probe" } },
+    } : {
+      disposition: privateValue, reasonCodes: ["SOURCE_UNSUPPORTED"], evidenceRefs: [],
+      summary: "The source layout is unsupported.", payload: { incompatibilityCode: "UNSUPPORTED_LAYOUT" },
+      [privateKey]: privateValue,
+    };
 
     const malformedAssistantTail: AssistantMessage = {
       role: "assistant",
       content: [{
         type: "toolCall",
         id: "call-sdk-schema-probe",
-        name: "execute_command",
-        arguments: {
-          command: {
-            type: "CAPTURE_CLAIM_URL",
-            data: { urlRef: "", captureProfileRef: "profile-sdk-schema-probe" },
-          },
-        },
+        name: toolName,
+        arguments: toolArguments,
       }],
       api: model.api,
       provider: model.provider,
@@ -239,13 +246,23 @@ const run = async (): Promise<void> => {
     };
 
     await session.agent.continue();
-    assert(diagnostics.length === 1, `expected one local diagnostic, got ${diagnostics.length}`);
-    assert(diagnostics[0]?.stage === "LOCAL_SCHEMA", "malformed input did not produce a LOCAL_SCHEMA diagnostic");
-    assert(diagnostics[0]?.errorCode === "COMMAND_SCHEMA_INVALID", "diagnostic error code was not local schema invalid");
+    if (toolName === "execute_command") {
+      assert(diagnostics.length === 1, `expected one local diagnostic, got ${diagnostics.length}`);
+      assert(diagnostics[0]?.stage === "LOCAL_SCHEMA", "malformed input did not produce a LOCAL_SCHEMA diagnostic");
+      assert(diagnostics[0]?.errorCode === "COMMAND_SCHEMA_INVALID", "diagnostic error code was not local schema invalid");
+    } else {
+      const content = observedToolResult?.content[0];
+      assert(content?.type === "text", "SDK terminal arguments did not reach the bridge");
+      const result = JSON.parse(content.text);
+      assert(result.kind === "DRAFT_INVALID", "malformed draft did not return DRAFT_INVALID");
+      assert(result.issues[0]?.code === "INVALID_VALUE" && result.issues[0]?.path?.[0] === "disposition", "unrepairable draft input was not identified");
+      assert(!JSON.stringify(result).includes(privateKey) && !JSON.stringify(result).includes(privateValue), "draft diagnostics exposed input");
+      assert(!bridge.isClosed && bridge.terminalFrame === null, "malformed draft closed the invocation");
+    }
     assert(gatewayCalls.length === 0, `Gateway.perform was called ${gatewayCalls.length} time(s)`);
     assert(providerGuardCalls === 0, `provider guard was called ${providerGuardCalls} time(s)`);
     assert(networkGuardCalls === 0, `network guard was called ${networkGuardCalls} time(s)`);
-    process.stdout.write("affiliate OMP SDK schema probe passed (no provider call).\n");
+    process.stdout.write(`affiliate OMP SDK ${toolName} schema probe passed (no provider call).\n`);
   } finally {
     try {
       await session?.dispose();
@@ -260,6 +277,12 @@ const run = async (): Promise<void> => {
         }
       }
     }
+  }
+};
+
+const run = async (): Promise<void> => {
+  for (const toolName of ["execute_command", "check_result", "submit_result"] as const) {
+    await runScenario(toolName);
   }
 };
 

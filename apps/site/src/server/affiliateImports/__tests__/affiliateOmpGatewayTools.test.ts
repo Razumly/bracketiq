@@ -11,6 +11,57 @@ import {
   type AffiliateAgentClaimEnvelope,
 } from "../agentGatewayContracts";
 import { createAffiliateOmpGatewayTools, type AffiliateOmpToolResult } from "../affiliateOmpGatewayTools";
+import { buildAffiliateSportsCatalogSnapshot } from "../affiliateSportsCatalog";
+
+const legacyRepairFixture = (html: string | Buffer = '<p>Outdoor&nbsp;soccer on grass fields</p>') => {
+  const bytes = typeof html === "string" ? Buffer.from(html, "utf8") : html;
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  const catalog = buildAffiliateSportsCatalogSnapshot(
+    [{ id: "grass-soccer", name: "Grass Soccer" }], "2026-09-07T12:00:00.000Z",
+  );
+  const base = claimFor("MAPPING_PRODUCER");
+  const manifest = {
+    schemaVersion: 1 as const,
+    entries: [{
+      evidenceRef: "evidence-1", kind: "PAGE_HTML" as const, artifactId: "artifact-1",
+      sha256, mimeType: "text/html", byteSize: bytes.byteLength, retention: "INDEFINITE" as const,
+    }],
+  };
+  const claim: AffiliateAgentClaimEnvelope = {
+    ...base,
+    role: "MAPPING_PRODUCER", queue: "AFFILIATE_MAPPING", lane: "MAPPING_PRODUCTION",
+    evidenceManifest: { ...manifest, hash: hashAffiliateAgentValue(manifest) },
+    subject: {
+      type: "MAPPING_PRODUCER", supplySourceId: "supply-1", mappingJobId: "mapping-1",
+      listingKind: "CLUB", pass: 1,
+      repairContext: { kind: "LEGACY_SPORT_REPAIR", intakeId: "intake-1", evidenceRunId: "run-1", sportsCatalog: catalog },
+    },
+  };
+  const artifact = {
+    kind: "ARTIFACT_READ" as const, receiptId: "read-receipt", evidenceRef: "evidence-1",
+    sha256, byteSize: bytes.byteLength, mimeType: "text/html", bytes,
+    sourceUrl: "https://example.test/sports", finalUrl: "https://example.test/sports",
+  };
+  const draft = {
+    disposition: "CONTRACT_GAP", reasonCodes: ["CONTRACT_REQUIREMENT_MISSING"], evidenceRefs: ["evidence-1"],
+    summary: "A separate mapping requirement needs review.",
+    payload: {
+      contractArea: "MAPPING_EVIDENCE", requestedChange: "Define the missing mapping requirement.",
+      sportEvidence: {
+        evidenceRunId: "run-1", sportsCatalogSha256: catalog.sha256,
+        sportDeterminations: [{
+          sourceLabels: ["Soccer"], status: "RESOLVED", resolutionBasis: "SOURCE_EVIDENCE",
+          canonicalSportNames: ["Grass Soccer"], rationale: "The source identifies grass fields.",
+          evidence: [{
+            artifactId: "artifact-1", artifactSha256: sha256, artifactKind: "PAGE_HTML",
+            pageUrl: "https://example.test/sports", excerpt: "Outdoor soccer on grass fields",
+          }],
+        }],
+      },
+    },
+  };
+  return { claim, artifact, draft };
+};
 
 const evidence = Buffer.from("abc😀def", "utf8");
 const evidenceHash = createHash("sha256").update(evidence).digest("hex");
@@ -100,6 +151,172 @@ const textValue = (result: AffiliateOmpToolResult) => {
   if (block.type !== "text") throw new Error("Expected a text result.");
   return JSON.parse(block.text);
 };
+
+it.each(["check_result", "submit_result"])("redacts top-level %s draft errors", async (toolName) => {
+  const perform = jest.fn();
+  const onTerminal = jest.fn();
+  const tools = createAffiliateOmpGatewayTools({
+    claim: claimFor("MAPPING_PRODUCER"), token: "private-claim-token", gateway: { perform }, onTerminal,
+  });
+  const privateKey = "private-undeclared-key";
+  const privateValue = "private-draft-value";
+  const response = await tools.execute(toolName, { ...terminalFields, [privateKey]: privateValue });
+  expect(textValue(response)).toMatchObject({
+    kind: "DRAFT_INVALID", authoritative: false, checked: ["INPUT_SCHEMA"],
+    issues: [{ path: [], code: "UNKNOWN_KEY" }],
+  });
+  expect(JSON.stringify(response)).not.toContain(privateKey);
+  expect(JSON.stringify(response)).not.toContain(privateValue);
+  expect(perform).not.toHaveBeenCalled();
+  expect(onTerminal).not.toHaveBeenCalled();
+  expect(tools.isClosed).toBe(false);
+});
+
+it("uses verifier decoding for malformed UTF-8 without decoding SOURCE first", async () => {
+  const bytes = Buffer.concat([Buffer.from("<p>Outdoor"), Buffer.from([255]), Buffer.from(" soccer on grass fields</p>")]);
+  const fixture = legacyRepairFixture(bytes);
+  const perform = jest.fn().mockResolvedValue(fixture.artifact);
+  const tools = createAffiliateOmpGatewayTools({
+    claim: fixture.claim, token: "private-claim-token", gateway: { perform }, onTerminal: jest.fn(),
+  });
+  const view = textValue(await tools.execute("read_artifact", { evidenceRef: "evidence-1", view: "CITATION_TEXT" }));
+  expect(view.text).toBe("Outdoor� soccer on grass fields");
+  fixture.draft.payload.sportEvidence.sportDeterminations[0].evidence[0].excerpt = view.text;
+  expect(textValue(await tools.execute("check_result", fixture.draft))).toMatchObject({ kind: "DRAFT_VALID" });
+  expect(tools.isClosed).toBe(false);
+  expect((await tools.execute("read_artifact", { evidenceRef: "evidence-1", view: "SOURCE" })).isError).toBe(true);
+  expect(tools.isClosed).toBe(true);
+  expect(perform).toHaveBeenCalledTimes(1);
+});
+
+it.each(["application/octet-stream", "image/png"])("uses claim kind for citation text with %s MIME", async (mimeType) => {
+  const fixture = legacyRepairFixture();
+  fixture.artifact.mimeType = mimeType;
+  fixture.claim.evidenceManifest.entries[0].mimeType = mimeType;
+  fixture.claim.evidenceManifest.hash = hashAffiliateAgentValue({
+    schemaVersion: 1, entries: fixture.claim.evidenceManifest.entries,
+  });
+  const tools = createAffiliateOmpGatewayTools({
+    claim: fixture.claim, token: "private-claim-token",
+    gateway: { perform: jest.fn().mockResolvedValue(fixture.artifact) }, onTerminal: jest.fn(),
+  });
+  const view = textValue(await tools.execute("read_artifact", { evidenceRef: "evidence-1", view: "CITATION_TEXT" }));
+  expect(view.text).toBe("Outdoor soccer on grass fields");
+  expect(textValue(await tools.execute("check_result", fixture.draft))).toMatchObject({ kind: "DRAFT_VALID" });
+  expect(tools.isClosed).toBe(false);
+});
+
+it("keeps a parser limit repairable while preserving raw artifact access", async () => {
+  const fixture = legacyRepairFixture("<b>x</b>".repeat(4_097));
+  const tools = createAffiliateOmpGatewayTools({
+    claim: fixture.claim, token: "private-claim-token",
+    gateway: { perform: jest.fn().mockResolvedValue(fixture.artifact) }, onTerminal: jest.fn(),
+  });
+  expect(textValue(await tools.execute("read_artifact", { evidenceRef: "evidence-1", view: "CITATION_TEXT" })))
+    .toMatchObject({ code: "CITATION_TEXT_LIMIT" });
+  expect(tools.isClosed).toBe(false);
+  expect(textValue(await tools.execute("read_artifact", { evidenceRef: "evidence-1", limit: 3 })).text).toBe("<b>");
+});
+
+it("repairs a draft from claim citation text before one terminal submission", async () => {
+  const fixture = legacyRepairFixture();
+  const perform = jest.fn(async (operation: AffiliateAgentClaimOperation) => {
+    if (operation.kind === "READ_ARTIFACT") return fixture.artifact;
+    if (operation.kind === "SUBMIT_RESULT") return { ...accepted(operation), disposition: "CONTRACT_GAP" as const };
+    throw new Error("Draft repair must not execute commands.");
+  });
+  const onTerminal = jest.fn();
+  const tools = createAffiliateOmpGatewayTools({ claim: fixture.claim, token: "private-claim-token", gateway: { perform }, onTerminal });
+  fixture.draft.reasonCodes = ["SOURCE_UNSUPPORTED", "CONTRACT_REQUIREMENT_MISSING"];
+  expect(textValue(await tools.execute("check_result", fixture.draft))).toMatchObject({
+    kind: "DRAFT_INVALID", authoritative: false, issues: [{ path: ["reasonCodes", 1] }],
+  });
+  expect(perform).not.toHaveBeenCalled();
+  fixture.draft.reasonCodes = ["CONTRACT_REQUIREMENT_MISSING"];
+  fixture.draft.payload.sportEvidence.sportDeterminations[0].evidence[0].excerpt = "Invented source quotation";
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    expect(textValue(await tools.execute("submit_result", fixture.draft))).toMatchObject({
+      kind: "DRAFT_INVALID",
+      issues: [{ path: ["payload", "sportEvidence", "sportDeterminations", 0, "evidence", 0, "excerpt"] }],
+    });
+  }
+  expect(perform.mock.calls.map(([operation]) => operation.kind)).toEqual(["READ_ARTIFACT"]);
+  expect(onTerminal).not.toHaveBeenCalled();
+  expect(tools.isClosed).toBe(false);
+  const raw = textValue(await tools.execute("read_artifact", { evidenceRef: "evidence-1" }));
+  const view = textValue(await tools.execute("read_artifact", { evidenceRef: "evidence-1", view: "CITATION_TEXT" }));
+  expect(raw.text).toContain("&nbsp;");
+  expect(view.text).toBe("Outdoor soccer on grass fields");
+  Object.assign(fixture.draft.payload.sportEvidence.sportDeterminations[0].evidence[0], view.citation, { excerpt: view.text });
+  expect(textValue(await tools.execute("check_result", fixture.draft))).toMatchObject({
+    kind: "DRAFT_VALID", authoritative: false, scope: "CLAIM_SNAPSHOT", issues: [],
+  });
+  expect(onTerminal).not.toHaveBeenCalled();
+  expect(textValue(await tools.execute("submit_result", fixture.draft))).toMatchObject({ kind: "TERMINAL_ACCEPTED" });
+  expect(perform.mock.calls.map(([operation]) => operation.kind)).toEqual(["READ_ARTIFACT", "SUBMIT_RESULT"]);
+  expect(onTerminal).toHaveBeenCalledTimes(1);
+  expect(tools.isClosed).toBe(true);
+});
+
+it("denies foreign citations and model-supplied draft authority without a read", async () => {
+  const fixture = legacyRepairFixture();
+  const perform = jest.fn();
+  const tools = createAffiliateOmpGatewayTools({
+    claim: fixture.claim, token: "private-claim-token", gateway: { perform }, onTerminal: jest.fn(),
+  });
+  const forged = await tools.execute("check_result", { ...fixture.draft, jobId: "foreign-job" });
+  expect(forged.isError).toBe(true);
+  fixture.draft.payload.sportEvidence.sportDeterminations[0].evidence[0].artifactId = "foreign-artifact";
+  expect(textValue(await tools.execute("check_result", fixture.draft))).toMatchObject({
+    kind: "DRAFT_INVALID",
+    issues: [{ path: ["payload", "sportEvidence", "sportDeterminations", 0, "evidence", 0, "artifactId"] }],
+  });
+  expect((await tools.execute("read_artifact", {
+    evidenceRef: "foreign-artifact", view: "CITATION_TEXT",
+  })).isError).toBe(true);
+  expect(perform).not.toHaveBeenCalled();
+  expect(tools.isClosed).toBe(false);
+});
+
+it("keeps Gateway authority after a successful local draft check", async () => {
+  const fixture = legacyRepairFixture();
+  const perform = jest.fn(async (operation: AffiliateAgentClaimOperation) => {
+    if (operation.kind === "READ_ARTIFACT") return fixture.artifact;
+    throw new AffiliateAgentGatewayError({
+      code: "CLAIM_NOT_ACTIVE", isRetryable: false, safeMessage: "The claim is no longer active.",
+    });
+  });
+  const onTerminal = jest.fn();
+  const tools = createAffiliateOmpGatewayTools({ claim: fixture.claim, token: "private-claim-token", gateway: { perform }, onTerminal });
+  expect(textValue(await tools.execute("check_result", fixture.draft))).toMatchObject({
+    kind: "DRAFT_VALID", authoritative: false,
+  });
+  expect(textValue(await tools.execute("submit_result", fixture.draft))).toMatchObject({ code: "CLAIM_NOT_ACTIVE" });
+  expect(onTerminal).not.toHaveBeenCalled();
+});
+
+it("pages canonical citation text within the existing byte and Unicode limits", async () => {
+  const fixture = legacyRepairFixture("<p>Club&nbsp;😀 &amp; league</p>".repeat(4_000));
+  const perform = jest.fn().mockResolvedValue(fixture.artifact);
+  const tools = createAffiliateOmpGatewayTools({
+    claim: fixture.claim, token: "private-claim-token", gateway: { perform }, onTerminal: jest.fn(),
+  });
+  let offset = 0;
+  const parts: string[] = [];
+  for (;;) {
+    const response = await tools.execute("read_artifact", { evidenceRef: "evidence-1", view: "CITATION_TEXT", offset, limit: 65_536 });
+    const page = textValue(response);
+    expect(Buffer.byteLength(JSON.stringify(page), "utf8")).toBeLessThan(48 * 1024);
+    expect(page.nextOffset).toBeGreaterThan(offset);
+    parts.push(page.text);
+    offset = page.nextOffset;
+    if (page.endOfArtifact) break;
+  }
+  expect(parts.join("")).toBe("Club 😀 & league ".repeat(4_000).trim());
+  const raw = textValue(await tools.execute("read_artifact", { evidenceRef: "evidence-1", limit: 3 }));
+  expect(raw.text).toBe("<p>");
+  expect(perform).toHaveBeenCalledTimes(1);
+});
 
 it("rejects reviewer writes and model-supplied claim authority before a Gateway effect", async () => {
   const perform = jest.fn();
@@ -268,57 +485,50 @@ it("replays the exact terminal operation after a durable invocation failure lose
   expect(perform).toHaveBeenCalledTimes(2);
 });
 it("forwards a maximal valid result body with its framing overhead", async () => {
-  const correction = {
-    kind: "SCHEMA_CORRECTION_REQUIRED" as const,
-    receiptId: "receipt-correction",
-    submissionNumber: 1 as const,
-    remainingSubmissions: 2 as const,
-    issues: [],
-    correctionPrompt: "The Gateway response was not confirmed.",
-  };
-  const probe = async (payloadSize: number) => {
-    const perform = jest.fn().mockResolvedValue(correction);
+  const fixture = legacyRepairFixture();
+  const draftFor = (size: number) => ({
+    ...fixture.draft,
+    payload: {
+      ...fixture.draft.payload,
+      sportEvidence: {
+        ...fixture.draft.payload.sportEvidence,
+        sportDeterminations: Array.from({ length: 32 }, (_, index) => ({
+          ...fixture.draft.payload.sportEvidence.sportDeterminations[0],
+          sourceLabels: [`Soccer ${String(index).padStart(2, "0")}`],
+          rationale: "x".repeat(size),
+        })),
+      },
+    },
+  });
+  const performFor = () => jest.fn(async (operation: AffiliateAgentClaimOperation) => (
+    operation.kind === "READ_ARTIFACT"
+      ? fixture.artifact
+      : { ...accepted(operation), disposition: "CONTRACT_GAP" as const }
+  ));
+  const probe = async (size: number) => {
+    const perform = performFor();
     const tools = createAffiliateOmpGatewayTools({
-      claim: claimFor("MAPPING_PRODUCER"),
-      token: "private-claim-token",
-      gateway: { perform },
-      onTerminal: jest.fn(),
+      claim: fixture.claim, token: "private-claim-token", gateway: { perform }, onTerminal: jest.fn(),
     });
-    await tools.execute("submit_result", {
-      ...terminalFields,
-      payload: { body: "x".repeat(payloadSize) },
-    });
-    return perform.mock.calls[0]?.[0] as Extract<
-      AffiliateAgentClaimOperation,
-      { kind: "SUBMIT_RESULT" }
-    > | undefined;
+    await tools.execute("submit_result", draftFor(size));
+    return perform.mock.calls.some(([operation]) => operation.kind === "SUBMIT_RESULT");
   };
-
-  let low = 0;
-  let high = 70_000;
+  let low = 1;
+  let high = 2_000;
   while (low < high) {
     const candidate = Math.ceil((low + high) / 2);
     if (await probe(candidate)) low = candidate;
     else high = candidate - 1;
   }
-
-  const perform = jest.fn(async (operation: AffiliateAgentClaimOperation) => accepted(operation));
+  const perform = performFor();
   const onTerminal = jest.fn();
   const tools = createAffiliateOmpGatewayTools({
-    claim: claimFor("MAPPING_PRODUCER"),
-    token: "private-claim-token",
-    gateway: { perform },
-    onTerminal,
+    claim: fixture.claim, token: "private-claim-token", gateway: { perform }, onTerminal,
   });
-  const outcome = await tools.execute("submit_result", {
-    ...terminalFields,
-    payload: { body: "x".repeat(low) },
-  });
+  const outcome = await tools.execute("submit_result", draftFor(low));
   expect(outcome.isError).toBeUndefined();
-  const operation = perform.mock.calls[0]?.[0] as Extract<
-    AffiliateAgentClaimOperation,
-    { kind: "SUBMIT_RESULT" }
-  >;
+  const operation = perform.mock.calls.find(([operation]) => operation.kind === "SUBMIT_RESULT")?.[0];
+  if (operation?.kind !== "SUBMIT_RESULT") throw new Error("Expected a validated terminal submission.");
   const frame = onTerminal.mock.calls[0]?.[0];
   expect(Buffer.byteLength(canonicalizeAffiliateAgentValue(operation.result), "utf8"))
     .toBeLessThanOrEqual(AFFILIATE_AGENT_MAX_TERMINAL_RESULT_CANONICAL_BYTES);
@@ -346,31 +556,19 @@ it("rejects a terminal frame that exceeds the trusted transport bound before Gat
   expect(onTerminal).not.toHaveBeenCalled();
 });
 
-it("sends an identity-bound candidate to the Gateway when semantic validation fails locally", async () => {
-  const perform = jest.fn().mockResolvedValue({
-    kind: "SCHEMA_CORRECTION_REQUIRED",
-    receiptId: "receipt-correction",
-    submissionNumber: 1,
-    remainingSubmissions: 2,
-    issues: [],
-    correctionPrompt: "Supply the required payload fields.",
-  });
+it("returns a local payload correction without terminal Gateway I/O", async () => {
+  const perform = jest.fn();
+  const onTerminal = jest.fn();
   const tools = createAffiliateOmpGatewayTools({
-    claim: claimFor("MAPPING_PRODUCER"),
-    token: "private-claim-token",
-    gateway: { perform },
-    onTerminal: jest.fn(),
+    claim: claimFor("MAPPING_PRODUCER"), token: "private-claim-token", gateway: { perform }, onTerminal,
   });
-  await tools.execute("submit_result", { ...terminalFields, payload: {} });
-  const operation = perform.mock.calls[0]?.[0] as Extract<
-    AffiliateAgentClaimOperation,
-    { kind: "SUBMIT_RESULT" }
-  >;
-  expect(operation.result).toMatchObject({
-    jobId: "job-1",
-    claimId: "claim-1",
-    payload: {},
+  expect(textValue(await tools.execute("submit_result", { ...terminalFields, payload: {} }))).toMatchObject({
+    kind: "DRAFT_INVALID",
+    issues: [{ path: ["payload", "incompatibilityCode"] }],
   });
+  expect(perform).not.toHaveBeenCalled();
+  expect(onTerminal).not.toHaveBeenCalled();
+  expect(tools.isClosed).toBe(false);
 });
 
 it("preserves Unicode across bounded evidence pages and refuses corrupt bytes", async () => {

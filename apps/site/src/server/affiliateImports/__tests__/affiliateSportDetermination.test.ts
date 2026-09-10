@@ -2,9 +2,11 @@
 
 import { createHash } from 'node:crypto';
 import {
+  AffiliateSportCitationTextLimitError,
   affiliateHumanSportResolutionSchema,
   affiliateHumanSportResolutionSha256,
   affiliateSportCitationTuple,
+  affiliateSportCitationText,
   affiliateSportDeterminationSchema,
   affiliateSportDeterminationSha256,
   assertAffiliateHumanSportResolutionMatchesDeterminations,
@@ -214,8 +216,49 @@ describe('affiliate sport determinations', () => {
       reasonCodes: ['SPORT_NOT_IN_CATALOG'],
     })).toBe(false);
   });
+  it('uses inert HTML text with decoded entities and no attribute or script content', async () => {
+    const html = '<p title="hidden > attribute">Track&nbsp;<b>Records</b> &amp; results</p>'
+      + '<!-- hidden comment --><script>hidden script</script><style>hidden style</style>'
+      + '<template>hidden template</template>'
+      + '<p>&lt;script&gt;literal&lt;/script&gt; &amp;lt;once&amp;gt;</p>';
+    await expect(affiliateSportCitationText({ kind: 'PAGE_HTML' }, Buffer.from(html))).resolves.toBe(
+      'Track Records & results <script>literal</script> &lt;once&gt;',
+    );
+  });
+
+  it.each([
+    ['lead<noscript>fallback<script>hidden</script><style>hidden</style></noscript>tail', 'lead fallback tail'],
+    ['<svg><style/></svg><p>visible</p>', 'visible'],
+    ['<svg/><style/>not-visible', ''],
+    ['<svg><foreignObject><style/>not-visible</foreignObject></svg><p>visible</p>', ''],
+  ])('preserves inert HTML context for %s', async (html, expected) => {
+    await expect(affiliateSportCitationText({ kind: 'PAGE_HTML' }, Buffer.from(html))).resolves.toBe(expected);
+  });
+
+  it('preserves long text and Unicode during citation interpretation', async () => {
+    const text = `${'a'.repeat(32_764)}😀${'b'.repeat(40_000)}`;
+    await expect(affiliateSportCitationText(
+      { kind: 'PAGE_HTML' }, Buffer.from(`<p>${text}&nbsp;end</p>`),
+    )).resolves.toBe(`${text} end`);
+  });
+
+  it('rejects artifacts above the existing byte bound before parsing', async () => {
+    await expect(affiliateSportCitationText(
+      { kind: 'PAGE_HTML' }, Buffer.alloc(8 * 1024 * 1024 + 1, 120),
+    )).rejects.toBeInstanceOf(AffiliateSportCitationTextLimitError);
+  });
+
+  it('rejects excessive markup and attribute work before DOM construction', async () => {
+    await expect(affiliateSportCitationText(
+      { kind: 'PAGE_HTML' }, Buffer.from('<b>x</b>'.repeat(4_097)),
+    )).rejects.toBeInstanceOf(AffiliateSportCitationTextLimitError);
+    await expect(affiliateSportCitationText(
+      { kind: 'PAGE_HTML' }, Buffer.from(`<p ${'a="" '.repeat(16_385)}>text</p>`),
+    )).rejects.toBeInstanceOf(AffiliateSportCitationTextLimitError);
+  });
+
   it('verifies claim-owned artifacts, excerpts, exact run, and fresh catalog before completion', async () => {
-    const bytes = Buffer.from('Outdoor soccer on grass fields', 'utf8');
+    const bytes = Buffer.from('<p>Outdoor&nbsp;soccer on grass fields</p>', 'utf8');
     const bytesHash = createHash('sha256').update(bytes).digest('hex');
     const completionDetermination = {
       ...resolved,

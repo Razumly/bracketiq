@@ -714,8 +714,8 @@ export const AFFILIATE_AGENT_ROLES = [
 ] as const;
 
 export type AffiliateAgentRole = (typeof AFFILIATE_AGENT_ROLES)[number];
-export const AFFILIATE_AGENT_ROLE_CONTRACT_VERSION = 5 as const;
-export const AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION = 5 as const;
+export const AFFILIATE_AGENT_ROLE_CONTRACT_VERSION = 6 as const;
+export const AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION = 6 as const;
 
 export const AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX = "legacy-sport-repair-continuation:";
 export const AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX = "legacy-sport-repair-continuation-review:";
@@ -766,6 +766,9 @@ const terminalResultShapeForRole = (
     : []),
   "Use an empty reasonCodes array when no reason code applies; evidenceRefs are sorted unique identifiers.",
   "All result and payload objects are strict: add no fields beyond this shape.",
+  "Run check_result with the same terminal fields before submit_result. Correct DRAFT_INVALID fields in this session. Local checks do not spend terminal corrections or execute commands.",
+  "DRAFT_VALID is a local claim-snapshot check, not approval or package validation. The Gateway still checks live authority, catalog freshness, receipts, and lifecycle state when you submit.",
+  "submit_result repeats the local draft check before contacting the Gateway. Do not repeat an unchanged invalid draft. For citation errors, read the cited artifact with view CITATION_TEXT and copy an exact excerpt and its returned provenance.",
   ...AFFILIATE_AGENT_TERMINAL_RESULT_PAYLOAD_SHAPES[role],
 ];
 
@@ -776,7 +779,7 @@ const LEGACY_SPORT_EVIDENCE_INSTRUCTIONS = [
   "Indoor, gym, or hard-court volleyball supports Indoor Volleyball; sand or beach volleyball supports Beach Volleyball; explicitly grass or outdoor-field volleyball supports Grass Volleyball. An explicit indoor facility with hardwood volleyball courts, together with a statement that the source's volleyball happens there, supports Indoor Volleyball. Cite both the venue description and the activity-to-venue link. A venue name, city, URL, or existing database sport value alone is not proof.",
   "Explicit outdoor grass/field soccer supports Grass Soccer; indoor/arena/boarded-field soccer supports Indoor Soccer; futsal rules or a futsal court supports Futsal; sand/beach soccer supports Beach Soccer. Only generic Soccer or Volleyball without usable surface evidence remains VARIANT_UNRESOLVED. An evidenced sport absent from the exact catalog is UNSUPPORTED. Keep blacklisted activities excluded. Do not invent a variant, generic alias, or user decision.",
   'sportEvidence has {"evidenceRunId":"<claim repairContext.evidenceRunId>","sportsCatalogSha256":"<claim catalog sha256>","sportDeterminations":[{"sourceLabels":["<exact source label>"],"status":"<RESOLVED|VARIANT_UNRESOLVED|UNSUPPORTED|BLACKLISTED>","resolutionBasis":"SOURCE_EVIDENCE","canonicalSportNames":["<exact catalog name; empty unless RESOLVED>"],"rationale":"<evidence-backed explanation>","evidence":[{"artifactId":"<manifest artifactId>","artifactSha256":"<manifest sha256>","artifactKind":"<PAGE_HTML|PAGE_MARKDOWN|PAGE_SCREENSHOT>","pageUrl":"<artifact finalUrl or sourceUrl>","excerpt":"<exact supporting source excerpt>"}]}]}.',
-  "Keep sourceLabels and canonicalSportNames sorted and unique. Order citations by artifactId, artifactSha256, artifactKind, pageUrl, and excerpt. Use the manifest's artifactId for citations and its evidenceRef for package or terminal evidenceRefs. Use only returned provenance URLs for pageUrl. Include the evidenceRef for every cited artifact. Never invent a citation, use another run, or claim USER_DECISION without an authenticated decision.",
+  "Keep sourceLabels and canonicalSportNames sorted and unique. Order citations by artifactId, artifactSha256, artifactKind, pageUrl, and excerpt. Use read_artifact with view CITATION_TEXT to inspect the verifier's text and manifest citation metadata. Copy the exact supporting excerpt. If citation parsing reaches its limit, use another listed artifact such as Markdown; do not raise limits or request an unapproved capture. Include every cited artifact's evidenceRef in package or terminal evidenceRefs. Never invent a citation, use another run, or claim USER_DECISION without an authenticated decision.",
 ] as const;
 
 const ROLE_PROMPT_INSTRUCTIONS: Readonly<
@@ -809,7 +812,7 @@ const ROLE_PROMPT_INSTRUCTIONS: Readonly<
     "Return one evidence-backed terminal disposition through submit_result(...). Use only the listed terminal dispositions.",
   ],
   SUPPLY_REVIEWER: [
-    "Use the inlined Authority Projection as the complete claim context. Use only read_artifact({evidenceRef}) and submit_result(...) for this read-only role.",
+    "Use the inlined Authority Projection as the complete claim context. Use only read_artifact({evidenceRef}), check_result(...), and submit_result(...) for this read-only role.",
     "Read the committed package and listed reviewer evidence through read_artifact({evidenceRef}).",
     "Review the package without editing it or reusing producer context. For legacy sport repair, inspect the supplied catalog, sportEvidence, and original manifest-owned artifacts.",
     ...LEGACY_SPORT_EVIDENCE_INSTRUCTIONS,
@@ -838,11 +841,13 @@ const AFFILIATE_AGENT_SUBMIT_RESULT_INPUT_SHAPE =
 const PROMPT_GATEWAY_PROTOCOL = {
   trustedTools: [
     "read_artifact",
+    "check_result",
     "execute_command",
     "submit_result",
   ] as const,
   toolInputShapes: [
-    '{"evidenceRef":"<listed evidence ref>","offset":<optional non-negative character offset>,"limit":<optional positive character limit>}',
+    '{"evidenceRef":"<listed evidence ref>","view":"<optional SOURCE|CITATION_TEXT>","offset":<optional non-negative UTF-16 offset in the selected view>,"limit":<optional positive character limit>}',
+    AFFILIATE_AGENT_SUBMIT_RESULT_INPUT_SHAPE,
     '{"command":<role-permitted affiliate-agent command object>}',
     AFFILIATE_AGENT_SUBMIT_RESULT_INPUT_SHAPE,
   ] as const,
@@ -985,6 +990,7 @@ export const affiliateAgentPromptTemplateSchema = z
       .object({
         trustedTools: z.tuple([
           z.literal("read_artifact"),
+          z.literal("check_result"),
           z.literal("execute_command"),
           z.literal("submit_result"),
         ]),
@@ -992,6 +998,7 @@ export const affiliateAgentPromptTemplateSchema = z
           z.literal(PROMPT_GATEWAY_PROTOCOL.toolInputShapes[0]),
           z.literal(PROMPT_GATEWAY_PROTOCOL.toolInputShapes[1]),
           z.literal(PROMPT_GATEWAY_PROTOCOL.toolInputShapes[2]),
+          z.literal(PROMPT_GATEWAY_PROTOCOL.toolInputShapes[3]),
         ]),
         terminalResultSchema: z.literal("affiliate-agent/terminal-result@1"),
         terminalResultShape: z

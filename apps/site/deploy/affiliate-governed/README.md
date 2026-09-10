@@ -198,10 +198,13 @@ The driver creates a new in-memory session for each claim. It disables
 ambient tools, extensions, context discovery, MCP, LSP, memory, and unrelated
 background model work. Both active and registered tools must match the
 claim's tool set. `read_artifact` returns verified text pages or image
-evidence. `execute_command` exists only when the role permits a non-terminal
-command. `submit_result` binds claim identity and authorization in trusted
-code. It emits one terminal frame only after the Gateway accepts the result.
-The supervisor confirms that result through an idempotent replay.
+evidence. `check_result` performs a read-only local draft check.
+`execute_command` exists only when the role permits a non-terminal command.
+`submit_result` binds claim identity and authorization in trusted code.
+It repeats the local draft check before it sends a result to the Gateway.
+A `DRAFT_INVALID` response keeps the invocation open and spends no terminal
+correction. Actual terminal submissions retain the existing Gateway
+correction limit, size limit, deadline, and idempotent supervisor replay.
 
 Artifact reads include required nullable `sourceUrl` and `finalUrl` fields.
 They come from stored capture metadata and remain fixed on receipt replay.
@@ -211,6 +214,31 @@ URL metadata remains null; the reader does not invent it from page links.
 For a declarative package, `listUrlRef` is the authorized page artifact's
 evidenceRef. It is not a raw URL or artifactId. Existing stored evidence does
 not require a new capture profile.
+
+Use `read_artifact` with `view: "CITATION_TEXT"` to inspect the text used by
+the sport citation verifier. The existing inert DOM parser decodes HTML
+entities with scripting disabled. A linear byte and syntax-complexity check
+runs before DOM construction. Output and cache budgets remain bounded.
+Script, style, template, attribute, and comment content is not citation text.
+Raw bytes and their hashes do not change. An over-budget view returns
+`CITATION_TEXT_LIMIT` without closing the invocation. Use another permitted
+artifact, such as Markdown; do not raise limits or request an unapproved capture.
+`CITATION_TEXT` uses the verifier's replacement decoding for invalid UTF-8.
+The default `SOURCE` view retains its strict UTF-8 decoding. Each view has
+its own UTF-16 offsets. Continue with
+the returned `nextOffset` and the same view. The citation view also returns
+the claim artifact identifier, hash, kind, and stored provenance URL.
+
+`check_result` checks the terminal schema and claim identity. Legacy
+Mapping Producer contract gaps also use the shared sport and citation
+verifier against the claim snapshot. The tool can read only claim-permitted
+evidence. It does not submit a result, execute a command, validate a package,
+approve work, publish data, or change the catalog. `DRAFT_VALID` is explicitly
+non-authoritative. The Gateway still checks current authority, live catalog
+freshness, evidence ownership, receipts, and lifecycle state at submission.
+Malformed terminal-tool input that reaches the bridge returns bounded
+`DRAFT_INVALID` issues without copying submitted values or undeclared keys.
+
 Package validation and commit require at least one stored provenance URL.
 They never use a page-body link as a substitute listing URL.
 
@@ -234,20 +262,22 @@ messages. Records survive workspace cleanup, including successful terminal
 completion. Retention follows the configured container log policy; this is
 not a permanent database audit.
 
-After SDK tool activation, the driver sets `lenientArgValidation` only on the
-final `execute_command` AgentTool wrapper. This routes malformed arguments to
-the trusted bridge's strict validator and diagnostic callback. The advertised
-schema and Gateway validation remain unchanged. Other tools keep normal SDK
-validation. Setting this flag on the earlier CustomTool definition is not
-sufficient in OMP 18.1.13 because that conversion drops the property.
+After SDK tool activation, the driver sets `lenientArgValidation` on the final
+`execute_command`, `check_result`, and `submit_result` wrappers. The SDK may
+repair simple syntax first. Unrepaired arguments reach the trusted bridge's
+strict validators. Command failures use the existing diagnostic callback.
+Terminal draft failures return safe `DRAFT_INVALID` results.
+Advertised schemas and Gateway validation stay unchanged. Other tools retain
+normal SDK validation. Set these flags on the final wrappers; OMP 18.1.13
+drops the property during conversion from the earlier CustomTool definition.
 
 Run the real SDK boundary regression from `apps/site`:
 
     npm exec --yes --package=bun@1.3.14 -- bun scripts/test-affiliate-omp-agent-sdk-schema.ts
 
-This probe uses an isolated temporary session and an unpaired malformed tool
-call. Throwing network and provider guards prevent provider requests. It
-checks that the bridge reports the local schema error without a Gateway call.
+This probe uses a fresh isolated session and an unpaired malformed call for
+each delegated tool. It checks safe handling of unrepairable terminal input.
+Throwing network and provider guards prove no Gateway or provider call occurs.
 
 The OMP runner does not use Bubblewrap. The shipped runner profiles remove
 the Codex-specific namespace and mount allowances. Keep the private cgroup,

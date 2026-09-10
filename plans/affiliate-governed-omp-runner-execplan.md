@@ -1556,3 +1556,103 @@ mismatch remains unresolved. The rejected excerpt value was not retained,
 so this run does not establish whether the remaining cause is the worker's
 quote or the stored-text interpretation. Another claim needs a new bounded
 decision.
+
+## Claim-scoped agent self-repair
+
+The operator asked for agents to identify and repair these errors themselves.
+Do not grant database credentials, storage credentials, arbitrary file access,
+unrestricted browsing, approval authority, or permission to change the catalog.
+This source work does not authorize another production claim or runtime change.
+Keep the stopped batch held until a new bounded production trial is approved.
+
+Read-only inspection recovered the exact Mission HTML and Markdown. Both
+matched their claim manifest hashes. A local call to the real sport verifier
+reproduced a defect: `Track Records` passed against Markdown but failed against
+HTML containing `Track&nbsp;Records`. An exact event-line quote passed against
+the same HTML. This proves a text interpretation defect, not an access denial.
+The failed claim's rejected value is still unknown.
+
+Use the existing inert HTML parser to decode entities and extract citation
+text. Share that text interpretation between the verifier and the worker's
+claim-scoped artifact view. Preserve raw evidence and its hashes.
+
+Add a read-only `check_result` tool in the trusted worker bridge. It must use
+the same terminal schema diagnostics and sport verification rules. It may
+read only evidence already permitted by the claim. It must not submit a
+terminal result, consume a terminal correction, execute a command, write a
+package, publish data, or change authority. Mark its result as a local check
+against the claim snapshot; the Gateway still checks live authority,
+freshness, ownership, receipts, and lifecycle state at submission.
+
+Add a citation-text view to `read_artifact` with the existing paging and byte
+limits. Keep raw reads available. Update the role/prompt contracts so the
+agent checks its draft, repairs reported fields from stored evidence, and
+submits only after local checks pass. Unsupported or ambiguous source facts
+still require an evidence-backed human-review result, not a guessed mapping.
+
+The citation interpreter now uses the existing inert DOM parser after a
+linear complexity gate. The exact stored Mission HTML accepts `Track Records`,
+as its Markdown already did. Attribute text, comments, scripts, and styles
+do not become citation text. The shared formatter preserves safe field
+diagnostics for both local checks and authoritative Gateway corrections.
+
+The bridge exposes `check_result` and the `CITATION_TEXT` view.
+`submit_result` also checks a draft before any terminal Gateway operation.
+Invalid local drafts remain repairable in the same invocation. The existing
+terminal body limit, claim deadline, sandbox limits, and three authoritative
+correction attempts are unchanged.
+
+A local replay used Mission's exact stored evidence to repair a reason-code
+ordering error and a deliberately invalid quote. It copied `Track Records`
+from the citation view and reached DRAFT_VALID with one permitted artifact
+read, zero Gateway effects, and zero terminal frames. This replay made no
+production calls and did not create a new claim.
+
+The final affected gate passed 650 tests in 22 suites, including isolated
+PostgreSQL tests. TypeScript, targeted ESLint, and all three real OMP SDK
+no-provider scenarios passed.
+Role and prompt contracts are version 6. This source requires a new reviewed
+deployment bundle and fresh preflight before production use. The current
+production deployment and all stopped workers remain unchanged.
+
+Review found four corrections before release: the reviewer prompt still
+listed the old tools; top-level draft errors bypassed safe formatting;
+citation viewing used SOURCE's strict decoder first; and full DOM parsing
+could exceed the worker memory limit.
+
+The reviewer list now includes check_result. Both terminal tools use the
+shared safe formatter for input-schema failures. Citation viewing goes
+directly through the verifier's decoder and does not use SOURCE MIME gates.
+
+Streaming parser prototypes exposed differences in noscript and foreign
+element handling. They were removed. The existing JSDOM parser now uses
+an inert, detached HTML document after a linear preflight scan. The scan
+retains the 8 MiB artifact ceiling and bounds markup and possible attribute
+work before DOM allocation. Text output and the four-entry cache are bounded.
+The empty parser window can close without recursively detaching a deep
+source document. Over-budget parsing returns a fixed, repairable limit.
+Experimental dependencies and Jest transforms were removed.
+
+The earlier streaming stress result is superseded. The final parser rejects
+the 8 MiB, 2,097,152-tag case before DOM creation. A 256 MiB heap smoke also
+parsed the allowed 8,192-markup boundary, including a deep document, without
+recursive cleanup failure. Peak RSS was 223,728 KiB. These are local resource
+observations, not production timing guarantees.
+
+Real SDK testing showed that it may repair syntax, including removal of an
+undeclared key, before the bridge runs. The driver now delegates unrepaired
+arguments for execute_command, check_result, and submit_result to the strict
+bridge validators. All three SDK scenarios passed with no Gateway or provider
+call. Terminal scenarios used an unrepairable disposition and proved bounded,
+redacted DRAFT_INVALID feedback. Final Gateway authority remains unchanged.
+
+Final Standards and Spec/access re-reviews passed. All reported parser,
+MIME, decoding, prompt, redaction, and SDK-dispatch findings are fixed,
+re-reviewed, and verified. The recorded Mission source also completes the
+local repair loop without a Gateway effect or terminal submission.
+
+This source change is not a production deployment. The existing production
+Gateway remains on source 919ff733a with role/prompt 5. Mission remains
+RETRY_WAIT at claim generation 2. TPH and Ultimate remain unclaimed.
+Admission is closed, all trial workers are stopped, and the 99 original
+protected records remain unchanged.
