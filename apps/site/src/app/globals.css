@@ -1287,10 +1287,14 @@ svg {
 }
 
 .discover-map-selection-body > p {
+  display: -webkit-box;
+  overflow: hidden;
   margin: 0;
   color: var(--discover-text-muted);
   font-size: 0.875rem;
   line-height: 1.5;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
 }
 
 .discover-map-event-pills {
