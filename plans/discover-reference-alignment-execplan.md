@@ -153,3 +153,5 @@ Revision note (2026-09-10 05:12Z): Final review found that shared card tokens we
 Revision note (2026-09-10 05:16Z): Final review found two location-picker accessibility and reflow gaps. The Discover location dropdown now aligns to the action group's safe edge, and Escape returns focus to the Set Location trigger.
 
 Revision note (2026-09-10 05:18Z): The mobile reflow review required a separate edge rule because the owned Popover root is the trigger-sized containing block. Mobile location popovers now use the left edge of the first full-width action item; the width cap keeps the panel inside the viewport.
+
+Revision note (2026-09-10 05:22Z): The 320px geometry check included the Discover container and toolbar insets. Reduced the mobile location panel cap from `100vw - 2rem` to `100vw - 4rem` so the left-anchored panel remains inside the viewport.
