@@ -145,3 +145,5 @@ Revision note (2026-09-10 04:49Z): Added `components/events/EventFilterControls.
 
 Revision note (2026-09-10 04:55Z): Focused tests, typechecking, and the production build passed. The full suite exposed a shared `MouseEvent` setup failure in 511 suites; no Discover test failed in that run's reported failures. Live browser comparison remains unavailable under the runtime-state rule.
 Revision note (2026-09-10 05:02Z): Code review found and fixed the controlled Dates trigger and recurring-event card schedule regression. Shared filter props were also composed once in Discover. Focused validation now passes 4 suites and 18 tests.
+
+Revision note (2026-09-10 05:09Z): Final review also identified a non-blocking prop-clump smell. The compact desktop control now picks only the filter fields it reads from the shared panel props.
