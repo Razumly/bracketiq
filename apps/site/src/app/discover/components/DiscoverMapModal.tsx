@@ -1320,7 +1320,7 @@ export default function DiscoverMapModal({
         content: {
           width: 'calc(100vw - 2rem)',
           maxWidth: 1275,
-          height: 'min(880px, calc(100dvh - 2rem))',
+          height: 'min(930px, calc(100dvh - 2rem))',
           padding: 0,
           gap: 0,
           display: 'flex',
