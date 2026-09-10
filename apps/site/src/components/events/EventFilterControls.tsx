@@ -58,7 +58,23 @@ export type EventFilterPanelProps<TEventType extends string> = {
   sportsHeading?: ReactNode;
 };
 
-type EventFilterControlsProps<TEventType extends string> = EventFilterPanelProps<TEventType> & {
+type EventFilterControlsProps<TEventType extends string> = Pick<
+  EventFilterPanelProps<TEventType>,
+  | 'selectedSports'
+  | 'setSelectedSports'
+  | 'sportsData'
+  | 'sportsLoading'
+  | 'selectedEventTypes'
+  | 'setSelectedEventTypes'
+  | 'eventTypeData'
+  | 'selectedEventTypeLabels'
+  | 'selectedStartDate'
+  | 'setSelectedStartDate'
+  | 'selectedEndDate'
+  | 'setSelectedEndDate'
+  | 'resetFilters'
+  | 'hasActiveFilters'
+> & {
   searchTerm: string;
   setSearchTerm: (value: string) => void;
   eventSort: EventSortValue;
