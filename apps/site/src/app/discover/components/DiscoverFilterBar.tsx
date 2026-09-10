@@ -90,6 +90,7 @@ function OverflowFilterRow({ items, contentKey, ariaLabel, moreLabel, trailing, 
   const rowRef = useRef<HTMLDivElement>(null);
   const [measurement, setMeasurement] = useState<{ key: string; count: number | null }>({ key: contentKey, count: null });
   const [moreOpen, setMoreOpen] = useState(false);
+  const [measurementDirty, setMeasurementDirty] = useState(false);
   const measurementIsStale = measurement.key !== contentKey;
   const measuredCount = measurementIsStale ? null : measurement.count;
   const preserveOpenOverflow = moreOpen && measurement.count !== null;
@@ -100,6 +101,12 @@ function OverflowFilterRow({ items, contentKey, ariaLabel, moreLabel, trailing, 
 
   /* eslint-disable react-hooks/set-state-in-effect -- The row width is a DOM measurement that controls overflow visibility. */
   useLayoutEffect(() => {
+    if (measurementDirty) {
+      if (moreOpen) return;
+      setMeasurementDirty(false);
+      setMeasurement((current) => current.count === null ? current : { key: contentKey, count: null });
+      return;
+    }
     if (measurement.count !== null && measurement.key === contentKey) return;
     if (preserveOpenOverflow) return;
     const row = rowRef.current;
@@ -124,20 +131,25 @@ function OverflowFilterRow({ items, contentKey, ariaLabel, moreLabel, trailing, 
     const itemWidths = itemElements.map((item) => item.getBoundingClientRect().width);
     const visibleItemCount = calculateVisibleFilterCount(itemWidths, availableWidth, gap, moreWidth, trailingWidth);
     setMeasurement({ key: contentKey, count: visibleItemCount });
-  }, [contentKey, items.length, measurement.count, measurement.key, preserveOpenOverflow]);
+  }, [contentKey, items.length, measurement.count, measurement.key, measurementDirty, moreOpen, preserveOpenOverflow]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     const row = rowRef.current;
     if (!row || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(() => {
-      if (moreOpen) return;
+      if (moreOpen) {
+        setMeasurementDirty(true);
+        return;
+      }
+      setMeasurementDirty(false);
       setMoreOpen(false);
       setMeasurement((current) => current.count === null ? current : { key: current.key, count: null });
     });
     observer.observe(row);
     return () => observer.disconnect();
   }, [moreOpen]);
+
 
   const showMore = isMeasuring || overflowItems.length > 0;
   const moreTrigger = (
@@ -168,7 +180,7 @@ function OverflowFilterRow({ items, contentKey, ariaLabel, moreLabel, trailing, 
       {showMore && (
         <UiPopover open={moreOpen && !isMeasuring} onOpenChange={setMoreOpen}>
           <PopoverTrigger render={moreTrigger}>{moreLabel}</PopoverTrigger>
-          {!isMeasuring && overflowItems.length > 0 && (
+          {!isMeasuring && moreOpen && overflowItems.length > 0 && (
             <PopoverContent
               align="start"
               aria-label={moreLabel}
