@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import Image from 'next/image';
-import { Alert, Button, Group, Paper, Stack, Text } from '@mantine/core';
+import { Alert, Button, Group, Paper, Stack, Text } from '@/components/organization/organization-operation-ui';
 import { ChevronDown, ChevronUp, ShieldCheck } from 'lucide-react';
 
 import { formatAgeRange } from '@/lib/age';

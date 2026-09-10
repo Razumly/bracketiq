@@ -11,7 +11,7 @@ import {
     Text,
     Textarea,
     TextInput,
-} from '@mantine/core';
+} from '@/components/organization/organization-operation-ui';
 
 import type { SignStep } from '@/lib/boldsignService';
 import type { DiscountPreview } from '@/lib/paymentService';

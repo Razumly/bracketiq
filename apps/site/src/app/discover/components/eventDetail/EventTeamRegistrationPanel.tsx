@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { Alert, Button, Paper, Select as MantineSelect, Text } from '@mantine/core';
+import { Alert, Button, Paper, Select, Text } from '@/components/organization/organization-operation-ui';
 
 import type { Team } from '@/types';
 import { formatPrice } from '@/types';
@@ -34,7 +34,7 @@ type EventTeamRegistrationPanelProps = {
     sportName?: string;
     totalParticipants: number;
     participantCapacity: number;
-    comboboxProps: React.ComponentProps<typeof MantineSelect>['comboboxProps'];
+    comboboxProps: React.ComponentProps<typeof Select>['comboboxProps'];
     onToggleTeamOptions: () => void;
     onSelectedTeamChange: (teamId: string) => void;
     onManageTeams: () => void;
@@ -114,7 +114,7 @@ export function EventTeamRegistrationPanel({
                                 <label className="mb-2 block text-sm font-medium text-gray-700">
                                     Select your team
                                 </label>
-                                <MantineSelect
+                                <Select
                                     placeholder="Choose a team"
                                     data={userTeams.map((team) => ({
                                         value: team.$id,

@@ -16,17 +16,18 @@ import {
   Alert,
   Button,
   Chip,
+  DatePickerInput,
   Group,
   Loader,
   Modal,
   Paper,
   ScrollArea,
   Select,
-  Slider,
   Text,
   TextInput,
-} from '@mantine/core';
-import { DatePickerInput } from '@mantine/dates';
+} from '@/components/organization/organization-operation-ui';
+import { Slider } from '@/components/ui/slider';
+
 import {
   GoogleMap,
   InfoWindowF,
@@ -1248,11 +1249,10 @@ export default function DiscoverMapModal({
       opened={opened}
       onClose={onClose}
       title="Discover map"
-      size="95vw"
-      radius="md"
+      size="xl"
       styles={{
         body: { padding: 0 },
-        content: { overflow: 'hidden' },
+        content: { maxWidth: '95vw', width: '95vw', overflow: 'hidden' },
       }}
     >
       <div style={{ height: 'min(78vh, 760px)', position: 'relative' }}>
@@ -1299,7 +1299,7 @@ export default function DiscoverMapModal({
               </Button>
             </Group>
             {searchTerm.trim() && (
-              <ScrollArea.Autosize mah={180} mt="xs">
+              <ScrollArea.Autosize mah={180} className="mt-2">
                 {searchResults.length > 0 ? (
                   searchResults.slice(0, 8).map((result) => (
                     <button
@@ -1313,7 +1313,7 @@ export default function DiscoverMapModal({
                     </button>
                   ))
                 ) : (
-                  <Text size="sm" c="dimmed" px="xs" py={6}>
+                  <Text size="sm" c="dimmed" className="px-2" py={6}>
                     No nearby {SEARCH_TARGETS.find((target) => target.value === searchTarget)?.label.toLowerCase()} match this search.
                   </Text>
                 )}
@@ -1553,11 +1553,14 @@ export default function DiscoverMapModal({
                     min={DISTANCE_SLIDER_MIN_MILES}
                     max={DISTANCE_SLIDER_MAX_MILES}
                     step={1}
-                    value={clampMiles(typeof maxDistance === 'number' ? kmToMiles(maxDistance) : kmToMiles(defaultMaxDistance))}
-                    onChange={(value) => setMaxDistance(milesToKm(value))}
-                    marks={DISTANCE_SLIDER_MARKS}
-                    mb="sm"
+                    value={[clampMiles(typeof maxDistance === 'number' ? kmToMiles(maxDistance) : kmToMiles(defaultMaxDistance))]}
+                    onValueChange={(value) => setMaxDistance(milesToKm(value[0] ?? DISTANCE_SLIDER_MIN_MILES))}
+                    getAriaLabel={() => 'Maximum map search distance in miles'}
+                    getAriaValueText={(_, value) => `${value} miles`}
                   />
+                  <div aria-hidden="true" className="mt-1 flex justify-between gap-2 text-xs text-muted-foreground">
+                    {DISTANCE_SLIDER_MARKS.map((mark) => <span key={mark.value}>{mark.label} mi</span>)}
+                  </div>
                 </div>
 
                 {activeEventFilters.length > 0 && (

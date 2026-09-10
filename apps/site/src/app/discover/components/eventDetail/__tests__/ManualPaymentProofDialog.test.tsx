@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { renderWithMantine } from '../../../../../../test/utils/renderWithMantine';
 import type { Bill, Event } from '@/types';
@@ -26,6 +26,20 @@ const bill = {
         amountCents: 1_000,
     }],
 } as unknown as Bill;
+
+function ManualPaymentProofHarness({ opened }: { opened: boolean }) {
+    return (
+        <ManualPaymentProofDialog
+            opened={opened}
+            event={event}
+            bill={bill}
+            zIndex={2000}
+            onClose={jest.fn()}
+            onSubmit={jest.fn()}
+        />
+    );
+}
+
 
 describe('ManualPaymentProofDialog', () => {
     it('renders the pending amount, host instructions, and payment link', () => {
@@ -86,5 +100,19 @@ describe('ManualPaymentProofDialog', () => {
 
         await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(proof));
         expect(await screen.findByText('Host review is unavailable.')).toBeInTheDocument();
+    });
+
+    it('shows the selected proof file when the dialog reopens', async () => {
+        const { rerender } = render(<ManualPaymentProofHarness opened />);
+        const proof = new File(['proof'], 'proof.png', { type: 'image/png' });
+        const input = document.querySelector('input[type="file"]');
+        expect(input).not.toBeNull();
+        fireEvent.change(input as HTMLInputElement, { target: { files: [proof] } });
+        expect(await screen.findByText('proof.png')).toBeInTheDocument();
+
+        rerender(<ManualPaymentProofHarness opened={false} />);
+        rerender(<ManualPaymentProofHarness opened />);
+
+        expect(await screen.findByText('proof.png')).toBeInTheDocument();
     });
 });

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Modal, Select, Button, Group, Paper, Text } from '@mantine/core';
+import { Modal, Select, Button, Group, Paper, Text } from '@/components/organization/organization-operation-ui';
 
 interface Division {
     id: string;

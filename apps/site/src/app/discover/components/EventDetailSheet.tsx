@@ -38,7 +38,6 @@ import {
     trackEventOutboundClicked,
     trackEventRegistrationStarted,
 } from '@/lib/analytics/eventAnalytics';
-// Replaced shadcn Select with Mantine Select
 
 interface EventDetailSheetProps {
     event: Event;

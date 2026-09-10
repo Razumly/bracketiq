@@ -1,4 +1,4 @@
-import { Alert, Text } from "@mantine/core";
+import { Alert, Text } from "@/components/organization/organization-operation-ui";
 
 import type { Event } from "@/types";
 

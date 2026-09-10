@@ -1,5 +1,5 @@
 import type { ComponentProps, RefObject } from 'react';
-import { ActionIcon } from '@mantine/core';
+import { ActionIcon } from '@/components/organization/organization-operation-ui';
 
 import { EventDetailHero } from './EventDetailHero';
 import { EventDetailSheetSummary } from './EventDetailSheetSummary';

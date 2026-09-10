@@ -80,8 +80,8 @@ describe('EventTeamRegistrationPanel', () => {
     it('renders managed teams and forwards selection and management', () => {
         const actions = renderPanel({ showTeamJoinOptions: true, selectedTeamId: '' });
 
-        fireEvent.click(screen.getByRole('textbox'));
-        fireEvent.click(screen.getByText('Cascade Crew'));
+        fireEvent.click(screen.getByRole('combobox'));
+        fireEvent.click(screen.getByRole('option', { name: 'Cascade Crew' }));
         expect(actions.onSelectedTeamChange).toHaveBeenCalledWith('team-one');
 
         fireEvent.click(screen.getByRole('button', { name: 'Create team' }));

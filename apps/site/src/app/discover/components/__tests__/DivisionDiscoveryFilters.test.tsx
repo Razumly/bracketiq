@@ -1,6 +1,4 @@
-import { MantineProvider } from "@mantine/core";
 import { render, screen, waitFor } from "@testing-library/react";
-import { renderWithMantine } from "../../../../../test/utils/renderWithMantine";
 import DivisionDiscoveryFilters, {
   DivisionDiscoveryFilterValue,
 } from "../DivisionDiscoveryFilters";
@@ -48,7 +46,7 @@ describe("DivisionDiscoveryFilters async lifecycle", () => {
     const onChange = jest.fn();
     globalThis.fetch = jest.fn(() => divisionTypes.promise) as typeof fetch;
 
-    renderWithMantine(
+    render(
       <DivisionDiscoveryFilters value={filterValue()} onChange={onChange} />,
     );
 
@@ -80,7 +78,7 @@ describe("DivisionDiscoveryFilters async lifecycle", () => {
       Promise.resolve(response({}, false)),
     ) as typeof fetch;
 
-    renderWithMantine(
+    render(
       <DivisionDiscoveryFilters
         value={filterValue({ skillDivisionTypeIds: ["stale-skill"] })}
         onChange={onChange}
@@ -106,23 +104,19 @@ describe("DivisionDiscoveryFilters async lifecycle", () => {
     }) as typeof fetch;
 
     const view = render(
-      <MantineProvider>
-        <DivisionDiscoveryFilters
-          key="first-request"
-          value={filterValue({ skillDivisionTypeIds: ["open"] })}
-          onChange={onChange}
-        />
-      </MantineProvider>,
+      <DivisionDiscoveryFilters
+        key="first-request"
+        value={filterValue({ skillDivisionTypeIds: ["open"] })}
+        onChange={onChange}
+      />,
     );
 
     view.rerender(
-      <MantineProvider>
-        <DivisionDiscoveryFilters
-          key="second-request"
-          value={filterValue({ skillDivisionTypeIds: ["open"] })}
-          onChange={onChange}
-        />
-      </MantineProvider>,
+      <DivisionDiscoveryFilters
+        key="second-request"
+        value={filterValue({ skillDivisionTypeIds: ["open"] })}
+        onChange={onChange}
+      />,
     );
 
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2));

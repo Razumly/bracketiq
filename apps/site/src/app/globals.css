@@ -321,19 +321,6 @@ svg {
   color: var(--discover-primary);
 }
 
-.discover-time-range-slider .mantine-RangeSlider-markLabel {
-  white-space: nowrap;
-}
-
-.discover-time-range-slider .mantine-RangeSlider-markWrapper:first-of-type .mantine-RangeSlider-markLabel {
-  left: 6px;
-  transform: translateX(0);
-}
-
-.discover-time-range-slider .mantine-RangeSlider-markWrapper:last-of-type .mantine-RangeSlider-markLabel {
-  left: calc(100% - 6px);
-  transform: translateX(-100%);
-}
 
 .discover-map-search-result {
   display: flex;

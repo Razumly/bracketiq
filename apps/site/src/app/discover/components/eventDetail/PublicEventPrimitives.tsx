@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Text } from "@mantine/core";
+import { Text } from "@/components/organization/organization-operation-ui";
 
 export type ReadOnlyDetailField = {
   label: string;

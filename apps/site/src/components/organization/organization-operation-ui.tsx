@@ -209,11 +209,20 @@ export function Button({ className, variant = 'filled', size = 'md', color, load
   const mappedVariant = buttonVariant(variant, color);
   const mappedSize = buttonSize(size, compact);
   const content = <>{loading && <Loader2 aria-hidden="true" className="size-4 animate-spin motion-reduce:animate-none" />}{leftSection}{children}{rightSection}</>;
-  const buttonProps = { ...props, target, rel, disabled: disabled || loading, 'aria-busy': loading || undefined, className: cn(radiusClass(radius, 'control'), fullWidth && 'w-full', justify === 'flex-start' && 'justify-start', spacingClass(px, 'px'), buttonMarginClass(mt, 'mt'), buttonMarginClass(mb, 'mb'), className), style: { width: w, ...style } } as any;
+  const buttonProps = {
+    ...props,
+    target,
+    rel,
+    role: component === 'a' ? 'link' : props.role,
+    disabled: disabled || loading,
+    'aria-busy': loading || undefined,
+    className: cn(radiusClass(radius, 'control'), fullWidth && 'w-full', justify === 'flex-start' && 'justify-start', spacingClass(px, 'px'), buttonMarginClass(mt, 'mt'), buttonMarginClass(mb, 'mb'), className),
+    style: { width: w, ...style },
+  } as unknown as React.ComponentProps<typeof BaseButton>;
   if (component === 'a') {
-    return <BaseButton nativeButton={false} render={<a href={href} />} variant={mappedVariant as any} size={mappedSize as any} {...buttonProps}>{content}</BaseButton>;
+    return <BaseButton nativeButton={false} render={<a href={href} />} variant={mappedVariant as React.ComponentProps<typeof BaseButton>['variant']} size={mappedSize as React.ComponentProps<typeof BaseButton>['size']} {...buttonProps}>{content}</BaseButton>;
   }
-  return <BaseButton variant={mappedVariant as any} size={mappedSize as any} {...buttonProps}>{content}</BaseButton>;
+  return <BaseButton variant={mappedVariant as React.ComponentProps<typeof BaseButton>['variant']} size={mappedSize as React.ComponentProps<typeof BaseButton>['size']} {...buttonProps}>{content}</BaseButton>;
 }
 
 type FieldProps = { id?: string; label?: React.ReactNode; description?: React.ReactNode; error?: React.ReactNode; errorProps?: React.HTMLAttributes<HTMLParagraphElement>; required?: boolean; mb?: Spacing; mt?: Spacing; p?: Spacing };
@@ -858,8 +867,8 @@ function DateControl({ includeTime, ...props }: DateControlProps & { includeTime
 export function DatePickerInput({ withAsterisk, w, maw, style, ...props }: DateControlProps) { return <DateControl {...props} required={props.required || withAsterisk} style={{ width: w, maxWidth: maw, ...style }} includeTime={false} />; }
 export function DateTimePicker({ withAsterisk, w, maw, style, ...props }: DateControlProps) { return <DateControl {...props} required={props.required || withAsterisk} style={{ width: w, maxWidth: maw, ...style }} includeTime />; }
 
-type FileInputProps = FieldProps & { value?: File | null; onChange?: (value: File | null) => void; placeholder?: string; accept?: string; clearable?: boolean; radius?: string | number; className?: string };
-export function FileInput({ value: _value, onChange, id, label, description, error, required, mb, mt, p, placeholder, accept, radius, className }: FileInputProps) { const resolvedId = useFieldId(id, label); return <FieldFrame id={resolvedId} label={label} description={description} error={error} required={required} mb={mb} mt={mt} p={p}><input id={resolvedId} type="file" accept={accept} required={required} aria-label={typeof label === 'string' ? label : placeholder} onChange={(event) => onChange?.(event.currentTarget.files?.[0] ?? null)} className={cn('block min-h-11 w-full min-w-0 border border-input bg-background px-3 py-2 text-sm text-foreground file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5', radiusClass(radius, 'control'), className)} /></FieldFrame>; }
+type FileInputProps = FieldProps & { value?: File | null; onChange?: (value: File | null) => void; placeholder?: string; accept?: string; clearable?: boolean; radius?: string | number; className?: string; disabled?: boolean };
+export function FileInput({ value, onChange, id, label, description, error, required, mb, mt, p, placeholder, accept, radius, className, disabled }: FileInputProps) { const resolvedId = useFieldId(id, label); return <FieldFrame id={resolvedId} label={label} description={description} error={error} required={required} mb={mb} mt={mt} p={p}><input id={resolvedId} type="file" accept={accept} required={required} disabled={disabled} aria-label={typeof label === 'string' ? label : placeholder} onChange={(event) => onChange?.(event.currentTarget.files?.[0] ?? null)} className={cn('block min-h-11 w-full min-w-0 border border-input bg-background px-3 py-2 text-sm text-foreground file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5', radiusClass(radius, 'control'), className)} />{value ? <span className="block truncate text-sm text-muted-foreground">{value.name}</span> : null}</FieldFrame>; }
 
 type SwitchProps = Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' | 'size'> & FieldProps & { size?: string; checked?: boolean; onChange?: React.ChangeEventHandler<HTMLInputElement> };
 export function Switch({ id, label, description, mb, mt, p, size: _size, checked, onChange, disabled, className, ...props }: SwitchProps) { const resolvedId = useFieldId(id, label); return <label htmlFor={resolvedId} className={cn('flex min-h-11 items-start gap-3 rounded-lg border border-transparent py-2 text-sm', spacingClass(mb, 'mb'), spacingClass(mt, 'mt'), spacingClass(p, 'p'), disabled && 'cursor-not-allowed opacity-60', className)}><input {...props} id={resolvedId} type="checkbox" role="switch" aria-label={typeof label === 'string' ? label : undefined} checked={checked} onChange={onChange} disabled={disabled} className="mt-1 size-4 accent-primary" /><span className="min-w-0"><span className="block font-medium text-foreground">{label}</span>{description && <span className="mt-1 block text-xs text-muted-foreground">{description}</span>}</span></label>; }
