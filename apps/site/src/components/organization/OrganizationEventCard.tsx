@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import { useState } from 'react';
-import { CalendarDays, CircleDot, MapPin, Users } from 'lucide-react';
+import { Building2, CalendarDays, CircleDot, MapPin, Users } from 'lucide-react';
 import { formatEnumDisplayLabel } from '@/lib/enumUtils';
 import { normalizeTimeZone } from '@/lib/dateUtils';
 import { resolveEventParticipantCapacity } from '@/lib/eventCapacity';
@@ -37,6 +37,16 @@ function formatScheduleDate(value: string, timeZone?: string): string | null {
   });
 }
 
+function formatScheduleTime(value: string, timeZone?: string): string | null {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    ...(timeZone ? { timeZone: normalizeTimeZone(timeZone) } : {}),
+  });
+}
+
 function eventDate(event: Event): string {
   if (event.dateDisplayMode === 'NO_FIXED_DATE' || event.dateDisplayMode === 'ONGOING') return event.dateDisplayText || event.scheduleText || 'No fixed start date';
   const schedule = getDisplaySchedule(event);
@@ -47,13 +57,30 @@ function eventDate(event: Event): string {
   return `${first} – ${last}`;
 }
 
+function eventTime(event: Event): string | null {
+  if (event.dateDisplayMode === 'NO_FIXED_DATE' || event.dateDisplayMode === 'ONGOING') return null;
+  const schedule = getDisplaySchedule(event);
+  const first = formatScheduleTime(schedule.start, schedule.timeZone);
+  if (!first) return null;
+  const last = schedule.end ? formatScheduleTime(schedule.end, schedule.timeZone) : null;
+  return last && last !== first ? `${first} – ${last}` : first;
+}
+
+function eventOrganizer(event: Event): string | null {
+  if (event.organizerName?.trim()) return event.organizerName.trim();
+  if (typeof event.organization === 'object' && event.organization?.name?.trim()) return event.organization.name.trim();
+  return null;
+}
+
 function eventStatus(event: Event, capacity: number): string {
   if (['DRAFT', 'UNPUBLISHED'].includes(String(event.state))) return 'Draft';
   if (event.state === 'PRIVATE') return 'Private';
   const end = getDisplaySchedule(event).end;
   if (end && Date.parse(end) < Date.now()) return 'Completed';
   if (capacity > 0 && event.attendees >= capacity) return 'Registration full';
-  return event.statusText || 'Registration open';
+  const statusText = event.statusText?.trim();
+  if (statusText && statusText.length <= 48 && !/[\r\n]/.test(statusText)) return statusText;
+  return 'Registration open';
 }
 
 function eventAttendance(event: Event, capacity: number): string {
@@ -64,14 +91,28 @@ function eventAttendance(event: Event, capacity: number): string {
 
 export default function OrganizationEventCard({ event, onClick }: { event: Event; onClick: () => void }) {
   const [imageIndex, setImageIndex] = useState(0);
-  const fallback = getEventImageFallbackUrl({ event, width: 640, height: 240, fit: 'inside' });
-  const primaryImage = getEventImageUrl({ imageId: event.imageId, width: 640, height: 240, placeholderUrl: fallback });
+  const fallback = getEventImageFallbackUrl({ event, width: 640, height: 280, fit: 'cover' });
+  const primaryImage = getEventImageUrl({
+    imageId: event.imageId,
+    width: 640,
+    height: 280,
+    placeholderUrl: fallback,
+    fit: 'cover',
+  });
   const initialsFallback = `/api/avatars/initials?name=${encodeURIComponent(event.name)}&size=640`;
   const imageSources = Array.from(new Set([primaryImage, fallback, initialsFallback]));
   const image = imageSources[Math.min(imageIndex, imageSources.length - 1)];
   const capacity = resolveEventParticipantCapacity(event);
   const price = event.affiliateUrl ? formatAffiliateEventPriceRange(event) : formatEventDivisionPriceRange(event);
   const sport = typeof event.sport === 'object' ? event.sport.name : event.sport;
+  const time = eventTime(event);
+  const organizer = eventOrganizer(event);
+  const registrationLabel = event.affiliateUrl
+    ? 'External registration'
+    : event.teamSignup
+      ? 'Team registration'
+      : 'Individual registration';
+
   return (
     <button type="button" className="org-event-card" onClick={onClick} aria-label={event.name}>
       <span className="org-event-card-image">
@@ -81,21 +122,49 @@ export default function OrganizationEventCard({ event, onClick }: { event: Event
           fill
           unoptimized
           sizes="(max-width: 767px) 100vw, (max-width: 1199px) 50vw, 33vw"
-          className={event.imageId && imageIndex === 0 ? 'object-cover' : 'object-contain'}
+          className="object-cover"
           onError={imageIndex < imageSources.length - 1 ? () => setImageIndex((current) => current + 1) : undefined}
         />
+        {event.affiliateUrl && <span className="org-event-card-image-badge">External registration</span>}
       </span>
       <span className="org-event-card-body">
         <strong className="org-event-card-title">{event.name}</strong>
-        <span className="org-event-card-kind"><span><CircleDot />{sport}</span><span>{formatEnumDisplayLabel(event.eventType, 'Event')}</span></span>
-        <span className="org-event-card-facts">
-          <span><CalendarDays />{eventDate(event)}</span>
+        <span className="org-event-card-kind">
+          <span className="org-event-card-kind-sport"><CircleDot aria-hidden="true" />{sport}</span>
+          <span>{formatEnumDisplayLabel(event.eventType, 'Event')}</span>
+          <span>{registrationLabel}</span>
           <span className="org-event-card-status">{eventStatus(event, capacity)}</span>
-          <span><MapPin />{event.location || 'Location to be announced'}</span>
-          <span><Users />{eventAttendance(event, capacity)}</span>
+        </span>
+        <span className="org-event-card-facts">
+          <span className="org-event-card-fact">
+            <CalendarDays aria-hidden="true" />
+            <span className="org-event-card-fact-copy">
+              <span>{eventDate(event)}</span>
+              {time && <span className="org-event-card-time">{time}</span>}
+            </span>
+          </span>
+          <span className="org-event-card-fact">
+            <MapPin aria-hidden="true" />
+            <span className="org-event-card-fact-copy">{event.location || 'Location to be announced'}</span>
+          </span>
+          {organizer && (
+            <span className="org-event-card-fact">
+              <Building2 aria-hidden="true" />
+              <span className="org-event-card-fact-copy">Hosted by {organizer}</span>
+            </span>
+          )}
         </span>
       </span>
-      <span className="org-event-card-price"><strong>{price}</strong><span>{event.teamSignup ? 'per team' : 'per person'}</span></span>
+      <span className="org-event-card-price">
+        <span className="org-event-card-price-copy">
+          <strong>{price}</strong>
+          <span>{event.teamSignup ? 'per team' : 'per person'}</span>
+        </span>
+        <span className="org-event-card-attendance">
+          <Users aria-hidden="true" />
+          {eventAttendance(event, capacity)}
+        </span>
+      </span>
     </button>
   );
 }

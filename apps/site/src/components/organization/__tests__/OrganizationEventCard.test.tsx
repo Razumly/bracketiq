@@ -53,6 +53,7 @@ describe('OrganizationEventCard schedule display', () => {
     renderWithMantine(
       <OrganizationEventCard
         event={createEvent({
+          statusText: 'Review-ready Summer 2026 adult basketball league card with source-supported registration details.',
           nextOccurrence: {
             slotId: 'slot-weekly',
             occurrenceDate: '2099-07-16',
@@ -66,6 +67,8 @@ describe('OrganizationEventCard schedule display', () => {
     );
 
     expect(screen.getByText('Jul 15, 2099')).toBeInTheDocument();
+    expect(screen.getByText('6:00 PM – 8:00 PM')).toBeInTheDocument();
+    expect(screen.queryByText(/Review-ready Summer 2026/i)).not.toBeInTheDocument();
     expect(screen.getByText('Registration open')).toBeInTheDocument();
   });
 });

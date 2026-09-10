@@ -1261,7 +1261,7 @@ function DiscoverPageContent() {
       <Navigation />
       <Container fluid py="xl" className="discover-shell">
         <div className="discover-page-header mb-8">
-          <Title order={1} mb={6} className="discover-title">
+          <Title order={1} fz="clamp(2rem, 4vw, 2.75rem)" fw={750} lh={1.05} mb={6} className="discover-title">
             Discover
           </Title>
           <Text c="dimmed" className="discover-subtitle">
@@ -1277,7 +1277,7 @@ function DiscoverPageContent() {
           }}
           className="discover-tabs"
         >
-          <TabsList className="discover-segment-list mb-6 w-full" variant="default">
+          <TabsList className="discover-segment-list mb-6 w-full" variant="line">
             <TabsTrigger value="events" className="discover-segment-tab">Events</TabsTrigger>
             <TabsTrigger value="organizations" className="discover-segment-tab">Organizations</TabsTrigger>
             <TabsTrigger value="rentals" className="discover-segment-tab">Rentals</TabsTrigger>
