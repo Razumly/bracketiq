@@ -20,7 +20,7 @@ The discover page should let someone search within the tab they are already view
 - [x] (2026-09-10) Completed the reference-style map layout. Passed `locationInfo` from the discover page to `DiscoverMapModal`.
 - [x] (2026-09-10) Confirmed that local data already contains co-located events. No database move or seed occurred.
 - [x] (2026-09-10) Passed the focused `DiscoverMapModal` Jest suite (12 tests), `npx tsc --noEmit --pretty false`, and `git -c core.whitespace=cr-at-eol diff --check`.
-- [ ] Verify the rebuilt map and detail card in a browser. The existing runtime was not restarted and lacks the Maps API key. See `Artifacts and Notes`.
+- [x] (2026-09-10) Browser-verified the rebuilt runtime's visible tabs, compact chrome, Nearby events rail, selected-event card, and close-to-rail restore. Map tiles and markers remain unverified because `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` is unavailable. See `Artifacts and Notes`.
 
 ## Surprises & Discoveries
 
@@ -53,7 +53,7 @@ The discover page should let someone search within the tab they are already view
 
 2026-09-10 outcome: The reference-style map implementation is complete. Visible tabs replace the earlier map type dropdown. The map has compact search, location, count, and filter controls. It uses coral event dots and a halo around the user location. A grouped Nearby events rail opens by default. A floating detail card shows the selected event. The discover page passes `locationInfo` to the modal.
 
-The focused Jest suite passed all 12 tests. TypeScript and diff checks also passed. The local data probe found co-located events, so no database move or seed occurred. Browser verification of the rebuilt map and card remains incomplete. The existing runtime was not restarted because this turn did not authorize a runtime state change. It also lacks the Maps API key. These checks do not establish that the new map and card render correctly.
+The focused Jest suite passed all 12 tests. TypeScript and diff checks also passed. The local data probe found co-located events, so no database move or seed occurred. Following the user's authorization, `site-ui-operations-prod` was restarted and became ready. The rebuilt browser run verified the visible tabs, compact modal chrome, Nearby events rail, selected-event card, and close-to-rail restore. The map displayed the intentional missing-key error because `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` is unavailable, so Google Maps tiles and markers remain unverified.
 
 ## Context and Orientation
 
@@ -107,7 +107,8 @@ All edits are additive or scoped replacements. The previous search fix is alread
 - Reference-layout implementation (2026-09-10): `DiscoverMapModal` now has visible tabs, compact search/location/count/filter controls, coral event dots, and a user halo. It also has a grouped Nearby events rail that opens by default and a floating selected-event detail card. `src/app/discover/page.tsx` passes `locationInfo` to the modal.
 - Reference-layout verification (2026-09-10): The focused `DiscoverMapModal` Jest suite passed all 12 tests. `npx tsc --noEmit --pretty false` and `git -c core.whitespace=cr-at-eol diff --check` passed.
 - Local data probe (2026-09-10): Co-located events already exist. No database move or seed occurred.
-- Browser limitation (2026-09-10): The existing `node server.mjs --port=3001` runtime was not restarted. This turn did not authorize a runtime state change. The runtime also lacks `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`. The rebuilt map and card pixels were not browser-verified. No new browser render is claimed.
+- Browser limitation (2026-09-10): The user authorized the restart, and `site-ui-operations-prod` was restarted and became ready. The rebuilt browser run verified the visible tabs, compact modal chrome, Nearby events rail, selected-event card, and close-to-rail restore. The map displayed the intentional missing-key error because `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` is unavailable; Google Maps pixels and markers remain unverified.
+- Selected-summary clamp (2026-09-10): The three-line selected-summary clamp was rebuilt and observed in the selected-event card.
 
 ## Interfaces and Dependencies
 
