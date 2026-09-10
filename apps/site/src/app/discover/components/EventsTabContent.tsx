@@ -12,22 +12,18 @@ import {
 import {
   Alert,
   Button,
-  Chip,
   Group,
   Loader,
   Paper,
   Select,
   Text,
-  TextInput,
 } from '@/components/organization/organization-operation-ui';
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { ArrowUpDown } from 'lucide-react';
 
 import OrganizationEventCard from '@/components/organization/OrganizationEventCard';
 import {
   ActiveEventFilters,
   EVENT_SORT_OPTIONS,
-  EventFilterPanel,
   type EventSortValue,
 } from '@/components/events/EventFilterControls';
 import Loading from '@/components/ui/Loading';
@@ -38,9 +34,9 @@ import {
 import { Event, EventTag, getEventDivisionPriceRange } from '@/types';
 import { formatEnumDisplayLabel } from '@/lib/enumUtils';
 import { trackEventClicked } from '@/lib/analytics/eventAnalytics';
-import DiscoverFilterBar, { DiscoverSportFilterList } from './DiscoverFilterBar';
+import DiscoverFilterBar from './DiscoverFilterBar';
 import DiscoverSearchControls from './DiscoverSearchControls';
-import DivisionDiscoveryFilters, { type DivisionDiscoveryFilterValue, useDivisionDiscoveryOptions } from './DivisionDiscoveryFilters';
+import { type DivisionDiscoveryFilterValue, useDivisionDiscoveryOptions } from './DivisionDiscoveryFilters';
 
 export type { EventSortValue };
 
@@ -208,36 +204,9 @@ function EventsTabView<TEventType extends string>(
     }
     setInternalEventSort(value);
   }, [onEventSortChange]);
-  const [tagSearchTerm, setTagSearchTerm] = useState('');
-  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const allEventTypesSelected = selectedEventTypes.length === eventTypeOptions.length;
-  const allTagsSelected = selectedTags.length === 0;
-  const tagsQuery = tagSearchTerm.trim().toLowerCase();
   const activeQuery = searchTerm.trim();
   const divisionOptions = useDivisionDiscoveryOptions(selectedSports);
-  useEffect(() => {
-    if (divisionOptions.loading || divisionOptions.error) return;
-    const availableSkillIds = new Set(divisionOptions.skillOptions.map((option) => option.value.trim().toLowerCase()));
-    const nextSkillIds = divisionFilters.skillDivisionTypeIds.filter((id) => availableSkillIds.has(id.trim().toLowerCase()));
-    const skillsChanged = nextSkillIds.length !== divisionFilters.skillDivisionTypeIds.length
-      || nextSkillIds.some((id, index) => id !== divisionFilters.skillDivisionTypeIds[index]);
-    if (skillsChanged) {
-      setDivisionFilters({ ...divisionFilters, skillDivisionTypeIds: nextSkillIds });
-    }
-  }, [divisionFilters, divisionOptions.error, divisionOptions.loading, divisionOptions.skillOptions, setDivisionFilters]);
-
-  const visibleEventTags = useMemo(() => {
-    const matchingTags = tagsQuery
-      ? eventTags.filter((tag) => tag.name.toLowerCase().includes(tagsQuery))
-      : eventTags;
-    return matchingTags
-      .slice()
-      .sort((a, b) => {
-        const countDiff = (b.eventCount ?? 0) - (a.eventCount ?? 0);
-        return countDiff || a.name.localeCompare(b.name);
-      })
-      .slice(0, 5);
-  }, [eventTags, tagsQuery]);
 
   const resetFilters = useCallback(() => {
     setSelectedEventTypes([...eventTypeOptions]);
@@ -308,7 +277,7 @@ function EventsTabView<TEventType extends string>(
     selectedStartDate,
     selectedTags,
   ]);
-  const { visibleEvents, isRefreshing, refreshError } = useEventListFiltering({
+  const { visibleEvents, refreshError } = useEventListFiltering({
     events,
     filters: eventFilters,
     filterKey: eventListFilterKey(eventFilters),
@@ -469,122 +438,6 @@ function EventsTabView<TEventType extends string>(
       : sortedEvents.length;
   const hasActiveDistanceFilter = Boolean(location && typeof maxDistance === 'number');
 
-  const renderTagFilters = () => (
-    <div>
-      <Text size="xs" fw={700} c="dimmed" tt="uppercase" mb={8}>
-        Tags
-      </Text>
-      <TextInput
-        value={tagSearchTerm}
-        onChange={(event) => setTagSearchTerm(event.currentTarget.value)}
-        placeholder="Search tag..."
-        mb="sm"
-      />
-      <Group gap="xs">
-        <Chip
-          color="blue"
-          radius="xl"
-          checked={allTagsSelected}
-          disabled={eventTagsLoading || !eventTags.length}
-          onChange={(checked) => {
-            if (checked) setSelectedTags([]);
-          }}
-        >
-          All
-        </Chip>
-        {eventTagsLoading ? (
-          <Loader size="sm" aria-label="Loading tags" />
-        ) : visibleEventTags.length ? (
-          visibleEventTags.map((tag) => (
-            <Chip
-              key={tag.slug || tag.name}
-              color="blue"
-              radius="xl"
-              checked={selectedTags.includes(tag.name)}
-              onChange={(checked) => {
-                setSelectedTags((current) => {
-                  if (checked) {
-                    const next = new Set(current);
-                    next.add(tag.name);
-                    return Array.from(next);
-                  }
-                  return current.filter((value) => value !== tag.name);
-                });
-              }}
-            >
-              {tag.name} ({tag.eventCount ?? 0})
-            </Chip>
-          ))
-        ) : (
-          <Text size="sm" c="dimmed">
-            {tagsQuery ? 'No tags match this search.' : 'No tags available.'}
-          </Text>
-        )}
-      </Group>
-      {eventTagsError && (
-        <Alert color="red" radius="md" mt="sm">
-          {eventTagsError}
-        </Alert>
-      )}
-    </div>
-  );
-
-
-  const sportsData = sports.map((sport) => ({ value: sport, label: sport }));
-  const eventTypeData = eventTypeOptions.map((type) => ({
-    value: type,
-    label: formatEnumDisplayLabel(type, 'Event'),
-  }));
-  const selectedEventTypeLabels = allEventTypesSelected
-    ? 'All event types'
-    : selectedEventTypes.map((type) => formatEnumDisplayLabel(type, 'Event')).join(', ');
-
-  const sharedFilterProps = {
-    location,
-    selectedSports,
-    setSelectedSports,
-    sportsData,
-    sportsLoading,
-    selectedEventTypes,
-    setSelectedEventTypes,
-    eventTypeData,
-    selectedEventTypeLabels,
-    selectedStartDate,
-    setSelectedStartDate,
-    selectedEndDate,
-    setSelectedEndDate,
-    maxDistance,
-    setMaxDistance,
-    defaultMaxDistance,
-    sportsError,
-    hideWeeklyChildren,
-    setHideWeeklyChildren,
-    resetFilters,
-    hasActiveFilters: activeFilterCount > 0,
-  };
-
-  const filterPanel = (
-    <div className="discover-filter-sheet-stack">
-      <DiscoverSportFilterList
-        sports={sports}
-        selectedSports={selectedSports}
-        setSelectedSports={setSelectedSports}
-        sportsLoading={sportsLoading}
-      />
-      {renderTagFilters()}
-      <EventFilterPanel
-        {...sharedFilterProps}
-        showSports={false}
-        dateHeading="Date Range"
-      />
-      <DivisionDiscoveryFilters
-        value={divisionFilters}
-        onChange={setDivisionFilters}
-        selectedSports={selectedSports}
-        options={divisionOptions}
-      />
-    </div>
-  );
 
   const renderSearchActions = () => (
     <div className="discover-event-controls mb-8 space-y-4">
@@ -620,14 +473,15 @@ function EventsTabView<TEventType extends string>(
         defaultMaxDistance={defaultMaxDistance}
         selectedStartDate={selectedStartDate}
         setSelectedStartDate={setSelectedStartDate}
-        selectedEndDate={selectedEndDate}
         setSelectedEndDate={setSelectedEndDate}
+        selectedEndDate={selectedEndDate}
         divisionFilters={divisionFilters}
         setDivisionFilters={setDivisionFilters}
         divisionOptions={divisionOptions}
         activeFilterCount={activeFilterCount}
         resetFilters={resetFilters}
-        onOpenMoreFilters={() => setIsFiltersOpen(true)}
+        hideWeeklyChildren={hideWeeklyChildren}
+        setHideWeeklyChildren={setHideWeeklyChildren}
       />
     </div>
   );
@@ -680,10 +534,13 @@ function EventsTabView<TEventType extends string>(
 
   const renderResults = () => (
     <div className="space-y-4">
-      <Group justify="space-between" align="center" gap="sm" wrap="wrap">
-        <Text size="sm" c="dimmed">
-          {eventReadoutCount} event{eventReadoutCount === 1 ? '' : 's'} {hasActiveDistanceFilter ? 'near you' : 'available'}.
-        </Text>
+      <Group className="discover-results-header" justify="space-between" align="center" gap="sm" wrap="wrap">
+        <div className="discover-results-summary">
+          <Text size="sm" c="dimmed">
+            {eventReadoutCount} event{eventReadoutCount === 1 ? '' : 's'} {hasActiveDistanceFilter ? 'near you' : 'available'}.
+          </Text>
+          <ActiveEventFilters filters={activeFilters} className="discover-active-event-filters" label="Active filters" />
+        </div>
         <Select
           aria-label="Sort events"
           data={EVENT_SORT_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
@@ -694,18 +551,10 @@ function EventsTabView<TEventType extends string>(
         />
       </Group>
 
-      <ActiveEventFilters filters={activeFilters} className="discover-active-event-filters" label="Active filters" />
-
       {(eventsError || refreshError) && (
         <Alert color="red">
           {eventsError ?? refreshError}
         </Alert>
-      )}
-
-      {isRefreshing && !isLoadingInitial && (
-        <Text role="status" aria-live="polite" size="sm" c="dimmed">
-          Updating events…
-        </Text>
       )}
 
       {renderEventCards()}
@@ -716,23 +565,6 @@ function EventsTabView<TEventType extends string>(
     <>
       {renderSearchActions()}
 
-      <Sheet open={isFiltersOpen} onOpenChange={(open) => setIsFiltersOpen(open)}>
-        <SheetContent side="bottom" className="max-h-[85dvh] overflow-y-auto">
-          <SheetHeader>
-            <SheetTitle>Filter Events</SheetTitle>
-            <SheetDescription>Adjust event type, sport, date, division, and distance filters.</SheetDescription>
-          </SheetHeader>
-          <div className="px-4 pb-6">
-            <Group justify="space-between" align="center" mb="md">
-              <Text fw={700} size="sm">Filters</Text>
-              <Button variant="subtle" size="compact-sm" onClick={resetFilters} disabled={!activeFilterCount}>
-                Reset
-              </Button>
-            </Group>
-            {filterPanel}
-          </div>
-        </SheetContent>
-      </Sheet>
 
       <div className="discover-event-results">
         {renderResults()}

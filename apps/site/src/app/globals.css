@@ -293,8 +293,49 @@ svg {
 
 .discover-search-submit {
   flex-shrink: 0;
+  margin-left: -1px;
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
+}
+
+.discover-search-input input {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+
+.discover-filter-more-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.discover-filter-more-item > .discover-sport-filter,
+.discover-filter-more-item > .discover-filter-control {
+  width: 100%;
+}
+
+.discover-filter-more-item > .discover-sport-filter {
+  text-align: left;
+}
+
+.discover-results-header {
+  min-width: 0;
+}
+
+.discover-results-summary {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 1rem;
+}
+
+.discover-active-event-filters {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .discover-search-actions {
@@ -472,6 +513,10 @@ svg {
   color: var(--discover-text);
 }
 
+.discover-filter-more-menu {
+  width: min(22rem, calc(100vw - 2rem));
+}
+
 .discover-filter-popover-heading {
   margin-bottom: 0.9rem;
   color: var(--discover-text);
@@ -488,8 +533,7 @@ svg {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.discover-filter-option-list,
-.discover-filter-sheet-options {
+.discover-filter-option-list {
   display: flex;
   flex-direction: column;
   margin-top: 0.75rem;
@@ -597,21 +641,6 @@ svg {
 }
 
 
-.discover-filter-sheet-section {
-  display: flex;
-  flex-direction: column;
-  gap: 0.65rem;
-}
-
-.discover-filter-sheet-options {
-  margin-top: 0;
-}
-
-.discover-filter-sheet-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-}
 
 .discover-filter-error {
   color: var(--destructive);

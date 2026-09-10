@@ -16,6 +16,7 @@ import {
   Check,
   ChevronDown,
   DollarSign,
+  EyeOff,
   MapPin,
   Search,
   Tag,
@@ -28,6 +29,7 @@ import {
 import {
   Alert,
   Button,
+  Checkbox,
   DatePickerInput,
   Loader,
   NumberInput,
@@ -72,23 +74,25 @@ export function calculateVisibleFilterCount(
   return fitCount;
 }
 
-
-type FilterItem = { key: string; node: ReactNode };
-type FilterOption = { value: string; label: string; count?: number };
+export type FilterOption = { value: string; label: string; count?: number };
+export type DiscoverFilterItem = { key: string; node: ReactNode };
 
 type OverflowFilterRowProps = {
-  items: FilterItem[];
+  items: DiscoverFilterItem[];
   contentKey: string;
   ariaLabel: string;
   moreLabel: string;
-  onMore: () => void;
   trailing?: ReactNode;
   className?: string;
 };
-function OverflowFilterRow({ items, contentKey, ariaLabel, moreLabel, onMore, trailing, className }: OverflowFilterRowProps) {
+
+function OverflowFilterRow({ items, contentKey, ariaLabel, moreLabel, trailing, className }: OverflowFilterRowProps) {
   const rowRef = useRef<HTMLDivElement>(null);
   const [measurement, setMeasurement] = useState<{ key: string; count: number | null }>({ key: contentKey, count: null });
+  const [moreOpen, setMoreOpen] = useState(false);
   const visibleCount = measurement.key === contentKey ? measurement.count : null;
+  const isMeasuring = visibleCount === null;
+  const overflowItems = isMeasuring ? [] : items.slice(visibleCount);
 
   /* eslint-disable react-hooks/set-state-in-effect -- The row width is a DOM measurement that controls overflow visibility. */
   useLayoutEffect(() => {
@@ -122,44 +126,156 @@ function OverflowFilterRow({ items, contentKey, ariaLabel, moreLabel, onMore, tr
     const row = rowRef.current;
     if (!row || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(() => {
+      setMoreOpen(false);
       setMeasurement((current) => current.count === null ? current : { key: current.key, count: null });
     });
     observer.observe(row);
     return () => observer.disconnect();
   }, []);
-  const showMore = visibleCount === null || visibleCount < items.length;
+
+  const showMore = isMeasuring || overflowItems.length > 0;
+  const moreTrigger = (
+    <Button
+      variant="outline"
+      size="sm"
+      data-overflow-more
+      aria-label={moreLabel}
+      aria-haspopup="dialog"
+      aria-hidden={isMeasuring ? true : undefined}
+      tabIndex={isMeasuring ? -1 : undefined}
+      style={isMeasuring ? { visibility: 'hidden' } : undefined}
+    />
+  );
+
   return (
     <div ref={rowRef} className={`discover-filter-row ${className ?? ''}`} aria-label={ariaLabel}>
-      {items.map((item, index) => (
-        <span
-          key={item.key}
-          data-overflow-item
-          className="discover-filter-row-item"
-          hidden={visibleCount !== null && index >= visibleCount}
-        >
-          {item.node}
-        </span>
-      ))}
+      {items.map((item, index) => {
+        if (!isMeasuring && index >= (visibleCount ?? 0)) {
+          return null;
+        }
+        return (
+          <span key={item.key} data-overflow-item className="discover-filter-row-item">
+            {item.node}
+          </span>
+        );
+      })}
       {showMore && (
-        <Button
-          variant="outline"
-          size="sm"
-          data-overflow-more
-          aria-label={moreLabel}
-          aria-hidden={visibleCount === null ? true : undefined}
-          tabIndex={visibleCount === null ? -1 : undefined}
-          onClick={onMore}
-          style={visibleCount === null ? { visibility: 'hidden' } : undefined}
-        >
-          {moreLabel}
-        </Button>
+        <UiPopover open={moreOpen && !isMeasuring} onOpenChange={setMoreOpen}>
+          <PopoverTrigger render={moreTrigger}>{moreLabel}</PopoverTrigger>
+          {!isMeasuring && overflowItems.length > 0 && (
+            <PopoverContent
+              align="start"
+              aria-label={moreLabel}
+              className="discover-filter-popover discover-filter-more-menu p-2"
+            >
+              <div
+                className="discover-filter-more-items"
+                onClick={(event) => {
+                  if (event.target instanceof Element && event.target.closest('.discover-sport-filter')) {
+                    setMoreOpen(false);
+                  }
+                }}
+              >
+                {overflowItems.map((item) => (
+                  <div key={item.key} className="discover-filter-more-item">
+                    {item.node}
+                  </div>
+                ))}
+              </div>
+            </PopoverContent>
+          )}
+        </UiPopover>
       )}
       {trailing && <span data-overflow-trailing className="discover-filter-row-trailing">{trailing}</span>}
     </div>
   );
 }
 
-type FilterPopoverProps = {
+export type DiscoverFilterRowsProps = {
+  sports: string[];
+  selectedSports: string[];
+  setSelectedSports: Dispatch<SetStateAction<string[]>>;
+  sportsLoading: boolean;
+  sportsError?: string | null;
+  filters: DiscoverFilterItem[];
+  filtersKey: string;
+  filterAriaLabel?: string;
+  moreFiltersLabel?: string;
+  activeFilterCount?: number;
+  resetFilters?: () => void;
+};
+
+export function DiscoverFilterRows({
+  sports,
+  selectedSports,
+  setSelectedSports,
+  sportsLoading,
+  sportsError,
+  filters,
+  filtersKey,
+  filterAriaLabel = 'Filters',
+  moreFiltersLabel,
+  activeFilterCount = 0,
+  resetFilters,
+}: DiscoverFilterRowsProps) {
+  const sportsKey = `${sports.join('|')}::${selectedSports.join('|')}`;
+  const sportsItems: DiscoverFilterItem[] = sportsLoading
+    ? [{ key: 'loading', node: <Loader size="sm" aria-label="Loading sports" /> }]
+    : [
+      {
+        key: 'all-sports',
+        node: (
+          <button
+            type="button"
+            className={`discover-sport-filter${selectedSports.length === 0 ? ' is-all-selected' : ''}`}
+            aria-pressed={selectedSports.length === 0}
+            onClick={() => setSelectedSports([])}
+          >
+            All sports
+          </button>
+        ),
+      },
+      ...sports.map((sport) => ({
+        key: sport,
+        node: (
+          <button
+            type="button"
+            className={`discover-sport-filter${selectedSports.includes(sport) ? ' is-selected' : ''}`}
+            aria-pressed={selectedSports.includes(sport)}
+            onClick={() => setSelectedSports((current) => (
+              current.includes(sport) ? current.filter((value) => value !== sport) : [...current, sport]
+            ))}
+          >
+            {sport}
+          </button>
+        ),
+      })),
+    ];
+  const clearAllControl = activeFilterCount > 0 && resetFilters
+    ? <button type="button" className="discover-filter-clear-all" onClick={resetFilters}>Clear all</button>
+    : undefined;
+
+  return (
+    <div className="discover-filter-bar">
+      <OverflowFilterRow
+        items={sportsItems}
+        contentKey={sportsKey}
+        ariaLabel="Sports"
+        moreLabel="More sports"
+      />
+      <OverflowFilterRow
+        items={filters}
+        contentKey={filtersKey}
+        ariaLabel={filterAriaLabel}
+        moreLabel={moreFiltersLabel ?? `More filters${activeFilterCount ? ` (${activeFilterCount})` : ''}`}
+        trailing={clearAllControl}
+      />
+      {sportsError && <div className="discover-filter-error" role="alert">{sportsError}</div>}
+    </div>
+  );
+}
+
+export type FilterPopoverProps = {
   id: string;
   label: string;
   valueLabel?: string;
@@ -172,7 +288,7 @@ type FilterPopoverProps = {
   children: ReactNode;
 };
 
-function FilterPopover({ id, label, valueLabel, value, icon: Icon, active = false, open, onOpenChange, onClear, children }: FilterPopoverProps) {
+export function FilterPopover({ id, label, valueLabel, value, icon: Icon, active = false, open, onOpenChange, onClear, children }: FilterPopoverProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const wasOpenRef = useRef(false);
   useEffect(() => {
@@ -228,7 +344,8 @@ function FilterPopover({ id, label, valueLabel, value, icon: Icon, active = fals
   );
 }
 
-type FilterOptionListProps = {
+
+export type FilterOptionListProps = {
   options: FilterOption[];
   value: string[];
   allLabel: string;
@@ -236,7 +353,7 @@ type FilterOptionListProps = {
   allValue?: string[];
 };
 
-function FilterOptionList({ options, value, allLabel, onChange, allValue }: FilterOptionListProps) {
+export function FilterOptionList({ options, value, allLabel, onChange, allValue }: FilterOptionListProps) {
   const allSelected = allValue ? value.length === allValue.length : value.length === 0;
   const toggle = (option: FilterOption) => {
     onChange(value.includes(option.value)
@@ -308,11 +425,6 @@ const priceSummary = (minimum: number | null, maximum: number | null): string | 
 };
 
 const optionList = (options: DivisionOption[]): FilterOption[] => options.map((option) => ({ value: option.id, label: option.name }));
-const renderClearAllControl = (activeFilterCount: number, resetFilters: () => void): ReactNode => (
-  activeFilterCount > 0
-    ? <button type="button" className="discover-filter-clear-all" onClick={resetFilters}>Clear all</button>
-    : undefined
-);
 type DiscoverFilterItemContext<TEventType extends string> = {
   panelId: string;
   openFilter: string | null;
@@ -352,6 +464,8 @@ type DiscoverFilterItemContext<TEventType extends string> = {
   ageLabels: string[];
   skillOptions: FilterOption[];
   skillLabels: string[];
+  hideWeeklyChildren?: boolean;
+  setHideWeeklyChildren?: (value: boolean) => void;
 };
 
 type DiscoverFilterItemProps<TEventType extends string> = {
@@ -605,51 +719,31 @@ function SkillLevelFilterItem<TEventType extends string>({ context }: DiscoverFi
   );
 }
 
-export type DiscoverSportFilterListProps = {
-  sports: string[];
-  selectedSports: string[];
-  setSelectedSports: Dispatch<SetStateAction<string[]>>;
-  sportsLoading: boolean;
-};
-
-export function DiscoverSportFilterList({ sports, selectedSports, setSelectedSports, sportsLoading }: DiscoverSportFilterListProps) {
-  const allSportsSelected = selectedSports.length === 0;
-  if (sportsLoading) return <Loader size="sm" aria-label="Loading sports" />;
-
+function VisibilityFilterItem<TEventType extends string>({ context }: DiscoverFilterItemProps<TEventType>) {
+  const { panelId, openFilter, setOpen, hideWeeklyChildren = false, setHideWeeklyChildren } = context;
+  if (!setHideWeeklyChildren) return null;
   return (
-    <div className="discover-filter-sheet-section">
-      <Text size="xs" fw={700} c="dimmed" tt="uppercase">Sports</Text>
-      <div className="discover-filter-sheet-options" aria-label="Sports">
-        <button
-          type="button"
-          className={`discover-filter-option${allSportsSelected ? ' is-selected' : ''}`}
-          aria-pressed={allSportsSelected}
-          onClick={() => setSelectedSports([])}
-        >
-          <span>All sports</span>
-          {allSportsSelected && <Check aria-hidden="true" className="discover-filter-option-check" />}
-        </button>
-        {sports.map((sport) => {
-          const selected = selectedSports.includes(sport);
-          return (
-            <button
-              key={sport}
-              type="button"
-              className={`discover-filter-option${selected ? ' is-selected' : ''}`}
-              aria-pressed={selected}
-              onClick={() => setSelectedSports((current) => (
-                selected ? current.filter((value) => value !== sport) : [...current, sport]
-              ))}
-            >
-              <span>{sport}</span>
-              {selected && <Check aria-hidden="true" className="discover-filter-option-check" />}
-            </button>
-          );
-        })}
-      </div>
-    </div>
+    <FilterPopover
+      id={`${panelId}-visibility`}
+      label="Visibility"
+      valueLabel={hideWeeklyChildren ? 'Weekly sessions hidden' : undefined}
+      value={hideWeeklyChildren ? 'Weekly hidden' : undefined}
+      icon={EyeOff}
+      active={hideWeeklyChildren}
+      open={openFilter === 'visibility'}
+      onOpenChange={setOpen('visibility')}
+      onClear={() => setHideWeeklyChildren(false)}
+    >
+      <div className="discover-filter-popover-heading">Visibility</div>
+      <Checkbox
+        checked={hideWeeklyChildren}
+        onChange={(event) => setHideWeeklyChildren(event.currentTarget.checked)}
+        label="Hide weekly sessions"
+      />
+    </FilterPopover>
   );
 }
+
 
 export type DiscoverFilterBarProps<TEventType extends string = Event['eventType']> = {
   location: { lat: number; lng: number } | null;
@@ -678,7 +772,8 @@ export type DiscoverFilterBarProps<TEventType extends string = Event['eventType'
   divisionOptions: DivisionDiscoveryFilterOptions;
   activeFilterCount: number;
   resetFilters: () => void;
-  onOpenMoreFilters: () => void;
+  hideWeeklyChildren?: boolean;
+  setHideWeeklyChildren?: (value: boolean) => void;
 };
 
 export default function DiscoverFilterBar<TEventType extends string = Event['eventType']>({
@@ -708,7 +803,8 @@ export default function DiscoverFilterBar<TEventType extends string = Event['eve
   divisionOptions,
   activeFilterCount,
   resetFilters,
-  onOpenMoreFilters,
+  hideWeeklyChildren = false,
+  setHideWeeklyChildren,
 }: DiscoverFilterBarProps<TEventType>) {
   const [openFilter, setOpenFilter] = useState<string | null>(null);
   const [tagSearch, setTagSearch] = useState('');
@@ -736,11 +832,21 @@ export default function DiscoverFilterBar<TEventType extends string = Event['eve
   const genderLabels = selectedLabels(divisionFilters.genders, genderOptions);
   const ageLabels = selectedLabels(divisionFilters.ageDivisionTypeIds, ageOptions);
   const skillLabels = selectedLabels(divisionFilters.skillDivisionTypeIds, skillOptions);
+  useEffect(() => {
+    if (divisionOptions.loading || divisionOptions.error) return;
+    const availableSkillIds = new Set(divisionOptions.skillOptions.map((option) => option.value.trim().toLowerCase()));
+    const nextSkillIds = divisionFilters.skillDivisionTypeIds.filter((id) => availableSkillIds.has(id.trim().toLowerCase()));
+    if (
+      nextSkillIds.length !== divisionFilters.skillDivisionTypeIds.length
+      || nextSkillIds.some((id, index) => id !== divisionFilters.skillDivisionTypeIds[index])
+    ) {
+      setDivisionFilters({ ...divisionFilters, skillDivisionTypeIds: nextSkillIds });
+    }
+  }, [divisionFilters, divisionOptions.error, divisionOptions.loading, divisionOptions.skillOptions, setDivisionFilters]);
   const distanceMiles = typeof maxDistance === 'number' ? Math.round(maxDistance / KM_PER_MILE) : null;
   const distanceActive = Boolean(location && distanceMiles !== null);
   const priceActive = divisionFilters.priceMinDollars !== null || divisionFilters.priceMaxDollars !== null;
   const dateActive = Boolean(selectedStartDate || selectedEndDate);
-  const sportsKey = `${sports.join('|')}::${selectedSports.join('|')}`;
   const filtersKey = [
     selectedStartDate?.toISOString() ?? '',
     selectedEndDate?.toISOString() ?? '',
@@ -758,36 +864,9 @@ export default function DiscoverFilterBar<TEventType extends string = Event['eve
     divisionOptions.genders.length,
     divisionOptions.ages.length,
     divisionOptions.skillOptions.length,
+    hideWeeklyChildren ? 'hidden' : 'shown',
     activeFilterCount,
   ].join('::');
-
-  const sportsItems: FilterItem[] = sportsLoading
-    ? [{ key: 'loading', node: <Loader size="sm" aria-label="Loading sports" /> }]
-    : [
-      {
-        key: 'all-sports',
-        node: (
-          <button type="button" className={`discover-sport-filter${selectedSports.length === 0 ? ' is-all-selected' : ''}`} aria-pressed={selectedSports.length === 0} onClick={() => setSelectedSports([])}>
-            All sports
-          </button>
-        ),
-      },
-      ...sports.map((sport) => ({
-        key: sport,
-        node: (
-          <button
-            type="button"
-            className={`discover-sport-filter${selectedSports.includes(sport) ? ' is-selected' : ''}`}
-            aria-pressed={selectedSports.includes(sport)}
-            onClick={() => setSelectedSports((current) => (
-              current.includes(sport) ? current.filter((value) => value !== sport) : [...current, sport]
-            ))}
-          >
-            {sport}
-          </button>
-        ),
-      })),
-    ];
 
   const filterContext: DiscoverFilterItemContext<TEventType> = {
     panelId,
@@ -828,8 +907,10 @@ export default function DiscoverFilterBar<TEventType extends string = Event['eve
     ageLabels,
     skillOptions,
     skillLabels,
+    hideWeeklyChildren,
+    setHideWeeklyChildren,
   };
-  const filterItems: FilterItem[] = [
+  const filterItems: DiscoverFilterItem[] = [
     { key: 'dates', node: <DatesFilterItem context={filterContext} /> },
     { key: 'price', node: <PriceFilterItem context={filterContext} /> },
     { key: 'distance', node: <DistanceFilterItem context={filterContext} /> },
@@ -838,21 +919,23 @@ export default function DiscoverFilterBar<TEventType extends string = Event['eve
     { key: 'gender', node: <GenderFilterItem context={filterContext} /> },
     { key: 'age-group', node: <AgeGroupFilterItem context={filterContext} /> },
     { key: 'skill-level', node: <SkillLevelFilterItem context={filterContext} /> },
+    ...(setHideWeeklyChildren
+      ? [{ key: 'visibility', node: <VisibilityFilterItem context={filterContext} /> }]
+      : []),
   ];
-  const clearAllControl = renderClearAllControl(activeFilterCount, resetFilters);
 
   return (
-    <div className="discover-filter-bar">
-      <OverflowFilterRow items={sportsItems} contentKey={sportsKey} ariaLabel="Sports" moreLabel="More sports" onMore={onOpenMoreFilters} />
-      <OverflowFilterRow
-        items={filterItems}
-        contentKey={filtersKey}
-        ariaLabel="Event filters"
-        moreLabel={`More filters${activeFilterCount ? ` (${activeFilterCount})` : ''}`}
-        onMore={onOpenMoreFilters}
-        trailing={clearAllControl}
-      />
-      {sportsError && <div className="discover-filter-error" role="alert">{sportsError}</div>}
-    </div>
+    <DiscoverFilterRows
+      sports={sports}
+      selectedSports={selectedSports}
+      setSelectedSports={setSelectedSports}
+      sportsLoading={sportsLoading}
+      sportsError={sportsError}
+      filters={filterItems}
+      filtersKey={filtersKey}
+      filterAriaLabel="Event filters"
+      activeFilterCount={activeFilterCount}
+      resetFilters={resetFilters}
+    />
   );
 }
