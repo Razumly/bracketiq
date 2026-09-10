@@ -1,11 +1,18 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { MapPin } from 'lucide-react';
 import { useLocation } from '@/app/hooks/useLocation';
 import { locationService } from '@/lib/locationService';
 import { useDebounce } from '@/app/hooks/useDebounce';
-import { Popover, Button, TextInput, Loader, ScrollArea, Text, Group } from '@mantine/core';
-import Paper from '@mui/material/Paper';
+import {
+  Button,
+  Group,
+  Loader,
+  Popover,
+  Text,
+  TextInput,
+} from '@/components/organization/organization-operation-ui';
 
 export default function LocationSearch() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -104,38 +111,44 @@ export default function LocationSearch() {
   };
 
   return (
-    <Popover opened={showLocationOptions} onChange={setShowLocationOptions} position="bottom-start" withArrow>
+    <Popover opened={showLocationOptions} onChange={setShowLocationOptions}>
       <Popover.Target>
-        <Button variant="default" onClick={toggleLocationOptions}>
+        <Button
+          variant="outline"
+          onClick={toggleLocationOptions}
+          aria-expanded={showLocationOptions}
+          aria-haspopup="dialog"
+          leftSection={<MapPin aria-hidden="true" size={16} />}
+        >
           {locationInfo?.city ? `${locationInfo.city}${locationInfo.state ? `, ${locationInfo.state}` : ''}` : 'Set Location'}
         </Button>
       </Popover.Target>
-      <Popover.Dropdown>
+      <Popover.Dropdown className="w-[min(24rem,calc(100vw-2rem))]">
         <Group mb="sm">
-          <Button fullWidth onClick={handleUseCurrentLocation} disabled={loading} leftSection={<span>📍</span>}>
-            {loading ? 'Getting location…' : 'Use Current Location'}
+          <Button fullWidth onClick={handleUseCurrentLocation} disabled={loading} leftSection={<MapPin aria-hidden="true" size={16} />}>
+            {loading ? <><Loader size="sm" aria-hidden="true" />Getting location…</> : 'Use Current Location'}
           </Button>
         </Group>
         <form onSubmit={handleSearchLocation}>
           <Group align="stretch" gap="xs">
             <TextInput
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.currentTarget.value)}
+              onChange={(event) => setSearchQuery(event.currentTarget.value)}
               placeholder="Enter city, state, or ZIP"
-              style={{ flex: 1 }}
+              className="min-w-0 flex-1"
             />
             <Button type="submit" disabled={loading || !searchQuery.trim()}>Search</Button>
           </Group>
         </form>
         {(predictionsLoading || predictions.length > 0) && (
-          <ScrollArea.Autosize mah={180} mt="sm">
-            {predictionsLoading && <Text size="xs" c="dimmed" px="xs">Loading suggestions…</Text>}
-            {predictions.map((p) => (
-              <Button key={p.placeId} variant="subtle" fullWidth justify="flex-start" onClick={() => selectPrediction(p.placeId)}>
-                {p.description}
+          <div className="mt-3 max-h-48 overflow-auto">
+            {predictionsLoading && <Text size="xs" c="dimmed" className="px-2">Loading suggestions…</Text>}
+            {predictions.map((prediction) => (
+              <Button key={prediction.placeId} variant="subtle" fullWidth justify="flex-start" onClick={() => selectPrediction(prediction.placeId)}>
+                {prediction.description}
               </Button>
             ))}
-          </ScrollArea.Autosize>
+          </div>
         )}
         {locationInfo && (
           <Group justify="space-between" mt="sm">

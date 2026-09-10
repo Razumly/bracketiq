@@ -5,7 +5,6 @@ import { OrganizationDataPlaceholder, OrganizationLoadingValue, useOrganizationD
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import {
   AlertCircle,
-  ArrowUpDown,
   Filter,
   Plus,
   RotateCcw,
@@ -15,22 +14,25 @@ import {
 } from 'lucide-react';
 
 import {
-  Alert,
   Button,
-  Checkbox,
-  DatePickerInput,
   Group,
   Loader,
-  MultiSelect,
   Paper,
-  Popover,
   Select,
-  Stack,
   Text,
   TextInput,
   Title,
 } from '@/components/organization/organization-operation-ui';
 import OrganizationEventCard from '@/components/organization/OrganizationEventCard';
+import {
+  ActiveEventFilters,
+  EVENT_SORT_OPTIONS,
+  EventFilterControls,
+  EventFilterPanel,
+  type EventFilter,
+  type EventFilterPanelProps,
+  type EventSortValue,
+} from '@/components/events/EventFilterControls';
 import type { Event } from '@/types';
 import { getEventDivisionPriceRange } from '@/types';
 import { formatEnumDisplayLabel } from '@/lib/enumUtils';
@@ -43,21 +45,11 @@ const KM_PER_MILE = 1.60934;
 const DISTANCE_SLIDER_MIN_MILES = 10;
 const DISTANCE_SLIDER_MAX_MILES = 100;
 
-const EVENT_SORT_OPTIONS = [
-  { value: 'recommended', label: 'Recommended' },
-  { value: 'soonest', label: 'Soonest' },
-  { value: 'nearest', label: 'Nearest' },
-  { value: 'price-low', label: 'Price (Low to High)' },
-  { value: 'popular', label: 'Most popular' },
-  { value: 'alpha', label: 'A to Z' },
-] as const;
 
-type EventSortValue = (typeof EVENT_SORT_OPTIONS)[number]['value'];
 type EventSegment = 'upcoming' | 'drafts' | 'past';
 type EventLocation = { lat: number; lng: number } | null;
 type EventDistance = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => number;
 type EventTypeOption<TEventType extends string> = readonly TEventType[];
-type EventFilter = { key: string; label: string; onRemove: () => void };
 
 type OrganizationEventsTabContentProps<TEventType extends string = Event['eventType']> = {
   organizationName: string;
@@ -101,36 +93,7 @@ type OrganizationEventsTabContentProps<TEventType extends string = Event['eventT
   setHideWeeklyChildren?: (value: boolean) => void;
 };
 
-type EventFilterPanelProps<TEventType extends string> = {
-  location: EventLocation;
-  selectedSports: string[];
-  setSelectedSports: Dispatch<SetStateAction<string[]>>;
-  sportsData: Array<{ value: string; label: string }>;
-  sportsLoading: boolean;
-  selectedEventTypes: TEventType[];
-  setSelectedEventTypes: (value: TEventType[]) => void;
-  eventTypeData: Array<{ value: TEventType; label: string }>;
-  selectedEventTypeLabels: string;
-  selectedStartDate: Date | null;
-  setSelectedStartDate: (value: Date | null) => void;
-  selectedEndDate: Date | null;
-  setSelectedEndDate: (value: Date | null) => void;
-  maxDistance: number | null;
-  setMaxDistance: (value: number | null) => void;
-  defaultMaxDistance: number;
-  sportsError: string | null;
-  hideWeeklyChildren: boolean;
-  setHideWeeklyChildren?: (value: boolean) => void;
-  resetFilters: () => void;
-  hasActiveFilters: boolean;
-};
 
-type EventControlsProps<TEventType extends string> = EventFilterPanelProps<TEventType> & {
-  searchTerm: string;
-  setSearchTerm: (value: string) => void;
-  eventSort: EventSortValue;
-  setEventSort: (value: EventSortValue) => void;
-};
 
 type MobileEventFilterControlsProps<TEventType extends string> = EventFilterPanelProps<TEventType> & {
   searchTerm: string;
@@ -294,143 +257,7 @@ const OrganizationEventsHeading = ({
   </div>
 );
 
-const OrganizationEventsFilterPanel = <TEventType extends string>({
-  location,
-  selectedSports,
-  setSelectedSports,
-  sportsData,
-  sportsLoading,
-  selectedEventTypes,
-  setSelectedEventTypes,
-  eventTypeData,
-  selectedEventTypeLabels,
-  selectedStartDate,
-  setSelectedStartDate,
-  selectedEndDate,
-  setSelectedEndDate,
-  maxDistance,
-  setMaxDistance,
-  defaultMaxDistance,
-  sportsError,
-  hideWeeklyChildren,
-  setHideWeeklyChildren,
-  resetFilters,
-  hasActiveFilters,
-}: EventFilterPanelProps<TEventType>) => (
-  <Stack gap="md">
-    <MultiSelect
-      aria-label="Filter by sports"
-      placeholder="All sports"
-      data={sportsData}
-      value={selectedSports}
-      onChange={setSelectedSports}
-      disabled={sportsLoading}
-    />
-    <MultiSelect
-      aria-label="Filter by event type"
-      placeholder={selectedEventTypeLabels || 'All event types'}
-      data={eventTypeData}
-      value={selectedEventTypes}
-      onChange={(value) => setSelectedEventTypes(value as TEventType[])}
-    />
-    <div className="grid gap-3 sm:grid-cols-2">
-      <DatePickerInput aria-label="Filter by start date" value={selectedStartDate} onChange={setSelectedStartDate} />
-      <DatePickerInput aria-label="Filter by end date" value={selectedEndDate} minDate={selectedStartDate ?? undefined} onChange={setSelectedEndDate} />
-    </div>
-    {location && (
-      <label className="block space-y-2 text-sm">
-        <span className="flex items-center justify-between gap-3 font-medium">
-          <span>Distance</span>
-          <span className="text-muted-foreground">{typeof maxDistance === 'number' ? `Within ${Math.round(kmToMiles(maxDistance))} mi` : 'Any distance'}</span>
-        </span>
-        <input
-          type="range"
-          min={DISTANCE_SLIDER_MIN_MILES}
-          max={DISTANCE_SLIDER_MAX_MILES}
-          step={1}
-          value={clampMiles(typeof maxDistance === 'number' ? kmToMiles(maxDistance) : kmToMiles(defaultMaxDistance))}
-          onChange={(event) => setMaxDistance(milesToKm(Number(event.currentTarget.value)))}
-          className="w-full accent-primary"
-          aria-label="Filter by distance"
-        />
-      </label>
-    )}
-    {sportsError && <Alert color="red">{sportsError}</Alert>}
-    {setHideWeeklyChildren && (
-      <Checkbox
-        checked={hideWeeklyChildren}
-        onChange={(event) => setHideWeeklyChildren(event.currentTarget.checked)}
-        label="Hide weekly sessions"
-      />
-    )}
-    <Button variant="outline" onClick={resetFilters} disabled={!hasActiveFilters}>
-      <RotateCcw data-icon="inline-start" aria-hidden="true" />
-      Clear all filters
-    </Button>
-  </Stack>
-);
 
-const OrganizationEventsControls = <TEventType extends string>({
-  searchTerm,
-  setSearchTerm,
-  eventSort,
-  setEventSort,
-  ...filterProps
-}: EventControlsProps<TEventType>) => (
-  <>
-    <div className="org-event-filters hidden lg:flex">
-      <TextInput
-        aria-label="Search"
-        value={searchTerm}
-        onChange={(event) => setSearchTerm(event.currentTarget.value)}
-        placeholder="Search"
-        leftSection={<Search aria-hidden="true" className="size-4" />}
-        className="min-w-0 flex-1"
-      />
-      <MultiSelect
-        aria-label="Filter by sports"
-        placeholder="Sports"
-        data={filterProps.sportsData}
-        value={filterProps.selectedSports}
-        onChange={filterProps.setSelectedSports}
-        disabled={filterProps.sportsLoading}
-        className="w-40"
-      />
-      <Popover>
-        <Popover.Target><Button variant="outline">Dates</Button></Popover.Target>
-        <Popover.Dropdown>
-          <Stack gap="sm">
-            <DatePickerInput label="Start date" aria-label="Filter by start date" value={filterProps.selectedStartDate} onChange={filterProps.setSelectedStartDate} />
-            <DatePickerInput label="End date" aria-label="Filter by end date" value={filterProps.selectedEndDate} minDate={filterProps.selectedStartDate ?? undefined} onChange={filterProps.setSelectedEndDate} />
-          </Stack>
-        </Popover.Dropdown>
-      </Popover>
-      <MultiSelect
-        aria-label="Filter by event type"
-        placeholder={filterProps.selectedEventTypeLabels || 'Event type'}
-        data={filterProps.eventTypeData}
-        value={filterProps.selectedEventTypes}
-        onChange={(value) => filterProps.setSelectedEventTypes(value as TEventType[])}
-        className="w-44"
-      />
-      <Button variant="ghost" onClick={filterProps.resetFilters} disabled={!filterProps.hasActiveFilters}>Clear all</Button>
-      <div className="org-event-sort">
-        <Text size="xs" c="dimmed">Sort by</Text>
-        <Select
-          aria-label="Sort events"
-          data={EVENT_SORT_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
-          value={eventSort}
-          onChange={(value) => setEventSort((value as EventSortValue) ?? 'soonest')}
-          rightSection={<ArrowUpDown aria-hidden="true" className="size-4" />}
-        />
-      </div>
-    </div>
-
-    <div className="space-y-3 lg:hidden">
-      <MobileEventFilterControls searchTerm={searchTerm} setSearchTerm={setSearchTerm} {...filterProps} />
-    </div>
-  </>
-);
 
 const MobileEventFilterControls = <TEventType extends string>({
   searchTerm,
@@ -478,32 +305,13 @@ const MobileEventFilterControls = <TEventType extends string>({
               <X aria-hidden="true" />
             </Button>
           </Group>
-          <OrganizationEventsFilterPanel {...filterProps} />
+          <EventFilterPanel {...filterProps} />
         </Paper>
       )}
     </div>
   );
 };
 
-const ActiveEventFilters = ({ filters }: { filters: EventFilter[] }) => {
-  if (filters.length === 0) return null;
-  return (
-    <div className="flex flex-wrap items-center gap-2" aria-label="Active event filters">
-      <Text size="sm" c="dimmed" className="mr-1">Filters:</Text>
-      {filters.map((filter) => (
-        <button
-          key={filter.key}
-          type="button"
-          onClick={filter.onRemove}
-          className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-border bg-muted px-3 py-1 text-sm text-foreground hover:bg-accent/10"
-        >
-          <span>{filter.label}</span>
-          <X aria-hidden="true" className="size-3.5" />
-        </button>
-      ))}
-    </div>
-  );
-};
 
 const EVENT_SEGMENTS: EventSegment[] = ['upcoming', 'drafts', 'past'];
 
@@ -860,13 +668,18 @@ export default function OrganizationEventsTabContent<TEventType extends string =
         createEventDisabled={createEventDisabled}
         createEventHelperText={createEventHelperText}
       />
-      <OrganizationEventsControls
-        searchTerm={searchTerm}
-        setSearchTerm={setSearchTerm}
-        eventSort={eventSort}
-        setEventSort={setEventSort}
-        {...filterProps}
-      />
+      <div className="org-event-filters hidden lg:flex">
+        <EventFilterControls
+          searchTerm={searchTerm}
+          setSearchTerm={setSearchTerm}
+          eventSort={eventSort}
+          setEventSort={setEventSort}
+          {...filterProps}
+        />
+      </div>
+      <div className="space-y-3 lg:hidden">
+        <MobileEventFilterControls searchTerm={searchTerm} setSearchTerm={setSearchTerm} {...filterProps} />
+      </div>
       <ActiveEventFilters filters={activeFilters} />
       <EventSegmentTabs eventSegment={eventSegment} setEventSegment={setEventSegment} segmentCounts={segmentCounts} loading={isDataLoading} />
       <div className="flex items-center justify-between gap-3 lg:hidden">
