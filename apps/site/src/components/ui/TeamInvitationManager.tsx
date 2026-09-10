@@ -5,6 +5,20 @@ import { Alert, Badge, Button, Group, Paper, Stack, Text } from '@mantine/core';
 import { userService } from '@/lib/userService';
 import type { Invite } from '@/types';
 
+function pendingInvitationFallback(status: string | null | undefined, isCurrentAttempt = true) {
+  return isCurrentAttempt && (status == null || status === 'PENDING' || status === 'SENT' || status === 'FAILED')
+    ? 'Pending acceptance'
+    : undefined;
+}
+
+async function loadInitialInvites(load: () => Promise<void>, onError: () => void) {
+  try {
+    await load();
+  } catch {
+    onError();
+  }
+}
+
 export default function TeamInvitationManager({ teamId, onChanged, onInvitesLoaded }: {
   teamId: string; onChanged: () => Promise<void>; onInvitesLoaded: (invites: Invite[]) => void;
 }) {
@@ -21,7 +35,9 @@ export default function TeamInvitationManager({ teamId, onChanged, onInvitesLoad
     const all = [...pending, ...history];
     setInvites(all); onInvitesLoaded(all);
   }, [teamId, onInvitesLoaded]);
-  useEffect(() => { void load().catch(() => setError('Invitation history could not be loaded.')); }, [load]);
+  useEffect(() => {
+    void loadInitialInvites(load, () => setError('Invitation history could not be loaded.'));
+  }, [load]);
   const act = async (invite: Invite, action: 'remind' | 'cancel' | 'reinvite') => {
     setActing(invite.$id); setError(null); setMessage(null);
     const requestId = `${action}:${invite.$id}`;
@@ -55,7 +71,7 @@ export default function TeamInvitationManager({ teamId, onChanged, onInvitesLoad
     {current.map((invite) => {
       const history = invites.filter((item) => invite.userId && item.userId === invite.userId && item.$id !== invite.$id);
       return <Paper key={invite.$id} withBorder p="sm"><Stack gap="xs">
-        <Group justify="space-between"><Text>{[invite.firstName, invite.lastName].filter(Boolean).join(' ') || invite.email || 'Player'}</Text><Badge>{invite.invitationLabel || `Invitation ${invite.status?.toLowerCase()}`}</Badge></Group>
+        <Group justify="space-between"><Text>{[invite.firstName, invite.lastName].filter(Boolean).join(' ') || invite.email || 'Player'}</Text><Badge>{invite.invitationLabel || pendingInvitationFallback(invite.status, invite.isCurrentAttempt) || `Invitation ${invite.status?.toLowerCase()}`}</Badge></Group>
         <Text size="xs" c="dimmed">Created {invite.$createdAt ? new Date(invite.$createdAt).toLocaleString() : '—'}{invite.finalizedAt ? ` · Final outcome ${new Date(invite.finalizedAt).toLocaleString()}` : ''}</Text>
         <Group gap="xs">
           {invite.status === 'PENDING' ? <>
@@ -65,7 +81,7 @@ export default function TeamInvitationManager({ teamId, onChanged, onInvitesLoad
         </Group>
         <details><summary>Attempts and deliveries</summary><Stack gap={4} mt="xs">
           {[invite, ...history].map((attempt) => <div key={attempt.$id}>
-            <Text size="sm">{attempt.invitationLabel || attempt.status} · {attempt.finalizedAt || attempt.$createdAt} · Sender {attempt.senderName || 'Name unavailable'}{attempt.actingGuardianId ? ` · Guardian ${attempt.actingGuardianName || 'Name unavailable'}` : ''}</Text>
+            <Text size="sm">{attempt.invitationLabel || pendingInvitationFallback(attempt.status, attempt.isCurrentAttempt) || attempt.status} · {attempt.finalizedAt || attempt.$createdAt} · Sender {attempt.senderName || 'Name unavailable'}{attempt.actingGuardianId ? ` · Guardian ${attempt.actingGuardianName || 'Name unavailable'}` : ''}</Text>
             {(attempt.deliveries ?? []).map((delivery) => <Text key={delivery.id} size="xs" c="dimmed">{delivery.kind === 'REMINDER' ? 'Reminder' : 'Delivery'}: {delivery.status.toLowerCase()} · {new Date(delivery.createdAt).toLocaleString()}</Text>)}
           </div>)}
         </Stack></details>

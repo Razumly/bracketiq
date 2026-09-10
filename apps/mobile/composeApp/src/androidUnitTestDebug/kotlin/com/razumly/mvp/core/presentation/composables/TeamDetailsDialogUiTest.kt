@@ -161,7 +161,7 @@ class TeamDetailsDialogUiTest {
     }
 
     @Test
-    fun given_pending_player_when_team_details_opens_then_awaiting_player_label_is_visible() {
+    fun given_pending_player_when_team_details_opens_then_pending_acceptance_label_is_visible() {
         val currentUser = user(id = "manager", firstName = "Casey", lastName = "Manager")
         val pendingPlayer = user(id = "pending", firstName = "Jordan", lastName = "Awaiting")
 
@@ -190,7 +190,7 @@ class TeamDetailsDialogUiTest {
             }
         }
 
-        composeRule.onNodeWithText("Awaiting player").assertIsDisplayed()
+        composeRule.onNodeWithText("Pending acceptance").assertIsDisplayed()
     }
 
     private fun user(

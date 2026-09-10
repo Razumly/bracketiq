@@ -26,7 +26,7 @@ import InvitePlayersModal from '@/app/teams/components/InvitePlayersModal';
 import { describeDeleteOutcome } from '@/lib/deleteOutcome';
 import { normalizeExternalHttpUrl } from '@/lib/externalUrl';
 
-export type TeamDetailPageTab = 'roster' | 'schedule' | 'finance';
+export type TeamDetailPageTab = 'roster' | 'schedule' | 'finance' | 'invitations';
 
 interface TeamDetailModalProps {
     currentTeam: Team;
@@ -38,7 +38,7 @@ interface TeamDetailModalProps {
     selectedFreeAgentId?: string;
     selectedFreeAgentUser?: UserData;
     canChargeRegistration?: boolean;
-    variant?: 'modal' | 'page';
+    variant?: 'modal' | 'page' | 'edit';
     activeTab?: TeamDetailPageTab;
     onActiveTabChange?: (tab: TeamDetailPageTab) => void;
 }
@@ -190,6 +190,7 @@ const getAccountlessInviteDisplayName = (invite: Invite): string => {
 };
 
 const ACTIVE_PLAYER_REGISTRATION_STATUSES = new Set(['ACTIVE', 'PENDING', 'STARTED']);
+const CANCELLABLE_INVITATION_STATUSES: Record<string, true> = { '': true, PENDING: true, SENT: true, FAILED: true };
 const isActivePlayerRegistration = (registration: TeamPlayerRegistration): boolean => (
     ACTIVE_PLAYER_REGISTRATION_STATUSES.has(String(registration.status ?? '').trim().toUpperCase())
 );
@@ -250,32 +251,48 @@ export default function TeamDetailModal({
     activeTab,
     onActiveTabChange,
 }: TeamDetailModalProps) {
+    const { user } = useApp();
+    const isTeamCaptain = currentTeam.captainId === user?.$id || currentTeam.managerId === user?.$id;
+    const canManageTeam = canManage ?? isTeamCaptain;
     const isPageMode = variant === 'page';
+    const isEditMode = variant === 'edit';
     const detailIsActive = isPageMode || isOpen;
     const showTeamDetailTabs = isPageMode;
     const financeTabAvailable = showTeamDetailTabs && Boolean(currentTeam.organizationId);
+    const invitationsTabAvailable = showTeamDetailTabs && canManageTeam;
     const requestedDetailTab = showTeamDetailTabs ? activeTab ?? 'roster' : 'roster';
-    const detailTab = requestedDetailTab === 'finance' && !financeTabAvailable ? 'roster' : requestedDetailTab;
+    const detailTab = (
+        (requestedDetailTab === 'finance' && !financeTabAvailable)
+        || (requestedDetailTab === 'invitations' && !invitationsTabAvailable)
+    ) ? 'roster' : requestedDetailTab;
     const showRosterTab = !showTeamDetailTabs || detailTab === 'roster';
     const showScheduleTab = showTeamDetailTabs && detailTab === 'schedule';
     const showFinanceTab = financeTabAvailable && detailTab === 'finance';
+    const showInvitationsTab = invitationsTabAvailable && detailTab === 'invitations';
     const detailTabs = useMemo(() => {
         const tabs: Array<{ label: string; value: TeamDetailPageTab }> = [
             { label: 'Roster', value: 'roster' },
             { label: 'Schedule', value: 'schedule' },
         ];
+        if (invitationsTabAvailable) {
+            tabs.push({ label: 'Invitation History', value: 'invitations' });
+        }
         if (financeTabAvailable) {
             tabs.push({ label: 'Finance', value: 'finance' });
         }
         return tabs;
-    }, [financeTabAvailable]);
-    const { user } = useApp();
+    }, [financeTabAvailable, invitationsTabAvailable]);
     const [showAddPlayers, setShowAddPlayers] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [teamPlayers, setTeamPlayers] = useState<UserData[]>([]);
     const [pendingPlayers, setPendingPlayers] = useState<UserData[]>([]);
+    const teamDetailsRequestVersion = useRef(0);
+    const invitedTeamUpdate = useRef<Team | undefined>(undefined);
+    const latestTeam = useRef(currentTeam);
+    const pendingInviteCancellations = useRef(new Set<string>());
+    const cancelledInviteIds = useRef(new Set<string>());
     const [localFreeAgents, setLocalFreeAgents] = useState<UserData[]>(EMPTY_FREE_AGENTS);
     const [inviteFreeAgentContext, setInviteFreeAgentContext] = useState<TeamInviteFreeAgentContext>(EMPTY_INVITE_FREE_AGENT_CONTEXT);
     const [editingName, setEditingName] = useState(false);
@@ -330,8 +347,6 @@ export default function TeamDetailModal({
     const [memberComplianceError, setMemberComplianceError] = useState<string | null>(null);
     const [expandedComplianceUserIds, setExpandedComplianceUserIds] = useState<string[]>([]);
 
-    const isTeamCaptain = currentTeam.captainId === user?.$id || currentTeam.managerId === user?.$id;
-    const canManageTeam = canManage ?? isTeamCaptain;
     const canChargeForTeamRegistration = canChargeRegistration ?? Boolean(user?.hasStripeAccount || (currentTeam.registrationPriceCents ?? 0) > 0);
     const registrationPriceCents = Math.max(0, Math.round(currentTeam.registrationPriceCents ?? 0));
     const effectiveJoinPolicy = currentTeam.joinPolicy ?? (currentTeam.openRegistration ? 'OPEN_REGISTRATION' : 'CLOSED');
@@ -568,19 +583,33 @@ export default function TeamDetailModal({
         price: registrationPriceCents,
     }), [currentTeam.name, registrationPriceCents, teamDivisionLabel]);
 
-    const fetchRoleInvites = useCallback(async () => {
+    const handleInvitesLoaded = useCallback((invites: Invite[]) => {
+        setTeamInvitationAttempts(invites.filter((invite) => !cancelledInviteIds.current.has(invite.$id)));
+    }, []);
+    const fetchRoleInvites = useCallback(async (
+        team: Team = currentTeam,
+        requestVersion = teamDetailsRequestVersion.current,
+    ) => {
         const invites = await userService.listInvites({
-            teamId: currentTeam.$id,
+            teamId: team.$id,
             types: TEAM_ROLE_INVITE_TYPES,
         });
+        if (requestVersion !== teamDetailsRequestVersion.current) {
+            return;
+        }
+        handleInvitesLoaded(invites);
         const pendingInvites = invites.filter((invite) => invite.status === 'PENDING'
-            && (!currentTeam.pending.includes(invite.userId ?? '') || isAssignedInvite(invite)));
+            && !cancelledInviteIds.current.has(invite.$id)
+            && (!team.pending.includes(invite.userId ?? '') || isAssignedInvite(invite)));
         const inviteUserIds = pendingInvites
             .map((invite) => invite.userId)
             .filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
         const invitedUsers = inviteUserIds.length > 0
-            ? await userService.getUsersByIds(inviteUserIds, { teamId: currentTeam.$id })
+            ? await userService.getUsersByIds(inviteUserIds, { teamId: team.$id })
             : [];
+        if (requestVersion !== teamDetailsRequestVersion.current) {
+            return;
+        }
         const invitedUserMap = new Map(invitedUsers.map((invitedUser) => [invitedUser.$id, invitedUser]));
         setPendingRoleInvites(
             pendingInvites.map((invite) => ({
@@ -588,7 +617,7 @@ export default function TeamDetailModal({
                 invitedUser: invite.userId ? invitedUserMap.get(invite.userId) : undefined,
             })),
         );
-    }, [currentTeam.$id, currentTeam.pending]);
+    }, [currentTeam, handleInvitesLoaded]);
     const refreshTeamRoleDetails = useCallback(async () => {
         const refreshedTeam = await teamService.getTeamById(currentTeam.$id, true);
         if (refreshedTeam) {
@@ -653,44 +682,76 @@ export default function TeamDetailModal({
         }
     }, [canManageTeam, currentTeam.$id]);
 
-    const fetchTeamDetails = useCallback(async () => {
+    const fetchTeamDetails = useCallback(async ({
+        updatedTeam,
+        refreshTeam = false,
+    }: { updatedTeam?: Team; refreshTeam?: boolean } = {}) => {
+        const requestVersion = ++teamDetailsRequestVersion.current;
         try {
             setLoading(true);
+            setError(null);
+            const team = refreshTeam
+                ? await teamService.getTeamById(currentTeam.$id, true)
+                : updatedTeam ?? currentTeam;
+            if (requestVersion !== teamDetailsRequestVersion.current) {
+                return;
+            }
+            if (!team) {
+                throw new Error('Team details could not be loaded.');
+            }
 
-            const rosterUserIds = Array.from(new Set([
-                ...currentTeam.playerIds,
-                ...currentTeam.pending,
-            ].filter((value) => value.trim().length > 0)));
-            const rosterUsers = rosterUserIds.length > 0
-                ? await userService.getUsersByIds(rosterUserIds, { teamId: currentTeam.$id })
-                : [];
-            const pendingUserIds = new Set(currentTeam.pending);
-            setTeamPlayers(rosterUsers.filter((player) => !pendingUserIds.has(player.$id)));
-            setPendingPlayers(rosterUsers.filter((player) => pendingUserIds.has(player.$id)));
+            if ((updatedTeam || refreshTeam) && team.players && team.pendingPlayers) {
+                setTeamPlayers(team.players);
+                setPendingPlayers(team.pendingPlayers);
+            } else {
+                const rosterUserIds = Array.from(new Set([
+                    ...team.playerIds,
+                    ...team.pending,
+                ].filter((value) => value.trim().length > 0)));
+                const rosterUsers = rosterUserIds.length > 0
+                    ? await userService.getUsersByIds(rosterUserIds, { teamId: team.$id })
+                    : [];
+                if (requestVersion !== teamDetailsRequestVersion.current) {
+                    return;
+                }
+                const pendingUserIds = new Set(team.pending);
+                setTeamPlayers(rosterUsers.filter((player) => !pendingUserIds.has(player.$id)));
+                setPendingPlayers(rosterUsers.filter((player) => pendingUserIds.has(player.$id)));
+            }
 
-            const managerId = currentTeam.managerId ?? currentTeam.captainId;
-            const roleUserIds = [managerId, currentTeam.headCoachId, ...assistantCoachIds]
+            const teamAssistantCoachIds = Array.isArray(team.assistantCoachIds)
+                ? team.assistantCoachIds
+                : (Array.isArray(team.coachIds) ? team.coachIds : []);
+            const managerId = team.managerId ?? team.captainId;
+            const roleUserIds = [managerId, team.headCoachId, ...teamAssistantCoachIds]
                 .filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
             const roleUsers = roleUserIds.length > 0
-                ? await userService.getUsersByIds(roleUserIds, { teamId: currentTeam.$id })
+                ? await userService.getUsersByIds(roleUserIds, { teamId: team.$id })
                 : [];
+            if (requestVersion !== teamDetailsRequestVersion.current) {
+                return;
+            }
             const roleUserMap = new Map(roleUsers.map((roleUser) => [roleUser.$id, roleUser]));
             setManagerUser(managerId ? roleUserMap.get(managerId) ?? null : null);
-            setHeadCoachUser(currentTeam.headCoachId ? roleUserMap.get(currentTeam.headCoachId) ?? null : null);
+            setHeadCoachUser(team.headCoachId ? roleUserMap.get(team.headCoachId) ?? null : null);
             setAssistantCoachUsers(
-                assistantCoachIds
+                teamAssistantCoachIds
                     .map((assistantCoachId) => roleUserMap.get(assistantCoachId))
                     .filter((roleUser): roleUser is UserData => Boolean(roleUser)),
             );
 
-            await fetchRoleInvites();
+            await fetchRoleInvites(team, requestVersion);
         } catch (error) {
             console.error('Failed to fetch team details:', error);
-            setError('Failed to load team details');
+            if (requestVersion === teamDetailsRequestVersion.current) {
+                setError('Failed to load team details');
+            }
         } finally {
-            setLoading(false);
+            if (requestVersion === teamDetailsRequestVersion.current) {
+                setLoading(false);
+            }
         }
-    }, [assistantCoachIds, currentTeam.$id, currentTeam.captainId, currentTeam.headCoachId, currentTeam.managerId, currentTeam.pending, currentTeam.playerIds, fetchRoleInvites]);
+    }, [currentTeam, fetchRoleInvites]);
 
     useEffect(() => {
         let cancelled = false;
@@ -725,9 +786,18 @@ export default function TeamDetailModal({
     }, [canManageTeam, currentTeam.$id, detailIsActive]);
 
     useEffect(() => {
+        latestTeam.current = currentTeam;
+    }, [currentTeam]);
+
+    useEffect(() => {
         if (detailIsActive) {
             void fetchTeamDetails();
+        } else {
+            setLoading(false);
         }
+        return () => {
+            teamDetailsRequestVersion.current += 1;
+        };
     }, [detailIsActive, fetchTeamDetails]);
 
     useEffect(() => {
@@ -1033,7 +1103,15 @@ export default function TeamDetailModal({
         })
     ), [activePlayerRegistrationByUserId, currentTeam.$id, jerseyNumbersByUserId, teamPlayers]);
 
+    const handleCloseDetails = () => {
+        setEditingDetails(false);
+        if (isEditMode) {
+            onClose();
+        }
+    };
+
     const handleSaveDetails = async () => {
+        const nextName = newName.trim();
         const nextSport = draftSport.trim();
         const nextTeamSize = Number(draftTeamSize) || 0;
         const nextCaptainId = draftCaptainId.trim();
@@ -1061,6 +1139,10 @@ export default function TeamDetailModal({
             ? Math.max(0, Math.round((Number(draftRegistrationPriceDollars) || 0) * 100))
             : 0;
 
+        if (isEditMode && !nextName) {
+            setError('Team name is required.');
+            return;
+        }
         if (!nextSport) {
             setError('Sport is required.');
             return;
@@ -1098,6 +1180,7 @@ export default function TeamDetailModal({
         }
 
         const updated = await teamService.updateTeamDetails(currentTeam.$id, {
+            ...(isEditMode ? { name: nextName } : {}),
             sport: nextSport,
             division: nextDivision,
             divisionTypeId: nextDivisionTypeId,
@@ -1118,15 +1201,28 @@ export default function TeamDetailModal({
         await fetchRegistrationQuestions();
 
         onTeamUpdated?.(updated);
-        setEditingDetails(false);
+        handleCloseDetails();
     };
 
     const handleSaveJerseyNumber = async (playerId: string) => {
         setSavingJerseyNumberIds((current) => new Set(current).add(playerId));
         setError(null);
         try {
+            const isPendingPlayer = pendingPlayers.some((player) => player.$id === playerId);
+            const pendingRegistration = isPendingPlayer
+                ? currentTeam.playerRegistrations?.find((registration) => registration.userId === playerId)
+                : undefined;
+            const playerRegistrations = isPendingPlayer
+                ? [{
+                    id: pendingRegistration?.id ?? `${currentTeam.$id}__${playerId}`,
+                    teamId: currentTeam.$id,
+                    userId: playerId,
+                    status: pendingRegistration?.status ?? 'INVITED',
+                    jerseyNumber: (jerseyNumbersByUserId[playerId] ?? '').trim() || null,
+                }]
+                : buildPlayerRegistrationPayload(currentTeam.captainId);
             const updated = await teamService.updateTeamDetails(currentTeam.$id, {
-                playerRegistrations: buildPlayerRegistrationPayload(currentTeam.captainId),
+                playerRegistrations,
             });
             if (!updated) {
                 setError('Failed to update jersey number');
@@ -1166,7 +1262,18 @@ export default function TeamDetailModal({
         return [prioritized, ...limited.filter((agent) => agent.$id !== normalizedSelectedFreeAgentId)];
     };
 
-    const handlePlayerInviteSent = useCallback((invitedUser: UserData) => {
+    const handleInvitedTeamUpdated = useCallback((updatedTeam: Team) => {
+        invitedTeamUpdate.current = updatedTeam;
+        onTeamUpdated?.(updatedTeam);
+    }, [onTeamUpdated]);
+
+    const handleInvitesSent = useCallback(async () => {
+        const updatedTeam = invitedTeamUpdate.current;
+        invitedTeamUpdate.current = undefined;
+        await fetchTeamDetails({ updatedTeam, refreshTeam: !updatedTeam });
+    }, [fetchTeamDetails]);
+
+    const handlePlayerInviteSent = useCallback(async (invitedUser: UserData) => {
         const nextPendingPlayers = pendingPlayers.some((player) => player.$id === invitedUser.$id)
             ? pendingPlayers
             : [...pendingPlayers, invitedUser];
@@ -1178,7 +1285,8 @@ export default function TeamDetailModal({
                 ...nextPendingPlayers.map((player) => player.$id),
             ])),
         });
-    }, [currentTeam, onTeamUpdated, pendingPlayers]);
+        await handleInvitesSent();
+    }, [currentTeam, handleInvitesSent, onTeamUpdated, pendingPlayers]);
 
     const handleCancelRoleInvite = async (inviteId: string) => {
         setCancellingRoleInviteIds((previous) => new Set(previous).add(inviteId));
@@ -1514,36 +1622,74 @@ export default function TeamDetailModal({
         }
     };
 
+
     const handleCancelInvite = async (playerId: string) => {
-        // Add this player to the cancelling set to show loading spinner
-        setCancellingInviteIds(prev => new Set(prev).add(playerId));
+        const team = latestTeam.current;
+        const cancellationKey = `${team.$id}:${playerId}`;
+        if (!canManageTeam || pendingInviteCancellations.current.has(cancellationKey)) {
+            return;
+        }
+        pendingInviteCancellations.current.add(cancellationKey);
+        setCancellingInviteIds((previous) => new Set(previous).add(playerId));
+        setError(null);
 
         try {
-            const attempt = teamInvitationAttempts.find((invite) => invite.userId === playerId && invite.status === 'PENDING');
-            const success = attempt
-                ? await teamService.removeTeamInvitation(attempt.$id)
-                : Boolean(await teamService.removePlayerFromTeam(currentTeam.$id, playerId));
-
-            if (success) {
-                // Update local state
-                setPendingPlayers(prev => prev.filter(player => player.$id !== playerId));
-
-                // Update parent component
-                const updatedTeam = {
-                    ...currentTeam,
-                    pending: currentTeam.pending.filter(id => id !== playerId)
-                };
-                onTeamUpdated?.(updatedTeam);
+            const findAttempt = (invites: Invite[]) => invites.find((invite) => (
+                invite.type === 'TEAM'
+                && invite.teamId === team.$id
+                && invite.userId === playerId
+                && getPendingInviteRole(team, invite) === 'player'
+                && invite.isCurrentAttempt !== false
+                && !cancelledInviteIds.current.has(invite.$id)
+                && CANCELLABLE_INVITATION_STATUSES[String(invite.status ?? '').trim().toUpperCase()] === true
+            ));
+            const registration = team.playerRegistrations?.find((entry) => (
+                entry.userId === playerId && entry.status === 'INVITED' && entry.invitationId?.trim()
+            ));
+            let inviteId = registration?.invitationId?.trim() || findAttempt(teamInvitationAttempts)?.$id;
+            if (!inviteId) {
+                const invites = await userService.listInvites({ teamId: team.$id, type: 'TEAM' });
+                inviteId = findAttempt(invites)?.$id;
             }
-        } catch (error) {
-            console.error('Failed to cancel invite:', error);
-            setError('Failed to cancel invitation');
+            if (!inviteId) {
+                throw new Error('The pending invitation could not be found. Reload the team and try again.');
+            }
+            if (!await userService.deleteInviteById(inviteId)) {
+                throw new Error('Invitation cancellation could not be confirmed. Try again.');
+            }
+            cancelledInviteIds.current.add(inviteId);
+            if (latestTeam.current.$id !== team.$id) {
+                return;
+            }
+
+            // Stop an older roster load from restoring the cancelled player.
+            teamDetailsRequestVersion.current += 1;
+            setLoading(false);
+            setPendingPlayers((previous) => previous.filter((player) => player.$id !== playerId));
+            setTeamPlayers((previous) => previous.filter((player) => player.$id !== playerId));
+            setPendingRoleInvites((previous) => previous.filter((entry) => entry.invite.$id !== inviteId));
+            setTeamInvitationAttempts((previous) => previous.filter((invite) => invite.$id !== inviteId));
+            const updatedTeam: Team = {
+                ...latestTeam.current,
+                pending: latestTeam.current.pending.filter((id) => id !== playerId),
+                pendingPlayers: latestTeam.current.pendingPlayers?.filter((player) => player.$id !== playerId),
+                playerIds: latestTeam.current.playerIds.filter((id) => id !== playerId),
+                players: latestTeam.current.players?.filter((player) => player.$id !== playerId),
+                playerRegistrations: latestTeam.current.playerRegistrations?.map((entry) => (
+                    entry.userId === playerId ? { ...entry, status: 'REMOVED' } : entry
+                )),
+            };
+            latestTeam.current = updatedTeam;
+            onTeamUpdated?.(updatedTeam);
+        } catch (cancelError) {
+            console.error('Failed to cancel invite:', cancelError);
+            setError(cancelError instanceof Error ? cancelError.message : 'Failed to cancel invitation. Try again.');
         } finally {
-            // Remove this player from the cancelling set
-            setCancellingInviteIds(prev => {
-                const newSet = new Set(prev);
-                newSet.delete(playerId);
-                return newSet;
+            pendingInviteCancellations.current.delete(cancellationKey);
+            setCancellingInviteIds((previous) => {
+                const next = new Set(previous);
+                next.delete(playerId);
+                return next;
             });
         }
     };
@@ -1626,7 +1772,7 @@ export default function TeamDetailModal({
                                                 <Badge color="blue" variant="light" size="xs">Captain</Badge>
                                             )}
                                             {canManageTeam && isPending && (
-                                                <Badge color="yellow" variant="light" size="xs">{teamInvitationAttempts.find((invite) => invite.userId === player.$id && invite.isCurrentAttempt !== false)?.invitationLabel || 'Invitation pending'}</Badge>
+                                                <Badge color="yellow" variant="light" size="xs">{playerRegistration?.invitationLabel || teamInvitationAttempts.find((invite) => invite.userId === player.$id && invite.isCurrentAttempt !== false)?.invitationLabel || 'Pending acceptance'}</Badge>
                                             )}
                                             {canManageTeam && player.isManagedPlayer ? (
                                                 <Badge color="violet" variant="light" size="xs">Managed profile</Badge>
@@ -1651,7 +1797,7 @@ export default function TeamDetailModal({
                                             ) : null}
                                         </Group>
                                         <Group gap="xs" mt="xs" align="flex-end" wrap="wrap" onClick={(event) => event.stopPropagation()}>
-                                            {canManageTeam && !isPending ? (
+                                            {canManageTeam ? (
                                                 <Group gap={6} align="flex-end" wrap="nowrap">
                                                     <TextInput
                                                         label="Jersey #"
@@ -1892,16 +2038,75 @@ export default function TeamDetailModal({
             </ResponsiveCardGrid>
     );
 
+    const renderRosterSection = () => (
+        <div className={rosterSectionClass('team-detail-roster-main')}>
+            <Group justify="space-between" mb="sm">
+                <Title order={5}>Roster ({rosterPlayerCount})</Title>
+                {canManageTeam && memberComplianceLoading ? (
+                    <Group gap={6}>
+                        <Loader size="xs" />
+                        <Text size="xs" c="dimmed">Loading status</Text>
+                    </Group>
+                ) : null}
+            </Group>
+            {canManageTeam && memberComplianceError ? (
+                <Alert color="red" variant="light" mb="sm">
+                    {memberComplianceError}
+                </Alert>
+            ) : null}
+            {rosterPlayerCount > 0 ? (
+                isPageMode
+                    ? renderRosterPlayerCards()
+                    : (
+                        <ScrollArea.Autosize mah={360} type="auto">
+                            {renderRosterPlayerCards()}
+                        </ScrollArea.Autosize>
+                    )
+            ) : (
+                <Text c="dimmed" ta="center" py={8}>
+                    {canManageTeam ? 'Invite some players to build your team!' : 'This team is just getting started.'}
+                </Text>
+            )}
+        </div>
+    );
+
+    const invitePlayersModal = canManageTeam ? (
+        <InvitePlayersModal
+            isOpen={showAddPlayers}
+            onClose={() => setShowAddPlayers(false)}
+            team={currentTeam}
+            freeAgentContext={inviteFreeAgentContext}
+            selectedFreeAgentId={selectedFreeAgentId}
+            selectedFreeAgentUser={selectedFreeAgentUser}
+            pendingRoleInvites={pendingRoleInvites}
+            onPlayerInviteSent={handlePlayerInviteSent}
+            onRoleInvitesChanged={refreshTeamRoleDetails}
+            onTeamUpdated={handleInvitedTeamUpdated}
+            onInvitesSent={handleInvitesSent}
+        />
+    ) : null;
+
     const editDetailsModal = canManageTeam ? (
         <Modal
-            opened={editingDetails}
-            onClose={() => setEditingDetails(false)}
+            opened={isEditMode ? isOpen : editingDetails}
+            onClose={handleCloseDetails}
             title="Edit Team Details"
             size="lg"
             centered
             scrollAreaComponent={ScrollArea.Autosize}
         >
             <Stack gap="md">
+                {isEditMode && error && (
+                    <Alert color="red" variant="light" withCloseButton onClose={() => setError(null)}>{error}</Alert>
+                )}
+                {isEditMode && (
+                    <TextInput
+                        label="Team Name"
+                        value={newName}
+                        onChange={(event) => setNewName(event.currentTarget.value)}
+                        required
+                    />
+                )}
                 <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
                     <NumberInput
                         label="Team Size"
@@ -2145,13 +2350,28 @@ export default function TeamDetailModal({
                     </div>
                 )}
 
+                {isEditMode && renderRosterSection()}
+
                 <Group justify="flex-end">
-                    <Button variant="default" onClick={() => setEditingDetails(false)}>Cancel</Button>
+                    <Button variant="default" onClick={handleCloseDetails}>Cancel</Button>
+                    {isEditMode && (
+                        <Button variant="default" onClick={() => setShowAddPlayers(true)}>Invite Roster Members</Button>
+                    )}
                     <Button onClick={() => { void handleSaveDetails(); }}>Save Team Details</Button>
                 </Group>
             </Stack>
         </Modal>
     ) : null;
+
+    if (isEditMode) {
+        return (
+            <>
+                {editDetailsModal}
+                {invitePlayersModal}
+            </>
+        );
+    }
+
     const accountlessDraft = editingAccountlessInvite ?? {
         inviteId: '',
         firstName: '',
@@ -2273,6 +2493,16 @@ export default function TeamDetailModal({
                             radius="xl"
                             mb="lg"
                         />
+                    )}
+
+                    {showInvitationsTab && (
+                        <div className="org-tab-content">
+                            <TeamInvitationManager
+                                teamId={currentTeam.$id}
+                                onChanged={refreshTeamRoleDetails}
+                                onInvitesLoaded={handleInvitesLoaded}
+                            />
+                        </div>
                     )}
 
                     {showScheduleTab && (
@@ -2565,35 +2795,7 @@ export default function TeamDetailModal({
                     )}
 
                     {/* Roster */}
-                    <div className={rosterSectionClass('team-detail-roster-main')}>
-                        <Group justify="space-between" mb="sm">
-                            <Title order={5}>Roster ({rosterPlayerCount})</Title>
-                            {canManageTeam && memberComplianceLoading ? (
-                                <Group gap={6}>
-                                    <Loader size="xs" />
-                                    <Text size="xs" c="dimmed">Loading status</Text>
-                                </Group>
-                            ) : null}
-                        </Group>
-                        {canManageTeam && memberComplianceError ? (
-                            <Alert color="red" variant="light" mb="sm">
-                                {memberComplianceError}
-                            </Alert>
-                        ) : null}
-                        {rosterPlayerCount > 0 ? (
-                            isPageMode
-                                ? renderRosterPlayerCards()
-                                : (
-                                    <ScrollArea.Autosize mah={360} type="auto">
-                                        {renderRosterPlayerCards()}
-                                    </ScrollArea.Autosize>
-                                )
-                        ) : (
-                            <Text c="dimmed" ta="center" py={8}>
-                                {canManageTeam ? 'Invite some players to build your team!' : 'This team is just getting started.'}
-                            </Text>
-                        )}
-                    </div>
+                    {renderRosterSection()}
 
                     {/* Pending Invitations */}
                     {pendingPlayerRoleInvites.length > 0 && (
@@ -2632,7 +2834,7 @@ export default function TeamDetailModal({
                                                     )}
                                                     <span className={`text-xs font-medium ${isFromEvent ? 'text-blue-600' : 'text-yellow-600'
                                                         }`}>
-                                                        {isFromEvent ? 'Free Agent - Invitation pending' : 'Invitation pending'}
+                                                        {isFromEvent ? 'Free Agent - ' : ''}{invite.invitationLabel || 'Pending acceptance'}
                                                     </span>
                                                 </div>
                                             </div>
@@ -2682,26 +2884,12 @@ export default function TeamDetailModal({
                     )}
 
                     {/* Add Team Role Invites Section */}
-                    {canManageTeam ? <div className={rosterSectionClass('team-detail-roster-main')}>
-                        <TeamInvitationManager teamId={currentTeam.$id} onChanged={refreshTeamRoleDetails} onInvitesLoaded={setTeamInvitationAttempts} />
-                    </div> : null}
                     {canManageTeam && (
                         <div className={rosterSectionClass('team-detail-roster-main')}>
                             <Button onClick={() => setShowAddPlayers(true)} mb="sm">
                                 Invite Roster Members
                             </Button>
-                            <InvitePlayersModal
-                                isOpen={showAddPlayers}
-                                onClose={() => setShowAddPlayers(false)}
-                                team={currentTeam}
-                                freeAgentContext={inviteFreeAgentContext}
-                                selectedFreeAgentId={selectedFreeAgentId}
-                                selectedFreeAgentUser={selectedFreeAgentUser}
-                                pendingRoleInvites={pendingRoleInvites}
-                                onPlayerInviteSent={handlePlayerInviteSent}
-                                onRoleInvitesChanged={refreshTeamRoleDetails}
-                                onInvitesSent={fetchTeamDetails}
-                            />
+                            {invitePlayersModal}
                         </div>
                     )}
 

@@ -204,7 +204,14 @@ export default function InvitePlayersModal({
       : (Array.isArray(team.coachIds) ? team.coachIds : [])
   ), [team.assistantCoachIds, team.coachIds]);
 
-  const playerInviteCapacityUserIds = useMemo(() => {
+  const assignedPlayerInvites = useMemo(
+    () => pendingRoleInvites.filter(
+      (entry) => isAssignedInvite(entry.invite)
+        && getPendingInviteRole(team, entry.invite) === 'player',
+    ),
+    [pendingRoleInvites, team],
+  );
+  const { playerInviteCapacityUserIds, accountlessPlayerInviteCount } = useMemo(() => {
     const userIds = new Set<string>();
     team.playerIds.forEach((playerId) => {
       if (playerId.trim().length > 0) {
@@ -226,15 +233,17 @@ export default function InvitePlayersModal({
       });
     }
     localInvitedPlayerIds.forEach((userId) => userIds.add(userId));
-    return userIds;
-  }, [localInvitedPlayerIds, team.pending, team.playerIds, team.playerRegistrations]);
-  const assignedPlayerInvites = useMemo(
-    () => pendingRoleInvites.filter(
-      (entry) => isAssignedInvite(entry.invite)
-        && getPendingInviteRole(team, entry.invite) === 'player',
-    ),
-    [pendingRoleInvites, team],
-  );
+    let accountlessPlayerInviteCount = 0;
+    assignedPlayerInvites.forEach(({ invite }) => {
+      const userId = invite.userId?.trim();
+      if (userId) {
+        userIds.add(userId);
+      } else {
+        accountlessPlayerInviteCount += 1;
+      }
+    });
+    return { playerInviteCapacityUserIds: userIds, accountlessPlayerInviteCount };
+  }, [assignedPlayerInvites, localInvitedPlayerIds, team.pending, team.playerIds, team.playerRegistrations]);
   const unrefreshedLocalPlayerInviteCount = useMemo(() => {
     const unmatchedAssignedInvites = [...assignedPlayerInvites];
     return localEmailPlayerInvites.reduce((unrefreshedCount, localInvite) => {
@@ -251,7 +260,7 @@ export default function InvitePlayersModal({
   }, [assignedPlayerInvites, localEmailPlayerInvites]);
 
   const playerInviteCapacityCount = playerInviteCapacityUserIds.size
-    + assignedPlayerInvites.length
+    + accountlessPlayerInviteCount
     + unrefreshedLocalPlayerInviteCount;
   const playerInviteLimit = Math.max(0, Math.trunc(team.teamSize || 0));
   const canInviteAnotherPlayer = playerInviteLimit <= 0 || playerInviteCapacityCount < playerInviteLimit;

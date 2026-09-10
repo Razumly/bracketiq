@@ -1,4 +1,4 @@
-import { isMinorAtUtcDate } from '@/server/userPrivacy';
+import { isMinorAtUtcDate, isUnknownDateOfBirth } from '@/server/userPrivacy';
 import { isInvitationExpired, isPendingInvitation } from './teamInvitationState';
 
 type LabelInvitation = {
@@ -12,7 +12,8 @@ type LabelInvitation = {
 export const teamInvitationLabel = (invite: LabelInvitation, playerBirthday?: Date | null): string => {
   if (invite.status === 'EXPIRED' || isInvitationExpired(invite)) return 'Invitation expired';
   if (!isPendingInvitation(invite.status)) return `Invitation ${String(invite.status).toLowerCase()}`;
-  const birthday = playerBirthday ?? invite.dateOfBirth;
-  const needsGuardian = birthday ? isMinorAtUtcDate(birthday) : Boolean(invite.isMinor);
-  return needsGuardian ? 'Awaiting guardian' : 'Awaiting player';
+  const birthday = isUnknownDateOfBirth(playerBirthday) ? invite.dateOfBirth : playerBirthday;
+  const needsGuardian = invite.isMinor === true
+    || (!isUnknownDateOfBirth(birthday) && isMinorAtUtcDate(birthday));
+  return needsGuardian ? 'Awaiting guardian' : 'Pending acceptance';
 };

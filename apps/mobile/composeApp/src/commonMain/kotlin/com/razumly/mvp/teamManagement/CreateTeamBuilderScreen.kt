@@ -885,7 +885,7 @@ private fun BuilderRoster(
                 player = user,
                 isPending = user.id !in persistedTeam?.playerIds.orEmpty(),
                 pendingLabel = persistedTeam?.playerRegistrations
-                    ?.firstOrNull { it.userId == user.id }?.invitationLabel ?: "Awaiting player",
+                    ?.firstOrNull { it.userId == user.id }?.invitationLabel ?: "Pending acceptance",
                 trailingContent = if (editable) {{
                     Row {
                         TextButton(onClick = { onEditAccount(user) }) { Icon(Icons.Default.Edit, contentDescription = null); Spacer(Modifier.width(4.dp)); Text("Edit") }
