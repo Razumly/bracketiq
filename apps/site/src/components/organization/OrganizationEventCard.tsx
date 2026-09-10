@@ -94,7 +94,7 @@ function eventAttendance(event: Event, capacity: number): string {
 
 export default function OrganizationEventCard({ event, onClick }: { event: Event; onClick: () => void }) {
   const [imageIndex, setImageIndex] = useState(0);
-  const fallback = getEventImageFallbackUrl({ event, width: 640, height: 280, fit: 'cover' });
+  const fallback = getEventImageFallbackUrl({ event, width: 640, height: 280, fit: 'inside' });
   const primaryImage = getEventImageUrl({
     imageId: event.imageId,
     width: 640,
@@ -105,6 +105,7 @@ export default function OrganizationEventCard({ event, onClick }: { event: Event
   const initialsFallback = `/api/avatars/initials?name=${encodeURIComponent(event.name)}&size=640`;
   const imageSources = Array.from(new Set([primaryImage, fallback, initialsFallback]));
   const image = imageSources[Math.min(imageIndex, imageSources.length - 1)];
+  const imageIsFallback = !event.imageId || imageIndex > 0;
   const capacity = resolveEventParticipantCapacity(event);
   const price = event.affiliateUrl ? formatAffiliateEventPriceRange(event) : formatEventDivisionPriceRange(event);
   const sport = typeof event.sport === 'object' ? event.sport.name : event.sport;
@@ -125,7 +126,7 @@ export default function OrganizationEventCard({ event, onClick }: { event: Event
           fill
           unoptimized
           sizes="(max-width: 767px) 100vw, (max-width: 1199px) 50vw, 33vw"
-          className="object-cover"
+          className={imageIsFallback ? 'object-contain' : 'object-cover'}
           onError={imageIndex < imageSources.length - 1 ? () => setImageIndex((current) => current + 1) : undefined}
         />
         {event.affiliateUrl && <span className="org-event-card-image-badge">External registration</span>}
