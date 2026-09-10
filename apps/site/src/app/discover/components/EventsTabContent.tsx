@@ -11,9 +11,7 @@ import {
 import {
   Alert,
   Button,
-  Checkbox,
   Chip,
-  DatePickerInput,
   Group,
   Loader,
   Paper,
@@ -21,14 +19,18 @@ import {
   Text,
   TextInput,
 } from '@/components/organization/organization-operation-ui';
-import { Slider } from '@/components/ui/slider';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { ArrowUpDown, CalendarDays, SlidersHorizontal, X } from 'lucide-react';
+import { ArrowUpDown, SlidersHorizontal } from 'lucide-react';
 
-import EventCard from '@/components/ui/EventCard';
-import ResponsiveCardGrid from '@/components/ui/ResponsiveCardGrid';
+import OrganizationEventCard from '@/components/organization/OrganizationEventCard';
+import {
+  ActiveEventFilters,
+  EVENT_SORT_OPTIONS,
+  EventFilterControls,
+  EventFilterPanel,
+  type EventSortValue,
+} from '@/components/events/EventFilterControls';
 import Loading from '@/components/ui/Loading';
-
 import {
   eventListFilterKey,
   useEventListFiltering,
@@ -39,26 +41,9 @@ import { trackEventClicked } from '@/lib/analytics/eventAnalytics';
 import DiscoverSearchControls from './DiscoverSearchControls';
 import DivisionDiscoveryFilters, { type DivisionDiscoveryFilterValue } from './DivisionDiscoveryFilters';
 
-const EVENT_SORT_OPTIONS = [
-  { value: 'recommended', label: 'Recommended' },
-  { value: 'soonest', label: 'Soonest' },
-  { value: 'nearest', label: 'Nearest' },
-  { value: 'price-low', label: 'Price (Low to High)' },
-  { value: 'popular', label: 'Most popular' },
-  { value: 'alpha', label: 'A to Z' },
-] as const;
-export type EventSortValue = (typeof EVENT_SORT_OPTIONS)[number]['value'];
+export type { EventSortValue };
 
 const KM_PER_MILE = 1.60934;
-const DISTANCE_SLIDER_MIN_MILES = 10;
-const DISTANCE_SLIDER_MAX_MILES = 100;
-const DISTANCE_SLIDER_MARKS = [
-  { value: 10, label: '10' },
-  { value: 25, label: '25' },
-  { value: 50, label: '50' },
-  { value: 75, label: '75' },
-  { value: DISTANCE_SLIDER_MAX_MILES, label: String(DISTANCE_SLIDER_MAX_MILES) },
-];
 const EMPTY_DIVISION_FILTERS: DivisionDiscoveryFilterValue = {
   genders: [],
   skillDivisionTypeIds: [],
@@ -68,9 +53,6 @@ const EMPTY_DIVISION_FILTERS: DivisionDiscoveryFilterValue = {
 };
 
 const kmToMiles = (value: number): number => value / KM_PER_MILE;
-const milesToKm = (value: number): number => value * KM_PER_MILE;
-const clampMiles = (value: number): number =>
-  Math.min(DISTANCE_SLIDER_MAX_MILES, Math.max(DISTANCE_SLIDER_MIN_MILES, Math.round(value)));
 
 type EventsTabContentProps<TEventType extends string = Event['eventType']> = {
   location: { lat: number; lng: number } | null;
@@ -225,22 +207,15 @@ function EventsTabView<TEventType extends string>(
     }
     setInternalEventSort(value);
   }, [onEventSortChange]);
-  const [sportSearchTerm, setSportSearchTerm] = useState('');
   const [tagSearchTerm, setTagSearchTerm] = useState('');
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const allEventTypesSelected = selectedEventTypes.length === eventTypeOptions.length;
   const allSportsSelected = selectedSports.length === 0;
   const allTagsSelected = selectedTags.length === 0;
-  const sportsQuery = sportSearchTerm.trim().toLowerCase();
   const tagsQuery = tagSearchTerm.trim().toLowerCase();
   const activeQuery = searchTerm.trim();
 
-  const visibleSports = useMemo(() => {
-    if (!sportsQuery) {
-      return sports;
-    }
-    return sports.filter((sport) => sport.toLowerCase().includes(sportsQuery));
-  }, [sports, sportsQuery]);
+  const quickSports = sports.slice(0, 6);
 
   const visibleEventTags = useMemo(() => {
     const matchingTags = tagsQuery
@@ -486,352 +461,288 @@ function EventsTabView<TEventType extends string>(
   const hasActiveDistanceFilter = Boolean(location && typeof maxDistance === 'number');
 
   const renderTagFilters = () => (
-      <div>
-        <Text size="xs" fw={700} c="dimmed" tt="uppercase" mb={8}>
-          Tags
-        </Text>
-        <TextInput
-          value={tagSearchTerm}
-          onChange={(event) => setTagSearchTerm(event.currentTarget.value)}
-          placeholder="Search tag..."
-          mb="sm"
-        />
-        <Group gap="xs">
-          <Chip
-            color="blue"
-            radius="xl"
-            checked={allTagsSelected}
-            disabled={eventTagsLoading || !eventTags.length}
-            onChange={(checked) => {
-              if (checked) {
-                setSelectedTags([]);
-              }
-            }}
-          >
-            All
-          </Chip>
-          {eventTagsLoading ? (
-            <Loader size="sm" aria-label="Loading tags" />
-          ) : visibleEventTags.length ? (
-            visibleEventTags.map((tag) => (
-              <Chip
-                key={tag.slug || tag.name}
-                color="blue"
-                radius="xl"
-                checked={selectedTags.includes(tag.name)}
-                onChange={(checked) => {
-                  setSelectedTags((current) => {
-                    if (checked) {
-                      const next = new Set(current);
-                      next.add(tag.name);
-                      return Array.from(next);
-                    }
-                    return current.filter((value) => value !== tag.name);
-                  });
-                }}
-              >
-                {tag.name} ({tag.eventCount ?? 0})
-              </Chip>
-            ))
-          ) : (
-            <Text size="sm" c="dimmed">
-              {tagsQuery ? 'No tags match this search.' : 'No tags available.'}
-            </Text>
-          )}
-        </Group>
-        {eventTagsError && (
-          <Alert color="red" radius="md" mt="sm">
-            {eventTagsError}
-          </Alert>
+    <div>
+      <Text size="xs" fw={700} c="dimmed" tt="uppercase" mb={8}>
+        Tags
+      </Text>
+      <TextInput
+        value={tagSearchTerm}
+        onChange={(event) => setTagSearchTerm(event.currentTarget.value)}
+        placeholder="Search tag..."
+        mb="sm"
+      />
+      <Group gap="xs">
+        <Chip
+          color="blue"
+          radius="xl"
+          checked={allTagsSelected}
+          disabled={eventTagsLoading || !eventTags.length}
+          onChange={(checked) => {
+            if (checked) setSelectedTags([]);
+          }}
+        >
+          All
+        </Chip>
+        {eventTagsLoading ? (
+          <Loader size="sm" aria-label="Loading tags" />
+        ) : visibleEventTags.length ? (
+          visibleEventTags.map((tag) => (
+            <Chip
+              key={tag.slug || tag.name}
+              color="blue"
+              radius="xl"
+              checked={selectedTags.includes(tag.name)}
+              onChange={(checked) => {
+                setSelectedTags((current) => {
+                  if (checked) {
+                    const next = new Set(current);
+                    next.add(tag.name);
+                    return Array.from(next);
+                  }
+                  return current.filter((value) => value !== tag.name);
+                });
+              }}
+            >
+              {tag.name} ({tag.eventCount ?? 0})
+            </Chip>
+          ))
+        ) : (
+          <Text size="sm" c="dimmed">
+            {tagsQuery ? 'No tags match this search.' : 'No tags available.'}
+          </Text>
         )}
-      </div>
+      </Group>
+      {eventTagsError && (
+        <Alert color="red" radius="md" mt="sm">
+          {eventTagsError}
+        </Alert>
+      )}
+    </div>
   );
 
-  const renderSportFilters = () => (
-      <div>
-        <Text size="xs" fw={700} c="dimmed" tt="uppercase" mb={8}>
-          Sports
-        </Text>
-        <TextInput
-          value={sportSearchTerm}
-          onChange={(event) => setSportSearchTerm(event.currentTarget.value)}
-          placeholder="Search sport..."
-          mb="sm"
-        />
-        <Group gap="xs" align="center">
+  const renderSportShortcuts = () => (
+    <div className="discover-sport-shortcuts" aria-label="Popular sports">
+      {sportsLoading ? (
+        <Loader size="sm" aria-label="Loading sports" />
+      ) : (
+        <>
           <Chip
             radius="xl"
             checked={allSportsSelected}
-            disabled={sportsLoading || !sports.length}
+            disabled={!sports.length}
             onChange={(checked) => {
-              if (checked) {
-                setSelectedSports([]);
-              }
+              if (checked) setSelectedSports([]);
             }}
           >
-            All
+            All sports
           </Chip>
-          {sportsLoading ? (
-            <Loader size="sm" aria-label="Loading sports" />
-          ) : visibleSports.length ? (
-            visibleSports.map((sport) => (
-              <Chip
-                key={sport}
-                radius="xl"
-                checked={selectedSports.includes(sport)}
-                onChange={(checked) => {
-                  setSelectedSports((current) => {
-                    if (checked) {
-                      const next = new Set(current);
-                      next.add(sport);
-                      return Array.from(next);
-                    }
-                    return current.filter((value) => value !== sport);
-                  });
-                }}
-              >
-                {sport}
-              </Chip>
-            ))
-          ) : (
-            <Text size="sm" c="dimmed">
-              {sportsQuery ? 'No sports match this search.' : 'No sports available.'}
-            </Text>
+          {quickSports.map((sport) => (
+            <Chip
+              key={sport}
+              radius="xl"
+              checked={selectedSports.includes(sport)}
+              onChange={(checked) => {
+                setSelectedSports((current) => (
+                  checked
+                    ? Array.from(new Set([...current, sport]))
+                    : current.filter((value) => value !== sport)
+                ));
+              }}
+            >
+              {sport}
+            </Chip>
+          ))}
+          {sports.length > quickSports.length && (
+            <Button variant="ghost" size="sm" onClick={() => setIsFiltersOpen(true)}>
+              More
+            </Button>
           )}
-        </Group>
-        {sportsError && (
-          <Alert color="red" radius="md" mt="sm">
-            {sportsError}
-          </Alert>
-        )}
-      </div>
+        </>
+      )}
+    </div>
   );
 
-  const renderDateFilters = () => (
-      <div>
-        <Text size="xs" fw={700} c="dimmed" tt="uppercase" mb={8}>
-          Date Range
-        </Text>
-        <div className="grid gap-2">
-          <DatePickerInput
-            value={selectedStartDate}
-            onChange={setSelectedStartDate}
-            clearable
-            leftSection={<CalendarDays size={16} />}
-            placeholder="From today (default)"
-            aria-label="Filter by start date"
-            valueFormat="MMM D, YYYY"
-            highlightToday
-          />
-          <DatePickerInput
-            value={selectedEndDate}
-            onChange={setSelectedEndDate}
-            clearable
-            leftSection={<CalendarDays size={16} />}
-            minDate={
-              selectedStartDate
-                ? new Date(
-                    selectedStartDate.getFullYear(),
-                    selectedStartDate.getMonth(),
-                    selectedStartDate.getDate(),
-                    0,
-                    0,
-                    0,
-                    0,
-                  )
-                : undefined
-            }
-            placeholder="No max date"
-            aria-label="Filter by end date"
-            valueFormat="MMM D, YYYY"
-            highlightToday
-          />
-        </div>
-      </div>
-  );
+  const sportsData = sports.map((sport) => ({ value: sport, label: sport }));
+  const eventTypeData = eventTypeOptions.map((type) => ({
+    value: type,
+    label: formatEnumDisplayLabel(type, 'Event'),
+  }));
+  const selectedEventTypeLabels = allEventTypesSelected
+    ? 'All event types'
+    : selectedEventTypes.map((type) => formatEnumDisplayLabel(type, 'Event')).join(', ');
 
   const filterPanel = (
     <div className="space-y-6">
       {renderTagFilters()}
-
-      {renderSportFilters()}
-
-      {renderDateFilters()}
-
+      <EventFilterPanel
+        location={location}
+        selectedSports={selectedSports}
+        setSelectedSports={setSelectedSports}
+        sportsData={sportsData}
+        sportsLoading={sportsLoading}
+        selectedEventTypes={selectedEventTypes}
+        setSelectedEventTypes={setSelectedEventTypes}
+        eventTypeData={eventTypeData}
+        selectedEventTypeLabels={selectedEventTypeLabels}
+        selectedStartDate={selectedStartDate}
+        setSelectedStartDate={setSelectedStartDate}
+        selectedEndDate={selectedEndDate}
+        setSelectedEndDate={setSelectedEndDate}
+        maxDistance={maxDistance}
+        setMaxDistance={setMaxDistance}
+        defaultMaxDistance={defaultMaxDistance}
+        sportsError={sportsError}
+        hideWeeklyChildren={hideWeeklyChildren}
+        setHideWeeklyChildren={setHideWeeklyChildren}
+        resetFilters={resetFilters}
+        hasActiveFilters={activeFilterCount > 0}
+        sportsHeading="Sports"
+        dateHeading="Date Range"
+      />
       <DivisionDiscoveryFilters
         value={divisionFilters}
         onChange={setDivisionFilters}
         selectedSports={selectedSports}
       />
-
-      {setHideWeeklyChildren && (
-        <div>
-          <Checkbox
-            checked={hideWeeklyChildren}
-            onChange={(event) => setHideWeeklyChildren(event.currentTarget.checked)}
-            label="Hide weekly child sessions"
-          />
-        </div>
-      )}
-
-      {location && (
-        <div>
-          <Text size="xs" fw={700} c="dimmed" tt="uppercase" mb={8}>
-            Distance
-          </Text>
-          <Text size="sm" fw={600} mb={6}>
-            {typeof maxDistance === 'number' ? `Within ${Math.round(kmToMiles(maxDistance))} mi` : 'Any distance'}
-          </Text>
-          <Slider
-            min={DISTANCE_SLIDER_MIN_MILES}
-            max={DISTANCE_SLIDER_MAX_MILES}
-            step={1}
-            value={[clampMiles(typeof maxDistance === 'number' ? kmToMiles(maxDistance) : kmToMiles(defaultMaxDistance))]}
-            onValueChange={(value) => setMaxDistance(milesToKm(value[0] ?? DISTANCE_SLIDER_MIN_MILES))}
-            getAriaLabel={() => 'Maximum distance in miles'}
-            getAriaValueText={(_, value) => `${value} miles`}
-          />
-          <div aria-hidden="true" className="mt-1 flex justify-between gap-2 text-xs text-muted-foreground">
-            {DISTANCE_SLIDER_MARKS.map((mark) => <span key={mark.value}>{mark.label} mi</span>)}
-          </div>
-        </div>
-      )}
     </div>
   );
 
   const renderSearchActions = () => (
-      <div className="space-y-6 mb-8">
-        <Group justify="space-between" align="center" gap="md" wrap="wrap" className="w-full">
-          <DiscoverSearchControls
-            value={searchTerm}
-            onValueChange={setSearchTerm}
-            placeholder="Search"
-            onSearch={onSearchSubmit}
-            onOpenMap={onOpenMap}
-            searchLabel="Search"
-          />
-          {showCreateEventButton && (
-            <div className="w-full min-w-0 sm:w-auto sm:min-w-[16.25rem]">
-              <Button size="md" fullWidth onClick={onCreateEvent} disabled={createEventDisabled}>
-                Create event
-              </Button>
-              {createEventHelperText && (
-                <Text size="xs" c={createEventDisabled ? 'red' : 'dimmed'} mt={6}>
-                  {createEventHelperText}
-                </Text>
-              )}
-            </div>
+    <div className="discover-event-controls mb-8 space-y-4">
+      <DiscoverSearchControls
+        value={searchTerm}
+        onValueChange={setSearchTerm}
+        placeholder="Search events"
+        onSearch={onSearchSubmit}
+        onOpenMap={onOpenMap}
+        onCreateEvent={onCreateEvent}
+        showCreateEventButton={showCreateEventButton}
+        createEventDisabled={createEventDisabled}
+        createEventHelperText={createEventHelperText}
+        searchLabel="Search events"
+      />
+      {renderSportShortcuts()}
+      <div className="discover-event-filter-row hidden lg:flex">
+        <EventFilterControls
+          searchTerm={searchTerm}
+          setSearchTerm={setSearchTerm}
+          eventSort={eventSort}
+          setEventSort={setEventSort}
+          showSearch={false}
+          showSort={false}
+          additionalControls={(
+            <Button
+              variant="outline"
+              leftSection={<SlidersHorizontal aria-hidden="true" className="size-4" />}
+              onClick={() => setIsFiltersOpen(true)}
+            >
+              More filters
+            </Button>
           )}
-        </Group>
+          location={location}
+          selectedSports={selectedSports}
+          setSelectedSports={setSelectedSports}
+          sportsData={sportsData}
+          sportsLoading={sportsLoading}
+          selectedEventTypes={selectedEventTypes}
+          setSelectedEventTypes={setSelectedEventTypes}
+          eventTypeData={eventTypeData}
+          selectedEventTypeLabels={selectedEventTypeLabels}
+          selectedStartDate={selectedStartDate}
+          setSelectedStartDate={setSelectedStartDate}
+          selectedEndDate={selectedEndDate}
+          setSelectedEndDate={setSelectedEndDate}
+          maxDistance={maxDistance}
+          setMaxDistance={setMaxDistance}
+          defaultMaxDistance={defaultMaxDistance}
+          sportsError={sportsError}
+          hideWeeklyChildren={hideWeeklyChildren}
+          setHideWeeklyChildren={setHideWeeklyChildren}
+          resetFilters={resetFilters}
+          hasActiveFilters={activeFilterCount > 0}
+        />
       </div>
+    </div>
   );
+
 
   const renderEventCards = () => (
     isLoadingInitial ? (
-            <Loading text="Loading events..." />
-          ) : sortedEvents.length === 0 ? (
-            <Paper withBorder p="xl" radius="lg">
-              <Text fw={700} mb={6}>
-                No events match your filters
-              </Text>
-              <Text size="sm" c="dimmed" mb={12}>
-                Try increasing distance, removing a sport filter, or clearing all filters.
-              </Text>
-              <Button variant="default" onClick={resetFilters}>
-                Clear filters
-              </Button>
-            </Paper>
-          ) : (
-            <>
-              <ResponsiveCardGrid>
-                {sortedEvents.map((event) => (
-                  <EventCard
-                    key={event.$id}
-                    event={event}
-                    showDistance={Boolean(location)}
-                    userLocation={location}
-                    onClick={() => {
-                      trackEventClicked(event, 'discover_events');
-                      onEventClick(event);
-                    }}
-                  />
-                ))}
-              </ResponsiveCardGrid>
-              <div ref={sentinelRef} style={{ height: 1 }} />
-              {isLoadingMore && (
-                <Group justify="center" mt="lg">
-                  <Loader />
-                </Group>
-              )}
-              {!hasMoreEvents && (
-                <Text size="sm" c="dimmed" ta="center" mt="lg">
-                  You’ve reached the end of the results.
-                </Text>
-              )}
-            </>
-          )
+      <Loading text="Loading events..." />
+    ) : sortedEvents.length === 0 ? (
+      <Paper withBorder p="xl" radius="lg">
+        <Text fw={700} mb={6}>
+          No events match your filters
+        </Text>
+        <Text size="sm" c="dimmed" mb={12}>
+          Try increasing distance, removing a sport filter, or clearing all filters.
+        </Text>
+        <Button variant="default" onClick={resetFilters}>
+          Clear filters
+        </Button>
+      </Paper>
+    ) : (
+      <>
+        <div className="org-event-grid discover-event-grid">
+          {sortedEvents.map((event) => (
+            <OrganizationEventCard
+              key={event.$id}
+              event={event}
+              onClick={() => {
+                trackEventClicked(event, 'discover_events');
+                onEventClick(event);
+              }}
+            />
+          ))}
+        </div>
+        <div ref={sentinelRef} style={{ height: 1 }} />
+        {isLoadingMore && (
+          <Group justify="center" mt="lg">
+            <Loader />
+          </Group>
+        )}
+        {!hasMoreEvents && (
+          <Text size="sm" c="dimmed" ta="center" mt="lg">
+            You&apos;ve reached the end of the results.
+          </Text>
+        )}
+      </>
+    )
   );
 
-  const renderActiveFilters = () => (
-    activeFilters.length > 0 && (
-            <Paper withBorder p="sm" radius="lg" className="discover-active-filters">
-              <Group justify="space-between" align="flex-start" gap="xs" wrap="wrap">
-                <Group gap="xs" align="center">
-                  <Text fw={600} size="sm" c="dimmed">
-                    Active filters
-                  </Text>
-                  {activeFilters.map((filter) => (
-                    <button
-                      key={filter.key}
-                      type="button"
-                      className="discover-active-filter-chip"
-                      onClick={filter.onRemove}
-                    >
-                      <span>{filter.label}</span>
-                      <X size={12} />
-                    </button>
-                  ))}
-                </Group>
-                <Button variant="subtle" size="compact-sm" onClick={resetFilters}>
-                  Clear all
-                </Button>
-              </Group>
-            </Paper>
-          )
-  );
 
   const renderResults = () => (
-        <div className="space-y-4">
-          <Group justify="space-between" align="center" gap="sm" wrap="wrap">
-            <Text size="sm" c="dimmed">
-              {eventReadoutCount} event{eventReadoutCount === 1 ? '' : 's'} {hasActiveDistanceFilter ? 'near you' : 'available'}.
-            </Text>
-            <Select
-              aria-label="Sort events"
-              data={EVENT_SORT_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
-              value={eventSort}
-              onChange={(value) => setEventSort((value as (typeof EVENT_SORT_OPTIONS)[number]['value']) ?? 'recommended')}
-              leftSection={<ArrowUpDown size={14} />}
-              style={{ minWidth: 220 }}
-            />
-          </Group>
+    <div className="space-y-4">
+      <Group justify="space-between" align="center" gap="sm" wrap="wrap">
+        <Text size="sm" c="dimmed">
+          {eventReadoutCount} event{eventReadoutCount === 1 ? '' : 's'} {hasActiveDistanceFilter ? 'near you' : 'available'}.
+        </Text>
+        <Select
+          aria-label="Sort events"
+          data={EVENT_SORT_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+          value={eventSort}
+          onChange={(value) => setEventSort((value as EventSortValue) ?? 'recommended')}
+          leftSection={<ArrowUpDown size={14} />}
+          style={{ minWidth: 220 }}
+        />
+      </Group>
 
-          {renderActiveFilters()}
+      <ActiveEventFilters filters={activeFilters} />
 
-          {(eventsError || refreshError) && (
-            <Alert color="red">
-              {eventsError ?? refreshError}
-            </Alert>
-          )}
+      {(eventsError || refreshError) && (
+        <Alert color="red">
+          {eventsError ?? refreshError}
+        </Alert>
+      )}
 
-          {isRefreshing && !isLoadingInitial && (
-            <Text role="status" aria-live="polite" size="sm" c="dimmed">
-              Updating events…
-            </Text>
-          )}
+      {isRefreshing && !isLoadingInitial && (
+        <Text role="status" aria-live="polite" size="sm" c="dimmed">
+          Updating events…
+        </Text>
+      )}
 
-          {renderEventCards()}
-        </div>
+      {renderEventCards()}
+    </div>
   );
 
   return (
@@ -855,36 +766,16 @@ function EventsTabView<TEventType extends string>(
           </div>
         </SheetContent>
       </Sheet>
-      <Button
-        variant="default"
-        leftSection={<SlidersHorizontal size={16} />}
-        onClick={() => setIsFiltersOpen(true)}
-        className="mb-4 lg:hidden"
-      >
-        Filters{activeFilterCount ? ` (${activeFilterCount})` : ''}
-      </Button>
-      <div className="grid gap-6 lg:grid-cols-[18rem_minmax(0,1fr)]">
-        <aside className="hidden lg:block lg:sticky lg:top-24 lg:h-[calc(100dvh-6.5rem)]">
-          <Paper
-            withBorder
-            p={0}
-            radius="lg"
-            className="h-full overflow-hidden"
-          >
-            <div className="discover-filter-panel h-full overflow-y-auto p-4">
-              <Group justify="space-between" align="center" mb="md">
-                <Text fw={700} size="sm">
-                  Filters
-                </Text>
-                <Button variant="subtle" size="compact-sm" onClick={resetFilters} disabled={!activeFilterCount}>
-                  Reset
-                </Button>
-              </Group>
-              {filterPanel}
-            </div>
-          </Paper>
-        </aside>
 
+      <div className="discover-event-results">
+        <Button
+          variant="default"
+          leftSection={<SlidersHorizontal size={16} />}
+          onClick={() => setIsFiltersOpen(true)}
+          className="mb-4 lg:hidden"
+        >
+          Filters{activeFilterCount ? ` (${activeFilterCount})` : ''}
+        </Button>
         {renderResults()}
       </div>
     </>

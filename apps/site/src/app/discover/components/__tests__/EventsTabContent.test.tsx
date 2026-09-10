@@ -9,7 +9,7 @@ import EventsTabContent, { type EventSortValue } from '../EventsTabContent';
 
 jest.mock('@/components/location/LocationSearch', () => ({ __esModule: true, default: () => null }));
 jest.mock('@/lib/analytics/eventAnalytics', () => ({ trackEventClicked: jest.fn() }));
-jest.mock('@/components/ui/EventCard', () => ({
+jest.mock('@/components/organization/OrganizationEventCard', () => ({
   __esModule: true,
   default: ({ event, onClick }: { event: Event; onClick: () => void }) => (
     <button data-testid="event-card" onClick={onClick}>{event.name}</button>
@@ -115,7 +115,7 @@ it('filters the complete cache locally, updates counts, removes chips, and opens
   expect(screen.getByText('2 events available.')).toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: 'Basketball', exact: true, pressed: true }));
   expect(cardNames()).toHaveLength(3);
-  await user.type(screen.getByRole('textbox', { name: 'Search', exact: true }), 'middle');
+  await user.type(screen.getByRole('textbox', { name: 'Search events', exact: true }), 'middle');
   expect(cardNames()).toEqual(['Basketball middle']);
   await act(async () => { jest.advanceTimersByTime(500); });
   expect(onFilterChange).not.toHaveBeenCalled();
@@ -154,12 +154,12 @@ it('keeps filters and cached results while a partial-cache refresh fails', async
   const onFilterChange = jest.fn(() => new Promise<void>((_resolve, fail) => { reject = fail; }));
   const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
   render(<Harness hasMoreEvents onFilterChange={onFilterChange} />);
-  const input = screen.getByRole('textbox', { name: 'Search', exact: true });
+  const input = screen.getByRole('textbox', { name: 'Search events', exact: true });
   await user.type(input, 'Basketball');
   await act(async () => { jest.advanceTimersByTime(250); });
   expect(onFilterChange).toHaveBeenCalledTimes(1);
   expect(screen.getByText('Updating events…')).toBeInTheDocument();
-  expect(screen.getByRole('textbox', { name: 'Search', exact: true })).toBe(input);
+  expect(screen.getByRole('textbox', { name: 'Search events', exact: true })).toBe(input);
   expect(input).toHaveFocus();
   expect(cardNames()).toEqual(['Basketball late', 'Basketball middle']);
   await act(async () => { reject(new Error('Events are unavailable')); });
@@ -172,12 +172,12 @@ it('keeps filters and cached results while a partial-cache refresh fails', async
 it('retains filters during initial loading and applies them when events arrive', async () => {
   const user = userEvent.setup();
   const view = render(<Harness isLoadingInitial events={[]} />);
-  const input = screen.getByRole('textbox', { name: 'Search', exact: true });
+  const input = screen.getByRole('textbox', { name: 'Search events', exact: true });
   await user.type(input, 'middle');
   expect(cardNames()).toHaveLength(0);
   view.rerender(<Harness isLoadingInitial={false} />);
   await waitFor(() => expect(cardNames()).toEqual(['Basketball middle']));
-  expect(screen.getByRole('textbox', { name: 'Search', exact: true })).toBe(input);
+  expect(screen.getByRole('textbox', { name: 'Search events', exact: true })).toBe(input);
   fireEvent.click(screen.getByRole('button', { name: 'Clear all' }));
   expect(cardNames()).toHaveLength(3);
 });
