@@ -4,7 +4,7 @@ This ExecPlan is a living document. The sections `Progress`, `Surprises & Discov
 
 ## Purpose / Big Picture
 
-The discover page should let someone search within the tab they are already viewing: events, organizations, rentals, or open-registration teams. It should also offer a map beside the existing location control, showing nearby events, organizations, and rental fields around the user's current or selected location. After the change, a user can open `/discover`, choose a tab, search from that tab's header, open the map modal, pan the map, press "Search this area", and select a result to focus the map or navigate to the relevant page. The map modal keeps its own dropdown because it overlays multiple marker types in one view.
+The discover page should let someone search within the tab they are already viewing: events, organizations, rentals, or open-registration teams. It should also offer a map beside the existing location control, showing nearby events, organizations, and rental fields around the user's current or selected location. After the change, a user can open `/discover`, choose a tab, search from that tab's header, open the map modal, pan the map, press "Search this area", and select a result to focus the map or navigate to the relevant page. The map modal uses visible Events/Organizations/Rentals tabs and retains a hidden native category selector only as a compatibility seam, not as a user-facing dropdown.
 
 ## Progress
 
@@ -17,6 +17,10 @@ The discover page should let someone search within the tab they are already view
 - [x] (2026-05-14T20:52:09Z) Validated with TypeScript, focused Jest tests, lint, diff checks, production build, and rendered browser checks.
 - [x] (2026-05-14T21:18:34Z) Removed the page-level search dropdown so each tab search runs against the current tab only while keeping the map modal dropdown.
 - [x] (2026-05-14T21:32:18Z) Made the map modal dropdown filter visible markers/results by type and added color-coded event, organization, and rental markers.
+- [x] (2026-09-10) Completed the reference-style map layout. Passed `locationInfo` from the discover page to `DiscoverMapModal`.
+- [x] (2026-09-10) Confirmed that local data already contains co-located events. No database move or seed occurred.
+- [x] (2026-09-10) Passed the focused `DiscoverMapModal` Jest suite (12 tests), `npx tsc --noEmit --pretty false`, and `git -c core.whitespace=cr-at-eol diff --check`.
+- [ ] Verify the rebuilt map and detail card in a browser. The existing runtime was not restarted and lacks the Maps API key. See `Artifacts and Notes`.
 
 ## Surprises & Discoveries
 
@@ -24,6 +28,8 @@ The discover page should let someone search within the tab they are already view
   Evidence: `/Users/elesesy/StudioProjects/mvp-app/composeApp/src/androidMain/kotlin/com/razumly/mvp/eventMap/MapComponent.kt` has `updateCameraBounds(...)`, `searchPlaces(...)`, and `getEvents()`.
 - Observation: The web repo already has `@react-google-maps/api`, a shared `GOOGLE_MAPS_SCRIPT_ID`, and location helpers, so the discover map should reuse those instead of adding a new map loader.
   Evidence: `src/components/location/LocationSelector.tsx` and `src/lib/googleMapsLoader.ts`.
+- Observation: Local data already contains events at the same location.
+  Evidence: The local data probe found co-located events. No database move or seed occurred.
 
 ## Decision Log
 
@@ -36,11 +42,18 @@ The discover page should let someone search within the tab they are already view
 - Decision: The map modal will focus markers for events, organizations, and rentals, while team search remains page-level because teams do not have their own coordinates.
   Rationale: Teams are attached to organizations, but not every team has a direct mappable location. Mapping team markers would imply a location model that does not exist.
   Date/Author: 2026-05-14 / Codex
+- Decision: Replace the map type dropdown with visible tabs. Add a default Nearby events rail and a floating selected-event detail card.
+  Rationale: Match the supplied map reference layout.
+  Date/Author: 2026-09-10 / Codex
 
 ## Outcomes & Retrospective
 
-Implementation is complete. The discover page now owns a Teams tab backed by `teamService.searchOpenRegistrationTeams(...)`, and tab-level search submits against whichever tab is active. The map modal reuses the existing Google Maps loader, keeps its marker-type dropdown, and searches around the user's current discover location first, falling back only if current location is unavailable. Rendered verification confirmed the controls and modal open on the production server; Google Maps marker rendering was blocked locally by `RefererNotAllowedMapError` for `http://localhost:3000`.
-Follow-up map behavior now scopes visible markers to the selected modal dropdown type. Event markers are blue, organization markers are green, rental markers are orange, and the user's current location remains a separate blue dot.
+2026-05-14 outcome (earlier implementation): Implementation is complete. The discover page now owns a Teams tab backed by `teamService.searchOpenRegistrationTeams(...)`, and tab-level search submits against whichever tab is active. The map modal reuses the existing Google Maps loader, keeps its marker-type dropdown, and searches around the user's current discover location first, falling back only if current location is unavailable. Rendered verification confirmed the controls and modal open on the production server; Google Maps marker rendering was blocked locally by `RefererNotAllowedMapError` for `http://localhost:3000`.
+2026-05-14 follow-up (earlier implementation): Map behavior now scopes visible markers to the selected modal dropdown type. Event markers are blue, organization markers are green, rental markers are orange, and the user's current location remains a separate blue dot.
+
+2026-09-10 outcome: The reference-style map implementation is complete. Visible tabs replace the earlier map type dropdown. The map has compact search, location, count, and filter controls. It uses coral event dots and a halo around the user location. A grouped Nearby events rail opens by default. A floating detail card shows the selected event. The discover page passes `locationInfo` to the modal.
+
+The focused Jest suite passed all 12 tests. TypeScript and diff checks also passed. The local data probe found co-located events, so no database move or seed occurred. Browser verification of the rebuilt map and card remains incomplete. The existing runtime was not restarted because this turn did not authorize a runtime state change. It also lacks the Maps API key. These checks do not establish that the new map and card render correctly.
 
 ## Context and Orientation
 
@@ -91,6 +104,10 @@ All edits are additive or scoped replacements. The previous search fix is alread
 - `npm run build` passed. It emitted an existing Turbopack NFT warning for `next.config.mjs` through `src/lib/storage.ts` and two existing `z-index` warnings.
 - Browser verification at `http://localhost:3000/discover` confirmed Events/Organizations/Rentals/Teams tabs, the original discover target dropdown, the Teams search target switching to the Teams tab, the Map button, and the map modal search controls. The Google Maps script returned `RefererNotAllowedMapError` for `http://localhost:3000`.
 - Follow-up implementation removed the page-level dropdown so search is scoped by the active tab. This still needs post-follow-up rendered verification on a restarted production server or a fast enough local dev surface.
+- Reference-layout implementation (2026-09-10): `DiscoverMapModal` now has visible tabs, compact search/location/count/filter controls, coral event dots, and a user halo. It also has a grouped Nearby events rail that opens by default and a floating selected-event detail card. `src/app/discover/page.tsx` passes `locationInfo` to the modal.
+- Reference-layout verification (2026-09-10): The focused `DiscoverMapModal` Jest suite passed all 12 tests. `npx tsc --noEmit --pretty false` and `git -c core.whitespace=cr-at-eol diff --check` passed.
+- Local data probe (2026-09-10): Co-located events already exist. No database move or seed occurred.
+- Browser limitation (2026-09-10): The existing `node server.mjs --port=3001` runtime was not restarted. This turn did not authorize a runtime state change. The runtime also lacks `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`. The rebuilt map and card pixels were not browser-verified. No new browser render is claimed.
 
 ## Interfaces and Dependencies
 
@@ -99,3 +116,5 @@ Use `@react-google-maps/api` already present in `package.json`. Reuse `GOOGLE_MA
     GET /api/teams?query=<text>&openRegistration=true&limit=100
 
 `teamService.searchOpenRegistrationTeams(query, limit)` returns `Team[]` hydrated through existing `mapRowToTeam(...)`.
+
+Revision note (2026-09-10): Recorded the completed reference layout and its verification limits so the plan reflects the current implementation. Preserved earlier implementation and browser results as history.

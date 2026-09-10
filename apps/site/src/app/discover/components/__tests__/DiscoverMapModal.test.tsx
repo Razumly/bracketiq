@@ -1,5 +1,5 @@
 import { useState, type Dispatch, type SetStateAction } from 'react';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 
 import DiscoverMapModal from '../DiscoverMapModal';
 import { eventService } from '@/lib/eventService';
@@ -169,11 +169,13 @@ const renderModal = (
     selectedTags?: string[];
     setSelectedTags?: Dispatch<SetStateAction<string[]>>;
     selectedSports?: string[];
+    onClose?: () => void;
+    onEventClick?: (event: Event) => void;
   } = {},
 ) => renderWithMantine(
   <DiscoverMapModal
     opened
-    onClose={jest.fn()}
+    onClose={options.onClose ?? jest.fn()}
     location={location}
     requestLocation={jest.fn()}
     kmBetween={kmBetween}
@@ -194,7 +196,7 @@ const renderModal = (
     selectedEndDate={null}
     setSelectedEndDate={jest.fn()}
     defaultMaxDistance={50}
-    onEventClick={jest.fn()}
+    onEventClick={options.onEventClick ?? jest.fn()}
     onOrganizationClick={jest.fn()}
   />,
 );
@@ -619,5 +621,56 @@ describe('DiscoverMapModal', () => {
 
     expect(openSpy).toHaveBeenCalledWith('https://example.com/book', '_blank', 'noopener,noreferrer');
     openSpy.mockRestore();
+  });
+
+  it('switches from nearby event rows to a selected detail card and restores the rail on close', async () => {
+    const event = buildMapEvent({
+      $id: 'cascade-classic',
+      name: 'Cascade Volleyball Classic',
+      description: 'A weekend tournament for local clubs.',
+      eventType: 'TOURNAMENT',
+      sport: { $id: 'volleyball', name: 'Volleyball' } as Event['sport'],
+      start: '2099-06-12T18:00:00.000Z',
+      end: '2099-06-14T18:00:00.000Z',
+      timeZone: 'UTC',
+      location: 'Cascade Sports Center',
+      coordinates: [VANCOUVER_WA_CENTER.lng, VANCOUVER_WA_CENTER.lat + 0.1],
+    });
+    mockedEventService.getEventsPaginated.mockResolvedValue([event, buildMapEvent()]);
+    const onClose = jest.fn();
+    const onEventClick = jest.fn();
+    renderModal(VANCOUVER_WA_CENTER, { onClose, onEventClick });
+
+    const rail = await screen.findByRole('complementary', { name: 'Nearby events' });
+    const row = within(rail).getByRole('button', { name: 'Select Cascade Volleyball Classic' });
+    expect(within(row).getByText('Volleyball')).toBeInTheDocument();
+    expect(within(row).getByText('Jun 12, 2099 – Jun 14, 2099')).toBeInTheDocument();
+    expect(within(row).getByText('Cascade Sports Center')).toBeInTheDocument();
+    expect(within(row).getByText('6.9 mi')).toBeInTheDocument();
+
+    fireEvent.click(row);
+
+    const detail = await screen.findByRole('region', { name: 'Selected event' });
+    expect(screen.queryByRole('complementary', { name: 'Nearby events' })).not.toBeInTheDocument();
+    expect(within(detail).getByRole('heading', { name: 'Cascade Volleyball Classic' })).toBeInTheDocument();
+    expect(within(detail).getByText('Tournament')).toBeInTheDocument();
+    expect(within(detail).getByText('Volleyball')).toBeInTheDocument();
+    expect(within(detail).getByText('A weekend tournament for local clubs.')).toBeInTheDocument();
+    expect(within(detail).getByText('Jun 12, 2099 – Jun 14, 2099')).toBeInTheDocument();
+    expect(within(detail).getByText('Cascade Sports Center')).toBeInTheDocument();
+    expect(within(detail).getByText('6.9 mi')).toBeInTheDocument();
+    expect(within(detail).getByRole('button', { name: 'View event' })).toBeInTheDocument();
+
+    fireEvent.click(within(detail).getByRole('button', { name: 'Close selected event' }));
+
+    const restoredRail = await screen.findByRole('complementary', { name: 'Nearby events' });
+    expect(within(restoredRail).getByRole('button', { name: 'Select Cascade Volleyball Classic' })).toHaveFocus();
+    expect(screen.queryByRole('region', { name: 'Selected event' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cascade Volleyball Classic' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'View event' }));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onEventClick).toHaveBeenCalledWith(event);
   });
 });

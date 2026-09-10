@@ -1432,6 +1432,7 @@ function DiscoverPageContent() {
         opened={mapOpened}
         onClose={() => setMapOpened(false)}
         location={location}
+        locationInfo={locationInfo}
         requestLocation={requestLocation}
         kmBetween={kmBetween}
         selectedSports={selectedSports}
