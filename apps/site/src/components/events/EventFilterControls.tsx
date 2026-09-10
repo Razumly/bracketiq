@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
+import { useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
 import { ArrowUpDown, CalendarDays, RotateCcw, Search, X } from 'lucide-react';
 
 import {
@@ -193,6 +193,15 @@ export function EventFilterControls<TEventType extends string>({
   ...filterProps
 }: EventFilterControlsProps<TEventType>) {
   const [datesOpen, setDatesOpen] = useState(false);
+  const dateTriggerContainerRef = useRef<HTMLSpanElement>(null);
+  const wasDatesOpenRef = useRef(false);
+
+  useEffect(() => {
+    if (wasDatesOpenRef.current && !datesOpen) {
+      dateTriggerContainerRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    }
+    wasDatesOpenRef.current = datesOpen;
+  }, [datesOpen]);
   return (
     <>
       {showSearch && (
@@ -215,7 +224,9 @@ export function EventFilterControls<TEventType extends string>({
         className="w-40"
       />
       <Popover opened={datesOpen} onChange={setDatesOpen}>
-        <Popover.Target><Button variant="outline" aria-haspopup="dialog" aria-expanded={datesOpen} onClick={() => setDatesOpen((open) => !open)} leftSection={<CalendarDays aria-hidden="true" className="size-4" />}>Dates</Button></Popover.Target>
+        <span ref={dateTriggerContainerRef} className="inline-flex min-w-0 max-w-full">
+          <Popover.Target><Button variant="outline" aria-haspopup="dialog" aria-expanded={datesOpen} onClick={() => setDatesOpen((open) => !open)} leftSection={<CalendarDays aria-hidden="true" className="size-4" />}>Dates</Button></Popover.Target>
+        </span>
         <Popover.Dropdown>
           <Stack gap="sm">
             <DatePickerInput label="Start date" aria-label="Filter by start date" value={filterProps.selectedStartDate} clearable onChange={filterProps.setSelectedStartDate} />

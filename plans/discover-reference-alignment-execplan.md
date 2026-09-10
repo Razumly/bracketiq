@@ -155,3 +155,5 @@ Revision note (2026-09-10 05:16Z): Final review found two location-picker access
 Revision note (2026-09-10 05:18Z): The mobile reflow review required a separate edge rule because the owned Popover root is the trigger-sized containing block. Mobile location popovers now use the left edge of the first full-width action item; the width cap keeps the panel inside the viewport.
 
 Revision note (2026-09-10 05:22Z): The 320px geometry check included the Discover container and toolbar insets. Reduced the mobile location panel cap from `100vw - 2rem` to `100vw - 4rem` so the left-anchored panel remains inside the viewport.
+
+Revision note (2026-09-10 05:27Z): Added focus restoration for compact Dates and owned date inputs. Kept the Discover toolbar on one line above the mobile breakpoint so right-edge location placement does not clip when actions would otherwise wrap.

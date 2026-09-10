@@ -279,17 +279,20 @@ describe('organization operation filters', () => {
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
 
-  it('renders a branded calendar and dismisses it with Escape', async () => {
+  it('renders a branded calendar and restores focus after Escape dismissal', async () => {
     const user = userEvent.setup();
     render(<DatePickerInput aria-label="Start date" value={null} onChange={jest.fn()} />);
 
-    await user.click(screen.getByRole('button', { name: 'Start date' }));
+    const trigger = screen.getByRole('button', { name: 'Start date' });
+    await user.click(trigger);
     expect(screen.getByRole('dialog', { name: 'Start date' })).toBeVisible();
     expect(screen.getByRole('button', { name: /previous month/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /next month/i })).toBeInTheDocument();
     expect(screen.queryByRole('gridcell')).not.toBeInTheDocument();
 
+    await user.click(screen.getByRole('button', { name: /previous month/i }));
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('dialog', { name: 'Start date' })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
   });
 });
