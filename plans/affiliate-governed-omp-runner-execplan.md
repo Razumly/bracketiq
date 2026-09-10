@@ -1372,3 +1372,75 @@ A fresh reviewed image and preflight are required before resumption.
 The three jobs remain queued, claimGeneration zero, with admission closed.
 Private batch evidence is in
 `/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v6-small-batch-20260910T032130340Z/run`.
+
+### Corrected-image batch resume
+
+Both review axes passed after the query correction. Source commit
+`7acce0ace76ecf8fb40004193c141030cfc839f0` was integrated into main.
+Site CI passed in run `34436431139`. The authorized image publish passed
+in run `34436996618`.
+
+The six authorized services use these immutable images:
+
+- Worker: `ghcr.io/razumly/bracketiq-affiliate-governed@sha256:28368c56575dc06d04c45a7a6d7ce0cf0594e999790368bdc710d4e729e0cb81`.
+- Gateway: `ghcr.io/razumly/bracketiq-affiliate-gateway@sha256:c9ae2f21f11dca3ab0ac611ff699a3b8ce82b7bbf71dc673255fbeacb49789f8`.
+
+Both image revision labels matched the source commit. Bundle parsing,
+producer containment, reviewer containment, and the SDK probe passed.
+The SDK probe made no provider call. The deployment contract remains
+version 6, with role and prompt version 5.
+
+Fresh preflight passed without findings. Its report hash is
+`c34203dcd228cc51dbe6f9c2fa60f69f4f9ce1e4c3074fb1825321e0edcd26ca`.
+Its evidence is in `preflight-replay-01` under the private batch directory.
+The deployed Gateway replayed both the original TPH/Ultimate admission and
+the Mission retry with replayed true and writeCount zero. All 99 protected
+history and data fingerprints were unchanged before claims.
+
+The producer readiness rule requires a healthy reviewer. Both selected
+workers were started. Admission still permits only one exact job and one
+claim at a time. Mission producer claim
+`agw-claim-8e772917-cfb4-4dff-b4d4-b5ed0d22f1fd` started against the same
+queued job. Its signed subject is CLUB, pass 2, with deployment 6 and role
+and prompt 5. Admission was closed after that claim.
+
+### Batch stopped after Mission Valley
+
+Mission Valley's one producer claim failed at `2026-09-10T04:49:02.915Z`
+with `SCHEMA_CORRECTIONS_EXHAUSTED`. Its job is RETRY_WAIT with claim
+generation 1. The failed claim and all prior attempts remain in the audit.
+No second claim was admitted.
+
+The worker read the listed HTML and Markdown artifacts. It then made three
+CONTRACT_GAP result submissions. The first two responses requested corrections
+to `payload.sportEvidence` and `evidenceRefs`. The third response exhausted
+the correction limit and failed the claim. The terminal receipt is
+`agw-receipt-71166605-c098-4eef-8ed4-9b8d7eca913f`.
+
+No mapping command ran. No mapping was validated or committed. No reviewer
+job was created. TPH and Ultimate remain in their same QUEUED jobs with
+claim generation 0. The stop-on-failure rule stopped the complete batch.
+
+The current `terminalResultCorrectionIssuesFor` helper returns the same two
+sport-evidence issues for any invalid legacy CONTRACT_GAP. Both envelope
+schema failures and sport-evidence verification failures use that helper.
+The retained receipts do not distinguish those failure branches. They do
+not retain the rejected field values. The workspace is empty. Thus the
+exact invalid value is not established by this run. Do not increase the
+correction limit or claim that a specific sport citation was missing.
+
+Final read-only safety checks passed:
+
+- Admission is closed. Active claims and unresolved claim pointers are zero.
+- Mapper 1, reviewer 1, and the root runner are stopped.
+- The Gateway, model gateway, and auth broker are healthy with restart `no`.
+- All five dormant service identities and states are unchanged.
+- All 99 prior history and protected data fingerprints are unchanged.
+- The three roots remain PRE_MAPPED at generation 1 with LEGACY_SPORT_REPAIR.
+- Root automation and source automatic scraping remain disabled.
+- The three organizations remain UNLISTED with public pages and widgets disabled.
+- Existing version-1 mapping active flags are unchanged. This batch did not
+  activate a mapping or publish data.
+
+The exact final proof is `run/small-batch-final-safety.json` under the private
+batch directory. Another claim needs a new bounded recovery decision.
