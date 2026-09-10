@@ -76,7 +76,7 @@
 .org-event-card-fact-copy { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .org-event-card-time { color: var(--org-muted); }
 .org-event-card-time::before { content: '·'; margin-inline: .4rem; color: var(--org-muted); }
-.org-event-card-status { color: var(--org-link); font-weight: 600; }
+.org-event-card-status { display: block; max-width: 100%; min-width: 0; overflow: hidden; color: var(--org-link); font-size: .78rem; font-weight: 600; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
 .org-event-card-price { display: flex; align-items: center; justify-content: space-between; gap: 1rem; min-height: 3.25rem; padding: .8rem 1rem; border-top: 1px solid var(--org-line); }
 .org-event-card-price-copy { display: flex; align-items: baseline; gap: .55rem; min-width: 0; }
 .org-event-card-price strong { font-size: 1rem; font-weight: 700; white-space: nowrap; }

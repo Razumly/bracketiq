@@ -457,7 +457,7 @@ svg {
   font-weight: 500;
 }
 
-.discover-segment-tab[data-active='true'] {
+.discover-segment-tab[data-active] {
   border-bottom-color: var(--discover-accent);
   background: transparent;
   color: var(--discover-text);
@@ -465,7 +465,7 @@ svg {
   box-shadow: none;
 }
 
-.discover-segment-tab[data-active='true']::after {
+.discover-segment-tab[data-active]::after {
   display: none;
 }
 
