@@ -1,8 +1,8 @@
 import {
   assertRepeatingTimeSlotsResolvable,
   enumerateRepeatingTimeSlotOccurrences,
+  listRepeatingTimeSlotDstAdjustments,
   resolveRepeatingTimeSlotOccurrence,
-  RepeatingTimeSlotValidationError,
 } from "../repeatingTimeSlotAvailability";
 
 const slot = (overrides: Record<string, unknown> = {}) => ({
@@ -18,7 +18,7 @@ const slot = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-describe("strict repeating Time Slot availability", () => {
+describe("repeating Time Slot availability", () => {
   it("resolves an overnight interval on the next local date", () => {
     const resolved = resolveRepeatingTimeSlotOccurrence(slot(), "2026-02-28");
 
@@ -65,49 +65,96 @@ describe("strict repeating Time Slot availability", () => {
     expect(resolved.durationMinutes).toBe(240);
   });
 
-  it("rejects a nonexistent local time during a DST gap", () => {
-    expect(() =>
-      resolveRepeatingTimeSlotOccurrence(
-        slot({
-          daysOfWeek: [6],
-          startDate: "2026-03-08",
-          endDate: "2026-03-08",
-          startTimeMinutes: 2 * 60 + 30,
-          endTimeMinutes: 4 * 60,
-        }),
-        "2026-03-08",
-      ),
-    ).toThrow(RepeatingTimeSlotValidationError);
-    expect(() =>
-      resolveRepeatingTimeSlotOccurrence(
-        slot({
-          daysOfWeek: [6],
-          startDate: "2026-03-08",
-          endDate: "2026-03-08",
-          startTimeMinutes: 2 * 60 + 30,
-          endTimeMinutes: 4 * 60,
-        }),
-        "2026-03-08",
-      ),
-    ).toThrow(/does not exist/);
+  it("shifts a nonexistent local time forward during a DST gap", () => {
+    const resolved = resolveRepeatingTimeSlotOccurrence(
+      slot({
+        daysOfWeek: [6],
+        startDate: "2026-03-08",
+        endDate: "2026-03-08",
+        startTimeMinutes: 2 * 60 + 30,
+        endTimeMinutes: 4 * 60,
+      }),
+      "2026-03-08",
+    );
+
+    expect(resolved.start.toISOString()).toBe("2026-03-08T07:30:00.000Z");
+    expect(resolved.end.toISOString()).toBe("2026-03-08T08:00:00.000Z");
+    expect(resolved.durationMinutes).toBe(30);
+    expect(resolved.dstAdjustments).toHaveLength(1);
+    expect(resolved.dstAdjustments[0]).toMatchObject({
+      boundary: "start",
+      kind: "GAP_SHIFT_FORWARD",
+      requestedDate: "2026-03-08",
+      requestedTimeMinutes: 150,
+      effectiveDate: "2026-03-08",
+      effectiveTimeMinutes: 210,
+    });
   });
 
-  it("rejects an ambiguous local time during a DST fold", () => {
-    expect(() =>
-      resolveRepeatingTimeSlotOccurrence(
-        slot({
-          daysOfWeek: [6],
-          startDate: "2026-11-01",
-          endDate: "2026-11-01",
-          startTimeMinutes: 1 * 60 + 30,
-          endTimeMinutes: 3 * 60,
-        }),
-        "2026-11-01",
-      ),
-    ).toThrow(/ambiguous/);
+  it("uses the earlier instant during a DST fold", () => {
+    const resolved = resolveRepeatingTimeSlotOccurrence(
+      slot({
+        daysOfWeek: [6],
+        startDate: "2026-11-01",
+        endDate: "2026-11-01",
+        startTimeMinutes: 1 * 60 + 30,
+        endTimeMinutes: 3 * 60,
+      }),
+      "2026-11-01",
+    );
+
+    expect(resolved.start.toISOString()).toBe("2026-11-01T05:30:00.000Z");
+    expect(resolved.end.toISOString()).toBe("2026-11-01T08:00:00.000Z");
+    expect(resolved.durationMinutes).toBe(150);
+    expect(resolved.dstAdjustments).toEqual([
+      expect.objectContaining({
+        boundary: "start",
+        kind: "FOLD_EARLIER",
+        requestedDate: "2026-11-01",
+        requestedTimeMinutes: 90,
+        effectiveDate: "2026-11-01",
+        effectiveTimeMinutes: 90,
+      }),
+    ]);
   });
 
-  it("validates a daylight-saving gap after the event validation window", () => {
+  it("resolves the reported overnight DST gap", () => {
+    const reportedSlot = slot({
+      id: "reported-overnight-dst-gap",
+      daysOfWeek: [5, 6],
+      startDate: "2026-03-10",
+      endDate: undefined,
+      startTimeMinutes: 11 * 60,
+      endTimeMinutes: 2 * 60,
+      timeZone: "America/Los_Angeles",
+    });
+    const resolved = resolveRepeatingTimeSlotOccurrence(
+      reportedSlot,
+      "2027-03-13",
+    );
+
+    expect(resolved.endDate).toBe("2027-03-14");
+    expect(resolved.end.toISOString()).toBe("2027-03-14T10:00:00.000Z");
+    expect(resolved.durationMinutes).toBe(15 * 60);
+    expect(resolved.dstAdjustments).toEqual([
+      expect.objectContaining({
+        boundary: "end",
+        kind: "GAP_SHIFT_FORWARD",
+        requestedDate: "2027-03-14",
+        requestedTimeMinutes: 2 * 60,
+        effectiveDate: "2027-03-14",
+        effectiveTimeMinutes: 3 * 60,
+      }),
+    ]);
+    const normalOccurrence = resolveRepeatingTimeSlotOccurrence(
+      reportedSlot,
+      "2027-03-14",
+    );
+    expect(normalOccurrence.end.toISOString()).toBe("2027-03-15T09:00:00.000Z");
+    expect(normalOccurrence.dstAdjustments).toEqual([]);
+  });
+
+  it("accepts a daylight-saving gap after the event validation window", () => {
     expect(() =>
       assertRepeatingTimeSlotsResolvable({
         slots: [
@@ -122,25 +169,45 @@ describe("strict repeating Time Slot availability", () => {
         ],
         eventStart: new Date("2026-01-01T00:00:00.000Z"),
       }),
-    ).toThrow(/does not exist on 2030-03-10/);
+    ).not.toThrow();
   });
 
-  it("validates the next annual daylight-saving gap after a future slot start", () => {
-    expect(() =>
-      assertRepeatingTimeSlotsResolvable({
-        slots: [
-          slot({
-            id: "future-next-year-dst-gap",
-            daysOfWeek: [6],
-            startDate: "2026-03-10",
-            endDate: undefined,
-            startTimeMinutes: 2 * 60 + 30,
-            endTimeMinutes: 4 * 60,
-          }),
-        ],
-        eventStart: new Date("2026-03-01T00:00:00.000Z"),
+  it("reports DST adjustments only through the final generated end", () => {
+    const sharedOptions = {
+      slot: slot({
+        id: "future-next-year-dst-gap",
+        daysOfWeek: [6],
+        startDate: "2026-03-10",
+        endDate: undefined,
+        startTimeMinutes: 2 * 60 + 30,
+        endTimeMinutes: 4 * 60,
       }),
-    ).toThrow(/does not exist on 2027-03-14/);
+      eventStart: new Date("2026-03-01T00:00:00.000Z"),
+    };
+    expect(listRepeatingTimeSlotDstAdjustments(sharedOptions)).toEqual([]);
+
+
+    expect(
+      listRepeatingTimeSlotDstAdjustments({
+        ...sharedOptions,
+        finalGeneratedEnd: new Date("2027-03-14T06:00:00.000Z"),
+      }),
+    ).toEqual([]);
+
+    const adjustments = listRepeatingTimeSlotDstAdjustments({
+      ...sharedOptions,
+      finalGeneratedEnd: new Date("2027-03-14T08:00:00.000Z"),
+    });
+    expect(adjustments).toEqual([
+      expect.objectContaining({
+        boundary: "start",
+        kind: "GAP_SHIFT_FORWARD",
+        requestedDate: "2027-03-14",
+        requestedTimeMinutes: 2 * 60 + 30,
+        effectiveDate: "2027-03-14",
+        effectiveTimeMinutes: 3 * 60 + 30,
+      }),
+    ]);
   });
   it("filters occurrences outside configured local date bounds", () => {
     const occurrences = enumerateRepeatingTimeSlotOccurrences({

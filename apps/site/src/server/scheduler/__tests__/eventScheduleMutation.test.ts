@@ -354,6 +354,15 @@ describe("event schedule Match Graph persistence", () => {
       validateAndNormalizeSerializedGraph("event_1", graph),
     ).not.toThrow();
   });
+  it("accepts an unassigned team official under Best Available coverage", () => {
+    const graph = buildProposalValidationGraph();
+    graph.event.staffingPriority = "BEST_AVAILABLE_COVERAGE";
+    graph.event.doTeamsOfficiate = true;
+
+    expect(() =>
+      validateAndNormalizeSerializedGraph("event_1", graph),
+    ).not.toThrow();
+  });
 
   it("accepts a player as a team-officiating assignment holder", () => {
     const graph = buildProposalValidationGraph();

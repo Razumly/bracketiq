@@ -2,6 +2,8 @@
 
 package com.razumly.mvp.core.data.repositories
 
+import com.razumly.mvp.core.data.dataTypes.assertFutureOneTimeEnd
+
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.Facility
 import com.razumly.mvp.core.data.dataTypes.Field
@@ -462,6 +464,7 @@ class FieldRepository(
     }
 
     override suspend fun createTimeSlot(slot: TimeSlot): Result<TimeSlot> = runCatching {
+        slot.assertFutureOneTimeEnd()
         val normalizedDays = slot.normalizedDaysOfWeek()
         val normalizedFieldIds = slot.normalizedScheduledFieldIds()
         val normalizedDivisionIds = slot.normalizedDivisionIds()
@@ -494,6 +497,7 @@ class FieldRepository(
     }
 
     override suspend fun updateTimeSlot(slot: TimeSlot): Result<TimeSlot> = runCatching {
+        slot.assertFutureOneTimeEnd()
         val payload = slot.toTimeSlotDTO()
         val dao = databaseService.getCatalogCacheDao
         val scope = api.activateCatalogCache(dao)

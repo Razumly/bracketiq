@@ -129,7 +129,7 @@ describe('league scheduling (time slots)', () => {
     expect(scheduled.matches[0].end.toISOString()).toBe('2026-03-03T04:00:00.000Z');
   });
 
-  it('rejects a repeating slot whose overnight end falls in a daylight-saving gap', () => {
+  it('shifts a repeating overnight end through a daylight-saving gap', () => {
     const slot = new TimeSlot({
       id: 'slot_dst_gap_scheduler',
       dayOfWeek: 5,
@@ -151,9 +151,11 @@ describe('league scheduling (time slots)', () => {
       'league_dst_gap_scheduler',
     );
 
-    expect(() => scheduleEvent({ event: league }, context)).toThrow(
-      /does not exist on 2026-03-08/,
-    );
+    const scheduled = scheduleEvent({ event: league }, context);
+
+    expect(scheduled.matches).toHaveLength(1);
+    expect(scheduled.matches[0].start.toISOString()).toBe('2026-03-08T03:00:00.000Z');
+    expect(scheduled.matches[0].end.toISOString()).toBe('2026-03-08T04:00:00.000Z');
   });
 });
 

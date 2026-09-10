@@ -38,7 +38,7 @@ const weeklyBoundarySlot = {
 };
 
 describe('resolveWeeklyOccurrence', () => {
-  it('returns the strict DST resolver error for an invalid selected occurrence', async () => {
+  it('resolves a selected occurrence whose local start is in a DST gap', async () => {
     const result = await resolveWeeklyOccurrence({
       event: {
         id: 'weekly_parent',
@@ -64,11 +64,18 @@ describe('resolveWeeklyOccurrence', () => {
           repeating: true,
         }),
       },
-    } as any);
+      divisions: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+    } as unknown as Prisma.TransactionClient);
 
     expect(result).toEqual({
-      ok: false,
-      error: expect.stringContaining('does not exist on 2026-03-08'),
+      ok: true,
+      value: expect.objectContaining({
+        slotId: 'slot_dst_gap',
+        occurrenceDate: '2026-03-08',
+        divisionIds: [],
+      }),
     });
   });
 

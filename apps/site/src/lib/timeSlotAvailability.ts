@@ -133,10 +133,38 @@ const invalidSlot = (slotId: string, detail: string): never => {
   );
 };
 
-export const resolveOneTimeTimeSlot = (
+const resolveEndLocalDate = (
+  slotId: string,
+  startParts: { year: number; month: number; day: number },
+  endParts: { year: number; month: number; day: number } | null,
+  overnight: boolean,
+): string => {
+  const startLocalDate = localDateString(startParts);
+  const followingDate = new Date(Date.UTC(startParts.year, startParts.month - 1, startParts.day + 1));
+  const nextLocalDate = followingDate.toISOString().slice(0, 10);
+  const endLocalDate = overnight ? nextLocalDate : startLocalDate;
+  if (endParts) {
+    const requestedDate = localDateString(endParts);
+    if (requestedDate !== startLocalDate && requestedDate !== endLocalDate) {
+      invalidSlot(slotId, 'the interval must not exceed one local day or end before its start date.');
+    }
+  }
+  return endLocalDate;
+};
+
+export const assertOneTimeTimeSlotFutureEnd = (
+  slot: Pick<ResolvedOneTimeTimeSlot, 'slotId' | 'end'>,
+  now = new Date(),
+): void => {
+  if (!Number.isFinite(slot.end.getTime()) || slot.end.getTime() <= now.getTime()) {
+    invalidSlot(slot.slotId, 'the end date and time must be in the future.');
+  }
+};
+
+const readOneTimeIntervalInput = (
   slot: TimeSlotIntervalInput,
-  fallbackTimeZone = 'UTC',
-): ResolvedOneTimeTimeSlot => {
+  fallbackTimeZone: string,
+) => {
   const slotId = normalizeSlotId(slot);
   if (slot.repeating !== false) {
     invalidSlot(slotId, 'the slot must be marked as non-repeating.');
@@ -155,37 +183,46 @@ export const resolveOneTimeTimeSlot = (
   }
   const parsedEnd = parseUnknownDate(slot.endDate, timeZone);
   const endParts = parsedEnd ? getDateTimePartsInTimeZone(parsedEnd, timeZone) : null;
-  const startTimeMinutes = normalizeMinute(slot.startTimeMinutes)
-    ?? (startParts.hour * 60 + startParts.minute);
-  const endTimeMinutes = normalizeMinute(slot.endTimeMinutes)
-    ?? (endParts ? endParts.hour * 60 + endParts.minute : null);
-  if (endTimeMinutes === null) {
-    return invalidSlot(slotId, 'select an end time.');
+  return { slotId, timeZone, parsedStart, parsedEnd, startParts, endParts };
+};
+
+type LocalDateParts = NonNullable<ReturnType<typeof getDateTimePartsInTimeZone>>;
+
+const resolveSlotMinutes = (slotId: string, value: unknown, parts: LocalDateParts | null, label: string): number => {
+  if (value !== null && value !== undefined) {
+    return normalizeMinute(value) ?? invalidSlot(slotId, `select a valid ${label} time.`);
   }
-  if (endTimeMinutes <= startTimeMinutes) {
-    invalidSlot(slotId, 'the end time must be after the start time on the same local date.');
-  }
+  return parts ? parts.hour * 60 + parts.minute : invalidSlot(slotId, `select a ${label} time.`);
+};
+
+const resolveExactSlotInstant = (parsed: Date | null, parts: LocalDateParts | null, date: string, minutes: number, timeZone: string): Date | null => {
+  if (parsed && parts && localDateString(parts) === date && parts.hour * 60 + parts.minute === minutes) return parsed;
+  return zonedTimeToUtcDate(`${date}T${formatMinutes(minutes)}:00`, timeZone);
+};
+
+const localTimestamp = (date: Date, timeZone: string): number => {
+  const parts = getDateTimePartsInTimeZone(date, timeZone);
+  if (!parts) return Number.NaN;
+  return Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second, date.getUTCMilliseconds());
+};
+
+export const resolveOneTimeTimeSlot = (
+  slot: TimeSlotIntervalInput,
+  fallbackTimeZone = 'UTC',
+): ResolvedOneTimeTimeSlot => {
+  const { slotId, timeZone, parsedStart, parsedEnd, startParts, endParts } = readOneTimeIntervalInput(slot, fallbackTimeZone);
+  const startTimeMinutes = resolveSlotMinutes(slotId, slot.startTimeMinutes, startParts, 'start');
+  const endTimeMinutes = resolveSlotMinutes(slotId, slot.endTimeMinutes, endParts, 'end');
+  const endLocalDate = resolveEndLocalDate(slotId, startParts, endParts, endTimeMinutes <= startTimeMinutes);
 
   const localDate = localDateString(startParts);
-  const resolvedStart = zonedTimeToUtcDate(
-    `${localDate}T${formatMinutes(startTimeMinutes)}:00`,
-    timeZone,
-  );
-  const resolvedEnd = zonedTimeToUtcDate(
-    `${localDate}T${formatMinutes(endTimeMinutes)}:00`,
-    timeZone,
-  );
-  const start = startParts.hour * 60 + startParts.minute === startTimeMinutes
-    ? parsedStart
-    : resolvedStart;
-  const end = parsedEnd
-    && endParts
-    && localDateString(endParts) === localDate
-    && endParts.hour * 60 + endParts.minute === endTimeMinutes
-    ? parsedEnd
-    : resolvedEnd;
+  const start = resolveExactSlotInstant(parsedStart, startParts, localDate, startTimeMinutes, timeZone);
+  const end = resolveExactSlotInstant(parsedEnd, endParts, endLocalDate, endTimeMinutes, timeZone);
   if (!start || !end || end.getTime() <= start.getTime()) {
     return invalidSlot(slotId, 'the exact interval cannot be resolved.');
+  }
+  if (localTimestamp(end, timeZone) - localTimestamp(start, timeZone) > MINUTES_PER_DAY * 60000) {
+    invalidSlot(slotId, 'the interval must not exceed one local day.');
   }
 
   return {
@@ -207,17 +244,17 @@ const scopeIntersection = (
   universe: string[],
   globalId: string,
 ): string | null => {
-  const normalizedUniverse = universe.length > 0 ? universe : [];
+  const normalizedUniverse = universe;
   const firstScope = first.length > 0 ? first : normalizedUniverse;
   const secondScope = second.length > 0 ? second : normalizedUniverse;
   if (firstScope.length === 0 && secondScope.length === 0) {
     return globalId;
   }
   if (firstScope.length === 0) {
-    return secondScope[0] ?? globalId;
+    return secondScope[0];
   }
   if (secondScope.length === 0) {
-    return firstScope[0] ?? globalId;
+    return firstScope[0];
   }
   const secondByKey = new Map(secondScope.map((id) => [id.toLowerCase(), id]));
   for (const id of firstScope) {

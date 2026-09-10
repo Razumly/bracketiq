@@ -40,6 +40,14 @@ const sendSchema = z.object({
   pageContext: pageContextSchema.nullable().optional(),
 });
 
+const jsonResponseError = async (error: Response) => {
+  const message = await error.text();
+  return NextResponse.json(
+    { error: message || error.statusText || 'AI request failed.' },
+    { status: error.status },
+  );
+};
+
 const loadConversationMessages = async (conversationId: string) => {
   const page = await getOpenAiClient().conversations.items.list(conversationId, {
     order: 'asc',
@@ -66,7 +74,7 @@ export async function GET(req: NextRequest) {
     resolved.setCookie?.(response);
     return response;
   } catch (error) {
-    if (error instanceof Response) return error;
+    if (error instanceof Response) return jsonResponseError(error);
     console.error('AI assistant load failed', error);
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Internal Server Error' }, { status: 500 });
   }
@@ -102,7 +110,7 @@ export async function POST(req: NextRequest) {
     resolved.setCookie?.(response);
     return response;
   } catch (error) {
-    if (error instanceof Response) return error;
+    if (error instanceof Response) return jsonResponseError(error);
     console.error('AI assistant message failed', error);
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Internal Server Error' }, { status: 500 });
   }

@@ -8,6 +8,7 @@ import {
 } from '@/lib/repeatingTimeSlotAvailability';
 import { repeatingTimeSlotValidationResponse } from '@/server/repeatingTimeSlotValidationResponse';
 import {
+  assertOneTimeTimeSlotFutureEnd,
   resolveOneTimeTimeSlot,
   TimeSlotValidationError,
 } from '@/lib/timeSlotAvailability';
@@ -227,7 +228,7 @@ const persistTimeSlotDivisions = async (
   }
 };
 
-export async function GET(req: NextRequest) {
+function readTimeSlotQuery(req: NextRequest) {
   const params = req.nextUrl.searchParams;
   const idsParam = params.get('ids');
   const fieldId = params.get('fieldId')?.trim();
@@ -247,24 +248,20 @@ export async function GET(req: NextRequest) {
       ],
     ),
   );
-  const hasReadScope = Boolean(ids?.length || normalizedFieldIds.length);
-  if (!hasReadScope) {
-    return NextResponse.json(
-      { error: 'Time-slot reads require an id or field scope.' },
-      { status: 400 },
-    );
-  }
+  return { ids, rentalOnly, normalizedFieldIds, dayOfWeek, limit, offset };
+}
 
+async function optionalTimeSlotSession(req: NextRequest) {
   let session: Awaited<ReturnType<typeof requireSession>> | null = null;
   try {
     session = await requireSession(req);
   } catch (error) {
     if (!(error instanceof Response)) throw error;
   }
-  if (!session && !rentalOnly) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  return session;
+}
 
+function initialTimeSlotReadScope(ids: string[] | undefined, normalizedFieldIds: string[]) {
   const whereClauses: any[] = [];
   if (ids?.length) whereClauses.push({ id: { in: ids } });
   if (normalizedFieldIds.length) {
@@ -275,6 +272,10 @@ export async function GET(req: NextRequest) {
       ],
     });
   }
+  return whereClauses;
+}
+
+async function restrictRentalReadScope(session: Awaited<ReturnType<typeof optionalTimeSlotSession>>, rentalOnly: boolean, ids: string[] | undefined, normalizedFieldIds: string[], whereClauses: Record<string, unknown>[], limit: number, offset: number): Promise<NextResponse | null> {
   if (!session) {
     const publicRentalSlotIds = await resolvePublicRentalSlotIds(ids ?? [], normalizedFieldIds);
     if (!publicRentalSlotIds.length) {
@@ -303,6 +304,10 @@ export async function GET(req: NextRequest) {
     }
     whereClauses.push({ id: { in: rentalSlotIds } });
   }
+  return null;
+}
+
+function addTimeSlotWeekdayScope(dayOfWeek: string | null, whereClauses: Record<string, unknown>[]): void {
   if (dayOfWeek !== null && dayOfWeek !== undefined) {
     const day = Number(dayOfWeek);
     if (Number.isInteger(day) && day >= 0 && day <= 6) {
@@ -315,6 +320,114 @@ export async function GET(req: NextRequest) {
     }
   }
 
+}
+
+function readTimeSlotCreateInput(data: z.infer<typeof createSchema>) {
+  const repeating = data.repeating ?? false;
+  const normalizedDays = normalizeDaysOfWeek({
+    dayOfWeek: data.dayOfWeek ?? undefined,
+    daysOfWeek: data.daysOfWeek ?? undefined,
+  });
+  const requiredTemplateIds = normalizeTemplateIds(data.requiredTemplateIds);
+  const hostRequiredTemplateIds = normalizeTemplateIds(data.hostRequiredTemplateIds);
+  const scheduledFieldIds = normalizeFieldIds([
+    ...(Array.isArray(data.scheduledFieldIds) ? data.scheduledFieldIds : []),
+    ...(typeof data.scheduledFieldId === 'string' ? [data.scheduledFieldId] : []),
+  ]);
+  const scheduledFieldId = scheduledFieldIds[0] ?? data.scheduledFieldId ?? null;
+  return { repeating, normalizedDays, requiredTemplateIds, hostRequiredTemplateIds, scheduledFieldIds, scheduledFieldId };
+}
+
+function readCreatedSlotInterval(data: z.infer<typeof createSchema>, slotTimeZone: string) {
+  return {
+    startDate: parseDateInputInTimeZone(data.startDate, slotTimeZone) ?? new Date(),
+    endDate: data.endDate === null ? null : parseDateInputInTimeZone(data.endDate, slotTimeZone),
+    startTimeMinutes: data.startTimeMinutes ?? null,
+    endTimeMinutes: data.endTimeMinutes ?? null,
+  };
+}
+
+function resolveCreatedSlotInterval(data: z.infer<typeof createSchema>, slotTimeZone: string, repeating: boolean, scheduledFieldId: string | null, scheduledFieldIds: string[], normalizedDays: number[]) {
+  let { startDate, endDate, startTimeMinutes, endTimeMinutes } = readCreatedSlotInterval(data, slotTimeZone);
+  if (!repeating) {
+    try {
+      const resolved = resolveOneTimeTimeSlot({
+        ...data,
+        id: data.id,
+        repeating: false,
+        startDate,
+        endDate,
+        startTimeMinutes,
+        endTimeMinutes,
+        timeZone: slotTimeZone,
+        scheduledFieldId,
+        scheduledFieldIds,
+      }, slotTimeZone);
+      assertOneTimeTimeSlotFutureEnd(resolved);
+      startDate = resolved.start;
+      endDate = resolved.end;
+      startTimeMinutes = resolved.startTimeMinutes;
+      endTimeMinutes = resolved.endTimeMinutes;
+    } catch (error) {
+      if (error instanceof TimeSlotValidationError) {
+        return NextResponse.json(
+          { error: error.message, code: 'INVALID_TIME_SLOT', slotIds: error.slotIds },
+          { status: 400 },
+        );
+      }
+      throw error;
+    }
+  }
+  if (repeating) {
+    try {
+      assertRepeatingTimeSlotsResolvable({
+        slots: [{
+          ...data,
+          id: data.id,
+          dayOfWeek: normalizedDays[0] ?? data.dayOfWeek,
+          daysOfWeek: normalizedDays,
+          startDate,
+          endDate,
+          startTimeMinutes,
+          endTimeMinutes,
+          timeZone: slotTimeZone,
+          scheduledFieldId,
+          scheduledFieldIds,
+          repeating: true,
+        }],
+        eventStart: startDate,
+        eventEnd: null,
+      });
+    } catch (error) {
+      const repeatingTimeSlotResponse = repeatingTimeSlotValidationResponse(error);
+      if (repeatingTimeSlotResponse) {
+        return repeatingTimeSlotResponse;
+      }
+      throw error;
+    }
+  }
+  return { startDate, endDate, startTimeMinutes, endTimeMinutes };
+}
+
+export async function GET(req: NextRequest) {
+  const { ids, rentalOnly, normalizedFieldIds, dayOfWeek, limit, offset } = readTimeSlotQuery(req);
+  const hasReadScope = Boolean(ids?.length || normalizedFieldIds.length);
+  if (!hasReadScope) {
+    return NextResponse.json(
+      { error: 'Time-slot reads require an id or field scope.' },
+      { status: 400 },
+    );
+  }
+
+  const session = await optionalTimeSlotSession(req);
+  if (!session && !rentalOnly) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const whereClauses = initialTimeSlotReadScope(ids, normalizedFieldIds);
+  const scopeResponse = await restrictRentalReadScope(session, rentalOnly, ids, normalizedFieldIds, whereClauses, limit, offset);
+  if (scopeResponse) return scopeResponse;
+  addTimeSlotWeekdayScope(dayOfWeek, whereClauses);
   const slots = await prisma.timeSlots.findMany({
     where: { AND: [{ archivedAt: null }, ...whereClauses] },
     orderBy: { startDate: 'asc' },
@@ -367,18 +480,7 @@ export async function POST(req: NextRequest) {
   }
 
   const data = parsed.data;
-  const repeating = data.repeating ?? false;
-  const normalizedDays = normalizeDaysOfWeek({
-    dayOfWeek: data.dayOfWeek ?? undefined,
-    daysOfWeek: data.daysOfWeek ?? undefined,
-  });
-  const requiredTemplateIds = normalizeTemplateIds(data.requiredTemplateIds);
-  const hostRequiredTemplateIds = normalizeTemplateIds(data.hostRequiredTemplateIds);
-  const scheduledFieldIds = normalizeFieldIds([
-    ...(Array.isArray(data.scheduledFieldIds) ? data.scheduledFieldIds : []),
-    ...(typeof data.scheduledFieldId === 'string' ? [data.scheduledFieldId] : []),
-  ]);
-  const scheduledFieldId = scheduledFieldIds[0] ?? data.scheduledFieldId ?? null;
+  const { repeating, normalizedDays, requiredTemplateIds, hostRequiredTemplateIds, scheduledFieldIds, scheduledFieldId } = readTimeSlotCreateInput(data);
   if (!scheduledFieldIds.length) {
     return NextResponse.json({ error: 'Time slots require at least one scheduled field.' }, { status: 400 });
   }
@@ -386,67 +488,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
   const slotTimeZone = await resolveSlotTimeZone(scheduledFieldIds, data.timeZone);
-  let startDate = parseDateInputInTimeZone(data.startDate, slotTimeZone) ?? new Date();
-  const parsedEndDate = data.endDate === null ? null : parseDateInputInTimeZone(data.endDate, slotTimeZone);
-  let endDate = parsedEndDate;
-  let startTimeMinutes = data.startTimeMinutes ?? null;
-  let endTimeMinutes = data.endTimeMinutes ?? null;
-  if (!repeating) {
-    try {
-      const resolved = resolveOneTimeTimeSlot({
-        ...data,
-        id: data.id,
-        repeating: false,
-        startDate,
-        endDate,
-        startTimeMinutes,
-        endTimeMinutes,
-        timeZone: slotTimeZone,
-        scheduledFieldId,
-        scheduledFieldIds,
-      }, slotTimeZone);
-      startDate = resolved.start;
-      endDate = resolved.end;
-      startTimeMinutes = resolved.startTimeMinutes;
-      endTimeMinutes = resolved.endTimeMinutes;
-    } catch (error) {
-      if (error instanceof TimeSlotValidationError) {
-        return NextResponse.json(
-          { error: error.message, code: 'INVALID_TIME_SLOT', slotIds: error.slotIds },
-          { status: 400 },
-        );
-      }
-      throw error;
-    }
-  }
-  if (repeating) {
-    try {
-      assertRepeatingTimeSlotsResolvable({
-        slots: [{
-          ...data,
-          id: data.id,
-          dayOfWeek: normalizedDays[0] ?? data.dayOfWeek,
-          daysOfWeek: normalizedDays,
-          startDate,
-          endDate,
-          startTimeMinutes,
-          endTimeMinutes,
-          timeZone: slotTimeZone,
-          scheduledFieldId,
-          scheduledFieldIds,
-          repeating: true,
-        }],
-        eventStart: startDate,
-        eventEnd: null,
-      });
-    } catch (error) {
-      const repeatingTimeSlotResponse = repeatingTimeSlotValidationResponse(error);
-      if (repeatingTimeSlotResponse) {
-        return repeatingTimeSlotResponse;
-      }
-      throw error;
-    }
-  }
+  const interval = resolveCreatedSlotInterval(data, slotTimeZone, repeating, scheduledFieldId, scheduledFieldIds, normalizedDays);
+  if (interval instanceof NextResponse) return interval;
+  const { startDate, endDate, startTimeMinutes, endTimeMinutes } = interval;
   const divisions = normalizeDivisionKeys(data.divisions);
   const now = new Date();
 
@@ -454,7 +498,7 @@ export async function POST(req: NextRequest) {
     const slot = await prisma.timeSlots.create({
       data: {
         id: data.id,
-        dayOfWeek: normalizedDays[0] ?? data.dayOfWeek ?? null,
+        dayOfWeek: primarySlotWeekday(normalizedDays, data.dayOfWeek),
         daysOfWeek: normalizedDays,
         startTimeMinutes,
         endTimeMinutes,
@@ -476,10 +520,10 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ...slot,
-      dayOfWeek: normalizedDays[0] ?? slot.dayOfWeek ?? null,
+      dayOfWeek: primarySlotWeekday(normalizedDays, slot.dayOfWeek),
       daysOfWeek: normalizedDays,
       timeZone: slotTimeZone,
-      scheduledFieldId: scheduledFieldIds[0] ?? slot.scheduledFieldId ?? null,
+      scheduledFieldId,
       scheduledFieldIds,
       divisions,
       requiredTemplateIds,
@@ -499,4 +543,8 @@ export async function POST(req: NextRequest) {
     console.error('Create time slot failed', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
+}
+
+function primarySlotWeekday(days: number[], fallback: number | null | undefined): number | null {
+  return days[0] ?? fallback ?? null;
 }

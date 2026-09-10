@@ -1,4 +1,5 @@
 import {
+  assertOneTimeTimeSlotFutureEnd,
   assertValidOneTimeTimeSlots,
   findOneTimeTimeSlotConflicts,
   resolveOneTimeTimeSlot,
@@ -19,6 +20,44 @@ const slot = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe('canonical One-Time Time Slot availability', () => {
+  it('rejects an interval longer than one local day even by seconds', () => {
+    expect(() => resolveOneTimeTimeSlot(slot({
+      startDate: '2035-06-11T09:00:00Z', endDate: '2035-06-12T09:00:01Z',
+      startTimeMinutes: 540, endTimeMinutes: 540, timeZone: 'UTC',
+    }))).toThrow(/one local day/);
+  });
+
+  it('rejects expired saves but keeps historical intervals readable', () => {
+    const resolved = resolveOneTimeTimeSlot(slot());
+    expect(() => assertOneTimeTimeSlotFutureEnd(resolved, resolved.end)).toThrow(/in the future/);
+    expect(() => assertOneTimeTimeSlotFutureEnd(resolved, new Date('2026-08-18T00:00:00Z'))).toThrow(/in the future/);
+    expect(() => assertOneTimeTimeSlotFutureEnd(resolved, new Date('2026-08-17T13:30:00Z'))).not.toThrow();
+  });
+
+  it('keeps a full local day across a daylight-saving change', () => {
+    const resolved = resolveOneTimeTimeSlot(slot({
+      startDate: '2026-10-31T12:00:00', endDate: '2026-11-01T12:00:00',
+      startTimeMinutes: 720, endTimeMinutes: 720,
+    }));
+    expect(resolved.end.getTime() - resolved.start.getTime()).toBe(25 * 60 * 60 * 1000);
+  });
+
+  it('resolves an overnight clock range on the next local date', () => {
+    const resolved = resolveOneTimeTimeSlot(slot({ startTimeMinutes: 22 * 60, endTimeMinutes: 2 * 60 }));
+    expect(resolved.start.toISOString()).toBe('2026-08-18T02:00:00.000Z');
+    expect(resolved.end.toISOString()).toBe('2026-08-18T06:00:00.000Z');
+  });
+
+  it('resolves equal clock times as one full local day', () => {
+    const resolved = resolveOneTimeTimeSlot(slot({ endTimeMinutes: 9 * 60 }));
+    expect(resolved.end.toISOString()).toBe('2026-08-18T13:00:00.000Z');
+  });
+
+  it('rejects an explicit multi-day range instead of silently shortening it', () => {
+    expect(() => resolveOneTimeTimeSlot(slot({ endDate: '2026-08-19T10:00:00' })))
+      .toThrow(/one local day/);
+  });
+
   it('resolves one local date and exact start/end times in the slot time zone', () => {
     const resolved = resolveOneTimeTimeSlot(slot());
 

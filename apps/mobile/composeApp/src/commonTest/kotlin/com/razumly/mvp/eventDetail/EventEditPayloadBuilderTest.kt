@@ -8,10 +8,44 @@ import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import com.razumly.mvp.core.data.dataTypes.OneTimeTimeSlotValidationException
 import kotlin.test.assertNotNull
 import kotlin.time.Instant
 
 class EventEditPayloadBuilderTest {
+    @Test
+    fun given_historical_slot_when_saving_metadata_then_omits_slot_but_rejects_slot_update() {
+        val event = leagueEvent()
+        val historical = slot(
+            id = "historical",
+            repeating = false,
+            startDate = Instant.parse("2026-04-13T09:00:00Z"),
+            endDate = Instant.parse("2026-04-13T10:00:00Z"),
+        )
+        val fields = listOf(field(id = "field-1"))
+        val result = EventEditPayloadBuilder.prepareForUpdate(
+            EventEditPayloadInput(
+                editedEvent = event,
+                editableFields = fields,
+                editableLeagueTimeSlots = listOf(historical),
+                selectedRentalFields = emptyList(),
+                leagueScoringConfig = LeagueScoringConfigDTO(),
+                originalEventStart = event.start,
+            ),
+        )
+        val now = Instant.parse("2026-04-14T00:00:00Z")
+        val metadataOnly = result.validateAndKeepChangedManagedCollections(
+            fields, fields, listOf(historical), listOf(historical), now,
+        )
+        assertEquals(null, metadataOnly.prepared.timeSlots)
+        assertFailsWith<OneTimeTimeSlotValidationException> {
+            result.validateAndKeepChangedManagedCollections(
+                fields, fields, listOf(historical), emptyList(), now,
+            )
+        }
+    }
+
     @Test
     fun prepareForUpdate_preserves_generated_end_date_mode_for_weekly_events() {
         val event = leagueEvent(
@@ -72,7 +106,7 @@ class EventEditPayloadBuilderTest {
     }
 
     @Test
-    fun omitUnchangedManagedCollections_drops_fields_and_slots_for_an_unchanged_edit() {
+    fun given_unchanged_collections_when_preparing_save_then_omits_fields_and_slots() {
         val event = leagueEvent()
         val currentFields = listOf(field(id = "field-1"))
         val currentTimeSlots = listOf(slot(id = "slot-1", repeating = true))
@@ -85,7 +119,7 @@ class EventEditPayloadBuilderTest {
                 leagueScoringConfig = LeagueScoringConfigDTO(),
                 originalEventStart = event.start,
             ),
-        ).omitUnchangedManagedCollections(
+        ).validateAndKeepChangedManagedCollections(
             currentFields = currentFields,
             baselineFields = currentFields.map { field -> field.copy(fieldNumber = 99) },
             currentTimeSlots = currentTimeSlots,
@@ -276,7 +310,7 @@ class EventEditPayloadBuilderTest {
     }
 
     @Test
-    fun given_invalid_fields_or_bounds_when_building_league_slot_drafts_then_drops_slots() {
+    fun given_overnight_slots_when_building_drafts_then_keeps_them_and_drops_missing_resources() {
         val event = leagueEvent(
             divisions = listOf("open"),
             fieldIds = listOf("field-1"),
@@ -288,28 +322,31 @@ class EventEditPayloadBuilderTest {
             startTimeMinutes = 9 * 60,
             endTimeMinutes = 10 * 60,
         )
-        val invalidRepeatingTime = slot(
-            id = "invalid-repeating",
+        val repeatingOvernight = slot(
+            id = "repeating-overnight",
             repeating = true,
             scheduledFieldIds = listOf("field-1"),
             startTimeMinutes = 10 * 60,
             endTimeMinutes = 9 * 60,
         )
-        val invalidNonRepeatingTime = slot(
-            id = "invalid-non-repeating",
+        val oneTimeOvernight = slot(
+            id = "one-time-overnight",
             repeating = false,
             scheduledFieldIds = listOf("field-1"),
             startDate = Instant.parse("2026-04-14T17:00:00Z"),
             endDate = Instant.parse("2026-04-14T15:30:00Z"),
+            startTimeMinutes = 17 * 60,
+            endTimeMinutes = 15 * 60 + 30,
         )
 
         val result = EventEditPayloadBuilder.buildLeagueSlotDrafts(
             event = event,
             originalEventStart = event.start,
-            editableLeagueTimeSlots = listOf(missingField, invalidRepeatingTime, invalidNonRepeatingTime),
+            editableLeagueTimeSlots = listOf(missingField, repeatingOvernight, oneTimeOvernight),
         )
 
-        assertEquals(listOf("invalid-repeating"), result.map(TimeSlot::id))
+        assertEquals(listOf("repeating-overnight", "one-time-overnight"), result.map(TimeSlot::id))
+        assertEquals(Instant.parse("2026-04-15T15:30:00Z"), result.last().endDate)
     }
 
     private fun leagueEvent(

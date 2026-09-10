@@ -1590,7 +1590,7 @@ internal class EventEditActionHandler(
                     normalizeRentalSlotResourceSelection(slot, validFieldIds)
                 },
             ),
-        ).omitUnchangedManagedCollections(
+        ).validateAndKeepChangedManagedCollections(
             currentFields = currentFields,
             baselineFields = baseline?.fields,
             currentTimeSlots = currentTimeSlots,

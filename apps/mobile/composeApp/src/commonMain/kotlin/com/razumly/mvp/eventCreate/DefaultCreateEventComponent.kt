@@ -52,6 +52,7 @@ import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
 import com.razumly.mvp.core.data.dataTypes.canonicalizedOneTime
+import com.razumly.mvp.core.data.dataTypes.assertFutureOneTimeEnd
 import com.razumly.mvp.core.data.dataTypes.validateOneTimeTimeSlots
 import com.razumly.mvp.core.data.dataTypes.validateRepeatingTimeSlotOccurrences
 import com.razumly.mvp.core.data.dataTypes.RepeatingTimeSlotValidationException
@@ -2486,6 +2487,7 @@ class DefaultCreateEventComponent(
 
             if (!slot.repeating) {
                 val canonicalSlot = try {
+                    slot.assertFutureOneTimeEnd()
                     slot.canonicalizedOneTime()
                 } catch (error: IllegalArgumentException) {
                     invalidConfiguredScheduleSlot(
