@@ -50,7 +50,7 @@ import EventsTabContent, { type EventSortValue } from './components/EventsTabCon
 import DiscoverSearchControls from './components/DiscoverSearchControls';
 import DiscoverMapModal from './components/DiscoverMapModal';
 import DivisionDiscoveryFilters, { type DivisionDiscoveryFilterValue } from './components/DivisionDiscoveryFilters';
-import { DiscoverFilterRows, FilterOptionList, FilterPopover, type DiscoverFilterItem } from './components/DiscoverFilterBar';
+import { DiscoverFilterRows, FilterOptionList, FilterPopover, resolveOpenFilter, type DiscoverFilterItem } from './components/DiscoverFilterBar';
 import {
   buildTeamDivisionFilterOptions,
   filterOpenRegistrationTeams,
@@ -1603,7 +1603,7 @@ function OrganizationsTabContent(props: {
     .map((tagSlug) => tagOptions.find((option) => option.value === tagSlug)?.label ?? tagSlug)
     .filter(Boolean);
   const tagSummary = tagLabels.length === 1 ? tagLabels[0] : tagLabels.length > 1 ? `${tagLabels[0]} +${tagLabels.length - 1}` : undefined;
-  const setOpen = (id: string) => (open: boolean) => setOpenFilter(open ? id : null);
+  const setOpen = (id: string) => (open: boolean) => setOpenFilter((current) => resolveOpenFilter(current, id, open));
   const distanceMiles = typeof maxDistance === 'number' ? Math.round(kmToMiles(maxDistance)) : null;
   const organizationFilterItems: DiscoverFilterItem[] = [
     {
@@ -1900,7 +1900,7 @@ function TeamsTabContent(props: {
   }, [setSearchTerm, setSelectedSports, setSelectedDivisionTypeValues]);
 
   const activeFilterCount = activeFilters.length;
-  const setOpen = (id: string) => (open: boolean) => setOpenFilter(open ? id : null);
+  const setOpen = (id: string) => (open: boolean) => setOpenFilter((current) => resolveOpenFilter(current, id, open));
   const teamFilterItems: DiscoverFilterItem[] = [
     {
       key: 'team-division',
@@ -2198,7 +2198,7 @@ function RentalsTabContent(props: {
   const timeRangeActive = timeRange[0] !== defaultTimeRange[0] || timeRange[1] !== defaultTimeRange[1];
   const timeRangeLabel = `${formatHourLabel(timeRange[0])} - ${formatHourLabel(timeRange[1])}`;
   const distanceMiles = typeof maxDistance === 'number' ? Math.round(kmToMiles(maxDistance)) : null;
-  const setOpen = (id: string) => (open: boolean) => setOpenFilter(open ? id : null);
+  const setOpen = (id: string) => (open: boolean) => setOpenFilter((current) => resolveOpenFilter(current, id, open));
   const rentalFilterItems: DiscoverFilterItem[] = [
     {
       key: 'rental-time-range',

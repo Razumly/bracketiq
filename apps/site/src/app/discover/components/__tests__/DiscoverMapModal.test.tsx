@@ -1,7 +1,9 @@
 import { useState, type Dispatch, type SetStateAction } from 'react';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 
 import DiscoverMapModal from '../DiscoverMapModal';
+import { resolveOpenFilter } from '../DiscoverFilterBar';
 import { eventService } from '@/lib/eventService';
 import { organizationService } from '@/lib/organizationService';
 import type { Event, Organization } from '@/types';
@@ -468,6 +470,31 @@ describe('DiscoverMapModal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Hide map filters' }));
 
     expect(filterShell).toHaveAttribute('data-mobile-expanded', 'false');
+  });
+
+  it('closes Tags and keeps Sports open when switching map filters', async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    const tagsButton = await screen.findByRole('button', { name: 'Tags' });
+    const sportsButton = screen.getByRole('button', { name: /^Sports:/ });
+
+    await user.click(tagsButton);
+    expect(tagsButton).toHaveAttribute('aria-expanded', 'true');
+
+    await user.click(sportsButton);
+
+    expect(tagsButton).toHaveAttribute('aria-expanded', 'false');
+    expect(sportsButton).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('ignores a delayed Tags close after Sports opens', () => {
+    const tagsOpen = resolveOpenFilter(null, 'tags', true);
+    const sportsOpen = resolveOpenFilter(tagsOpen, 'sports', true);
+    const afterTagsClose = resolveOpenFilter(sportsOpen, 'tags', false);
+
+    expect(afterTagsClose).toBe('sports');
+    expect(resolveOpenFilter(afterTagsClose, 'sports', false)).toBeNull();
   });
 
   it('regroups markers only after a zoom gesture settles', async () => {
