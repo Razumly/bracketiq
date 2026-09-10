@@ -4,23 +4,54 @@ import Image from 'next/image';
 import { useState } from 'react';
 import { CalendarDays, CircleDot, MapPin, Users } from 'lucide-react';
 import { formatEnumDisplayLabel } from '@/lib/enumUtils';
+import { normalizeTimeZone } from '@/lib/dateUtils';
 import { resolveEventParticipantCapacity } from '@/lib/eventCapacity';
 import { formatAffiliateEventPriceRange, formatEventDivisionPriceRange, getEventImageFallbackUrl, getEventImageUrl, type Event } from '@/types';
 
+type DisplaySchedule = {
+  start: string;
+  end: string | null;
+  timeZone?: string;
+};
+
+function getDisplaySchedule(event: Event): DisplaySchedule {
+  if (!event.nextOccurrence) {
+    return { start: event.start, end: event.end };
+  }
+
+  return {
+    start: event.nextOccurrence.start,
+    end: event.nextOccurrence.end,
+    timeZone: event.nextOccurrence.timeZone ?? event.timeZone ?? 'UTC',
+  };
+}
+
+function formatScheduleDate(value: string, timeZone?: string): string | null {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    ...(timeZone ? { timeZone: normalizeTimeZone(timeZone) } : {}),
+  });
+}
+
 function eventDate(event: Event): string {
   if (event.dateDisplayMode === 'NO_FIXED_DATE' || event.dateDisplayMode === 'ONGOING') return event.dateDisplayText || event.scheduleText || 'No fixed start date';
-  const start = new Date(event.start);
-  if (Number.isNaN(start.getTime())) return 'Date to be announced';
-  const end = event.end ? new Date(event.end) : start;
-  const first = start.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  if (Number.isNaN(end.getTime()) || start.toDateString() === end.toDateString()) return first;
-  return start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' – ' + end.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const schedule = getDisplaySchedule(event);
+  const first = formatScheduleDate(schedule.start, schedule.timeZone);
+  if (!first) return 'Date to be announced';
+  const last = schedule.end ? formatScheduleDate(schedule.end, schedule.timeZone) : null;
+  if (!last || first === last) return first;
+  return `${first} – ${last}`;
 }
 
 function eventStatus(event: Event, capacity: number): string {
   if (['DRAFT', 'UNPUBLISHED'].includes(String(event.state))) return 'Draft';
   if (event.state === 'PRIVATE') return 'Private';
-  if (event.end && Date.parse(event.end) < Date.now()) return 'Completed';
+  const end = getDisplaySchedule(event).end;
+  if (end && Date.parse(end) < Date.now()) return 'Completed';
   if (capacity > 0 && event.attendees >= capacity) return 'Registration full';
   return event.statusText || 'Registration open';
 }

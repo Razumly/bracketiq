@@ -571,31 +571,35 @@ function EventsTabView<TEventType extends string>(
     ? 'All event types'
     : selectedEventTypes.map((type) => formatEnumDisplayLabel(type, 'Event')).join(', ');
 
+  const sharedFilterProps = {
+    location,
+    selectedSports,
+    setSelectedSports,
+    sportsData,
+    sportsLoading,
+    selectedEventTypes,
+    setSelectedEventTypes,
+    eventTypeData,
+    selectedEventTypeLabels,
+    selectedStartDate,
+    setSelectedStartDate,
+    selectedEndDate,
+    setSelectedEndDate,
+    maxDistance,
+    setMaxDistance,
+    defaultMaxDistance,
+    sportsError,
+    hideWeeklyChildren,
+    setHideWeeklyChildren,
+    resetFilters,
+    hasActiveFilters: activeFilterCount > 0,
+  };
+
   const filterPanel = (
     <div className="space-y-6">
       {renderTagFilters()}
       <EventFilterPanel
-        location={location}
-        selectedSports={selectedSports}
-        setSelectedSports={setSelectedSports}
-        sportsData={sportsData}
-        sportsLoading={sportsLoading}
-        selectedEventTypes={selectedEventTypes}
-        setSelectedEventTypes={setSelectedEventTypes}
-        eventTypeData={eventTypeData}
-        selectedEventTypeLabels={selectedEventTypeLabels}
-        selectedStartDate={selectedStartDate}
-        setSelectedStartDate={setSelectedStartDate}
-        selectedEndDate={selectedEndDate}
-        setSelectedEndDate={setSelectedEndDate}
-        maxDistance={maxDistance}
-        setMaxDistance={setMaxDistance}
-        defaultMaxDistance={defaultMaxDistance}
-        sportsError={sportsError}
-        hideWeeklyChildren={hideWeeklyChildren}
-        setHideWeeklyChildren={setHideWeeklyChildren}
-        resetFilters={resetFilters}
-        hasActiveFilters={activeFilterCount > 0}
+        {...sharedFilterProps}
         sportsHeading="Sports"
         dateHeading="Date Range"
       />
@@ -639,27 +643,7 @@ function EventsTabView<TEventType extends string>(
               More filters
             </Button>
           )}
-          location={location}
-          selectedSports={selectedSports}
-          setSelectedSports={setSelectedSports}
-          sportsData={sportsData}
-          sportsLoading={sportsLoading}
-          selectedEventTypes={selectedEventTypes}
-          setSelectedEventTypes={setSelectedEventTypes}
-          eventTypeData={eventTypeData}
-          selectedEventTypeLabels={selectedEventTypeLabels}
-          selectedStartDate={selectedStartDate}
-          setSelectedStartDate={setSelectedStartDate}
-          selectedEndDate={selectedEndDate}
-          setSelectedEndDate={setSelectedEndDate}
-          maxDistance={maxDistance}
-          setMaxDistance={setMaxDistance}
-          defaultMaxDistance={defaultMaxDistance}
-          sportsError={sportsError}
-          hideWeeklyChildren={hideWeeklyChildren}
-          setHideWeeklyChildren={setHideWeeklyChildren}
-          resetFilters={resetFilters}
-          hasActiveFilters={activeFilterCount > 0}
+          {...sharedFilterProps}
         />
       </div>
     </div>

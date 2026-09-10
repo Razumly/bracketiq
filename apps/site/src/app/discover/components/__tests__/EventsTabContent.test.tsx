@@ -77,6 +77,16 @@ it('opens the mobile filter sheet with filter controls', async () => {
   expect(within(filterDialog).getByText('Sports')).toBeInTheDocument();
   expect(within(filterDialog).getByText('Date Range')).toBeInTheDocument();
 });
+
+it('opens the shared date filter popover from the desktop filter row', async () => {
+  const user = userEvent.setup();
+  render(<Harness />);
+
+  await user.click(screen.getByRole('button', { name: 'Dates', exact: true }));
+
+  expect(screen.getByRole('button', { name: 'Dates', exact: true })).toHaveAttribute('aria-expanded', 'true');
+  expect(screen.getByRole('button', { name: 'Filter by start date', exact: true })).toBeInTheDocument();
+});
 const originalFetch = globalThis.fetch;
 beforeEach(() => {
   jest.resetAllMocks();
