@@ -55,6 +55,19 @@ describe('LocationSearch', () => {
     expect(mockRequestLocation).toHaveBeenCalledTimes(1);
   });
 
+  it('returns focus to Set Location after Escape closes the picker', async () => {
+    const user = userEvent.setup();
+    renderWithMantine(<LocationSearch />);
+
+    const locationButton = screen.getByRole('button', { name: 'Set Location' });
+    await user.click(locationButton);
+    await screen.findByPlaceholderText('Enter city, state, or ZIP');
+
+    await user.keyboard('{Escape}');
+
+    await waitFor(() => expect(locationButton).toHaveFocus());
+  });
+
   it('submits a typed ZIP through the shared location search and closes on success', async () => {
     const user = userEvent.setup();
     renderWithMantine(<LocationSearch />);

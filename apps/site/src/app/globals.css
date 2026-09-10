@@ -297,6 +297,11 @@ svg {
   min-width: 0;
 }
 
+.location-search-dropdown {
+  right: 0;
+  left: auto;
+}
+
 .discover-create-event {
   background: var(--discover-accent, #f06b4f);
   color: #fff;

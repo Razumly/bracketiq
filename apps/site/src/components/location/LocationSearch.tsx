@@ -17,6 +17,8 @@ import {
 export default function LocationSearch() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showLocationOptions, setShowLocationOptions] = useState(false);
+  const locationTriggerContainerRef = useRef<HTMLSpanElement>(null);
+  const wasLocationOptionsOpenRef = useRef(false);
   const [predictions, setPredictions] = useState<Array<{ description: string; placeId: string }>>([]);
   const [predictionsLoading, setPredictionsLoading] = useState(false);
   const [sessionToken, setSessionToken] = useState<any | null>(null);
@@ -33,6 +35,13 @@ export default function LocationSearch() {
     clearLocation,
     setLocationFromInfo,
   } = useLocation();
+
+  useEffect(() => {
+    if (wasLocationOptionsOpenRef.current && !showLocationOptions) {
+      locationTriggerContainerRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    }
+    wasLocationOptionsOpenRef.current = showLocationOptions;
+  }, [showLocationOptions]);
 
   const handleUseCurrentLocation = async () => {
     locationPromptAttemptedRef.current = true;
@@ -112,18 +121,20 @@ export default function LocationSearch() {
 
   return (
     <Popover opened={showLocationOptions} onChange={setShowLocationOptions}>
-      <Popover.Target>
-        <Button
-          variant="outline"
-          onClick={toggleLocationOptions}
-          aria-expanded={showLocationOptions}
-          aria-haspopup="dialog"
-          leftSection={<MapPin aria-hidden="true" size={16} />}
-        >
-          {locationInfo?.city ? `${locationInfo.city}${locationInfo.state ? `, ${locationInfo.state}` : ''}` : 'Set Location'}
-        </Button>
-      </Popover.Target>
-      <Popover.Dropdown className="w-[min(24rem,calc(100vw-2rem))]">
+      <span ref={locationTriggerContainerRef} className="inline-flex min-w-0 max-w-full">
+        <Popover.Target>
+          <Button
+            variant="outline"
+            onClick={toggleLocationOptions}
+            aria-expanded={showLocationOptions}
+            aria-haspopup="dialog"
+            leftSection={<MapPin aria-hidden="true" size={16} />}
+          >
+            {locationInfo?.city ? `${locationInfo.city}${locationInfo.state ? `, ${locationInfo.state}` : ''}` : 'Set Location'}
+          </Button>
+        </Popover.Target>
+      </span>
+      <Popover.Dropdown className="location-search-dropdown w-[min(24rem,calc(100vw-2rem))]">
         <Group mb="sm">
           <Button fullWidth onClick={handleUseCurrentLocation} disabled={loading} leftSection={<MapPin aria-hidden="true" size={16} />}>
             {loading ? <><Loader size="sm" aria-hidden="true" />Getting location…</> : 'Use Current Location'}
