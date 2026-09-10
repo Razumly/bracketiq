@@ -1839,4 +1839,20 @@ The expanded final gate passed 815 tests in 28 suites. TypeScript, targeted
 ESLint, the recorded Mission smoke, and all three SDK scenarios passed.
 The last terminal-agent narration correction passed another 128 tests in the
 three affected suites and targeted ESLint. No production image was published.
-No runtime or production record changed for this policy update.
+No production runtime or record changed for this policy update.
+
+### Integration and cleanup
+
+Source commit `78854c462` was fast-forwarded into canonical main.
+The integrated gate passed 853 tests in 32 suites, including four additional
+sport-diagnostic consumers. It used a fresh
+`bracketiq_e2e_70_policy_integrated` database with all 219 migrations.
+
+The canonical checkout lacked installed SDK and PDF dependencies.
+`npm ci --ignore-scripts` restored the locked dependency set. The integrated
+TypeScript check then passed. No dependency declaration changed.
+
+Both policy test databases and the temporary Mission smoke files were removed.
+The local Postgres server was not stopped. All 99 protected production records
+still matched the baseline after cleanup. Production removal of the held
+Mission candidate remains incomplete and requires the governed exclusion path.
