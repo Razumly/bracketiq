@@ -1,5 +1,5 @@
 /* Generated organization references use white surfaces and compact controls. */
-.organization-management-shell, .org-section {
+.organization-management-shell, .org-section, .discover-shell {
   --org-line: var(--bq-border);
   --org-muted: var(--bq-ink-muted);
   --org-link: #007f8c;

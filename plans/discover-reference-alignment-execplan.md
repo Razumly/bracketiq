@@ -147,3 +147,5 @@ Revision note (2026-09-10 04:55Z): Focused tests, typechecking, and the producti
 Revision note (2026-09-10 05:02Z): Code review found and fixed the controlled Dates trigger and recurring-event card schedule regression. Shared filter props were also composed once in Discover. Focused validation now passes 4 suites and 18 tests.
 
 Revision note (2026-09-10 05:09Z): Final review also identified a non-blocking prop-clump smell. The compact desktop control now picks only the filter fields it reads from the shared panel props.
+
+Revision note (2026-09-10 05:12Z): Final review found that shared card tokens were scoped only to organization ancestors. Added `.discover-shell` to that token scope so Discover card borders, accents, and keyboard focus outlines resolve.
