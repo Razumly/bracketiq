@@ -216,10 +216,13 @@ function FilterPopover({ id, label, valueLabel, value, icon: Icon, active = fals
           </button>
         )}
       </div>
-      <PopoverContent align="start" className="discover-filter-popover p-4">
-        <div id={`${id}-panel`} role="dialog" aria-label={`${label} filter`}>
-          {children}
-        </div>
+      <PopoverContent
+        id={`${id}-panel`}
+        align="start"
+        aria-label={`${label} filter`}
+        className="discover-filter-popover p-4"
+      >
+        {children}
       </PopoverContent>
     </UiPopover>
   );
