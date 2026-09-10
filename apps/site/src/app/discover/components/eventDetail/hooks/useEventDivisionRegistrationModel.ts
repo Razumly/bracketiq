@@ -62,6 +62,53 @@ type UseEventDivisionRegistrationModelArgs = {
     onSelectedDivisionTypeKeyChange: (divisionTypeKey: string) => void;
 };
 
+function eventBilling(event: Event) {
+    const installmentAmounts = normalizeInstallmentAmountsCents(event.installmentAmounts);
+    const count = Number.isFinite(Number(event.installmentCount))
+        ? Math.max(0, Math.trunc(Number(event.installmentCount))) : installmentAmounts.length;
+    return {
+        priceCents: normalizePriceCents(event.price),
+        allowPaymentPlans: Boolean(event.allowPaymentPlans),
+        installmentCount: count || installmentAmounts.length || 0,
+        installmentAmounts,
+        installmentDueDates: normalizeInstallmentDueDateValues(event.installmentDueDates),
+        installmentDueRelativeDays: normalizeInstallmentDueRelativeDayValues(event.installmentDueRelativeDays),
+    };
+}
+
+function configuredInstallments<T>(preferred: T[] | undefined, inherited: T[]): T[] {
+    return preferred?.length ? preferred : inherited;
+}
+
+function divisionBilling(event: Event, division: EventDivisionOption | null) {
+    const inherited = eventBilling(event);
+    if (!division) return applyPaymentPlanSwitch(inherited);
+    const installmentAmounts = configuredInstallments(division.installmentAmounts, inherited.installmentAmounts).map(normalizePriceCents);
+    return applyPaymentPlanSwitch({
+        priceCents: typeof division.priceCents === 'number' ? normalizePriceCents(division.priceCents) : inherited.priceCents,
+        allowPaymentPlans: typeof division.allowPaymentPlans === 'boolean' ? division.allowPaymentPlans : inherited.allowPaymentPlans,
+        installmentCount: typeof division.installmentCount === 'number'
+            ? Math.max(0, Math.trunc(division.installmentCount)) : (installmentAmounts.length || inherited.installmentCount || 0),
+        installmentAmounts,
+        installmentDueDates: configuredInstallments(division.installmentDueDates, inherited.installmentDueDates),
+        installmentDueRelativeDays: configuredInstallments(division.installmentDueRelativeDays, inherited.installmentDueRelativeDays),
+    });
+}
+
+function applyPaymentPlanSwitch(plan: ReturnType<typeof eventBilling>) {
+    if (!plan.allowPaymentPlans) return { ...plan, installmentCount: 0, installmentAmounts: [], installmentDueDates: [], installmentDueRelativeDays: [] };
+    return plan;
+}
+
+function eventSportInput(event: Event) {
+    return typeof event.sport === 'string' ? event.sport : event.sport?.name ?? event.sportIds[0];
+}
+
+function explicitDivisionName(division: unknown) {
+    if (!division || typeof division !== 'object' || !('name' in division)) return null;
+    return typeof division.name === 'string' ? division.name : null;
+}
+
 export function useEventDivisionRegistrationModel({
     event,
     user,
@@ -77,14 +124,17 @@ export function useEventDivisionRegistrationModel({
     onSelectedDivisionIdChange,
     onSelectedDivisionTypeKeyChange,
 }: UseEventDivisionRegistrationModelArgs) {
-    const eventStartDate = selectedWeeklyOccurrenceOption?.start ?? parseDateValue(event.start ?? null);
-    const eventMinAge = typeof event.minAge === 'number' ? event.minAge : undefined;
-    const eventMaxAge = typeof event.maxAge === 'number' ? event.maxAge : undefined;
-    const hasAgeLimits = typeof eventMinAge === 'number' || typeof eventMaxAge === 'number';
+    const { eventStartDate, eventMinAge, eventMaxAge, hasAgeLimits, joinClosedMessage } = useMemo(() => {
+        const eventStartDate = selectedWeeklyOccurrenceOption?.start ?? parseDateValue(event.start ?? null);
+        const eventMinAge = typeof event.minAge === 'number' ? event.minAge : undefined;
+        const eventMaxAge = typeof event.maxAge === 'number' ? event.maxAge : undefined;
+        const hasAgeLimits = typeof eventMinAge === 'number' || typeof eventMaxAge === 'number';
+        const joinClosedMessage = isWeeklyParentEvent && selectedWeeklyOccurrenceOption
+            ? 'This weekly session has already started. Joining is closed.'
+            : 'This event has already started. Joining is closed.';
+        return { eventStartDate, eventMinAge, eventMaxAge, hasAgeLimits, joinClosedMessage };
+    }, [event.maxAge, event.minAge, event.start, isWeeklyParentEvent, selectedWeeklyOccurrenceOption]);
     const eventHasStarted = Boolean(eventStartDate && new Date() >= eventStartDate);
-    const joinClosedMessage = isWeeklyParentEvent && selectedWeeklyOccurrenceOption
-        ? 'This weekly session has already started. Joining is closed.'
-        : 'This event has already started. Joining is closed.';
     const userDob = parseDateValue(user?.dateOfBirth ?? null);
     const selectedChildForDivisionFilter = useMemo(() => {
         if (event.teamSignup || !selectedChildId) {
@@ -156,21 +206,16 @@ export function useEventDivisionRegistrationModel({
                 return;
             }
 
-            if (division && typeof division === 'object') {
-                const explicitName = typeof division.name === 'string' ? division.name : null;
-                if (explicitName) {
-                    appendLabel(explicitName);
-                    return;
-                }
+            const explicitName = explicitDivisionName(division);
+            if (explicitName) {
+                appendLabel(explicitName);
+                return;
             }
 
             if (divisionId) {
                 const inferred = inferDivisionDetails({
                     identifier: extractDivisionTokenFromId(divisionId) ?? divisionId,
-                    sportInput:
-                        typeof event.sport === 'string'
-                            ? event.sport
-                            : event.sport?.name ?? event.sportIds[0] ?? undefined,
+                    sportInput: eventSportInput(event),
                 });
                 appendLabel(inferred.defaultName || divisionId);
                 return;
@@ -182,7 +227,7 @@ export function useEventDivisionRegistrationModel({
         });
 
         return labels;
-    }, [allDivisionOptions, event.divisions, event.sport, event.sportIds]);
+    }, [allDivisionOptions, event]);
     const selectedDivisionOption = useMemo(() => {
         if (!divisionOptions.length) {
             return null;
@@ -297,67 +342,7 @@ export function useEventDivisionRegistrationModel({
                 : 0,
         }));
     }, [event.sport, event.sportIds, divisionCapacityBreakdown, divisionDisplayNameIndex]);
-    const selectedDivisionBilling = useMemo(() => {
-        const eventPriceCents = normalizePriceCents(event.price);
-        const eventAllowPaymentPlans = Boolean(event.allowPaymentPlans);
-        const eventInstallmentAmounts = normalizeInstallmentAmountsCents(event.installmentAmounts);
-        const eventInstallmentDueDates = normalizeInstallmentDueDateValues(event.installmentDueDates);
-        const eventInstallmentDueRelativeDays = normalizeInstallmentDueRelativeDayValues(
-            event.installmentDueRelativeDays,
-        );
-        const eventInstallmentCount = Number.isFinite(Number(event.installmentCount))
-            ? Math.max(0, Math.trunc(Number(event.installmentCount)))
-            : eventInstallmentAmounts.length;
-
-        if (!selectedDivisionOption) {
-            return {
-                priceCents: eventPriceCents,
-                allowPaymentPlans: eventAllowPaymentPlans,
-                installmentCount: eventAllowPaymentPlans
-                    ? (eventInstallmentCount || eventInstallmentAmounts.length || 0)
-                    : 0,
-                installmentAmounts: eventAllowPaymentPlans ? eventInstallmentAmounts : [],
-                installmentDueDates: eventAllowPaymentPlans ? eventInstallmentDueDates : [],
-                installmentDueRelativeDays: eventAllowPaymentPlans ? eventInstallmentDueRelativeDays : [],
-            };
-        }
-
-        const divisionPriceCents = typeof selectedDivisionOption.priceCents === 'number'
-            ? normalizePriceCents(selectedDivisionOption.priceCents)
-            : eventPriceCents;
-        const divisionAllowPaymentPlans = typeof selectedDivisionOption.allowPaymentPlans === 'boolean'
-            ? selectedDivisionOption.allowPaymentPlans
-            : eventAllowPaymentPlans;
-        const divisionInstallmentAmounts = divisionAllowPaymentPlans
-            ? (selectedDivisionOption.installmentAmounts?.length
-                ? selectedDivisionOption.installmentAmounts
-                : eventInstallmentAmounts).map((value) => normalizePriceCents(value))
-            : [];
-        const divisionInstallmentDueDates = divisionAllowPaymentPlans
-            ? (selectedDivisionOption.installmentDueDates?.length
-                ? selectedDivisionOption.installmentDueDates
-                : eventInstallmentDueDates)
-            : [];
-        const divisionInstallmentDueRelativeDays = divisionAllowPaymentPlans
-            ? (selectedDivisionOption.installmentDueRelativeDays?.length
-                ? selectedDivisionOption.installmentDueRelativeDays
-                : eventInstallmentDueRelativeDays)
-            : [];
-        const divisionInstallmentCount = divisionAllowPaymentPlans
-            ? (typeof selectedDivisionOption.installmentCount === 'number'
-                ? Math.max(0, Math.trunc(selectedDivisionOption.installmentCount))
-                : (divisionInstallmentAmounts.length || eventInstallmentCount || 0))
-            : 0;
-
-        return {
-            priceCents: divisionPriceCents,
-            allowPaymentPlans: divisionAllowPaymentPlans,
-            installmentCount: divisionInstallmentCount,
-            installmentAmounts: divisionInstallmentAmounts,
-            installmentDueDates: divisionInstallmentDueDates,
-            installmentDueRelativeDays: divisionInstallmentDueRelativeDays,
-        };
-    }, [event, selectedDivisionOption]);
+    const selectedDivisionBilling = useMemo(() => divisionBilling(event, selectedDivisionOption), [event, selectedDivisionOption]);
     const checkoutEvent = useMemo(() => ({
         ...event,
         price: selectedDivisionBilling.priceCents,
@@ -396,14 +381,17 @@ export function useEventDivisionRegistrationModel({
         selectedDivisionBilling.installmentDueDates,
         selectedDivisionBilling.installmentDueRelativeDays,
     ]);
-    const userAge = userDob ? calculateAgeOnDate(userDob, eventStartDate ?? new Date()) : undefined;
-    const hasValidUserAge = typeof userAge === 'number' && Number.isFinite(userAge);
-    const isMinor = typeof userAge === 'number' && Number.isFinite(userAge) && userAge < 18;
-    const isAdult = typeof userAge === 'number' && Number.isFinite(userAge) && userAge >= 18;
-    const ageWithinLimits = !hasAgeLimits
+    const { userAge, hasValidUserAge, isMinor, isAdult } = useMemo(() => {
+        const userAge = userDob ? calculateAgeOnDate(userDob, eventStartDate ?? new Date()) : undefined;
+        const hasValidUserAge = typeof userAge === 'number' && Number.isFinite(userAge);
+        const isMinor = hasValidUserAge && userAge < 18;
+        const isAdult = hasValidUserAge && userAge >= 18;
+        return { userAge, hasValidUserAge, isMinor, isAdult };
+    }, [eventStartDate, userDob]);
+    const ageWithinLimits = useMemo(() => !hasAgeLimits
         || (typeof userAge === 'number'
             && Number.isFinite(userAge)
-            && isAgeWithinRange(userAge, eventMinAge, eventMaxAge));
+            && isAgeWithinRange(userAge, eventMinAge, eventMaxAge)), [eventMaxAge, eventMinAge, hasAgeLimits, userAge]);
     const selectedDivisionAgeForUser = useMemo(() => {
         if (!selectedDivisionOption) {
             return null;
@@ -433,11 +421,14 @@ export function useEventDivisionRegistrationModel({
         }
         return null;
     })();
-    const canRegisterChild = isAdult && !eventHasStarted;
-    const isEventHost = Boolean(user && user.$id === event.hostId);
-    const isFreeEvent = selectedDivisionBilling.priceCents === 0;
-    const shouldBypassHostPayment = Boolean(isEventHost && !event.teamSignup);
-    const isFreeForUser = isFreeEvent || shouldBypassHostPayment;
+    const { canRegisterChild, isEventHost, isFreeForUser } = useMemo(() => {
+        const canRegisterChild = isAdult && !eventHasStarted && !event.teamSignup;
+        const isEventHost = Boolean(user && user.$id === event.hostId);
+        const isFreeEvent = selectedDivisionBilling.priceCents === 0;
+        const shouldBypassHostPayment = Boolean(isEventHost && !event.teamSignup);
+        const isFreeForUser = isFreeEvent || shouldBypassHostPayment;
+        return { canRegisterChild, isEventHost, isFreeForUser };
+    }, [event.hostId, event.teamSignup, eventHasStarted, isAdult, selectedDivisionBilling.priceCents, user]);
 
     return {
         eventStartDate,

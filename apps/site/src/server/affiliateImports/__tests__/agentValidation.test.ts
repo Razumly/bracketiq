@@ -1,6 +1,12 @@
 /** @jest-environment node */
 
+import path from 'node:path';
 import { AffiliateAgentValidationExecutor } from '../agentValidation';
+
+const worktreeRoot = path.resolve('/tmp/worktree');
+const toolchainRoot = path.resolve('/tmp/toolchain');
+const jestExecutable = path.join(toolchainRoot, 'node_modules', '.bin', process.platform === 'win32' ? 'jest.cmd' : 'jest');
+const tsxExecutable = path.join(toolchainRoot, 'node_modules', '.bin', process.platform === 'win32' ? 'tsx.cmd' : 'tsx');
 
 describe('affiliate mapping named validation executor', () => {
   it('maps named tests to fixed Jest paths without exposing a shell', async () => {
@@ -11,8 +17,8 @@ describe('affiliate mapping named validation executor', () => {
       timeoutMs: number;
     }> = [];
     const executor = new AffiliateAgentValidationExecutor({
-      worktreeRoot: '/tmp/worktree',
-      toolchainRoot: '/tmp/toolchain',
+      worktreeRoot,
+      toolchainRoot,
       commandRunner: async (input) => {
         calls.push(input);
         return { stdout: 'PASS', stderr: '', durationMs: 10 };
@@ -23,19 +29,19 @@ describe('affiliate mapping named validation executor', () => {
       'src/server/affiliateImports/__tests__/river-cityGeneratedSource.test.ts',
     ]);
     expect(calls).toEqual([{
-      executable: '/tmp/toolchain/node_modules/.bin/jest',
+      executable: jestExecutable,
       args: [
         '--runInBand',
         'src/server/affiliateImports/__tests__/river-cityGeneratedSource.test.ts',
       ],
-      cwd: '/tmp/worktree',
+      cwd: worktreeRoot,
       timeoutMs: 300000,
     }]);
   });
 
   it('rejects arbitrary test ids and source-key command injection', async () => {
     const executor = new AffiliateAgentValidationExecutor({
-      worktreeRoot: '/tmp/worktree',
+      worktreeRoot,
       commandRunner: async () => ({ stdout: '', stderr: '', durationMs: 0 }),
     });
     await expect(executor.runFocusedTest('npm:test -- --watch')).rejects.toThrow(
@@ -48,7 +54,7 @@ describe('affiliate mapping named validation executor', () => {
 
   it('requires an explicit capability before running a local review scrape', async () => {
     const blocked = new AffiliateAgentValidationExecutor({
-      worktreeRoot: '/tmp/worktree',
+      worktreeRoot,
       commandRunner: async () => ({ stdout: '', stderr: '', durationMs: 0 }),
     });
     await expect(blocked.runReviewScrape('river-city')).rejects.toThrow(
@@ -57,8 +63,8 @@ describe('affiliate mapping named validation executor', () => {
 
     const calls: string[][] = [];
     const allowed = new AffiliateAgentValidationExecutor({
-      worktreeRoot: '/tmp/worktree',
-      toolchainRoot: '/tmp/toolchain',
+      worktreeRoot,
+      toolchainRoot,
       allowReviewScrape: true,
       commandRunner: async (input) => {
         calls.push([input.executable, ...input.args]);
@@ -70,7 +76,7 @@ describe('affiliate mapping named validation executor', () => {
       setupPath: 'scripts/setup-river-city-affiliate-source.ts',
     }));
     expect(calls).toEqual([[
-      '/tmp/toolchain/node_modules/.bin/tsx',
+      tsxExecutable,
       'scripts/setup-river-city-affiliate-source.ts',
       '--scrape',
     ]]);

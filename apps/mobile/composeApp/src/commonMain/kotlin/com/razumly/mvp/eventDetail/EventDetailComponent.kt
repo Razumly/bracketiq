@@ -56,6 +56,29 @@ import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
 interface EventDetailComponent : ComponentContext, IPaymentProcessor {
+    val checkoutReview: StateFlow<EventCheckoutReviewState?> get() = kotlinx.coroutines.flow.MutableStateFlow(null)
+    val checkoutCompleted: StateFlow<Boolean> get() = kotlinx.coroutines.flow.MutableStateFlow(false)
+    fun confirmCheckoutReview() {}
+    fun dismissCheckoutReview() {}
+    fun dismissCheckoutCompleted() {}
+    val checkoutTeamEditor: StateFlow<EventCheckoutTeamEditorState?> get() = kotlinx.coroutines.flow.MutableStateFlow(null)
+    fun editCheckoutTeam(team: TeamWithPlayers) {}
+    fun dismissCheckoutTeamEditor() {}
+    fun changeCheckoutTeamName(value: String) {}
+    fun changeCheckoutTeamSize(value: String) {}
+    fun saveCheckoutTeamEditor() {}
+    val registrationSignup: StateFlow<com.razumly.mvp.core.data.dataTypes.EventSignupState?> get() = kotlinx.coroutines.flow.MutableStateFlow(null)
+    val registrationSignupBusy: StateFlow<Boolean> get() = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val registrationTeams: StateFlow<List<TeamWithPlayers>> get() = kotlinx.coroutines.flow.MutableStateFlow(emptyList())
+    val registrationPlayerSuggestions: StateFlow<List<UserData>> get() = kotlinx.coroutines.flow.MutableStateFlow(emptyList())
+    fun selectRegistrationTeam(teamId: String, onReady: () -> Unit) {}
+    fun prepareRegistrationTeam(onReady: (TeamWithPlayers) -> Unit) {}
+    fun searchRegistrationPlayers(query: String) {}
+    suspend fun saveRegistrationTeam(team: Team): Result<Team> = Result.failure(UnsupportedOperationException("Event Team creation is not supported."))
+    suspend fun addRegistrationPlayer(teamId: String, input: com.razumly.mvp.core.network.dto.TeamMemberInviteRequestDto): Result<Unit> = Result.failure(UnsupportedOperationException("Event Player preparation is not supported."))
+    fun setRegistrationPlayersStep(onReady: () -> Unit) {}
+    fun continueRegistrationReview(onReady: () -> Unit) {}
+
     val selectedEvent: StateFlow<Event>
     val authorityVerified: StateFlow<Boolean>
     val divisionMatches: StateFlow<Map<String, MatchWithRelations>>
@@ -342,6 +365,7 @@ data class TextSignaturePromptState(
     val step: SignStep,
     val currentStep: Int,
     val totalSteps: Int,
+    val registrantName: String? = null,
 )
 
 data class WebSignaturePromptState(
@@ -349,6 +373,7 @@ data class WebSignaturePromptState(
     val url: String,
     val currentStep: Int,
     val totalSteps: Int,
+    val registrantName: String? = null,
 )
 
 data class JoinChildOption(
@@ -356,6 +381,8 @@ data class JoinChildOption(
     val fullName: String,
     val email: String?,
     val hasEmail: Boolean,
+    val dateOfBirth: String? = null,
+    val ageAtEvent: Int? = null,
 )
 
 data class JoinChoiceDialogState(
@@ -377,6 +404,7 @@ data class EventRegistrationQuestionDialogState(
     val eventName: String,
     val questions: List<TeamJoinQuestion>,
     val answers: Map<String, String>,
+    val registrantName: String? = null,
 )
 
 data class SelectedWeeklyOccurrenceState(

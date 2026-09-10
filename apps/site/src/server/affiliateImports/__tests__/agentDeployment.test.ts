@@ -10,6 +10,13 @@ const repositoryRoot = process.cwd();
 const read = (relativePath: string) => fs.readFileSync(
   path.join(repositoryRoot, relativePath),
   'utf8',
+).replace(/\r\n/g, '\n');
+const tsxCliPath = path.join(
+  repositoryRoot,
+  'node_modules',
+  'tsx',
+  'dist',
+  'cli.mjs',
 );
 const runnerSeccompProfileJson = read('deploy/affiliate-governed/runner-seccomp.json');
 const runnerAppArmorProfileSha256 = createHash('sha256')
@@ -462,7 +469,9 @@ describe('affiliate mapping VM deployment boundary', () => {
     );
   });
 
-  it('renders only an internal model network for model and evaluator services', () => {
+  const posixOnly = process.platform === 'win32' ? it.skip : it;
+
+  posixOnly('renders only an internal model network for model and evaluator services', () => {
     const rendered = renderAiCompose();
 
     expect(rendered.networks).toEqual({
@@ -484,7 +493,7 @@ describe('affiliate mapping VM deployment boundary', () => {
     expect(runner).not.toContain('arguments+=("--live")');
   });
 
-  it('fails closed in disabled and queue modes before invoking the direct writer', () => {
+  posixOnly('fails closed in disabled and queue modes before invoking the direct writer', () => {
     const disabled = runController('disabled');
     expect(disabled.status).toBe(64);
     expect(disabled.stderr).toContain('Controller mode is disabled');
@@ -496,7 +505,7 @@ describe('affiliate mapping VM deployment boundary', () => {
     expect(queue.stderr).not.toContain('run-affiliate-mapping-agent.ts');
   });
 
-  it('executes the dry-run validation branch without starting the direct writer', () => {
+  posixOnly('executes the dry-run validation branch without starting the direct writer', () => {
     const dryRun = runController('dry-run', {
       AFFILIATE_MAPPING_BASE_COMMIT: 'a'.repeat(40),
       AFFILIATE_MAPPING_MODEL_ID: 'test-model',
@@ -508,7 +517,7 @@ describe('affiliate mapping VM deployment boundary', () => {
     expect(dryRun.stderr).toContain('AFFILIATE_MAPPING_DRY_RUN_SOURCE_KEY');
     expect(dryRun.stderr).not.toContain('run-affiliate-mapping-agent.ts');
   });
-  it('fails closed for a fully configured dry-run without starting a child process', () => {
+  posixOnly('fails closed for a fully configured dry-run without starting a child process', () => {
     const dryRun = runController('dry-run', {
       AFFILIATE_MAPPING_BASE_COMMIT: 'a'.repeat(40),
       AFFILIATE_MAPPING_MODEL_ID: 'test-model',
@@ -630,8 +639,8 @@ describe('affiliate mapping VM deployment boundary', () => {
       expect(read(launcher)).toContain('governed cohort proof');
     }
     const launch = spawnSync(
-      path.join(repositoryRoot, 'node_modules/.bin/tsx'),
-      ['scripts/run-affiliate-intake-codex-goal.ts', '--dry-run'],
+      process.execPath,
+      [tsxCliPath, 'scripts/run-affiliate-intake-codex-goal.ts', '--dry-run'],
       { cwd: repositoryRoot, env: process.env, encoding: 'utf8' },
     );
     expect(launch.status).toBe(78);

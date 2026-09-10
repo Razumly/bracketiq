@@ -1,4 +1,9 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
+import { Alert, Button, Group, Stack, Text } from '@mantine/core';
+import type { JoinIntent } from './eventDetail/eventRegistrationCommands';
+import { useEventSignupJourney } from './eventDetail/hooks/useEventSignupJourney';
+import { EventCheckoutContext, EventCheckoutModal } from './eventDetail/EventCheckoutLayout';
+import TeamCard from '@/components/ui/TeamCard';
 import { useRouter } from 'next/navigation';
 import {
     Event,
@@ -62,6 +67,9 @@ export default function EventDetailSheet({
     publicCompletion,
 }: EventDetailSheetProps) {
     const todayForDob = new Date();
+    const [checkoutOpened, setCheckoutOpened] = useState(false);
+    const [checkoutIntent, setCheckoutIntent] = useState<JoinIntent | null>(null);
+    const reviewSubmitting = useRef(false);
     const presentationController = useEventDetailPresentationController();
     const {
         user,
@@ -84,8 +92,8 @@ export default function EventDetailSheet({
         children,
         childrenLoading,
         childrenError,
-        userTeams,
-        isLoadingTeams,
+        userTeams: locallyManagedTeams,
+        isLoadingTeams: localTeamsLoading,
         registrationQuestions,
         registrationQuestionAnswers,
         setRegistrationQuestionAnswers,
@@ -106,6 +114,8 @@ export default function EventDetailSheet({
         closeFreeAgentActions,
     } = presentationController;
     const [joining, setJoining] = useState(false);
+    const [finalReview, setFinalReview] = useState<JoinIntent | null>(null);
+    React.useEffect(() => { setFinalReview(null); setCheckoutOpened(false); setCheckoutIntent(null); }, [isActive, currentEvent.$id, selectedOccurrence?.slotId, selectedOccurrence?.occurrenceDate]);
     const [joinError, setJoinError] = useState<string | null>(null);
     const [joinNotice, setJoinNotice] = useState<string | null>(null);
     const [selectedTeamId, setSelectedTeamId] = useState('');
@@ -158,6 +168,10 @@ export default function EventDetailSheet({
         clearProgress: clearEventRegistrationProgress,
         prepareCheckout: prepareEventCheckout,
     } = checkoutController;
+    const signupJourney = useEventSignupJourney({ event: currentEvent, user, progress: checkoutController.progress, selectedTeamId });
+    const userTeams = currentEvent.teamSignup ? signupJourney.teams : locallyManagedTeams;
+    const isLoadingTeams = currentEvent.teamSignup
+        ? checkoutController.progress.loading || signupJourney.loadingTeams : localTeamsLoading;
     const divisionRegistrationModel = useEventDivisionRegistrationModel({
         event: currentEvent,
         user,
@@ -262,9 +276,14 @@ export default function EventDetailSheet({
         setRegisteringChild,
         childRegistrationChildId,
         ensureWeeklyOccurrenceSelected,
-        finalizeJoin,
+        finalizeJoin: commitJoin,
         resetChildRegistrationState,
     } = joinFinalizationController;
+    const finalizeJoin = useCallback(async (intent: JoinIntent) => {
+        setFinalReview(intent);
+        setJoining(false);
+        setRegisteringChild(false);
+    }, [setRegisteringChild]);
     const registrationConfirmationController = useRegistrationConfirmationController({
         event: currentEvent,
         user,
@@ -291,9 +310,13 @@ export default function EventDetailSheet({
         setJoinNotice,
     });
     const {
-        beginSigningFlow,
+        beginSigningFlow: startSigning,
         resetSigningState,
     } = signingController;
+    const beginSigningFlow = useCallback((intent: JoinIntent) => {
+        setCheckoutIntent(intent);
+        return startSigning(intent);
+    }, [startSigning]);
 
     const registrationQuestionsController = useRegistrationQuestionsController({
         questions: registrationQuestions,
@@ -427,6 +450,10 @@ export default function EventDetailSheet({
         userTeams,
         paymentPlanPreview,
         timeoutMs: JOIN_API_TIMEOUT_MS,
+        resumedTeamAnswers: checkoutController.progress.state?.draft?.completedSteps.includes('questions')
+            && registrationQuestions.every((question) => !question.required || registrationQuestionAnswers[question.id]?.trim())
+            ? registrationQuestions.map((question) => ({ questionId: question.id, answer: registrationQuestionAnswers[question.id] ?? '' }))
+            : undefined,
         ensureWeeklyOccurrenceSelected,
         shouldAskRegistrationQuestions,
         openRegistrationQuestionsStep,
@@ -458,7 +485,16 @@ export default function EventDetailSheet({
         setJoinError,
         setJoinNotice,
     });
-    const registrationPanel = (
+    const registrationSteps = (
+        <Stack gap="sm">
+        {!currentEvent.teamSignup && childrenLoading ? <Text size="sm" c="dimmed">Checking linked children...</Text> : null}
+        {!currentEvent.teamSignup && childrenError ? <Alert color="red">{childrenError}</Alert> : null}
+        {checkoutController.progress.error || signupJourney.error ? <Alert color="red">
+            {checkoutController.progress.error || signupJourney.error}
+            <Button variant="subtle" onClick={() => { void signupJourney.reload(); }}>Reload saved progress</Button>
+        </Alert> : null}
+        {checkoutController.progress.state?.unavailableReason ? <Alert color="yellow">{checkoutController.progress.state.unavailableReason}</Alert> : null}
+        {checkoutController.progress.state?.invalidations.map((message) => <Alert key={message} color="yellow">{message}</Alert>)}
         <EventDetailRegistrationPanels
             childrenError={childrenError}
             childrenLoading={childrenLoading}
@@ -468,21 +504,31 @@ export default function EventDetailSheet({
             eventTeams={teams}
             isLoadingTeams={isLoadingTeams}
             joinActions={joinActions}
-            joining={joining}
+            joining={joining || checkoutController.progress.saving || checkoutController.progress.loading
+                || checkoutController.progress.state?.available === false || Boolean(checkoutController.progress.error)}
             joiningChildFreeAgent={joiningChildFreeAgent}
             joinFinalizationController={joinFinalizationController}
-            onManageTeams={() => {
-                router.push(`/teams?event=${currentEvent.$id}`);
-                onClose();
-            }}
-            onSelectedChildChange={setSelectedChildId}
+            onManageTeams={() => { void signupJourney.createTeam(); }}
+            onAddPlayers={() => { void signupJourney.addPlayers(); }}
+            onEditTeam={signupJourney.editTeam}
+            hasDraft={Boolean(checkoutController.progress.state?.draft && !checkoutController.progress.state.draft.completedAt)}
+            onResumePreparation={signupJourney.preparationStep ? () => { void signupJourney.resumePreparation(); } : undefined}
+            onSelectedChildChange={(childId) => { setSelectedChildId(childId); setCheckoutIntent(null); }}
             onSelectedTeamChange={(teamId) => {
+                setCheckoutIntent(null);
                 setSelectedTeamId(teamId);
                 saveEventRegistrationProgress({ selectedTeamId: teamId || null });
             }}
             onViewBracket={navigationController.viewBracket}
             onViewSchedule={navigationController.viewSchedule}
-            participantActions={participantActions}
+            participantActions={{ ...participantActions, handleJoinFreeAgents: async () => {
+                if (isMinor) { await participantActions.handleJoinFreeAgents(); return; }
+                const intent: JoinIntent = { mode: 'user_free_agent' };
+                setCheckoutIntent(intent);
+                if (shouldAskRegistrationQuestions(intent)) { openRegistrationQuestionsStep(intent); return; }
+                try { if (!await beginSigningFlow(intent)) await finalizeJoin(intent); }
+                catch (failure) { setJoinError(failure instanceof Error ? failure.message : 'Could not start registration.'); }
+            } }}
             participantModel={participantModel}
             paymentFailedTeamIds={paymentFailedTeamIds}
             presentationController={presentationController}
@@ -495,7 +541,41 @@ export default function EventDetailSheet({
             userTeams={userTeams}
             weeklyModel={weeklyModel}
         />
+        </Stack>
     );
+    const registrationDialogs = <>
+        {signupJourney.dialogs}
+        <EventCheckoutModal opened={Boolean(finalReview)} onClose={() => setFinalReview(null)} title="Review Event registration" step="Review and pay" centered zIndex={2000}>
+            <Stack>
+                <Text fw={600}>{currentEvent.name}</Text>
+                {finalReview?.team ? <TeamCard team={finalReview.team} showTeamMetadata={false} /> : null}
+                {finalReview?.childId ? <Text fw={600}>{participantModel.childOptions.find((child) => child.value === finalReview.childId)?.label}</Text> : null}
+                {selectedDivisionOption?.name ? <Text>{selectedDivisionOption.name}</Text> : null}
+                <Text size="sm">Confirm to continue with the Event registration and payment requirements.</Text>
+                <Group>
+                    <Button variant="default" onClick={() => setFinalReview(null)}>Back</Button>
+                    <Button loading={joining} onClick={async () => {
+                        if (!finalReview || reviewSubmitting.current) return;
+                        reviewSubmitting.current = true;
+                        const intent = finalReview;
+                        setFinalReview(null);
+                        setJoining(true);
+                        try { await commitJoin(intent); }
+                        catch (failure) { setJoinError(failure instanceof Error ? failure.message : 'Registration could not be completed.'); }
+                        finally { setJoining(false); reviewSubmitting.current = false; }
+                    }}>Confirm registration</Button>
+                </Group>
+            </Stack>
+        </EventCheckoutModal>
+    </>;
+    const workflowStepOpened = registrationWorkflowController.showRegistrationQuestionsModal
+        || registrationWorkflowController.showPasswordModal || registrationWorkflowController.showSignModal
+        || registrationWorkflowController.showCheckoutPreviewModal || registrationWorkflowController.showBillingAddressModal
+        || registrationWorkflowController.showPaymentModal || registrationWorkflowController.showManualPaymentModal
+        || Boolean(registrationWorkflowController.paymentPlanPreview);
+    const registrationPanel = <Button fullWidth size="md" onClick={() => { setCheckoutIntent(null); setCheckoutOpened(true); }}>
+        {checkoutController.progress.state?.draft ? 'Continue registration' : 'Register'}
+    </Button>;
     const content = (
         <EventDetailMainContent
             currentEvent={currentEvent}
@@ -507,8 +587,8 @@ export default function EventDetailSheet({
             hostUser={hostUser}
             isLoadingEvent={isLoadingEvent}
             joinCardDocking={joinCardDocking}
-            joinError={joinError}
-            joinNotice={joinNotice}
+            joinError={checkoutOpened ? null : joinError}
+            joinNotice={checkoutOpened ? null : joinNotice}
             navigationController={navigationController}
             onAffiliateClick={() => {
                 if (!publicModel.affiliateActionUrl) {
@@ -537,8 +617,25 @@ export default function EventDetailSheet({
     );
 
     return (
-        <>
+        <EventCheckoutContext.Provider value={{
+            eventName: currentEvent.name,
+            imageUrl: eventImageUrl,
+            divisionName: selectedDivisionOption?.name,
+            registrantName: checkoutIntent?.mode === 'user_free_agent' ? 'You · Free agent' : isTeamSignup
+                ? userTeams.find((team) => team.$id === selectedTeamId)?.name
+                : selectedChildId
+                    ? participantModel.childOptions.find((child) => child.value === selectedChildId)?.label
+                    : [user?.firstName, user?.lastName].filter(Boolean).join(' '),
+            priceCents: checkoutIntent?.mode === 'user_free_agent' ? 0 : selectedDivisionBilling.priceCents,
+        }}>
             {content}
+            {checkoutOpened ? <EventCheckoutModal keepMounted opened={!workflowStepOpened && !finalReview && !signupJourney.dialogOpened}
+                onClose={() => setCheckoutOpened(false)} title="Event checkout" step="Entry" centered zIndex={1700}>
+                {joinError ? <Alert color="red">{joinError}</Alert> : null}
+                {joinNotice ? <Alert color="blue">{joinNotice}</Alert> : null}
+                {registrationSteps}
+            </EventCheckoutModal> : null}
+            {registrationDialogs}
             <EventDetailOverlays
                 checkoutController={checkoutController}
                 checkoutEvent={checkoutEvent}
@@ -575,7 +672,6 @@ export default function EventDetailSheet({
                 teams={teams}
                 user={user}
             />
-        </>
+        </EventCheckoutContext.Provider>
     );
 }
-

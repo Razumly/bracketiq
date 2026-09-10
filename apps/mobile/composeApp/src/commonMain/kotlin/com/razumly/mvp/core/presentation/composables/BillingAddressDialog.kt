@@ -46,7 +46,7 @@ fun BillingAddressDialog(
     }
     val showError = attemptedSubmit && !draft.isCompleteForUsTax()
 
-    AlertDialog(
+    FormDialog(
         onDismissRequest = onDismiss,
         title = { Text("Billing Address Required") },
         text = {

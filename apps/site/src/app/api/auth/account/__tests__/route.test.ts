@@ -4,6 +4,8 @@ import { generateKeyPairSync } from 'crypto';
 import { NextRequest } from 'next/server';
 
 const prismaMock = {
+  eventRegistrationDrafts: { deleteMany: jest.fn() },
+  eventRegistrationTeamPreferences: { deleteMany: jest.fn() },
   authUser: {
     findUnique: jest.fn(),
     deleteMany: jest.fn(),
@@ -28,6 +30,7 @@ const prismaMock = {
     updateMany: jest.fn(),
   },
   invites: {
+    findMany: jest.fn(async () => []),
     updateMany: jest.fn(),
     deleteMany: jest.fn(),
   },

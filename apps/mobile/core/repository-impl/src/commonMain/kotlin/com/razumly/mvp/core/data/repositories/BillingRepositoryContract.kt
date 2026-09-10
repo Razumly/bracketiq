@@ -74,6 +74,15 @@ interface IBillingRepository : IMVPRepository {
         divisionId = divisionId,
         discountCode = discountCode,
     )
+    suspend fun createChildPurchaseIntent(
+        event: Event,
+        childUserId: String,
+        priceCents: Int,
+        occurrence: EventOccurrenceSelection?,
+        divisionId: String?,
+        answers: Map<String, String>,
+    ): Result<PurchaseIntent> = Result.failure(UnsupportedOperationException("Child checkout is not supported."))
+
     suspend fun createTeamRegistrationPurchaseIntent(
         team: Team,
         teamRegistration: TeamPlayerRegistration? = null,

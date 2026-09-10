@@ -1,9 +1,10 @@
+import { EventCheckoutModal } from './EventCheckoutLayout';
 import {
     Alert,
     Button,
     Checkbox,
     Group,
-    Modal,
+
     Paper,
     PasswordInput,
     Stack,
@@ -49,7 +50,7 @@ export function RegistrationQuestionsDialog({
     onSubmit,
 }: RegistrationQuestionsDialogProps) {
     return (
-        <Modal
+        <EventCheckoutModal
             opened={opened}
             onClose={onClose}
             centered
@@ -98,7 +99,7 @@ export function RegistrationQuestionsDialog({
                     </Group>
                 </Stack>
             </form>
-        </Modal>
+        </EventCheckoutModal>
     );
 }
 
@@ -122,11 +123,11 @@ export function PaymentPlanPreviewDialog({
     onContinue,
 }: PaymentPlanPreviewDialogProps) {
     return (
-        <Modal
+        <EventCheckoutModal
             opened={opened}
             onClose={onClose}
             centered
-            title="Payment plan preview"
+            title="Payment plan preview" step="Entry"
             zIndex={REGISTRATION_DIALOG_Z_INDEX}
         >
             <Stack gap="sm">
@@ -176,7 +177,7 @@ export function PaymentPlanPreviewDialog({
                     </Button>
                 </Group>
             </Stack>
-        </Modal>
+        </EventCheckoutModal>
     );
 }
 
@@ -200,7 +201,7 @@ export function PasswordConfirmationDialog({
     onSubmit,
 }: PasswordConfirmationDialogProps) {
     return (
-        <Modal
+        <EventCheckoutModal
             opened={opened}
             onClose={onClose}
             centered
@@ -234,7 +235,7 @@ export function PasswordConfirmationDialog({
                     </Group>
                 </Stack>
             </form>
-        </Modal>
+        </EventCheckoutModal>
     );
 }
 
@@ -264,7 +265,7 @@ export function SigningDialog({
     const currentLink = signLinks[currentIndex];
 
     return (
-        <Modal
+        <EventCheckoutModal
             opened={opened}
             onClose={onClose}
             centered
@@ -330,7 +331,7 @@ export function SigningDialog({
             ) : (
                 <Text size="sm" c="dimmed">Preparing documents...</Text>
             )}
-        </Modal>
+        </EventCheckoutModal>
     );
 }
 
@@ -371,11 +372,11 @@ export function CheckoutPreviewDialog({
         || normalizedCode.toUpperCase() === appliedCode.toUpperCase();
 
     return (
-        <Modal
+        <EventCheckoutModal
             opened={opened}
             onClose={onClose}
             centered
-            title="Checkout preview"
+            title="Checkout preview" step="Review and pay"
             zIndex={REGISTRATION_DIALOG_Z_INDEX}
         >
             <Stack gap="sm">
@@ -441,6 +442,6 @@ export function CheckoutPreviewDialog({
                     </Button>
                 </Group>
             </Stack>
-        </Modal>
+        </EventCheckoutModal>
     );
 }

@@ -428,7 +428,7 @@ internal fun JoinOptionsSheet(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                text = "Join options",
+                text = "Registration options",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold
             )
@@ -641,7 +641,7 @@ internal fun ChildJoinSelectionDialog(
     onDismiss: () -> Unit,
     onChildSelected: (String) -> Unit,
 ) {
-    AlertDialog(
+    EventCheckoutDialog(
         onDismissRequest = onDismiss,
         title = { Text("Select Child") },
         text = {
@@ -654,6 +654,9 @@ internal fun ChildJoinSelectionDialog(
                             .padding(vertical = 8.dp),
                     ) {
                         Text(text = child.fullName, style = MaterialTheme.typography.bodyLarge)
+                        child.ageAtEvent?.let { age ->
+                            Text(text = "Age $age at Event", style = MaterialTheme.typography.bodyMedium)
+                        }
                         val subtitle = if (child.hasEmail) {
                             child.email ?: "Email available"
                         } else {
@@ -724,7 +727,8 @@ internal fun EventRegistrationQuestionsDialog(
         mutableStateOf<String?>(null)
     }
 
-    AlertDialog(
+    EventCheckoutDialog(
+        step = EventCheckoutStep.REQUIREMENTS,
         onDismissRequest = onDismiss,
         title = { Text("Registration questions") },
         text = {
@@ -737,6 +741,9 @@ internal fun EventRegistrationQuestionsDialog(
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )
+                dialogState.registrantName?.let { name ->
+                    Text(text = "Registering $name", style = MaterialTheme.typography.titleMedium)
+                }
                 validationMessage?.let { message ->
                     Text(
                         text = message,

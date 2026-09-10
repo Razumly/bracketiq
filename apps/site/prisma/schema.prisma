@@ -514,6 +514,7 @@ enum BoldSignSyncOperationStatusEnum {
 }
 
 enum ModerationReportTargetTypeEnum {
+  TEAM_INVITATION
   CHAT_GROUP
   EVENT
   BLOCK_USER
@@ -1091,6 +1092,10 @@ model UserData {
   onboardingIntent                 String?
   accountVisibility                String    @default("PUBLIC")
   notificationSettings             Json      @default("{}")
+  // Durable roster identity before an Account claims the profile.
+  isManagedPlayer                 Boolean   @default(false)
+  mergedIntoProfileId             String?
+  mergedAt                        DateTime?
 
   @@index([accountVisibility])
 }
@@ -1167,8 +1172,15 @@ model Invites {
   createdAt      DateTime?
   updatedAt      DateTime?
   sentAt         DateTime?
+  finalizedAt    DateTime?
+  supersededAt   DateTime?
+  actedBy        String?
+  actingGuardianId String?
+  declineBlockScope String?
   type           String
   email          String?
+  // For minor players, `email` is the guardian delivery address.
+  playerEmail    String?
   phone          String?
   status         String?
   staffTypes     String[]  @default([])
@@ -1184,11 +1196,133 @@ model Invites {
   linkVersion    Int       @default(1)
   linkExpiresAt  DateTime?
   claimedBy      String?
+  // Claim and guardian metadata are separate from Team Membership acceptance.
+  isMinor        Boolean   @default(false)
+  dateOfBirth    DateTime?
+  guardianEmail  String?
+  idempotencyKey String?
 
   @@index([userId, status, createdAt, id])
   @@index([teamId, status, createdAt, id])
   @@index([status, updatedAt])
   @@index([linkExpiresAt, status])
+  @@index([teamId, createdBy, idempotencyKey])
+}
+
+model InvitationEvidence {
+  reportId          String   @id
+  inviteId          String
+  capturedAt        DateTime @default(now())
+  attemptCreatedAt  DateTime?
+  senderId          String?
+  playerId          String?
+  teamId            String?
+  status            String
+  finalizedAt       DateTime?
+  sentAt            DateTime?
+  actedBy           String?
+  actingGuardianId  String?
+  declineBlockScope String?
+  deliveries        Json
+
+  @@index([inviteId])
+  @@index([finalizedAt, reportId])
+}
+
+model TeamBlocks {
+  id        String   @id
+  playerId  String
+  teamId    String
+  createdBy String
+  createdAt DateTime @default(now())
+
+  @@unique([playerId, teamId])
+  @@index([teamId, playerId])
+}
+
+model InviteDeliveries {
+  id             String   @id
+  inviteId       String
+  idempotencyKey String
+  kind           String
+  requestedBy    String?
+  status         String
+  createdAt      DateTime @default(now())
+  completedAt    DateTime?
+  sentAt         DateTime?
+  failureCode    String?
+
+  @@unique([inviteId, idempotencyKey])
+  @@index([inviteId, createdAt, id])
+}
+
+model TeamCreationRequests {
+  teamId      String   @id
+  senderId    String
+  fingerprint String
+  createdAt   DateTime @default(now())
+}
+
+model InvitationRequests {
+  teamId       String
+  senderId     String
+  requestKey   String
+  inviteId     String
+  fingerprint  String?
+  createdAt    DateTime @default(now())
+
+  @@id([teamId, senderId, requestKey])
+  @@index([inviteId])
+}
+
+model UserProfileClaims {
+  id                 String    @id
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  profileId          String
+  claimantUserId     String
+  inviteId           String?
+  verificationMethod String
+  verifiedEmail      String?
+  status             String    @default("PENDING")
+  confirmationAt     DateTime?
+  completedAt        DateTime?
+  failureReason      String?
+
+  @@index([profileId, status])
+  @@index([claimantUserId, status])
+  @@index([inviteId])
+}
+
+model UserProfileMerges {
+  id               String   @id
+  createdAt        DateTime @default(now())
+  sourceProfileId  String
+  primaryProfileId String
+  claimantUserId   String
+  confirmationAt   DateTime
+  rosterIds        String[] @default([])
+  invitationIds    String[] @default([])
+  metadata         Json?
+
+  @@index([sourceProfileId])
+  @@index([primaryProfileId])
+  @@index([claimantUserId])
+}
+
+model UserProfileContactCorrections {
+  id             String   @id
+  createdAt      DateTime @default(now())
+  profileId      String
+  managerUserId  String
+  previousEmail  String?
+  correctedEmail String?
+  previousPhone  String?
+  correctedPhone String?
+  inviteId       String?
+
+  @@index([profileId, createdAt])
+  @@index([managerUserId, createdAt])
 }
 
 model TeamInviteEventSyncs {
@@ -1200,6 +1334,7 @@ model TeamInviteEventSyncs {
   eventId                      String
   eventTeamId                  String
   userId                       String
+  registrationId               String?
   previousRegistrationSnapshot Json?
   eventTeamHadUser             Boolean                       @default(false)
   eventTeamHadPendingUser      Boolean                       @default(false)
@@ -4141,6 +4276,43 @@ model ParentChildLinks {
   linkMethod   String?
   createdBy    String
   endedAt      DateTime?
+  declarationVersion Int?
+  declarationText String?
+  declarationConfirmedAt DateTime?
+  declarationInviteId String?
+}
+
+model EventRegistrationDrafts {
+  id                      String   @id
+  accountId               String
+  eventId                 String
+  slotId                  String   @default("")
+  occurrenceDate          String   @default("")
+  revision                Int      @default(1)
+  selectedTeamId          String?
+  selectedDivisionId      String?
+  selectedDivisionTypeKey String?
+  answers                 Json     @default("{}")
+  step                    String   @default("review")
+  completedSteps          String[] @default([])
+  registrationId          String?
+  teamCreationId          String?
+  completedAt             DateTime?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@unique([accountId, eventId, slotId, occurrenceDate])
+  @@index([accountId, updatedAt])
+}
+
+model EventRegistrationTeamPreferences {
+  accountId      String
+  sport          String
+  teamId         String
+  registrationId String
+  completedAt    DateTime
+
+  @@id([accountId, sport])
 }
 
 model EventRegistrations {

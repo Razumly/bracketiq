@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
+import { findGuardianAuthority } from '@/server/guardianAuthority';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,14 +37,7 @@ export async function GET(req: NextRequest) {
   const userId = params.get('userId') ?? session.userId;
 
   if (!session.isAdmin && userId !== session.userId) {
-    const parentLink = await prisma.parentChildLinks.findFirst({
-      where: {
-        parentId: session.userId,
-        childId: userId,
-        status: 'ACTIVE',
-      },
-      select: { id: true },
-    });
+    const parentLink = await findGuardianAuthority(prisma, session.userId, userId);
     if (!parentLink) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }

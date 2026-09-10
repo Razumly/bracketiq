@@ -35,6 +35,15 @@ enum class EventSearchSort {
 }
 
 interface IEventRepository : IMVPRepository {
+    fun observeRegistrationDraft(eventId: String, occurrence: EventOccurrenceSelection? = null): Flow<com.razumly.mvp.core.data.dataTypes.EventSignupState?> = flowOf(null)
+    suspend fun loadRegistrationDraft(eventId: String, occurrence: EventOccurrenceSelection? = null): Result<com.razumly.mvp.core.data.dataTypes.EventSignupState> =
+        Result.failure(UnsupportedOperationException("Shared registration progress is not supported."))
+    suspend fun saveRegistrationDraft(eventId: String, occurrence: EventOccurrenceSelection?, baseRevision: Int, draft: com.razumly.mvp.core.data.dataTypes.EventSignupDraft): Result<com.razumly.mvp.core.data.dataTypes.EventSignupState> =
+        Result.failure(UnsupportedOperationException("Shared registration progress is not supported."))
+    suspend fun createRegistrationTeam(eventId: String, occurrence: EventOccurrenceSelection?, baseRevision: Int, team: Team): Result<Team> =
+        Result.failure(UnsupportedOperationException("Event Team creation is not supported."))
+    suspend fun clearRegistrationDraft(eventId: String, occurrence: EventOccurrenceSelection? = null): Result<Unit> =
+        Result.failure(UnsupportedOperationException("Shared registration progress is not supported."))
     suspend fun reflowEventSchedule(request: ScheduleReflowRequestDto): Result<ScheduleReflowResultDto> =
         Result.failure(UnsupportedOperationException("Schedule Reflow is not supported."))
     fun getCachedEventsFlow(): Flow<Result<List<Event>>>
@@ -217,6 +226,14 @@ interface IEventRepository : IMVPRepository {
         joinWaitlist: Boolean = false,
         occurrence: EventOccurrenceSelection? = null,
     ): Result<ChildRegistrationResult>
+    suspend fun registerChildForEvent(
+        eventId: String,
+        childUserId: String,
+        joinWaitlist: Boolean,
+        occurrence: EventOccurrenceSelection?,
+        divisionId: String?,
+        answers: Map<String, String>,
+    ): Result<ChildRegistrationResult> = Result.failure(UnsupportedOperationException("Child registration selection is not supported."))
     suspend fun addTeamToEvent(
         event: Event,
         team: Team,

@@ -1,3 +1,9 @@
+import { eventTeamCreationContextSchema } from '@/lib/contracts/eventRegistrationDraft';
+import { RegistrationDraftError, saveRegistrationDraft } from '@/server/events/eventRegistrationDrafts';
+import { acquireTeamRosterLock } from '@/server/repositories/locks';
+import { invitationRequestFingerprint, InvitationRequestError } from '@/server/teams/teamInvitationRequests';
+import { TeamInvitationRestrictionError } from '@/server/teams/teamInvitationRestrictions';
+import { withRosterInvitationViews } from '@/server/teams/teamRosterInvitationViews';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
@@ -51,6 +57,7 @@ const playerRegistrationInputSchema = z.object({
 }).strict();
 
 const createSchema = z.object({
+  registrationDraft: eventTeamCreationContextSchema.optional(),
   id: z.string(),
   name: z.string().trim().min(1, 'Team name is required.'),
   division: z.string().optional(),
@@ -136,6 +143,36 @@ const withTeamRoleAliases = (team: Record<string, any>): Record<string, any> => 
     ...formatted,
     assistantCoachIds,
     coachIds: assistantCoachIds,
+  };
+};
+
+const canViewPendingRoster = (
+  team: Record<string, any>,
+  session: { userId: string; isAdmin: boolean } | null,
+): boolean => {
+  if (!session) return false;
+  if (session.isAdmin) return true;
+  return Boolean(
+    team.captainId === session.userId
+    || team.managerId === session.userId
+    || team.headCoachId === session.userId
+    || uniqueStrings(team.coachIds ?? team.assistantCoachIds).includes(session.userId),
+  );
+};
+
+const protectPendingRoster = (
+  team: Record<string, any>,
+  canView: boolean,
+): Record<string, any> => {
+  if (canView) return team;
+  return {
+    ...team,
+    pending: [],
+    playerRegistrations: Array.isArray(team.playerRegistrations)
+      ? team.playerRegistrations.filter((registration: any) => (
+        String(registration?.status ?? '').toUpperCase() !== 'INVITED'
+      ))
+      : team.playerRegistrations,
   };
 };
 
@@ -235,6 +272,7 @@ export async function GET(req: NextRequest) {
     organizationRows.map((organization: Record<string, any>) => [organization.id, organization]),
   );
   const responseTeams = withTeamRoleAliasesList(pageRecordRows)
+    .map((team) => protectPendingRoster(team, canViewPendingRoster(team, session) || includeAdminOnly))
     .map((team) => ({
       ...team,
       organization: typeof team.organizationId === 'string'
@@ -243,7 +281,7 @@ export async function GET(req: NextRequest) {
     }))
     .map((team) => (includeAdminOnly ? team : protectAffiliateRow(team, 'team')));
   return NextResponse.json({
-    teams: responseTeams,
+    teams: await withRosterInvitationViews(prisma, responseTeams),
     pagination: {
       limit: normalizedLimit,
       offset: normalizedOffset,
@@ -349,10 +387,29 @@ export async function POST(req: NextRequest) {
 
   let responseTeam: Record<string, any> | null = null;
   let createdPendingInvites: CreatedPendingTeamInviteRecord[] = [];
+  let inviteDelivery = {
+    attempted: false,
+    failed: false,
+    inviteIds: [] as string[],
+  };
 
   if (canonicalTeamsDelegate?.create && teamRegistrationsDelegate?.upsert && teamStaffAssignmentsDelegate?.upsert) {
     const now = new Date();
-    await prisma.$transaction(async (tx) => {
+    try {
+      await prisma.$transaction(async (tx) => {
+      await acquireTeamRosterLock(tx, data.id);
+      const { registrationDraft, ...teamInput } = data;
+      const fingerprint = invitationRequestFingerprint(teamInput);
+      const receipt = await tx.teamCreationRequests.findUnique({ where: { teamId: data.id } });
+      if (receipt) {
+        if (receipt.senderId !== session.userId || receipt.fingerprint !== fingerprint) {
+          throw new InvitationRequestError('This Team draft was already saved with different details. Open the saved Team to make changes.');
+        }
+        if (!await tx.canonicalTeams.findUnique({ where: { id: data.id }, select: { id: true } })) {
+          throw new InvitationRequestError('The saved Team no longer exists. Start a new Team draft.', 410);
+        }
+        return;
+      }
       await tx.canonicalTeams.create({
         data: {
           id: data.id,
@@ -392,10 +449,38 @@ export async function POST(req: NextRequest) {
         playerRegistrations: data.playerRegistrations,
         now,
       });
-    });
+      await tx.teamCreationRequests.create({ data: { teamId: data.id, senderId: session.userId, fingerprint } });
+      if (registrationDraft) {
+        await saveRegistrationDraft({ accountId: session.userId, ...registrationDraft }, {
+          baseRevision: registrationDraft.baseRevision,
+          patch: { selectedTeamId: data.id, teamCreationId: data.id, step: 'players', completedSteps: ['team'] },
+        }, tx);
+      }
+      });
+    } catch (error) {
+      if (error instanceof InvitationRequestError || error instanceof TeamInvitationRestrictionError || error instanceof RegistrationDraftError) {
+        return NextResponse.json({ error: error.message, ...(error instanceof RegistrationDraftError ? { state: error.state } : {}) }, { status: error.status });
+      }
+      throw error;
+    }
     responseTeam = await loadCanonicalTeamById(data.id, prisma) as Record<string, any> | null;
     if (createdPendingInvites.length) {
-      await sendInviteEmails(createdPendingInvites, getRequestOrigin(req));
+      inviteDelivery = {
+        attempted: true,
+        failed: false,
+        inviteIds: createdPendingInvites.map((invite) => invite.id),
+      };
+      try {
+        const deliveredInvites = await sendInviteEmails(createdPendingInvites, getRequestOrigin(req), { requestedBy: session.userId, requestedByIsAdmin: session.isAdmin });
+        inviteDelivery.failed = deliveredInvites.some(
+          (invite) => invite.delivery?.failed === true,
+        );
+      } catch (error) {
+        // The database transaction already committed. Keep that result and
+        // report delivery failure so the client can retry delivery safely.
+        inviteDelivery.failed = true;
+        console.warn('Team save committed but invite delivery failed', error);
+      }
     }
   } else {
     let team: Record<string, unknown>;
@@ -437,5 +522,8 @@ export async function POST(req: NextRequest) {
 
   await syncTeamChatByTeamId(String(responseTeam?.id ?? data.id));
 
-  return NextResponse.json(withTeamRoleAliases(responseTeam ?? { id: data.id }), { status: 201 });
+  return NextResponse.json({
+    ...withTeamRoleAliases(responseTeam ?? { id: data.id }),
+    delivery: inviteDelivery,
+  }, { status: 201 });
 }

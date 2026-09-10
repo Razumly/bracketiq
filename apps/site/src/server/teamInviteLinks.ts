@@ -39,6 +39,21 @@ export const buildTeamInviteShareUrl = (invite: LinkFields, baseUrl: string): st
   return url.toString();
 };
 
+/**
+ * Builds the profile-claim link that accompanies a Managed Player invite.
+ * The signature is the same tamper-proof, expiring proof as the Team link,
+ * but the UI and API keep Profile Claim separate from Team acceptance.
+ */
+export const buildManagedPlayerClaimUrl = (invite: LinkFields, baseUrl: string): string => {
+  const version = Math.max(1, Math.trunc(invite.linkVersion ?? 1));
+  const expiresAt = expiresAtMillis(invite.linkExpiresAt);
+  const url = new URL(`/claim/player/${encodeURIComponent(invite.id)}`, baseUrl);
+  url.searchParams.set('v', String(version));
+  url.searchParams.set('e', String(expiresAt));
+  url.searchParams.set('s', signatureFor(invite.id, version, expiresAt));
+  return url.toString();
+};
+
 export const verifyTeamInviteShareLink = (
   invite: LinkFields,
   input: { version: string | null; expiresAt: string | null; signature: string | null },

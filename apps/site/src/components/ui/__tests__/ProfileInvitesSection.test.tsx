@@ -5,6 +5,8 @@ import { buildTeam, buildUser } from '../../../../test/factories';
 import { renderWithMantine } from '../../../../test/utils/renderWithMantine';
 import type { Invite, PaymentIntent, Team } from '@/types';
 
+jest.mock('@/app/providers', () => ({ useApp: () => ({ refreshUser: jest.fn(async () => undefined) }) }));
+
 jest.mock('next/navigation', () => ({
   useRouter: () => ({
     push: jest.fn(),
@@ -13,6 +15,7 @@ jest.mock('next/navigation', () => ({
 
 jest.mock('@/lib/userService', () => ({
   userService: {
+    listTeamBlocks: jest.fn(async () => []),
     acceptInvite: jest.fn(),
     declineInvite: jest.fn(),
     listInvites: jest.fn(),

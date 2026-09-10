@@ -1,6 +1,8 @@
 /** @jest-environment node */
 
 import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import {
   runAffiliateMappingDraftJob,
 } from '../agentRunner';
@@ -115,7 +117,7 @@ const context = {
 
 describe('affiliate mapping isolated job runner', () => {
   it('renders a valid draft and records validation without publishing', async () => {
-    const worktreeRoot = await fs.mkdtemp('/tmp/affiliate-agent-runner-');
+      const worktreeRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'affiliate-agent-runner-'));
     try {
       const result = await runAffiliateMappingDraftJob({
         context,
@@ -160,7 +162,7 @@ describe('affiliate mapping isolated job runner', () => {
   });
 
   it('rejects identity, policy, and evidence outside the claimed context', async () => {
-    const worktreeRoot = await fs.mkdtemp('/tmp/affiliate-agent-runner-');
+      const worktreeRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'affiliate-agent-runner-'));
     try {
       for (const unsafeDraft of [
         { ...draft, intakeId: 'different_intake' },
@@ -184,7 +186,7 @@ describe('affiliate mapping isolated job runner', () => {
   });
 
   it('returns a refusal without writing files for a blocked job', async () => {
-    const worktreeRoot = await fs.mkdtemp('/tmp/affiliate-agent-runner-');
+      const worktreeRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'affiliate-agent-runner-'));
     const blockedContext = {
       ...context,
       jobId: 'job_blocked',

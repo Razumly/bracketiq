@@ -29,6 +29,7 @@ type TeamInviteEventSyncRow = {
   eventTeamId: string;
   userId: string;
   previousRegistrationSnapshot?: unknown;
+  registrationId?: string | null;
   eventTeamHadUser?: boolean | null;
   eventTeamHadPendingUser?: boolean | null;
   sourceTeamRegistrationId?: string | null;
@@ -113,7 +114,7 @@ const toSnapshotRecord = (value: unknown): Record<string, unknown> | null => {
 
 const resolveSyncRegistrationId = (syncRow: TeamInviteEventSyncRow): string => {
   const snapshot = toSnapshotRecord(syncRow.previousRegistrationSnapshot);
-  return normalizeId(snapshot?.id) ?? buildEventRegistrationId({
+  return normalizeId(syncRow.registrationId) ?? normalizeId(snapshot?.id) ?? buildEventRegistrationId({
     eventId: syncRow.eventId,
     registrantType: 'SELF',
     registrantId: syncRow.userId,
@@ -166,11 +167,7 @@ const restoreEventRegistrationSnapshot = async (
 ) => {
   const snapshot = toSnapshotRecord(syncRow.previousRegistrationSnapshot);
   if (!snapshot) {
-    const registrationId = buildEventRegistrationId({
-      eventId: syncRow.eventId,
-      registrantType: 'SELF',
-      registrantId: syncRow.userId,
-    });
+    const registrationId = resolveSyncRegistrationId(syncRow);
     await tx.eventRegistrations?.updateMany?.({
       where: { id: registrationId },
       data: {
@@ -181,11 +178,7 @@ const restoreEventRegistrationSnapshot = async (
     return;
   }
 
-  const registrationId = normalizeId(snapshot.id) ?? buildEventRegistrationId({
-    eventId: syncRow.eventId,
-    registrantType: 'SELF',
-    registrantId: syncRow.userId,
-  });
+  const registrationId = resolveSyncRegistrationId(syncRow);
   const createData = {
     id: registrationId,
     createdAt: toDate(snapshot.createdAt, now),
@@ -613,8 +606,14 @@ export const rollbackTeamInviteEventSyncs = async (
     return;
   }
 
+  await lockTeamRegistrationEvents(tx, rows.map((row) => row.eventId));
+  const completedEvents = await tx.events.findMany({
+    where: { id: { in: uniqueStrings(rows.map((row) => row.eventId)) }, end: { lte: now } },
+    select: { id: true },
+  }) as Array<{ id: string }>;
+  const completedIds = new Set(completedEvents.map((event) => event.id));
   const eventTeamsDelegate = getEventTeamsDelegate(tx);
-  await Promise.all(rows.map(async (row) => {
+  await Promise.all(rows.filter((row) => !completedIds.has(row.eventId)).map(async (row) => {
     const eventTeam = await eventTeamsDelegate?.findUnique?.({
       where: { id: row.eventTeamId },
       select: {

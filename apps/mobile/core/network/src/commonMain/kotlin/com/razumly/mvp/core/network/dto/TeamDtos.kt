@@ -10,6 +10,8 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class TeamPlayerRegistrationApiDto(
+    val invitationId: String? = null,
+    val invitationLabel: String? = null,
     val id: String? = null,
     val teamId: String? = null,
     val userId: String? = null,
@@ -131,6 +133,8 @@ data class TeamApiDto(
 fun TeamPlayerRegistrationApiDto.toTeamPlayerRegistrationOrNull(): TeamPlayerRegistration? {
     val normalizedUserId = userId?.trim()?.takeIf(String::isNotBlank) ?: return null
     return TeamPlayerRegistration(
+        invitationId = invitationId,
+        invitationLabel = invitationLabel,
         id = id?.trim().orEmpty(),
         teamId = teamId?.trim()?.takeIf(String::isNotBlank),
         userId = normalizedUserId,
@@ -184,6 +188,7 @@ data class TeamInviteEventTeamOptionDto(
 
 @Serializable
 data class TeamMemberInviteRequestDto(
+    val eventRegistration: EventRegistrationScopeDto? = null,
     val userId: String? = null,
     val email: String? = null,
     val role: String = "player",
@@ -191,6 +196,18 @@ data class TeamMemberInviteRequestDto(
     val lastName: String? = null,
     val phone: String? = null,
     val shareOnly: Boolean? = null,
+    val isMinor: Boolean? = null,
+    val dateOfBirth: String? = null,
+    val guardianEmail: String? = null,
+    val idempotencyKey: String? = null,
+    val existingInviteId: String? = null,
+)
+
+@Serializable
+data class TeamInviteDeliveryDto(
+    val attempted: Boolean = false,
+    val failed: Boolean = false,
+    val inviteIds: List<String> = emptyList(),
 )
 
 @Serializable
@@ -199,6 +216,9 @@ data class TeamMemberInviteResponseDto(
     val team: TeamApiDto? = null,
     val invite: Invite? = null,
     val shareUrl: String? = null,
+    val teamInviteUrl: String? = null,
+    val claimUrl: String? = null,
+    val delivery: TeamInviteDeliveryDto? = null,
 )
 
 @Serializable

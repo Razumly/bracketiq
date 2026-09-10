@@ -3438,7 +3438,7 @@ export default function ScoreUpdateModal({
                 leftSection={<ListChecks size={14} />}
                 onClick={onOpenRoster}
               >
-                Edit roster
+                View roster
               </Button>
             )}
             <Button

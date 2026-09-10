@@ -264,7 +264,15 @@ export const getMatchRoster = async (
       select: { id: true, firstName: true, lastName: true, userName: true },
     })
     : [];
-  const typedOverrides = overrides as MatchRosterOverrideRow[];
+  return serializeMatchRoster(params.eventTeamId, users, overrides);
+};
+
+export const serializeMatchRoster = (
+  eventTeamId: string,
+  users: RosterUserRow[],
+  overrides: MatchRosterOverrideRow[],
+) => {
+  const typedOverrides = overrides;
   const baseOverridesByUserId = new Map<string, MatchRosterOverrideRow>(
     typedOverrides
       .filter((entry) => entry.source === BASE_SOURCE && entry.userId)
@@ -301,7 +309,7 @@ export const getMatchRoster = async (
       removedAt: entry.removedAt,
     }));
   return {
-    eventTeamId: params.eventTeamId,
+    eventTeamId,
     entries: [...baseEntries, ...temporaryEntries],
   };
 };

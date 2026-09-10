@@ -176,6 +176,8 @@ internal class EventRegistrationMutationCoordinator(
         childUserId: String,
         joinWaitlist: Boolean,
         occurrence: EventOccurrenceSelection?,
+        divisionId: String? = null,
+        answers: Map<String, String> = emptyMap(),
     ): Result<ChildRegistrationResult> = runCatching {
         val normalizedEventId = eventId.trim()
         val normalizedChildUserId = childUserId.trim()
@@ -196,6 +198,8 @@ internal class EventRegistrationMutationCoordinator(
                 path = "api/events/$normalizedEventId/waitlist",
                 body = EventParticipantsRequestDto(
                     userId = normalizedChildUserId,
+                    divisionId = divisionId,
+                    answers = answers.toEventRegistrationQuestionAnswerDtos(),
                     slotId = occurrence?.slotId,
                     occurrenceDate = occurrence?.occurrenceDate,
                 ),
@@ -236,6 +240,8 @@ internal class EventRegistrationMutationCoordinator(
                 childId = normalizedChildUserId,
                 slotId = occurrence?.slotId,
                 occurrenceDate = occurrence?.occurrenceDate,
+                divisionId = divisionId,
+                answers = answers.toEventRegistrationQuestionAnswerDtos(),
             ),
         )
         response.error?.takeIf(String::isNotBlank)?.let { error(it) }

@@ -1,11 +1,20 @@
 /** @jest-environment node */
 
+const storedInvites = new Map<string, any>();
+const deliveries = new Map<string, any>();
 const prismaMock = {
+  $executeRaw: jest.fn(),
+  $queryRaw: jest.fn(),
+  $transaction: jest.fn((callback: any) => callback(prismaMock)),
+  teamBlocks: { findMany: jest.fn() },
+  parentChildLinks: { findMany: jest.fn() },
+  authUser: { findMany: jest.fn() },
+  inviteDeliveries: { findUnique: jest.fn(), create: jest.fn(), updateMany: jest.fn() },
   events: { findMany: jest.fn() },
   organizations: { findMany: jest.fn() },
   teams: { findMany: jest.fn() },
-  userData: { findUnique: jest.fn() },
-  invites: { update: jest.fn() },
+  userData: { findUnique: jest.fn(), findMany: jest.fn() },
+  invites: { findMany: jest.fn(), update: jest.fn(), findUnique: jest.fn(), updateMany: jest.fn() },
 };
 
 const buildInviteEmailMock = jest.fn();
@@ -13,6 +22,8 @@ const isEmailEnabledMock = jest.fn();
 const sendEmailMock = jest.fn();
 const sendPushToUsersMock = jest.fn();
 const isUserNotificationChannelEnabledMock = jest.fn();
+
+jest.mock('@/server/teams/teamMembership', () => ({ loadCanonicalTeamById: async (id: string) => ({ id, managerId: 'manager' }), normalizeId: (id: string) => id, normalizeIdList: (ids: string[]) => ids ?? [] }));
 
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 jest.mock('@/server/emailTemplates', () => ({ buildInviteEmail: (...args: any[]) => buildInviteEmailMock(...args) }));
@@ -27,9 +38,28 @@ jest.mock('@/server/notificationPreferences', () => ({
 
 import { sendInviteEmails } from '@/server/inviteEmails';
 
+const deliver = async (invites: Parameters<typeof sendInviteEmails>[0], url: string) => {
+  const records = invites.map((invite) => ({ ...invite, teamId: 'team', createdBy: 'manager' }));
+  records.forEach((invite) => storedInvites.set(invite.id, invite));
+  return sendInviteEmails(records, url);
+};
+
 describe('sendInviteEmails', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    storedInvites.clear(); deliveries.clear();
+    prismaMock.$executeRaw.mockResolvedValue(0);
+    prismaMock.$queryRaw.mockResolvedValue([]);
+    prismaMock.teamBlocks.findMany.mockResolvedValue([]);
+    prismaMock.authUser.findMany.mockResolvedValue([]);
+    prismaMock.parentChildLinks.findMany.mockResolvedValue([]);
+    prismaMock.invites.findMany.mockResolvedValue([]);
+    prismaMock.userData.findMany.mockResolvedValue([]);
+    prismaMock.invites.findUnique.mockImplementation(async ({ where }) => storedInvites.get(where.id));
+    prismaMock.invites.updateMany.mockImplementation(async ({ where, data }) => { storedInvites.set(where.id, { ...storedInvites.get(where.id), ...data }); return { count: 1 }; });
+    prismaMock.inviteDeliveries.findUnique.mockImplementation(async ({ where }) => deliveries.get(`${where.inviteId_idempotencyKey.inviteId}:${where.inviteId_idempotencyKey.idempotencyKey}`));
+    prismaMock.inviteDeliveries.create.mockImplementation(async ({ data }) => { const record = { ...data, createdAt: new Date() }; deliveries.set(`${data.inviteId}:${data.idempotencyKey}`, record); return record; });
+    prismaMock.inviteDeliveries.updateMany.mockImplementation(async ({ where, data }) => { for (const row of deliveries.values()) if (row.id === where.id) Object.assign(row, data); return { count: 1 }; });
     prismaMock.events.findMany.mockResolvedValue([]);
     prismaMock.organizations.findMany.mockResolvedValue([]);
     prismaMock.teams.findMany.mockResolvedValue([]);
@@ -54,8 +84,32 @@ describe('sendInviteEmails', () => {
     });
   });
 
+  it('routes a known child Account invitation to the active guardian', async () => {
+    prismaMock.userData.findMany.mockImplementation(async ({ select }) => select.blockedUserIds ? [] : [{ id: 'child', dateOfBirth: new Date('2015-01-01') }]);
+    prismaMock.parentChildLinks.findMany.mockResolvedValue([{ id: 'link', childId: 'child', parentId: 'guardian' }]);
+    prismaMock.authUser.findMany.mockResolvedValue([{ id: 'guardian', email: 'parent@example.com', passwordHash: 'active-password', disabledAt: null }]);
+    await deliver([{ id: 'child-invite', type: 'TEAM', userId: 'child', email: 'child@example.com', isMinor: false, status: 'PENDING' }], 'http://localhost');
+    expect(sendPushToUsersMock).toHaveBeenCalledWith(expect.objectContaining({ userIds: ['guardian'] }));
+    expect(buildInviteEmailMock).toHaveBeenCalledWith(expect.objectContaining({ isMinor: true, email: 'parent@example.com' }));
+  });
+
+  it('keeps another delivery successful when one recipient preference lookup fails', async () => {
+    isUserNotificationChannelEnabledMock.mockImplementation(async (userId, _type, channel) => {
+      if (userId === 'unavailable-user' && channel === 'email') throw new Error('Preference lookup failed');
+      return false;
+    });
+    const invites = await sendInviteEmails([
+      { id: 'unavailable', type: 'EVENT', userId: 'unavailable-user', email: 'one@example.test', status: 'PENDING' },
+      { id: 'delivered', type: 'EVENT', email: 'two@example.test', status: 'PENDING' },
+    ], 'http://localhost');
+    expect(invites[0].delivery).toMatchObject({ status: 'FAILED', failed: true });
+    expect(invites[1].delivery).toMatchObject({ status: 'SENT', failed: false });
+    expect(sendEmailMock).toHaveBeenCalledTimes(1);
+    expect(sendEmailMock).toHaveBeenCalledWith(expect.objectContaining({ to: 'two@example.test' }));
+  });
+
   it('uses push delivery for user-id invites when push targets exist', async () => {
-    const invites = await sendInviteEmails([{
+    const invites = await deliver([{
       id: 'invite_1',
       email: 'player@example.com',
       userId: 'user_1',
@@ -78,8 +132,8 @@ describe('sendInviteEmails', () => {
       status: 'PENDING',
       sentAt: expect.any(Date),
     })]);
-    expect(prismaMock.invites.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'invite_1' },
+    expect(prismaMock.invites.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: 'invite_1' }),
       data: expect.objectContaining({
         sentAt: expect.any(Date),
         updatedAt: expect.any(Date),
@@ -98,7 +152,7 @@ describe('sendInviteEmails', () => {
       prunedTokenCount: 0,
     });
 
-    const invites = await sendInviteEmails([{
+    const invites = await deliver([{
       id: 'invite_2',
       email: 'player@example.com',
       userId: 'user_1',
@@ -115,8 +169,8 @@ describe('sendInviteEmails', () => {
       status: 'PENDING',
       sentAt: expect.any(Date),
     })]);
-    expect(prismaMock.invites.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'invite_2' },
+    expect(prismaMock.invites.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: 'invite_2' }),
       data: expect.objectContaining({
         sentAt: expect.any(Date),
         updatedAt: expect.any(Date),
@@ -124,7 +178,7 @@ describe('sendInviteEmails', () => {
     }));
   });
 
-  it('marks invite as FAILED when email fallback fails', async () => {
+  it('keeps the invitation pending when email fallback fails', async () => {
     sendPushToUsersMock.mockResolvedValue({
       attempted: false,
       reason: 'no_tokens',
@@ -137,7 +191,7 @@ describe('sendInviteEmails', () => {
     sendEmailMock.mockRejectedValue(new Error('smtp down'));
     const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
 
-    const invites = await sendInviteEmails([{
+    const invites = await deliver([{
       id: 'invite_3',
       email: 'player@example.com',
       userId: 'user_1',
@@ -148,13 +202,9 @@ describe('sendInviteEmails', () => {
     expect(sendPushToUsersMock).toHaveBeenCalled();
     expect(invites).toEqual([expect.objectContaining({
       id: 'invite_3',
-      status: 'FAILED',
+      status: 'PENDING',
+      delivery: expect.objectContaining({ failed: true }),
     })]);
-    expect(prismaMock.invites.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'invite_3' },
-      data: expect.objectContaining({ status: 'FAILED' }),
-    }));
-    expect(prismaMock.invites.update.mock.calls[0][0].data).not.toHaveProperty('sentAt');
     expect(consoleErrorSpy).toHaveBeenCalled();
     consoleErrorSpy.mockRestore();
   });
@@ -168,7 +218,7 @@ describe('sendInviteEmails', () => {
     });
     const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
 
-    const invites = await sendInviteEmails([
+    const invites = await deliver([
       {
         id: 'invite_delivered',
         email: 'delivered@example.com',
@@ -187,12 +237,9 @@ describe('sendInviteEmails', () => {
 
     expect(invites).toEqual([
       expect.objectContaining({ id: 'invite_delivered', status: 'PENDING', sentAt: expect.any(Date) }),
-      expect.objectContaining({ id: 'invite_failed', status: 'FAILED' }),
+      expect.objectContaining({ id: 'invite_failed', status: 'PENDING', delivery: expect.objectContaining({ failed: true }) }),
     ]);
-    expect(prismaMock.invites.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'invite_failed' },
-      data: expect.objectContaining({ status: 'FAILED' }),
-    }));
+    expect(deliveries.get('invite_failed:initial').status).toBe('FAILED');
     consoleErrorSpy.mockRestore();
   });
 });

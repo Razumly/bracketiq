@@ -1,5 +1,6 @@
 package com.razumly.mvp.profile
 
+import com.razumly.mvp.core.network.userMessage
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -1061,9 +1062,13 @@ internal fun EventTemplatesEmptyState(onCreateEvent: () -> Unit) {
 @Composable
 fun ProfileInvitesScreen(component: ProfileComponent) {
     val invitesState by component.invitesState.collectAsState()
+    val teamBlocks by component.teamBlocks.collectAsState()
+    var teamBlockError by remember { mutableStateOf<String?>(null) }
+    var removingTeamBlockId by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(component) {
         component.refreshInvites()
+        component.refreshTeamBlocks()
     }
 
     val organizationInvites = remember(invitesState.invites) {
@@ -1102,6 +1107,22 @@ fun ProfileInvitesScreen(component: ProfileComponent) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.error,
             )
+        }
+
+        teamBlockError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        if (teamBlocks.isNotEmpty()) {
+            SectionHeaderRow(title = "Team Blocks")
+            teamBlocks.forEach { block ->
+                Text("${block.teamName ?: "Team"} - For ${block.playerName ?: "Player"}")
+                TextButton(enabled = removingTeamBlockId == null, onClick = {
+                    removingTeamBlockId = block.id
+                    component.removeTeamBlock(block) { result ->
+                        removingTeamBlockId = null
+                        teamBlockError = result.exceptionOrNull()?.userMessage("The Team Block was not removed. Try again.")
+                    }
+                }) { Text("Remove Team Block") }
+            }
+            Text("Removing a block permits a new invitation. It does not restore membership or send an invitation.")
         }
 
         when {
@@ -1186,6 +1207,9 @@ fun ProfileInvitesScreen(component: ProfileComponent) {
                             primaryEnabled = !requiresParentAccept && (!hasActiveInviteAction || isAccepting),
                             secondaryEnabled = !hasActiveInviteAction || isDeclining,
                         )
+                        InvitationBlockAction(invite, enabled = !hasActiveInviteAction && !requiresParentAccept) { blockScope, leaveChats, onResult ->
+                            component.declineAndBlockInvite(invite, blockScope, leaveChats, onResult)
+                        }
                     }
                 }
 
@@ -1833,7 +1857,7 @@ fun ProfileConnectionsScreen(component: ProfileComponent) {
                                                 pendingBlockUser = candidate
                                             }
                                         },
-                                        enabled = !isActionInProgress,
+                                        enabled = !isActionInProgress && (isBlocked || candidate.hasActiveAccount),
                                     ) {
                                         Text(if (isBlocked) "Unblock user" else "Block user")
                                     }
@@ -1931,7 +1955,7 @@ fun ProfileConnectionsScreen(component: ProfileComponent) {
                                     leaveSharedChatsOnBlock = true
                                     pendingBlockUser = friend
                                 },
-                                enabled = !isActionInProgress,
+                                enabled = !isActionInProgress && friend.hasActiveAccount,
                             ) {
                                 Text(if (isActionInProgress) "Working..." else "Block user")
                             }
@@ -1977,7 +2001,7 @@ fun ProfileConnectionsScreen(component: ProfileComponent) {
                                     leaveSharedChatsOnBlock = true
                                     pendingBlockUser = followedUser
                                 },
-                                enabled = !isActionInProgress,
+                                enabled = !isActionInProgress && followedUser.hasActiveAccount,
                             ) {
                                 Text(if (isActionInProgress) "Working..." else "Block user")
                             }

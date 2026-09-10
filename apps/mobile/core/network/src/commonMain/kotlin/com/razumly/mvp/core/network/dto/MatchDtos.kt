@@ -354,6 +354,13 @@ data class TeamCheckInResponseDto(
 )
 
 @Serializable
+data class MatchDocumentReadinessDto(
+    val isMinorAtEvent: Boolean? = null,
+    val documents: EventComplianceDocumentCountsDto? = null,
+    val requiredDocuments: List<EventComplianceRequiredDocumentDto> = emptyList(),
+)
+
+@Serializable
 data class MatchRosterEntryDto(
     val id: String? = null,
     val source: String? = null,
@@ -364,6 +371,7 @@ data class MatchRosterEntryDto(
     val userName: String? = null,
     val email: String? = null,
     val noAccount: Boolean? = null,
+    val documentReadiness: MatchDocumentReadinessDto? = null,
     val linkedAt: String? = null,
     val removedAt: String? = null,
 )
@@ -371,6 +379,8 @@ data class MatchRosterEntryDto(
 @Serializable
 data class MatchRosterDto(
     val eventTeamId: String? = null,
+    val canEdit: Boolean? = null,
+    val teamName: String? = null,
     val entries: List<MatchRosterEntryDto> = emptyList(),
 )
 

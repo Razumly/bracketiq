@@ -4,24 +4,16 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Alert, Badge, Button, Center, Container, Loader, Paper, Stack, Text, Title } from '@mantine/core';
 import { useApp } from '@/app/providers';
-import { apiRequest } from '@/lib/apiClient';
-
-type InvitePreview = {
-  available: boolean;
-  invite: {
-    id: string;
-    firstName?: string | null;
-    expiresAt?: string | null;
-    role?: 'PLAYER' | 'MANAGER' | 'HEAD_COACH' | 'ASSISTANT_COACH';
-  };
-  team: { id: string; name: string; sport?: string | null; division?: string | null; teamSize?: number | null };
-};
+import { teamInviteClaimService, type TeamInvitePreview as InvitePreview } from '@/lib/teamInviteClaimService';
+import TeamInvitationRecipientActions from '@/components/ui/TeamInvitationRecipientActions';
 
 export default function TeamInviteClaimPage() {
   const params = useParams<{ id: string }>();
   const searchParams = useSearchParams();
   const router = useRouter();
   const { isAuthenticated, loading: authLoading } = useApp();
+  const [recipientRefreshKey, setRecipientRefreshKey] = useState(0);
+  const [finished, setFinished] = useState(false);
   const [preview, setPreview] = useState<InvitePreview | null>(null);
   const [loading, setLoading] = useState(true);
   const [claiming, setClaiming] = useState(false);
@@ -48,7 +40,11 @@ export default function TeamInviteClaimPage() {
     const load = async () => {
       setLoading(true);
       try {
-        const data = await apiRequest<InvitePreview>(`/api/public/team-invites/${encodeURIComponent(params.id)}?${signedQuery}`);
+        const data = await teamInviteClaimService.preview(params.id, signedQuery);
+        if (!cancelled && data.invite.profileClaimRequired) {
+          router.replace(`/claim/player/${encodeURIComponent(params.id)}?${signedQuery}`);
+          return;
+        }
         if (!cancelled) setPreview(data);
       } catch {
         if (!cancelled) setError('This invitation is expired, already used, or unavailable.');
@@ -58,14 +54,15 @@ export default function TeamInviteClaimPage() {
     };
     void load();
     return () => { cancelled = true; };
-  }, [params.id, signedQuery]);
+  }, [params.id, signedQuery, router]);
 
-  const claim = async () => {
+  const claim = async (review = false) => {
     setClaiming(true);
     setError(null);
     try {
-      await apiRequest(`/api/team-invites/${encodeURIComponent(params.id)}/claim?${signedQuery}`, { method: 'POST' });
-      router.replace(`/teams/${encodeURIComponent(preview!.team.id)}`);
+      await teamInviteClaimService.act(params.id, signedQuery, review);
+      if (review) { setRecipientRefreshKey((key) => key + 1); setClaiming(false); }
+      else router.replace(`/teams/${encodeURIComponent(preview!.team.id)}`);
     } catch (claimError) {
       setError(claimError instanceof Error ? claimError.message : 'The invitation could not be accepted.');
       setClaiming(false);
@@ -76,6 +73,7 @@ export default function TeamInviteClaimPage() {
     return <Center mih="70vh"><Loader /></Center>;
   }
 
+  if (finished) return <Container size="xs" py={64}><Text>Invitation declined.</Text><Button onClick={() => router.replace('/profile')}>Open profile</Button></Container>;
   return (
     <Container size="xs" py={64}>
       <Paper withBorder shadow="sm" radius="lg" p="xl">
@@ -95,7 +93,11 @@ export default function TeamInviteClaimPage() {
           {error ? <Alert color="red">{error}</Alert> : null}
           {preview && !error ? (
             isAuthenticated ? (
-              <Button size="md" onClick={() => { void claim(); }} loading={claiming}>Accept invitation</Button>
+              <Stack gap="xs">
+                <Button size="md" onClick={() => { void claim(); }} loading={claiming}>Accept invitation</Button>
+                <Button variant="subtle" onClick={() => { void claim(true); }} disabled={claiming}>Review decline options</Button>
+                <TeamInvitationRecipientActions inviteId={params.id} refreshKey={recipientRefreshKey} onSaved={() => setFinished(true)} />
+              </Stack>
             ) : (
               <Stack gap="xs">
                 <Button size="md" onClick={() => router.push(`/login?next=${encodeURIComponent(returnPath)}`)}>Sign in to accept</Button>

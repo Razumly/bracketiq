@@ -11,6 +11,7 @@ import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventRegistrationCacheEntry
+import com.razumly.mvp.core.data.dataTypes.EventSignupState
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
@@ -408,7 +409,17 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
             assertTrue(eventRepository.staffInviteRequests.isEmpty())
 
             component.joinEvent()
+
             advance()
+
+            assertEquals(0, eventRepository.joinCallCount)
+
+            assertTrue(component.checkoutReview.value != null)
+
+            component.confirmCheckoutReview()
+
+            advance()
+
 
             assertEquals(1, eventRepository.joinCallCount)
             assertTrue(eventRepository.refreshRequests.isNotEmpty())
@@ -520,7 +531,17 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
         assertEquals(0, component.selectedWeeklyOccurrenceSummary.value?.participantCount)
 
         component.joinEvent()
+
         advance()
+
+        assertEquals(0, eventRepository.joinCallCount)
+
+        assertTrue(component.checkoutReview.value != null)
+
+        component.confirmCheckoutReview()
+
+        advance()
+
 
         assertEquals(1, eventRepository.joinCallCount)
         assertEquals(1, component.selectedWeeklyOccurrenceSummary.value?.participantCount)
@@ -605,6 +626,11 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
         assertEquals(listOf(linkedChild.userId), component.childJoinSelectionDialog.value?.children?.map { it.userId })
 
         component.selectChildForJoin(linkedChild.userId)
+        advance()
+
+        assertTrue(eventRepository.childRegistrationRequests.isEmpty())
+        assertEquals(EventCheckoutAction.CHILD, component.checkoutReview.value?.action)
+        component.confirmCheckoutReview()
         advance()
 
         assertEquals(
@@ -2238,6 +2264,11 @@ private class EventDetailFakeEventRepository(
     var managementSnapshotCallCount = 0
     var teamComplianceCallCount = 0
     var userComplianceCallCount = 0
+
+    override suspend fun loadRegistrationDraft(
+        eventId: String,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<EventSignupState> = Result.success(EventSignupState(available = true))
 
     override fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>> {
         eventWithRelationsFlowRequests += eventId

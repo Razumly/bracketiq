@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
 import { calculateAgeOnDate } from '@/lib/age';
+import { findGuardianAuthority } from '@/server/guardianAuthority';
 import {
   acquireEventLockAndLoadStructure,
   transitionEventRegistrationStatus,
@@ -54,14 +55,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ re
       return NextResponse.json({ error: 'Registration request not found.' }, { status: 404 });
     }
 
-    const parentLink = await prisma.parentChildLinks.findFirst({
-      where: {
-        parentId: session.userId,
-        childId: invite.userId,
-        status: 'ACTIVE',
-      },
-      select: { id: true },
-    });
+    const parentLink = await findGuardianAuthority(prisma, session.userId, invite.userId);
     if (!parentLink) {
       return NextResponse.json({ error: 'Registration request not found.' }, { status: 404 });
     }
@@ -90,15 +84,25 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ re
     }, { status: result.status });
   }
 
+  if (!await findGuardianAuthority(prisma, session.userId, registration.registrantId)) {
+    return NextResponse.json({ error: 'Active guardian authority is required' }, { status: 403 });
+  }
+
   if (parsed.data.action === 'decline') {
-    const declined = await prisma.eventRegistrations.update({
-      where: { id: registration.id },
-      data: {
-        status: 'CANCELLED',
-        consentStatus: 'guardian_declined',
-        updatedAt: new Date(),
-      },
+    const declined = await prisma.$transaction(async (tx) => {
+      if (!await findGuardianAuthority(tx, session.userId, registration.registrantId)) return null;
+      return tx.eventRegistrations.update({
+        where: { id: registration.id },
+        data: {
+          status: 'CANCELLED',
+          consentStatus: 'guardian_declined',
+          updatedAt: new Date(),
+        },
+      });
     });
+    if (!declined) {
+      return NextResponse.json({ error: 'Active guardian authority is required' }, { status: 403 });
+    }
 
     return NextResponse.json({
       registration: declined,
@@ -167,6 +171,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ re
         eventType: event.eventType,
         teamSignup: event.teamSignup,
       });
+      if (!await findGuardianAuthority(client, session.userId, registration.registrantId)) return null;
       const updatedRegistration = await transitionEventRegistrationStatus({
         registrationId: registration.id,
         status: approvedStatus,
@@ -186,6 +191,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ re
     const registrationResponse = eventRegistrationErrorResponse(error);
     if (registrationResponse) return registrationResponse;
     throw error;
+  }
+
+  if (!approved) {
+    return NextResponse.json({ error: 'Active guardian authority is required' }, { status: 403 });
   }
 
   const childAgeAtEvent = childProfile?.dateOfBirth

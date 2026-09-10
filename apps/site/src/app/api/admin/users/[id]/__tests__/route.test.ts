@@ -5,6 +5,8 @@ import { NextRequest } from 'next/server';
 const requireRazumlyAdminMock = jest.fn();
 const transactionMock = jest.fn(async (callback: any) => callback(prismaMock));
 const prismaMock = {
+  eventRegistrationDrafts: { deleteMany: jest.fn() },
+  eventRegistrationTeamPreferences: { deleteMany: jest.fn() },
   userData: {
     findUnique: jest.fn(),
     findMany: jest.fn(),

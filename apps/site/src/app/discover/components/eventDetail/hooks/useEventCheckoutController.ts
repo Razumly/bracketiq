@@ -219,7 +219,7 @@ export function useEventCheckoutController({
     }, [discount, pendingCheckout, setJoinError, setJoining, startCheckout]);
 
     const expireHold = useCallback(() => {
-        progress.clear();
+        void progress.save({ registrationId: null, step: 'review' });
         setWorkflowPhase('payment', false);
         setPaymentData(null);
         setPendingCheckout(null);
@@ -252,6 +252,7 @@ export function useEventCheckoutController({
     }, []);
 
     return {
+        progress,
         paymentData,
         pendingCheckout,
         holdExpiresAt: progress.holdExpiresAt,

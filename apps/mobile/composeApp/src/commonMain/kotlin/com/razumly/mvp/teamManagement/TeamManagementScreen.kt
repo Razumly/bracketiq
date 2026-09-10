@@ -72,6 +72,7 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
     val selectedFreeAgent by component.selectedFreeAgent.collectAsState()
     val selectedEvent by component.selectedEvent.collectAsState()
     val selectedTeam by component.selectedTeam.collectAsState()
+    val teamInvitations by component.teamInvitations.collectAsState()
     val componentError by component.errorState.collectAsState()
     val staffUsersById by component.staffUsersById.collectAsState()
     val teamMemberCompliance by component.teamMemberCompliance.collectAsState()
@@ -146,6 +147,8 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
         }
         CreateOrEditTeamScreen(
             team = team,
+            invitations = teamInvitations,
+            onInvitationAction = component::actOnInvitation,
             sports = sports,
             divisionTypeParameters = divisionTypeParameters,
             friends = friends,
@@ -367,7 +370,11 @@ private fun TeamInviteLinksDialog(
                                 Column(Modifier.weight(1f)) {
                                     Text(invite.name, fontWeight = FontWeight.SemiBold)
                                     Text(
-                                        "${invite.role} · ${if (invite.emailSent) "Email sent" else "Link ready"}",
+                                        "${invite.role} · ${when {
+                                            invite.deliveryFailed -> "Email delivery needs attention"
+                                            invite.emailSent -> "Email sent"
+                                            else -> "Link ready"
+                                        }}",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )

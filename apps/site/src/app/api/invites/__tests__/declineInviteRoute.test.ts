@@ -68,6 +68,7 @@ describe('POST /api/invites/[id]/decline', () => {
       where: { id: 'invite_1' },
       data: {
         status: 'DECLINED',
+        finalizedAt: expect.any(Date),
         updatedAt: expect.any(Date),
       },
     });
