@@ -20,7 +20,8 @@ The discover page should let someone search within the tab they are already view
 - [x] (2026-09-10) Completed the reference-style map layout. Passed `locationInfo` from the discover page to `DiscoverMapModal`.
 - [x] (2026-09-10) Confirmed that local data already contains co-located events. No database move or seed occurred.
 - [x] (2026-09-10) Passed the focused `DiscoverMapModal` Jest suite (12 tests), `npx tsc --noEmit --pretty false`, and `git -c core.whitespace=cr-at-eol diff --check`.
-- [x] (2026-09-10) Browser-verified the rebuilt runtime's visible tabs, compact chrome, Nearby events rail, selected-event card, and close-to-rail restore. Map tiles and markers remain unverified because `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` is unavailable. See `Artifacts and Notes`.
+- [x] (2026-09-10) Copied `.env` and `.env.local` from the sibling `site-ui-operations` worktree. The production build loaded both files, and the user-authorized `site-ui-operations-prod` restart became ready.
+- [x] (2026-09-10) Browser-verified the rebuilt page's Maps JavaScript request with the configured key, visible modal tabs, compact chrome, Nearby events rail, selected-event card, and close-to-rail restore. The selected-card summary clamp remained at three lines. The Google Maps canvas still showed `Oops! Something went wrong` with no tiles or markers, so map pixels and markers remain unverified. See `Artifacts and Notes`.
 
 ## Surprises & Discoveries
 
@@ -30,6 +31,8 @@ The discover page should let someone search within the tab they are already view
   Evidence: `src/components/location/LocationSelector.tsx` and `src/lib/googleMapsLoader.ts`.
 - Observation: Local data already contains events at the same location.
   Evidence: The local data probe found co-located events. No database move or seed occurred.
+- Observation (2026-09-10 environment rerun): Key availability and Google Maps rendering are separate verification results.
+  Evidence: After the environment copy, production rebuild, and ready restart, the browser loaded the Maps JavaScript request with the configured key. The canvas still showed the generic `Oops! Something went wrong` surface with no tiles or markers. This run did not establish a specific Google Cloud error.
 
 ## Decision Log
 
@@ -53,7 +56,7 @@ The discover page should let someone search within the tab they are already view
 
 2026-09-10 outcome: The reference-style map implementation is complete. Visible tabs replace the earlier map type dropdown. The map has compact search, location, count, and filter controls. It uses coral event dots and a halo around the user location. A grouped Nearby events rail opens by default. A floating detail card shows the selected event. The discover page passes `locationInfo` to the modal.
 
-The focused Jest suite passed all 12 tests. TypeScript and diff checks also passed. The local data probe found co-located events, so no database move or seed occurred. Following the user's authorization, `site-ui-operations-prod` was restarted and became ready. The rebuilt browser run verified the visible tabs, compact modal chrome, Nearby events rail, selected-event card, and close-to-rail restore. The map displayed the intentional missing-key error because `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` is unavailable, so Google Maps tiles and markers remain unverified.
+The focused Jest suite passed all 12 tests. TypeScript and diff checks also passed. The local data probe found co-located events, so no database move or seed occurred. After `.env` and `.env.local` were copied from the sibling `site-ui-operations` worktree, the production build loaded both files. Following the user's authorization, `site-ui-operations-prod` was restarted and became ready. The rebuilt browser run loaded the Maps JavaScript request with the configured key and verified the visible modal tabs, compact chrome, Nearby events rail, selected-event card, and close-to-rail restore. The selected-card summary clamp remained at three lines. The key is available, but the Google Maps canvas still showed its generic `Oops! Something went wrong` surface with no map tiles or markers; map pixels and markers remain unverified. No specific Google Cloud error was established by this run.
 
 ## Context and Orientation
 
@@ -97,6 +100,8 @@ All edits are additive or scoped replacements. The previous search fix is alread
 
 ## Artifacts and Notes
 
+Earlier implementation artifacts (2026-05-14; preserved as historical evidence):
+
 - `npx tsc --noEmit --pretty false` passed.
 - `npm test -- --runTestsByPath src/lib/__tests__/teamService.test.ts src/server/teams/__tests__/teamMembership.test.ts src/app/discover/components/__tests__/EventsTabContent.test.tsx --runInBand` passed: 3 suites, 25 tests.
 - `npx eslint src/app/discover/page.tsx src/app/discover/components/EventsTabContent.tsx src/app/discover/components/DiscoverSearchControls.tsx src/app/discover/components/DiscoverMapModal.tsx src/app/api/teams/route.ts src/lib/teamService.ts src/server/teams/teamMembership.ts src/lib/__tests__/teamService.test.ts src/server/teams/__tests__/teamMembership.test.ts src/app/discover/components/__tests__/EventsTabContent.test.tsx` passed.
@@ -104,11 +109,16 @@ All edits are additive or scoped replacements. The previous search fix is alread
 - `npm run build` passed. It emitted an existing Turbopack NFT warning for `next.config.mjs` through `src/lib/storage.ts` and two existing `z-index` warnings.
 - Browser verification at `http://localhost:3000/discover` confirmed Events/Organizations/Rentals/Teams tabs, the original discover target dropdown, the Teams search target switching to the Teams tab, the Map button, and the map modal search controls. The Google Maps script returned `RefererNotAllowedMapError` for `http://localhost:3000`.
 - Follow-up implementation removed the page-level dropdown so search is scoped by the active tab. This still needs post-follow-up rendered verification on a restarted production server or a fast enough local dev surface.
+
+Reference-layout and environment-rerun artifacts (2026-09-10):
+
 - Reference-layout implementation (2026-09-10): `DiscoverMapModal` now has visible tabs, compact search/location/count/filter controls, coral event dots, and a user halo. It also has a grouped Nearby events rail that opens by default and a floating selected-event detail card. `src/app/discover/page.tsx` passes `locationInfo` to the modal.
 - Reference-layout verification (2026-09-10): The focused `DiscoverMapModal` Jest suite passed all 12 tests. `npx tsc --noEmit --pretty false` and `git -c core.whitespace=cr-at-eol diff --check` passed.
 - Local data probe (2026-09-10): Co-located events already exist. No database move or seed occurred.
-- Browser limitation (2026-09-10): The user authorized the restart, and `site-ui-operations-prod` was restarted and became ready. The rebuilt browser run verified the visible tabs, compact modal chrome, Nearby events rail, selected-event card, and close-to-rail restore. The map displayed the intentional missing-key error because `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` is unavailable; Google Maps pixels and markers remain unverified.
-- Selected-summary clamp (2026-09-10): The three-line selected-summary clamp was rebuilt and observed in the selected-event card.
+- Environment rebuild (2026-09-10): `.env` and `.env.local` were copied from the sibling `site-ui-operations` worktree. The production build loaded both env files. The user-authorized `site-ui-operations-prod` restart became ready.
+- Rebuilt-browser verification (2026-09-10): The rebuilt page loaded the Maps JavaScript request with the configured key. The visible modal tabs, compact chrome, Nearby events rail, selected-event card, and close-to-rail restore rendered.
+- Browser limitation (2026-09-10): Despite the configured key being available, the Google Maps canvas still showed the generic `Oops! Something went wrong` surface with no map tiles or markers. Map pixels and markers remain unverified; this run did not establish a specific Google Cloud error.
+- Selected-summary clamp (2026-09-10): The three-line selected-summary clamp was rebuilt and observed in the selected-event card. It remained at three lines in the browser rerun after copying the environment files.
 
 ## Interfaces and Dependencies
 
@@ -119,3 +129,5 @@ Use `@react-google-maps/api` already present in `package.json`. Reuse `GOOGLE_MA
 `teamService.searchOpenRegistrationTeams(query, limit)` returns `Team[]` hydrated through existing `mapRowToTeam(...)`.
 
 Revision note (2026-09-10): Recorded the completed reference layout and its verification limits so the plan reflects the current implementation. Preserved earlier implementation and browser results as history.
+
+Revision note (2026-09-10, environment rerun): Replaced the current missing-key limitation with the copied-env production rebuild, ready authorized restart, and keyed browser evidence. Distinguished the available key from the unresolved Google Maps rendering failure, retained the three-line summary result, and preserved earlier verification history.
