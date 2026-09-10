@@ -6,6 +6,8 @@ import { createSport } from '@/types/defaults';
 import { trackEventClicked } from '@/lib/analytics/eventAnalytics';
 import { buildEvent } from '../../../../../test/factories';
 import EventsTabContent, { type EventSortValue } from '../EventsTabContent';
+import type { DivisionDiscoveryFilterValue } from '../DivisionDiscoveryFilters';
+import { calculateVisibleFilterCount } from '../DiscoverFilterBar';
 
 jest.mock('@/components/location/LocationSearch', () => ({ __esModule: true, default: () => null }));
 jest.mock('@/lib/analytics/eventAnalytics', () => ({ trackEventClicked: jest.fn() }));
@@ -25,7 +27,10 @@ const events = [
   buildEvent({ $id: 'middle', name: 'Basketball middle', eventType: 'EVENT', sport: basketball, start: '2099-09-11T18:00:00Z', price: 1500 }),
 ];
 
-function Harness(overrides: Partial<Props>) {
+function Harness({
+  initialDivisionFilters,
+  ...overrides
+}: Partial<Props> & { initialDivisionFilters?: DivisionDiscoveryFilterValue }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSports, setSelectedSports] = useState<string[]>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -33,6 +38,15 @@ function Harness(overrides: Partial<Props>) {
   const [selectedEndDate, setSelectedEndDate] = useState<Date | null>(null);
   const [selectedEventTypes, setSelectedEventTypes] = useState(['EVENT']);
   const [maxDistance, setMaxDistance] = useState<number | null>(null);
+  const [divisionFilters, setDivisionFilters] = useState<DivisionDiscoveryFilterValue>(
+    () => initialDivisionFilters ?? {
+      genders: [],
+      skillDivisionTypeIds: [],
+      ageDivisionTypeIds: [],
+      priceMinDollars: null,
+      priceMaxDollars: null,
+    },
+  );
   return (
     <EventsTabContent
       location={null} searchTerm={searchTerm} setSearchTerm={setSearchTerm}
@@ -42,6 +56,7 @@ function Harness(overrides: Partial<Props>) {
       maxDistance={maxDistance} setMaxDistance={setMaxDistance}
       selectedStartDate={selectedStartDate} setSelectedStartDate={setSelectedStartDate}
       selectedEndDate={selectedEndDate} setSelectedEndDate={setSelectedEndDate}
+      divisionFilters={divisionFilters} setDivisionFilters={setDivisionFilters}
       sports={['Basketball', 'Volleyball']} sportsLoading={false} sportsError={null}
       defaultMaxDistance={50} kmBetween={() => 0} events={events} totalEvents={37}
       isLoadingInitial={false} isLoadingMore={false} hasMoreEvents={false}
@@ -124,6 +139,10 @@ it('keeps the event type all option mapped to every event type', async () => {
     }
   }
 });
+it('reserves the More control gap when fitting the first filter', () => {
+  expect(calculateVisibleFilterCount([100, 100], 150, 8, 50, 0)).toBe(0);
+});
+
 
 it('opens the shared date filter popover from the desktop filter row', async () => {
   const user = userEvent.setup();
@@ -133,6 +152,41 @@ it('opens the shared date filter popover from the desktop filter row', async () 
 
   expect(screen.getByRole('button', { name: 'Dates', exact: true })).toHaveAttribute('aria-expanded', 'true');
   expect(screen.getByRole('button', { name: 'Filter by start date', exact: true })).toBeInTheDocument();
+  const dateDialog = screen.getByRole('dialog', { name: 'Dates filter' });
+  expect(dateDialog.closest('.discover-filter-row')).toBeNull();
+});
+it('clears unavailable skill selections when sports change with the filter sheet closed', async () => {
+  globalThis.fetch = jest.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      genders: [],
+      ages: [],
+      sportSkills: [
+        {
+          sportId: 'basketball',
+          sportName: 'Basketball',
+          skills: [{ id: 'basketball-beginner', name: 'Beginner' }],
+        },
+        {
+          sportId: 'volleyball',
+          sportName: 'Volleyball',
+          skills: [{ id: 'volleyball-beginner', name: 'Beginner' }],
+        },
+      ],
+    }),
+  });
+  const user = userEvent.setup();
+  render(<Harness initialDivisionFilters={{
+    genders: [],
+    skillDivisionTypeIds: ['volleyball-beginner'],
+    ageDivisionTypeIds: [],
+    priceMinDollars: null,
+    priceMaxDollars: null,
+  }} />);
+
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Division filters', exact: true })).toBeInTheDocument());
+  await user.click(screen.getByRole('button', { name: 'Basketball', exact: true }));
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Division filters', exact: true })).not.toBeInTheDocument());
 });
 
 it('returns focus to Dates when its date controls close with Escape', async () => {

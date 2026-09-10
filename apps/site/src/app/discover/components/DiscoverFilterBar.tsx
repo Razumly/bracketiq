@@ -31,10 +31,10 @@ import {
   DatePickerInput,
   Loader,
   NumberInput,
-  Popover,
   Text,
   TextInput,
 } from '@/components/organization/organization-operation-ui';
+import { Popover as UiPopover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { Event, EventTag } from '@/types';
 import { formatEnumDisplayLabel } from '@/lib/enumUtils';
 import type {
@@ -46,6 +46,32 @@ import type {
 const KM_PER_MILE = 1.60934;
 const DISTANCE_SLIDER_MIN_MILES = 10;
 const DISTANCE_SLIDER_MAX_MILES = 100;
+export function calculateVisibleFilterCount(
+  itemWidths: readonly number[],
+  availableWidth: number,
+  gap: number,
+  moreWidth: number,
+  trailingWidth: number,
+): number {
+  const itemWidth = itemWidths.reduce((sum, width) => sum + width, 0);
+  const itemGaps = Math.max(0, itemWidths.length - 1) * gap;
+  const trailingSpace = trailingWidth > 0 ? trailingWidth + (gap > 0 ? gap : 0) : 0;
+  const fullWidth = itemWidth + itemGaps + trailingSpace;
+
+  if (fullWidth <= availableWidth + 1) return itemWidths.length;
+
+  let usedWidth = 0;
+  let fitCount = 0;
+  for (const width of itemWidths) {
+    const itemGap = fitCount > 0 ? gap : 0;
+    const moreGap = moreWidth > 0 ? gap : 0;
+    if (usedWidth + itemGap + width + moreGap + moreWidth + trailingSpace > availableWidth + 1) break;
+    usedWidth += itemGap + width;
+    fitCount += 1;
+  }
+  return fitCount;
+}
+
 
 type FilterItem = { key: string; node: ReactNode };
 type FilterOption = { value: string; label: string; count?: number };
@@ -87,26 +113,8 @@ function OverflowFilterRow({ items, contentKey, ariaLabel, moreLabel, onMore, tr
     const moreWidth = moreElement?.getBoundingClientRect().width ?? 0;
     const trailingWidth = trailingElement?.getBoundingClientRect().width ?? 0;
     const itemWidths = itemElements.map((item) => item.getBoundingClientRect().width);
-    const itemWidth = itemWidths.reduce((sum, width) => sum + width, 0);
-    const itemGaps = Math.max(0, itemWidths.length - 1) * gap;
-    const trailingSpace = trailingWidth > 0 ? trailingWidth + (gap > 0 ? gap : 0) : 0;
-    const fullWidth = itemWidth + itemGaps + trailingSpace;
-
-    if (fullWidth <= availableWidth + 1) {
-      setMeasurement({ key: contentKey, count: items.length });
-      return;
-    }
-
-    let usedWidth = 0;
-    let fitCount = 0;
-    for (const width of itemWidths) {
-      const itemGap = fitCount > 0 ? gap : 0;
-      const moreGap = moreWidth > 0 && fitCount > 0 ? gap : 0;
-      if (usedWidth + itemGap + width + moreGap + moreWidth + trailingSpace > availableWidth + 1) break;
-      usedWidth += itemGap + width;
-      fitCount += 1;
-    }
-    setMeasurement({ key: contentKey, count: fitCount });
+    const visibleItemCount = calculateVisibleFilterCount(itemWidths, availableWidth, gap, moreWidth, trailingWidth);
+    setMeasurement({ key: contentKey, count: visibleItemCount });
   }, [contentKey, items.length, visibleCount]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
@@ -173,45 +181,47 @@ function FilterPopover({ id, label, valueLabel, value, icon: Icon, active = fals
   }, [open]);
 
   return (
-    <Popover opened={open} onChange={onOpenChange}>
-      <Popover.Target>
-        <div className="discover-filter-control" data-active={active ? '' : undefined} onClick={() => onOpenChange(!open)}>
-          <button
-            ref={triggerRef}
-            type="button"
-            className="discover-filter-trigger"
-            aria-label={valueLabel ? `${label}: ${valueLabel}` : label}
-            aria-haspopup="dialog"
-            aria-expanded={open}
-            aria-controls={`${id}-panel`}
-          >
-            <Icon aria-hidden="true" className="discover-filter-trigger-icon" />
-            <span className="discover-filter-trigger-label">{label}</span>
-            {value && <span className="discover-filter-trigger-value">{value}</span>}
-            <ChevronDown aria-hidden="true" className="discover-filter-trigger-chevron" />
-          </button>
-          {active && onClear && (
+    <UiPopover open={open} onOpenChange={onOpenChange}>
+      <div className="discover-filter-control" data-active={active ? '' : undefined}>
+        <PopoverTrigger
+          render={
             <button
+              ref={triggerRef}
               type="button"
-              className="discover-filter-trigger-clear"
-              aria-label={`Clear ${label}`}
-              onClick={(event) => {
-                event.stopPropagation();
-                onClear();
-                onOpenChange(false);
-              }}
-            >
-              <X aria-hidden="true" />
-            </button>
-          )}
-        </div>
-      </Popover.Target>
-      <Popover.Dropdown className="discover-filter-popover p-4">
+              className="discover-filter-trigger"
+              aria-label={valueLabel ? `${label}: ${valueLabel}` : label}
+              aria-haspopup="dialog"
+              aria-expanded={open}
+              aria-controls={`${id}-panel`}
+            />
+          }
+        >
+          <Icon aria-hidden="true" className="discover-filter-trigger-icon" />
+          <span className="discover-filter-trigger-label">{label}</span>
+          {value && <span className="discover-filter-trigger-value">{value}</span>}
+          <ChevronDown aria-hidden="true" className="discover-filter-trigger-chevron" />
+        </PopoverTrigger>
+        {active && onClear && (
+          <button
+            type="button"
+            className="discover-filter-trigger-clear"
+            aria-label={`Clear ${label}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onClear();
+              onOpenChange(false);
+            }}
+          >
+            <X aria-hidden="true" />
+          </button>
+        )}
+      </div>
+      <PopoverContent align="start" className="discover-filter-popover p-4">
         <div id={`${id}-panel`} role="dialog" aria-label={`${label} filter`}>
           {children}
         </div>
-      </Popover.Dropdown>
-    </Popover>
+      </PopoverContent>
+    </UiPopover>
   );
 }
 
