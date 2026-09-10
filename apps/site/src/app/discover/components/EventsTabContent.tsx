@@ -20,13 +20,12 @@ import {
   TextInput,
 } from '@/components/organization/organization-operation-ui';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { ArrowUpDown, SlidersHorizontal } from 'lucide-react';
+import { ArrowUpDown } from 'lucide-react';
 
 import OrganizationEventCard from '@/components/organization/OrganizationEventCard';
 import {
   ActiveEventFilters,
   EVENT_SORT_OPTIONS,
-  EventFilterControls,
   EventFilterPanel,
   type EventSortValue,
 } from '@/components/events/EventFilterControls';
@@ -38,8 +37,9 @@ import {
 import { Event, EventTag, getEventDivisionPriceRange } from '@/types';
 import { formatEnumDisplayLabel } from '@/lib/enumUtils';
 import { trackEventClicked } from '@/lib/analytics/eventAnalytics';
+import DiscoverFilterBar, { DiscoverSportFilterList } from './DiscoverFilterBar';
 import DiscoverSearchControls from './DiscoverSearchControls';
-import DivisionDiscoveryFilters, { type DivisionDiscoveryFilterValue } from './DivisionDiscoveryFilters';
+import DivisionDiscoveryFilters, { type DivisionDiscoveryFilterValue, useDivisionDiscoveryOptions } from './DivisionDiscoveryFilters';
 
 export type { EventSortValue };
 
@@ -210,12 +210,10 @@ function EventsTabView<TEventType extends string>(
   const [tagSearchTerm, setTagSearchTerm] = useState('');
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const allEventTypesSelected = selectedEventTypes.length === eventTypeOptions.length;
-  const allSportsSelected = selectedSports.length === 0;
   const allTagsSelected = selectedTags.length === 0;
   const tagsQuery = tagSearchTerm.trim().toLowerCase();
   const activeQuery = searchTerm.trim();
-
-  const quickSports = sports.slice(0, 6);
+  const divisionOptions = useDivisionDiscoveryOptions(selectedSports);
 
   const visibleEventTags = useMemo(() => {
     const matchingTags = tagsQuery
@@ -520,47 +518,6 @@ function EventsTabView<TEventType extends string>(
     </div>
   );
 
-  const renderSportShortcuts = () => (
-    <div className="discover-sport-shortcuts" aria-label="Popular sports">
-      {sportsLoading ? (
-        <Loader size="sm" aria-label="Loading sports" />
-      ) : (
-        <>
-          <Chip
-            radius="xl"
-            checked={allSportsSelected}
-            disabled={!sports.length}
-            onChange={(checked) => {
-              if (checked) setSelectedSports([]);
-            }}
-          >
-            All sports
-          </Chip>
-          {quickSports.map((sport) => (
-            <Chip
-              key={sport}
-              radius="xl"
-              checked={selectedSports.includes(sport)}
-              onChange={(checked) => {
-                setSelectedSports((current) => (
-                  checked
-                    ? Array.from(new Set([...current, sport]))
-                    : current.filter((value) => value !== sport)
-                ));
-              }}
-            >
-              {sport}
-            </Chip>
-          ))}
-          {sports.length > quickSports.length && (
-            <Button variant="ghost" size="sm" onClick={() => setIsFiltersOpen(true)}>
-              More
-            </Button>
-          )}
-        </>
-      )}
-    </div>
-  );
 
   const sportsData = sports.map((sport) => ({ value: sport, label: sport }));
   const eventTypeData = eventTypeOptions.map((type) => ({
@@ -596,17 +553,24 @@ function EventsTabView<TEventType extends string>(
   };
 
   const filterPanel = (
-    <div className="space-y-6">
+    <div className="discover-filter-sheet-stack">
+      <DiscoverSportFilterList
+        sports={sports}
+        selectedSports={selectedSports}
+        setSelectedSports={setSelectedSports}
+        sportsLoading={sportsLoading}
+      />
       {renderTagFilters()}
       <EventFilterPanel
         {...sharedFilterProps}
-        sportsHeading="Sports"
+        showSports={false}
         dateHeading="Date Range"
       />
       <DivisionDiscoveryFilters
         value={divisionFilters}
         onChange={setDivisionFilters}
         selectedSports={selectedSports}
+        options={divisionOptions}
       />
     </div>
   );
@@ -625,41 +589,35 @@ function EventsTabView<TEventType extends string>(
         createEventHelperText={createEventHelperText}
         searchLabel="Search events"
       />
-      {renderSportShortcuts()}
-      <div className="discover-event-filter-row hidden lg:flex">
-        <EventFilterControls
-          searchTerm={searchTerm}
-          setSearchTerm={setSearchTerm}
-          eventSort={eventSort}
-          setEventSort={setEventSort}
-          showSearch={false}
-          showSort={false}
-          additionalControls={(
-            <Button
-              variant="outline"
-              leftSection={<SlidersHorizontal aria-hidden="true" className="size-4" />}
-              onClick={() => setIsFiltersOpen(true)}
-            >
-              More filters
-            </Button>
-          )}
-          {...sharedFilterProps}
-        />
-      </div>
-      <div className="discover-mobile-filter-row flex lg:hidden">
-        <Button
-          variant="outline"
-          leftSection={<SlidersHorizontal size={16} />}
-          onClick={() => setIsFiltersOpen(true)}
-        >
-          More filters{activeFilterCount ? ` (${activeFilterCount})` : ''}
-        </Button>
-        {activeFilterCount > 0 && (
-          <Button variant="ghost" aria-label="Clear all filters" onClick={resetFilters}>
-            Clear all
-          </Button>
-        )}
-      </div>
+      <DiscoverFilterBar
+        location={location}
+        selectedSports={selectedSports}
+        setSelectedSports={setSelectedSports}
+        sports={sports}
+        sportsLoading={sportsLoading}
+        sportsError={sportsError}
+        selectedEventTypes={selectedEventTypes}
+        setSelectedEventTypes={setSelectedEventTypes}
+        eventTypeOptions={eventTypeOptions}
+        selectedTags={selectedTags}
+        setSelectedTags={setSelectedTags}
+        eventTags={eventTags}
+        eventTagsLoading={eventTagsLoading}
+        eventTagsError={eventTagsError}
+        maxDistance={maxDistance}
+        setMaxDistance={setMaxDistance}
+        defaultMaxDistance={defaultMaxDistance}
+        selectedStartDate={selectedStartDate}
+        setSelectedStartDate={setSelectedStartDate}
+        selectedEndDate={selectedEndDate}
+        setSelectedEndDate={setSelectedEndDate}
+        divisionFilters={divisionFilters}
+        setDivisionFilters={setDivisionFilters}
+        divisionOptions={divisionOptions}
+        activeFilterCount={activeFilterCount}
+        resetFilters={resetFilters}
+        onOpenMoreFilters={() => setIsFiltersOpen(true)}
+      />
     </div>
   );
 
@@ -725,7 +683,7 @@ function EventsTabView<TEventType extends string>(
         />
       </Group>
 
-      <ActiveEventFilters filters={activeFilters} />
+      <ActiveEventFilters filters={activeFilters} className="discover-active-event-filters" label="Active filters" />
 
       {(eventsError || refreshError) && (
         <Alert color="red">

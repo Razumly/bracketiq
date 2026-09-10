@@ -75,7 +75,54 @@ it('opens the mobile filter sheet with filter controls', async () => {
   const filterDialog = screen.getByRole('dialog', { name: 'Filter Events' });
   expect(filterDialog).toBeInTheDocument();
   expect(within(filterDialog).getByText('Sports')).toBeInTheDocument();
+  expect(within(filterDialog).getByRole('button', { name: 'Volleyball', exact: true })).toBeInTheDocument();
+  expect(within(filterDialog).queryByRole('combobox', { name: 'Filter by sports' })).not.toBeInTheDocument();
   expect(within(filterDialog).getByText('Date Range')).toBeInTheDocument();
+});
+
+it('shows every event filter trigger when the toolbar has room', () => {
+  const clientWidthDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, value: 2000 });
+  try {
+    render(<Harness />);
+    ['Dates', 'Price', /^Distance/, 'Event type', 'Event tags', 'Gender', 'Age group', 'Skill level'].forEach((name) => {
+      expect(screen.getByRole('button', { name, exact: typeof name === 'string' })).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('button', { name: 'More filters' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'More sports' })).not.toBeInTheDocument();
+  } finally {
+    if (clientWidthDescriptor) {
+      Object.defineProperty(HTMLElement.prototype, 'clientWidth', clientWidthDescriptor);
+    } else {
+      delete (HTMLElement.prototype as Partial<HTMLElement>).clientWidth;
+    }
+  }
+});
+it('keeps the event type all option mapped to every event type', async () => {
+  const clientWidthDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, value: 2000 });
+  try {
+    const user = userEvent.setup();
+    render(<Harness eventTypeOptions={['EVENT', 'TOURNAMENT']} />);
+
+    await user.click(screen.getByRole('button', { name: /^Event type/ }));
+    const eventTypeDialog = screen.getByRole('dialog', { name: 'Event type filter' });
+    const allOption = within(eventTypeDialog).getByRole('button', { name: /All event types/ });
+    expect(allOption).not.toHaveAttribute('aria-pressed', 'true');
+    await user.click(within(eventTypeDialog).getByRole('button', { name: 'Event', exact: true }));
+    await user.click(within(eventTypeDialog).getByRole('button', { name: 'Tournament', exact: true }));
+    expect(screen.getByRole('button', { name: 'Event type: Tournament', exact: true })).toBeInTheDocument();
+
+    await user.click(within(eventTypeDialog).getByRole('button', { name: /All event types/ }));
+    expect(screen.getByRole('button', { name: 'Event type', exact: true })).toBeInTheDocument();
+    expect(within(eventTypeDialog).getByRole('button', { name: /All event types/ })).toHaveAttribute('aria-pressed', 'true');
+  } finally {
+    if (clientWidthDescriptor) {
+      Object.defineProperty(HTMLElement.prototype, 'clientWidth', clientWidthDescriptor);
+    } else {
+      delete (HTMLElement.prototype as Partial<HTMLElement>).clientWidth;
+    }
+  }
 });
 
 it('opens the shared date filter popover from the desktop filter row', async () => {
