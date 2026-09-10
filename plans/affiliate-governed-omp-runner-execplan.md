@@ -1487,3 +1487,72 @@ smoke returned the original legacy activation prohibition with zero
 database or provider access. All 632 tests passed again after the fix.
 Both focused re-reviews passed. The shared finding is fixed, re-reviewed,
 and verified. Standards and Spec have no remaining blockers.
+
+### Terminal feedback deployment and Mission retry
+
+Source commit `919ff733af99929ddb179dc6744e48d3fbaee8b4` was integrated
+into main. Site CI run `34445035567` and the authorized image publish
+run `34445663657` passed.
+
+The six authorized services use:
+
+- Worker: `ghcr.io/razumly/bracketiq-affiliate-governed@sha256:01ddc0a9af7150a8d9bd3a51635764ba2060e8540224a8ba7d265ca33665a4fb`.
+- Gateway: `ghcr.io/razumly/bracketiq-affiliate-gateway@sha256:6aa94a56c13835e00222c6cf74c83f12b05782e11bfa546136989c74b5527d05`.
+
+Published-image bundle, producer/reviewer containment, SDK no-provider,
+and reviewer public-message probes passed. Fresh preflight passed without
+findings, with report hash
+`88a840ad03f186e68044267579f445aa9b2ffd9065245c58f717db754a06de58`.
+Evidence is in `preflight-terminal-01` under the same private batch directory.
+The initial TPH/Ultimate admission still replayed with zero writes.
+All five dormant services remained unchanged.
+
+The one authorized additional Mission claim started at
+`2026-09-10T06:46:04.181Z`. Claim
+`agw-claim-66c8facf-d718-4336-a826-18ef93c45702` is generation 2 of
+the existing job `bb453a27-f14b-4e0e-8737-bc4ad2cb6a2c`.
+Its signed subject remains CLUB, pass 2, with deployment 6 and role/prompt 5.
+Admission was closed after the claim. All 16 audit and artifact records
+from its first failed claim remained unchanged.
+
+### Mission retry result and final stop
+
+The authorized retry failed at `2026-09-10T06:47:54.550Z` with
+SCHEMA_CORRECTIONS_EXHAUSTED. The new feedback worked on the real claim:
+
+1. Submission 1 identified `reasonCodes[1]`: the set-like array was not sorted
+   and unique.
+2. Submission 2 passed envelope parsing. It identified
+   `payload.sportEvidence.sportDeterminations[0].evidence[0].excerpt`:
+   the excerpt was not present in the stored artifact.
+3. Submission 3 failed the same excerpt check. The failed claim retained
+   that exact safe field path and reason in its summary.
+
+The terminal receipt is `agw-receipt-f9d03c9e-5eee-4838-95c7-0b33eb64f469`.
+The job remains RETRY_WAIT at claim generation 2 and invocation failure
+count 2. No further Mission claim was authorized or admitted.
+
+No mapping command ran during the retry. No package was validated or
+committed. No reviewer job was created. TPH and Ultimate remain QUEUED
+with claim generation 0. The complete batch stopped because the approved
+condition for continuation was not met.
+
+Final read-only checks proved closed admission, zero active claims, zero
+unresolved claim pointers, stopped mapper 1/reviewer 1/root runner, and an
+empty workspace. The Gateway and both model services are healthy.
+All five dormant services are unchanged. All 99 original protected data
+and history fingerprints are unchanged. All 16 records from Mission's
+first failed claim are also unchanged.
+
+The three roots, source settings, mappings, and organization safety fields
+are unchanged from before this run. Root automation and automatic scraping
+remain disabled. Public pages and widgets remain disabled. Existing
+version-1 mapping active flags were preserved; this run activated nothing.
+
+Private final evidence is `run/terminal-feedback-final-safety.json`.
+The result sequence is in `run/mission-feedback-retry-result.json`.
+The feedback correction is deployed and verified. Mission's excerpt
+mismatch remains unresolved. The rejected excerpt value was not retained,
+so this run does not establish whether the remaining cause is the worker's
+quote or the stored-text interpretation. Another claim needs a new bounded
+decision.
