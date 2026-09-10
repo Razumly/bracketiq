@@ -259,6 +259,10 @@ svg {
   --discover-text-muted: var(--bq-ink-muted);
   --discover-primary: var(--bq-action);
   --discover-accent: var(--bq-brand-strong);
+  --discover-filter-selected-bg: #e8f3f2;
+  --discover-filter-selected-border: #c7dfdc;
+  --discover-filter-selected-text: #137676;
+  --discover-filter-control-border: #aab2bb;
 }
 .discover-event-controls {
   min-width: 0;
@@ -307,77 +311,318 @@ svg {
   color: #fff;
 }
 
-.discover-create-event:hover {
-  background: color-mix(in srgb, var(--discover-accent, #f06b4f) 88%, #000);
+.discover-filter-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-width: 0;
 }
 
-.discover-sport-shortcuts {
+.discover-filter-row {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   min-width: 0;
-  overflow-x: auto;
-  padding: 0.125rem 0 0.25rem;
-  scrollbar-width: thin;
+  overflow: hidden;
+  padding: 0.1rem 0;
 }
 
-.discover-sport-shortcuts > * {
+.discover-filter-row-item {
   flex: 0 0 auto;
+  min-width: 0;
 }
-.discover-sport-shortcuts button {
+.discover-filter-row-trailing {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.discover-filter-row > button[data-overflow-more] {
+  flex: 0 0 auto;
+  border-color: var(--discover-filter-control-border);
+  color: var(--discover-text);
+  white-space: nowrap;
+}
+
+.discover-sport-filter {
+  min-height: 2.25rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--discover-border);
   border-radius: var(--bq-radius-control, 0.5rem);
-  border-color: var(--discover-border);
+  background: var(--discover-surface);
+  color: var(--discover-text);
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
-.discover-sport-shortcuts button[aria-pressed='true'] {
-  border-color: var(--bq-ink);
-  background: var(--bq-ink);
-  color: var(--bq-on-action);
+.discover-sport-filter:hover {
+  border-color: var(--discover-filter-selected-border);
+  background: var(--discover-filter-selected-bg);
 }
 
-.discover-event-filter-row {
-  align-items: center;
-  gap: 0.65rem;
-  min-width: 0;
-  padding: 0.65rem 0 0;
-  border-top: 1px solid var(--discover-border);
+.discover-sport-filter.is-all-selected {
+  border-color: var(--discover-filter-selected-border);
+  background: var(--discover-filter-selected-bg);
+  color: var(--discover-filter-selected-text);
 }
 
-.discover-event-filter-row > :first-child {
-  flex: 0 0 10rem;
+.discover-sport-filter.is-selected {
+  border-color: var(--discover-filter-selected-border);
+  background: var(--discover-filter-selected-bg);
+  color: var(--discover-filter-selected-text);
 }
 
-.discover-event-filter-row > div {
-  min-width: 0;
+.discover-filter-control {
+  display: inline-flex;
+  align-items: stretch;
+  min-width: 8.5rem;
+  max-width: 17rem;
+  overflow: hidden;
+  border: 1px solid var(--discover-filter-control-border);
+  border-radius: var(--bq-radius-control, 0.5rem);
+  background: var(--discover-surface);
 }
 
-.discover-event-filter-row .org-event-sort {
-  flex: 0 1 12rem;
+.discover-filter-control[data-active] {
+  border-color: var(--discover-filter-selected-border);
 }
 
-.discover-event-results {
-  min-width: 0;
-}
-
-.discover-event-grid .org-event-card-image {
-  aspect-ratio: 2.28;
-}
-
-.discover-mobile-filter-row {
-  align-items: center;
-  gap: 0.65rem;
-  min-width: 0;
-  padding-top: 0.65rem;
-  border-top: 1px solid var(--discover-border);
-}
-
-.discover-mobile-filter-row > :first-child {
+.discover-filter-trigger {
+  display: flex;
   flex: 1 1 auto;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  min-height: 2.75rem;
+  padding: 0.55rem 0.7rem;
+  border: 0;
+  background: transparent;
+  color: var(--discover-text);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-align: left;
 }
 
-.discover-mobile-filter-row > :last-child {
-  flex: 0 0 auto;
+.discover-filter-trigger:hover {
+  background: var(--discover-surface-muted);
 }
+
+.discover-filter-trigger-icon {
+  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+  color: var(--discover-filter-selected-text);
+}
+
+.discover-filter-trigger-label {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.discover-filter-trigger-value {
+  min-width: 0;
+  overflow: hidden;
+  padding: 0.25rem 0.45rem;
+  border-radius: 0.3rem;
+  background: var(--discover-filter-selected-bg);
+  color: var(--discover-filter-selected-text);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.discover-filter-trigger-chevron {
+  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+  margin-left: auto;
+  color: var(--discover-text-muted);
+}
+
+.discover-filter-trigger-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 2.35rem;
+  border: 0;
+  border-left: 1px solid var(--discover-filter-selected-border);
+  background: var(--discover-filter-selected-bg);
+  color: var(--discover-filter-selected-text);
+}
+
+.discover-filter-trigger-clear:hover {
+  background: color-mix(in srgb, var(--discover-filter-selected-bg) 72%, var(--discover-filter-selected-text));
+}
+
+.discover-filter-trigger-clear svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.discover-filter-popover {
+  width: min(24rem, calc(100vw - 2rem));
+  max-height: min(32rem, calc(100vh - 2rem));
+  overflow-y: auto;
+  border-color: var(--discover-filter-control-border);
+  border-radius: var(--bq-radius-control, 0.5rem);
+  background: var(--discover-surface);
+  color: var(--discover-text);
+}
+
+.discover-filter-popover-heading {
+  margin-bottom: 0.9rem;
+  color: var(--discover-text);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.discover-filter-popover-fields {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.discover-filter-popover-fields.two-columns {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.discover-filter-option-list,
+.discover-filter-sheet-options {
+  display: flex;
+  flex-direction: column;
+  margin-top: 0.75rem;
+  overflow: hidden;
+  border: 1px solid var(--discover-border);
+  border-radius: var(--bq-radius-control, 0.5rem);
+}
+
+.discover-filter-option {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  min-height: 2.9rem;
+  padding: 0.65rem 0.8rem;
+  border: 0;
+  border-bottom: 1px solid var(--discover-border);
+  background: var(--discover-surface);
+  color: var(--discover-text);
+  font-size: 0.85rem;
+  text-align: left;
+}
+
+.discover-filter-option:last-child {
+  border-bottom: 0;
+}
+
+.discover-filter-option:hover,
+.discover-filter-option.is-selected {
+  background: var(--discover-filter-selected-bg);
+  color: var(--discover-filter-selected-text);
+}
+
+.discover-filter-option-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.discover-filter-option-copy small {
+  color: var(--discover-text-muted);
+  font-size: 0.7rem;
+}
+
+.discover-filter-option-count {
+  margin-left: auto;
+  color: var(--discover-text-muted);
+}
+
+.discover-filter-option-check {
+  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+  margin-left: auto;
+  color: var(--discover-filter-selected-text);
+}
+
+.discover-filter-range {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  color: var(--discover-text);
+  font-size: 0.85rem;
+}
+
+.discover-filter-range input {
+  width: 100%;
+  accent-color: var(--discover-filter-selected-text);
+}
+
+.discover-filter-range-scale {
+  display: flex;
+  justify-content: space-between;
+  color: var(--discover-text-muted);
+  font-size: 0.75rem;
+}
+
+.discover-filter-clear-link,
+.discover-filter-clear-all {
+  align-self: flex-start;
+  border: 0;
+  background: transparent;
+  color: var(--discover-filter-selected-text);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.discover-filter-clear-link {
+  margin-top: 1rem;
+}
+
+.discover-filter-clear-all {
+  padding: 0.25rem 0;
+}
+.discover-active-event-filters > button {
+  border-color: var(--discover-filter-selected-border);
+  background: var(--discover-filter-selected-bg);
+  color: var(--discover-filter-selected-text);
+}
+
+.discover-active-event-filters > button:hover {
+  background: var(--discover-filter-selected-border);
+}
+
+
+.discover-filter-sheet-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.discover-filter-sheet-options {
+  margin-top: 0;
+}
+
+.discover-filter-sheet-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.discover-filter-error {
+  color: var(--destructive);
+  font-size: 0.8rem;
+}
+
+@media (max-width: 47.99em) {
+  .discover-filter-popover {
+    width: min(24rem, calc(100vw - 2rem));
+  }
+}
+
 
 @media (min-width: 48em) {
   .discover-search-controls {

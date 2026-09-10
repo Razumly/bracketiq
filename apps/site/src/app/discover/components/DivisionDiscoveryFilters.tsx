@@ -9,7 +9,7 @@ import {
   Text,
 } from "@/components/organization/organization-operation-ui";
 
-type DivisionOption = { id: string; name: string };
+export type DivisionOption = { id: string; name: string };
 type DivisionTypePayload = {
   genders?: DivisionOption[];
   ages?: DivisionOption[];
@@ -34,11 +34,20 @@ type Props = {
   value: DivisionDiscoveryFilterValue;
   onChange: (value: DivisionDiscoveryFilterValue) => void;
   selectedSports?: string[];
+  options?: DivisionDiscoveryFilterOptions;
 };
 type DivisionTypeLoadState =
   | { status: "loading"; types: DivisionTypePayload }
   | { status: "ready"; types: DivisionTypePayload }
   | { status: "error"; types: DivisionTypePayload; message: string };
+
+export type DivisionDiscoveryFilterOptions = {
+  loading: boolean;
+  error: string | null;
+  genders: DivisionOption[];
+  ages: DivisionOption[];
+  skillOptions: Array<{ value: string; label: string }>;
+};
 
 const normalize = (value: string): string => value.trim().toLowerCase();
 
@@ -96,17 +105,17 @@ export const buildSportSkillFilterOptions = (
     .map(({ value, label }) => ({ value, label }));
 };
 
-export default function DivisionDiscoveryFilters({
-  value,
-  onChange,
-  selectedSports = [],
-}: Props) {
+export function useDivisionDiscoveryOptions(
+  selectedSports: string[] = [],
+  enabled = true,
+): DivisionDiscoveryFilterOptions {
   const [loadState, setLoadState] = useState<DivisionTypeLoadState>({
     status: "loading",
     types: {},
   });
 
   useEffect(() => {
+    if (!enabled) return;
     const controller = new AbortController();
     fetch("/api/division-types", { signal: controller.signal })
       .then((response) =>
@@ -131,16 +140,34 @@ export default function DivisionDiscoveryFilters({
         });
       });
     return () => controller.abort();
-  }, []);
+  }, [enabled]);
 
   const { types } = loadState;
   const loading = loadState.status === "loading";
   const error = loadState.status === "error" ? loadState.message : null;
-
   const skillOptions = useMemo(
     () => buildSportSkillFilterOptions(types.sportSkills ?? [], selectedSports),
     [selectedSports, types.sportSkills],
   );
+
+  return {
+    loading,
+    error,
+    genders: types.genders ?? [],
+    ages: types.ages ?? [],
+    skillOptions,
+  };
+}
+
+export default function DivisionDiscoveryFilters({
+  value,
+  onChange,
+  selectedSports = [],
+  options,
+}: Props) {
+  const loadedOptions = useDivisionDiscoveryOptions(selectedSports, !options);
+  const resolvedOptions = options ?? loadedOptions;
+  const { loading, error, genders, ages, skillOptions } = resolvedOptions;
 
   useEffect(() => {
     if (loading || error) return;
@@ -170,7 +197,7 @@ export default function DivisionDiscoveryFilters({
       <MultiSelect
         label="Gender"
         placeholder="Any gender"
-        data={(types.genders ?? []).map((option) => ({
+        data={genders.map((option) => ({
           value: option.id,
           label: option.name,
         }))}
@@ -181,7 +208,7 @@ export default function DivisionDiscoveryFilters({
       <MultiSelect
         label="Age group"
         placeholder="Any age group"
-        data={(types.ages ?? []).map((option) => ({
+        data={ages.map((option) => ({
           value: option.id,
           label: option.name,
         }))}
@@ -239,3 +266,4 @@ export default function DivisionDiscoveryFilters({
     </Stack>
   );
 }
+

@@ -56,6 +56,7 @@ export type EventFilterPanelProps<TEventType extends string> = {
   hasActiveFilters: boolean;
   dateHeading?: ReactNode;
   sportsHeading?: ReactNode;
+  showSports?: boolean;
 };
 
 type EventFilterControlsProps<TEventType extends string> = Pick<
@@ -117,6 +118,7 @@ export function EventFilterPanel<TEventType extends string>({
   hasActiveFilters,
   dateHeading,
   sportsHeading,
+  showSports = true,
 }: EventFilterPanelProps<TEventType>) {
   const resolvedEventTypeLabels = selectedEventTypeLabels
     ?? (selectedEventTypes.length === eventTypeData.length
@@ -125,15 +127,19 @@ export function EventFilterPanel<TEventType extends string>({
 
   return (
     <Stack gap="md">
-      {sportsHeading && <Text size="xs" fw={700} c="dimmed" tt="uppercase">{sportsHeading}</Text>}
-      <MultiSelect
-        aria-label="Filter by sports"
-        placeholder="All sports"
-        data={sportsData}
-        value={selectedSports}
-        onChange={setSelectedSports}
-        disabled={sportsLoading}
-      />
+      {showSports && (
+        <>
+          {sportsHeading && <Text size="xs" fw={700} c="dimmed" tt="uppercase">{sportsHeading}</Text>}
+          <MultiSelect
+            aria-label="Filter by sports"
+            placeholder="All sports"
+            data={sportsData}
+            value={selectedSports}
+            onChange={setSelectedSports}
+            disabled={sportsLoading}
+          />
+        </>
+      )}
       <MultiSelect
         aria-label="Filter by event type"
         placeholder={resolvedEventTypeLabels || 'All event types'}
@@ -260,11 +266,19 @@ export function EventFilterControls<TEventType extends string>({
   );
 }
 
-export function ActiveEventFilters({ filters }: { filters: EventFilter[] }) {
+export function ActiveEventFilters({
+  filters,
+  className,
+  label = 'Filters:',
+}: {
+  filters: EventFilter[];
+  className?: string;
+  label?: string;
+}) {
   if (filters.length === 0) return null;
   return (
-    <div className="flex flex-wrap items-center gap-2" aria-label="Active event filters">
-      <Text size="sm" c="dimmed" className="mr-1">Filters:</Text>
+    <div className={`flex flex-wrap items-center gap-2 ${className ?? ''}`} aria-label="Active event filters">
+      <Text size="sm" c="dimmed" className="mr-1">{label}</Text>
       {filters.map((filter) => (
         <button
           key={filter.key}
