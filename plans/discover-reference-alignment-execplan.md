@@ -151,3 +151,5 @@ Revision note (2026-09-10 05:09Z): Final review also identified a non-blocking p
 Revision note (2026-09-10 05:12Z): Final review found that shared card tokens were scoped only to organization ancestors. Added `.discover-shell` to that token scope so Discover card borders, accents, and keyboard focus outlines resolve.
 
 Revision note (2026-09-10 05:16Z): Final review found two location-picker accessibility and reflow gaps. The Discover location dropdown now aligns to the action group's safe edge, and Escape returns focus to the Set Location trigger.
+
+Revision note (2026-09-10 05:18Z): The mobile reflow review required a separate edge rule because the owned Popover root is the trigger-sized containing block. Mobile location popovers now use the left edge of the first full-width action item; the width cap keeps the panel inside the viewport.
