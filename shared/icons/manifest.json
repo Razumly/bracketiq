@@ -1,0 +1,254 @@
+{
+  "version": 1,
+  "icons": [
+    {
+      "key": "indoor-volleyball",
+      "category": "sports",
+      "file": "sports/indoor-volleyball.svg",
+      "source": "sports/indoor-volleyball.svg",
+      "sourceIcon": "ball-volleyball.svg",
+      "fragment": "sport-icon",
+      "approximation": false
+    },
+    {
+      "key": "beach-volleyball",
+      "category": "sports",
+      "file": "sports/beach-volleyball.svg",
+      "source": "sports/beach-volleyball.svg",
+      "sourceIcon": "ball-volleyball.svg",
+      "fragment": "sport-icon",
+      "approximation": true
+    },
+    {
+      "key": "grass-volleyball",
+      "category": "sports",
+      "file": "sports/grass-volleyball.svg",
+      "source": "sports/grass-volleyball.svg",
+      "sourceIcon": "ball-volleyball.svg",
+      "fragment": "sport-icon",
+      "approximation": true
+    },
+    {
+      "key": "basketball",
+      "category": "sports",
+      "file": "sports/basketball.svg",
+      "source": "sports/basketball.svg",
+      "sourceIcon": "ball-basketball.svg",
+      "fragment": "sport-icon",
+      "approximation": false
+    },
+    {
+      "key": "indoor-soccer",
+      "category": "sports",
+      "file": "sports/indoor-soccer.svg",
+      "source": "sports/indoor-soccer.svg",
+      "sourceIcon": "ball-football.svg",
+      "fragment": "sport-icon",
+      "approximation": true
+    },
+    {
+      "key": "grass-soccer",
+      "category": "sports",
+      "file": "sports/grass-soccer.svg",
+      "source": "sports/grass-soccer.svg",
+      "sourceIcon": "ball-football.svg",
+      "fragment": "sport-icon",
+      "approximation": true
+    },
+    {
+      "key": "beach-soccer",
+      "category": "sports",
+      "file": "sports/beach-soccer.svg",
+      "source": "sports/beach-soccer.svg",
+      "sourceIcon": "ball-football.svg",
+      "fragment": "sport-icon",
+      "approximation": true
+    },
+    {
+      "key": "tennis",
+      "category": "sports",
+      "file": "sports/tennis.svg",
+      "source": "sports/tennis.svg",
+      "sourceIcon": "ball-tennis.svg",
+      "fragment": "sport-icon",
+      "approximation": false
+    },
+    {
+      "key": "pickleball",
+      "category": "sports",
+      "file": "sports/pickleball.svg",
+      "source": "sports/pickleball.svg",
+      "sourceIcon": "ball-tennis.svg",
+      "fragment": "sport-icon",
+      "approximation": true
+    },
+    {
+      "key": "badminton",
+      "category": "sports",
+      "file": "sports/badminton.svg",
+      "source": "sports/badminton.svg",
+      "sourceIcon": "ball-tennis.svg",
+      "fragment": "sport-icon",
+      "approximation": true
+    },
+    {
+      "key": "racquetball",
+      "category": "sports",
+      "file": "sports/racquetball.svg",
+      "source": "sports/racquetball.svg",
+      "sourceIcon": "ball-tennis.svg",
+      "fragment": "sport-icon",
+      "approximation": true
+    },
+    {
+      "key": "football",
+      "category": "sports",
+      "file": "sports/football.svg",
+      "source": "sports/football.svg",
+      "sourceIcon": "ball-american-football.svg",
+      "fragment": "sport-icon",
+      "approximation": false
+    },
+    {
+      "key": "flag-football",
+      "category": "sports",
+      "file": "sports/flag-football.svg",
+      "source": "sports/flag-football.svg",
+      "sourceIcon": "ball-american-football.svg",
+      "fragment": "sport-icon",
+      "approximation": true
+    },
+    {
+      "key": "hockey",
+      "category": "sports",
+      "file": "sports/hockey.svg",
+      "source": "sports/hockey.svg",
+      "sourceIcon": "ball-tennis.svg",
+      "fragment": "sport-icon",
+      "approximation": true
+    },
+    {
+      "key": "field-hockey",
+      "category": "sports",
+      "file": "sports/field-hockey.svg",
+      "source": "sports/field-hockey.svg",
+      "sourceIcon": "ball-tennis.svg",
+      "fragment": "sport-icon",
+      "approximation": true
+    },
+    {
+      "key": "lacrosse",
+      "category": "sports",
+      "file": "sports/lacrosse.svg",
+      "source": "sports/lacrosse.svg",
+      "sourceIcon": "ball-tennis.svg",
+      "fragment": "sport-icon",
+      "approximation": true
+    },
+    {
+      "key": "australian-football",
+      "category": "sports",
+      "file": "sports/australian-football.svg",
+      "source": "sports/australian-football.svg",
+      "sourceIcon": "ball-american-football.svg",
+      "fragment": "sport-icon",
+      "approximation": true
+    },
+    {
+      "key": "ball-hockey",
+      "category": "sports",
+      "file": "sports/ball-hockey.svg",
+      "source": "sports/ball-hockey.svg",
+      "sourceIcon": "ball-tennis.svg",
+      "fragment": "sport-icon",
+      "approximation": true
+    },
+    {
+      "key": "futsal",
+      "category": "sports",
+      "file": "sports/futsal.svg",
+      "source": "sports/futsal.svg",
+      "sourceIcon": "ball-football.svg",
+      "fragment": "sport-icon",
+      "approximation": true
+    },
+    {
+      "key": "baseball",
+      "category": "sports",
+      "file": "sports/baseball.svg",
+      "source": "sports/baseball.svg",
+      "sourceIcon": "ball-baseball.svg",
+      "fragment": "sport-icon",
+      "approximation": false
+    },
+    {
+      "key": "softball",
+      "category": "sports",
+      "file": "sports/softball.svg",
+      "source": "sports/softball.svg",
+      "sourceIcon": "ball-baseball.svg",
+      "fragment": "sport-icon",
+      "approximation": true
+    },
+    {
+      "key": "table-tennis",
+      "category": "sports",
+      "file": "sports/table-tennis.svg",
+      "source": "sports/table-tennis.svg",
+      "sourceIcon": "ping-pong.svg",
+      "fragment": "sport-icon",
+      "approximation": false
+    },
+    {
+      "key": "ultimate-frisbee",
+      "category": "sports",
+      "file": "sports/ultimate-frisbee.svg",
+      "source": "sports/ultimate-frisbee.svg",
+      "sourceIcon": "disc.svg",
+      "fragment": "sport-icon",
+      "approximation": true
+    },
+    {
+      "key": "other",
+      "category": "sports",
+      "file": "sports/other.svg",
+      "source": "sports/other.svg",
+      "sourceIcon": "trophy.svg",
+      "fragment": "sport-icon",
+      "approximation": true
+    },
+    {
+      "key": "trophy",
+      "category": "product",
+      "file": "product/trophy.svg",
+      "source": "product/trophy.svg",
+      "sourceIcon": "MVPIcons.Trophy",
+      "fragment": "shared-icon",
+      "approximation": false,
+      "provenance": "existing-mobile-vector",
+      "license": "review-required"
+    },
+    {
+      "key": "tournament-bracket",
+      "category": "product",
+      "file": "product/tournament-bracket.svg",
+      "source": "product/tournament-bracket.svg",
+      "sourceIcon": "MVPIcons.TournamentBracket",
+      "fragment": "shared-icon",
+      "approximation": false,
+      "provenance": "existing-mobile-vector",
+      "license": "review-required"
+    },
+    {
+      "key": "groups",
+      "category": "product",
+      "file": "product/groups.svg",
+      "source": "product/groups.svg",
+      "sourceIcon": "MVPIcons.Groups",
+      "fragment": "shared-icon",
+      "approximation": false,
+      "provenance": "existing-mobile-vector",
+      "license": "review-required"
+    }
+  ]
+}

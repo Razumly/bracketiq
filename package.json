@@ -5,6 +5,8 @@
   "description": "BracketIQ monorepo task runner",
   "scripts": {
     "build:site": "npm --prefix apps/site run build",
+    "icons:sync": "node scripts/sync-shared-icons.mjs --write",
+    "icons:check": "node scripts/sync-shared-icons.mjs --check",
     "lint:site": "npm --prefix apps/site run lint",
     "test:site": "npm --prefix apps/site run test:ci",
     "typecheck:site": "npm --prefix apps/site exec -- tsc --noEmit",
