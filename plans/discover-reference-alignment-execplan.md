@@ -55,7 +55,7 @@ The visible result is checked at `/discover` against the approved references in 
 - Focused validation passed: the literal-path run passed 5 suites and 42 tests, including Discover, organization, location, date-control, and card paths. The site type check passed. The production build passed with the local `DATABASE_URL` validation value.
 - The shared date trigger is explicitly controlled, compact and calendar date inputs restore focus after Escape, and `OrganizationEventCard` uses the next occurrence and its time zone for recurring-event date and status display. Discover card tokens and location panel sizing/edges now resolve at desktop and mobile breakpoints.
 - The full suite ran 882 suites. 371 suites and 2,664 tests passed. 511 suites and 36 tests failed during shared setup with `ReferenceError: MouseEvent is not defined` at `test/setupTests.ts:21`.
-- Live browser comparison was not performed. The existing local production server cannot be restarted without explicit runtime authorization. Static reference review and rendered component smoke tests were used instead.
+- Browser smoke check completed after rebuilding and relaunching `site-ui-operations-prod`. `/discover` rendered at desktop and 390px mobile widths. Desktop showed the shared toolbar and event grid. Mobile document and body `scrollWidth` were both 390px, matching the viewport. The location-popup click was not completed because the browser waited on the geolocation permission path; focused tests cover that behavior.
 
 ## Context and Orientation
 
@@ -159,3 +159,5 @@ Revision note (2026-09-10 05:22Z): The 320px geometry check included the Discove
 Revision note (2026-09-10 05:27Z): Added focus restoration for compact Dates and owned date inputs. Kept the Discover toolbar on one line above the mobile breakpoint so right-edge location placement does not clip when actions would otherwise wrap.
 
 Revision note (2026-09-10 05:31Z): Re-ran all five focused suites with Jest `--runTestsByPath` so the bracketed organization route was selected literally. All 5 suites and 42 tests passed.
+
+Revision note (2026-09-10 05:40Z): Rebuilt the site, relaunched `site-ui-operations-prod`, and smoke-checked `/discover` at desktop and 390px mobile widths. The mobile document and body widths matched the viewport.
