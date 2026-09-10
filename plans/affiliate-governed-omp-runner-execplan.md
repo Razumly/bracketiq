@@ -1656,3 +1656,90 @@ Gateway remains on source 919ff733a with role/prompt 5. Mission remains
 RETRY_WAIT at claim generation 2. TPH and Ultimate remain unclaimed.
 Admission is closed, all trial workers are stopped, and the 99 original
 protected records remain unchanged.
+
+## Authorized role-6 Mission repair trial
+
+The operator approved the next repair-only steps: deploy the reviewed
+self-repair tooling, run one controlled Mission repair attempt, and
+independently review a resulting package. This authorizes the six named
+governed services only. It does not authorize publication, automatic
+scraping, a wider fleet start, or claims for TPH or Ultimate.
+
+Use source `229576c2a0e8c5a6c24fb9eeec7f3630d03e5a92`. Its Site CI
+run `34526237893` passed. Prepare deployment contract 7 from the existing
+deployment-6 bundle and the source-exported role/prompt-6 contracts.
+Install fresh preflight before admission.
+
+Use the existing Mission job `bb453a27-f14b-4e0e-8737-bc4ad2cb6a2c`.
+The one producer claim must be generation 3. Preserve both failed claims
+and their receipts, artifacts, and events. Use an exact-job, one-claim lease.
+Close admission after the claim. Admit one independent reviewer only if
+the producer commits a reviewable package. Stop on an unexpected failure.
+Keep TPH and Ultimate held throughout this trial.
+
+### Deployment and claim evidence
+
+Authorized image publish run `34528732002` passed. The immutable images are:
+
+- Worker: `ghcr.io/razumly/bracketiq-affiliate-governed@sha256:be46ae7cd9ae71edec769fb2a8f91f68b9eb77aeaec54bca454e4a276803216f`.
+- Gateway: `ghcr.io/razumly/bracketiq-affiliate-gateway@sha256:6ec299e234f3ad4fe660fdcb48dd9094de86c86cc4b2e3596fdbc42820c0970f`.
+
+Both revision labels match the reviewed source. Bundle parsing,
+producer/reviewer containment, all three SDK scenarios, the reviewer
+public-message check, and the recorded Mission repair loop passed.
+The recorded loop passed in both shipped Node and Bun runtimes with no
+Gateway effect or provider call.
+
+Deployment contract 7 has hash
+`103ccf422ed092b1bd6fb1419358cd492d189d9e37cf0e1082af84463538cf4b`.
+Fresh preflight passed without findings, with hash
+`adbe3503c7af55831c3957e841da1b71d66b7875425540d0ff36dd06f74b48ee`.
+Private evidence is under
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v7-mission-repair-229576c2a`.
+The five dormant services and all 99 original protected records were
+unchanged after the six-service refresh.
+
+Mission claim `agw-claim-ec059250-8b60-438a-8d38-2e8d1e59cc9d`
+started at `2026-09-10T21:08:57.330Z`. It is claim generation 3 of the
+same job. Its subject remains CLUB, pass 2, with deployment 7 and
+role/prompt 6. Admission was closed after the claim. All 32 records from
+the two prior failed attempts remained unchanged.
+
+### Successful bounded outcome
+
+The Mission claim completed at `2026-09-10T21:10:46.294Z`.
+The Gateway accepted CONTRACT_GAP with reason SPORT_NOT_IN_CATALOG.
+There were zero authoritative schema corrections and no invocation failure.
+The terminal receipt is `agw-receipt-67e0d71d-633e-479e-b188-3f2216e2a7c9`.
+The result hash is
+`a627b7f6a4f41c1d48c12295cd0ba89c5aebdc2fb36214cb70e31b86c4d0c8d6`.
+
+The accepted result cites the stored HTML and Markdown order of running
+events and the statement about field events. It identifies Track and Field
+as unsupported because no exact catalog name exists. It leaves canonical
+sport names empty and requests an authenticated catalog decision.
+The source is not mapped or approved by this result.
+
+One terminal submission and its governed domain effect completed.
+No package validation or commit command ran. No reviewer job was created;
+the terminal effect records reviewerJobId null. The conditional independent
+review step was therefore not applicable. The legacy mapping job records
+REVIEW_REQUIRED with the accepted Gateway terminal result.
+
+Final read-only checks passed. Admission is closed. Active claims and
+unresolved claim pointers are zero. Mapper 1, reviewer 1, and the root runner
+are stopped. The workspace is empty. The Gateway and both model services
+are healthy with restart policy no.
+
+All 99 original protected records and all 32 records from the two previous
+failed attempts are unchanged. All five dormant services are unchanged.
+The three roots, source settings, mappings, and organization safety fields
+are unchanged. Automation, automatic scraping, public pages, and public
+widgets remain disabled. Existing legacy mapping active flags were preserved.
+TPH and Ultimate remain QUEUED with claim generation zero.
+
+Private final proof is `run/final-safety.json` under the version-7 trial
+directory. The accepted result is `run/mission-producer-result.json`.
+The tooling and bounded repair trial are complete. Mission now needs a
+human catalog decision, not another blind retry. No additional claim or
+publication was authorized.
