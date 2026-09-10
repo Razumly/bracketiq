@@ -81,18 +81,28 @@ it('sorts Weekly cards by the next occurrence instead of the season start', () =
   expect(cardNames()).toEqual(['Earlier event', 'Weekly season']);
 });
 
-it('opens the mobile filter sheet with filter controls', async () => {
+it('opens More filters as a dropdown with remaining filter controls', async () => {
   const user = userEvent.setup();
   render(<Harness selectedSports={['Basketball']} />);
 
   await user.click(screen.getByRole('button', { name: 'More filters (1)' }));
 
-  const filterDialog = screen.getByRole('dialog', { name: 'Filter Events' });
-  expect(filterDialog).toBeInTheDocument();
-  expect(within(filterDialog).getByText('Sports')).toBeInTheDocument();
-  expect(within(filterDialog).getByRole('button', { name: 'Volleyball', exact: true })).toBeInTheDocument();
-  expect(within(filterDialog).queryByRole('combobox', { name: 'Filter by sports' })).not.toBeInTheDocument();
-  expect(within(filterDialog).getByText('Date Range')).toBeInTheDocument();
+  const filterDialog = screen.getByRole('dialog', { name: 'More filters (1)' });
+  expect(within(filterDialog).getByRole('button', { name: /Event tags/ })).toBeInTheDocument();
+  await user.click(within(filterDialog).getByRole('button', { name: /Event tags/ }));
+  expect(screen.getByRole('dialog', { name: 'Event tags filter' })).toBeInTheDocument();
+  expect(screen.queryByRole('dialog', { name: 'Filter Events' })).not.toBeInTheDocument();
+});
+
+it('opens More sports as a dropdown with remaining sports', async () => {
+  const user = userEvent.setup();
+  render(<Harness sports={['Basketball', 'Volleyball', 'Rugby', 'Tennis']} />);
+
+  await user.click(screen.getByRole('button', { name: 'More sports' }));
+
+  const sportsDialog = screen.getByRole('dialog', { name: 'More sports' });
+  expect(within(sportsDialog).getByRole('button', { name: 'Rugby', exact: true })).toBeInTheDocument();
+  expect(within(sportsDialog).getByRole('button', { name: 'Tennis', exact: true })).toBeInTheDocument();
 });
 
 it('shows every event filter trigger when the toolbar has room', () => {
@@ -155,7 +165,7 @@ it('opens the shared date filter popover from the desktop filter row', async () 
   const dateDialog = screen.getByRole('dialog', { name: 'Dates filter' });
   expect(dateDialog.closest('.discover-filter-row')).toBeNull();
 });
-it('clears unavailable skill selections when sports change with the filter sheet closed', async () => {
+it('clears unavailable skill selections when sports change', async () => {
   globalThis.fetch = jest.fn().mockResolvedValue({
     ok: true,
     json: async () => ({
@@ -236,9 +246,9 @@ it('filters the complete cache locally, updates counts, removes chips, and opens
   expect(screen.getByText('37 events available.')).toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: 'Basketball', exact: true }));
   expect(cardNames()).toEqual(['Basketball late', 'Basketball middle']);
-  expect(screen.getByText('2 events available.')).toBeInTheDocument();
-  await user.click(screen.getByRole('button', { name: 'Basketball', exact: true, pressed: true }));
-  expect(cardNames()).toHaveLength(3);
+  expect(screen.getByText('2 events available.').parentElement).toContainElement(
+    screen.getByLabelText('Active event filters'),
+  );
   await user.type(screen.getByRole('textbox', { name: 'Search events', exact: true }), 'middle');
   expect(cardNames()).toEqual(['Basketball middle']);
   await act(async () => { jest.advanceTimersByTime(500); });
@@ -247,7 +257,7 @@ it('filters the complete cache locally, updates counts, removes chips, and opens
   expect(onEventClick).toHaveBeenCalledWith(events[2]);
   expect(trackEventClicked).toHaveBeenCalledWith(events[2], 'discover_events');
   await user.click(screen.getByRole('button', { name: 'Search: middle' }));
-  expect(cardNames()).toHaveLength(3);
+  expect(cardNames()).toHaveLength(2);
 });
 
 it.each(['Soonest', 'Price (Low to High)'])('sorts cached cards by %s without fetching', async (label) => {
@@ -282,7 +292,7 @@ it('keeps filters and cached results while a partial-cache refresh fails', async
   await user.type(input, 'Basketball');
   await act(async () => { jest.advanceTimersByTime(250); });
   expect(onFilterChange).toHaveBeenCalledTimes(1);
-  expect(screen.getByText('Updating events…')).toBeInTheDocument();
+  expect(screen.queryByText('Updating events…')).not.toBeInTheDocument();
   expect(screen.getByRole('textbox', { name: 'Search events', exact: true })).toBe(input);
   expect(input).toHaveFocus();
   expect(cardNames()).toEqual(['Basketball late', 'Basketball middle']);

@@ -1,11 +1,10 @@
 'use client';
+import { Dispatch, RefObject, SetStateAction, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
-import { Dispatch, RefObject, SetStateAction, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   Alert,
   Button,
-  Chip,
   Container,
   Group,
   Loader,
@@ -14,11 +13,10 @@ import {
   TextInput,
   Title,
 } from '@/components/organization/organization-operation-ui';
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Slider } from '@/components/ui/slider';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
-import { SlidersHorizontal, X } from 'lucide-react';
+import { BarChart3, Clock3, MapPin, Tag, UsersRound } from 'lucide-react';
 
 import Navigation from '@/components/layout/Navigation';
 import Loading from '@/components/ui/Loading';
@@ -27,8 +25,9 @@ import TeamCard from '@/components/ui/TeamCard';
 import ResponsiveCardGrid from '@/components/ui/ResponsiveCardGrid';
 import { useApp } from '@/app/providers';
 import { useLocation } from '@/app/hooks/useLocation';
-import { useDebounce } from '@/app/hooks/useDebounce';
 import { hasEventListFilters } from '@/components/events/event-list-filtering';
+import { useDebounce } from '@/app/hooks/useDebounce';
+import { ActiveEventFilters } from '@/components/events/EventFilterControls';
 import { Event, EventTag, Facility, Field, Organization, OrganizationTag, Team, TimeSlot } from '@/types';
 import { eventService, type EventSearchSort } from '@/lib/eventService';
 import { organizationService } from '@/lib/organizationService';
@@ -51,6 +50,7 @@ import EventsTabContent, { type EventSortValue } from './components/EventsTabCon
 import DiscoverSearchControls from './components/DiscoverSearchControls';
 import DiscoverMapModal from './components/DiscoverMapModal';
 import DivisionDiscoveryFilters, { type DivisionDiscoveryFilterValue } from './components/DivisionDiscoveryFilters';
+import { DiscoverFilterRows, FilterOptionList, FilterPopover, type DiscoverFilterItem } from './components/DiscoverFilterBar';
 import {
   buildTeamDivisionFilterOptions,
   filterOpenRegistrationTeams,
@@ -1517,20 +1517,11 @@ function OrganizationsTabContent(props: {
     onSelectOrganization,
   } = props;
 
-  const [sportSearchTerm, setSportSearchTerm] = useState('');
   const [tagSearchTerm, setTagSearchTerm] = useState('');
-  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
-  const allSportsSelected = selectedSports.length === 0;
-  const allTagsSelected = selectedTags.length === 0;
-  const sportsQuery = sportSearchTerm.trim().toLowerCase();
+  const [openFilter, setOpenFilter] = useState<string | null>(null);
+  const panelId = useId();
   const tagsQuery = tagSearchTerm.trim().toLowerCase();
   const activeQuery = searchTerm.trim();
-  const visibleSports = useMemo(() => {
-    if (!sportsQuery) {
-      return sports;
-    }
-    return sports.filter((sport) => sport.toLowerCase().includes(sportsQuery));
-  }, [sports, sportsQuery]);
   const visibleOrganizationTags = useMemo(() => {
     const matchingTags = tagsQuery
       ? organizationTags.filter((tag) => tag.name.toLowerCase().includes(tagsQuery))
@@ -1602,163 +1593,127 @@ function OrganizationsTabContent(props: {
   }, [setDivisionFilters, setSearchTerm, setSelectedSports, setSelectedTags, setMaxDistance]);
 
   const activeFilterCount = activeFilters.length;
-
-  const filterPanel = (
-    <div className="space-y-6">
-      <div>
-        <Text size="xs" fw={700} c="dimmed" tt="uppercase" mb={8}>
-          Tags
-        </Text>
-        <TextInput
-          value={tagSearchTerm}
-          onChange={(event) => setTagSearchTerm(event.currentTarget.value)}
-          placeholder="Search tag..."
-          mb="sm"
-        />
-        <Group gap="xs" align="center">
-          <Chip
-            color="blue"
-            radius="xl"
-            checked={allTagsSelected}
-            disabled={organizationTagsLoading || !organizationTags.length}
-            onChange={(checked) => {
-              if (checked) {
-                setSelectedTags([]);
-              }
-            }}
-          >
-            All
-          </Chip>
+  const tagOptions = visibleOrganizationTags.map((tag) => ({
+    value: tag.slug ?? tag.name,
+    label: tag.name,
+    count: tag.organizationCount,
+  }));
+  const tagLabels = selectedTags
+    .map((tagSlug) => tagOptions.find((option) => option.value === tagSlug)?.label ?? tagSlug)
+    .filter(Boolean);
+  const tagSummary = tagLabels.length === 1 ? tagLabels[0] : tagLabels.length > 1 ? `${tagLabels[0]} +${tagLabels.length - 1}` : undefined;
+  const setOpen = (id: string) => (open: boolean) => setOpenFilter(open ? id : null);
+  const distanceMiles = typeof maxDistance === 'number' ? Math.round(kmToMiles(maxDistance)) : null;
+  const organizationFilterItems: DiscoverFilterItem[] = [
+    {
+      key: 'organization-tags',
+      node: (
+        <FilterPopover
+          id={`${panelId}-organization-tags`}
+          label="Tags"
+          valueLabel={tagSummary}
+          value={tagSummary}
+          icon={Tag}
+          active={selectedTags.length > 0}
+          open={openFilter === 'organization-tags'}
+          onOpenChange={setOpen('organization-tags')}
+          onClear={() => setSelectedTags([])}
+        >
+          <div className="discover-filter-popover-heading">Organization tags</div>
+          <TextInput
+            aria-label="Search organization tags"
+            placeholder="Search organization tags"
+            value={tagSearchTerm}
+            onChange={(event) => setTagSearchTerm(event.currentTarget.value)}
+          />
           {organizationTagsLoading ? (
             <Loader size="sm" aria-label="Loading organization tags" />
-          ) : visibleOrganizationTags.length ? (
-            visibleOrganizationTags.map((tag) => {
-              const identity = tag.slug ?? tag.name;
-              return (
-                <Chip
-                  key={identity}
-                  color="blue"
-                  radius="xl"
-                  checked={selectedTags.includes(identity)}
-                  onChange={(checked) => {
-                    setSelectedTags((current) => {
-                      if (checked) {
-                        const next = new Set(current);
-                        next.add(identity);
-                        return Array.from(next);
-                      }
-                      return current.filter((value) => value !== identity);
-                    });
-                  }}
-                >
-                  {tag.name} ({tag.organizationCount ?? 0})
-                </Chip>
-              );
-            })
+          ) : tagOptions.length ? (
+            <FilterOptionList options={tagOptions} value={selectedTags} allLabel="All tags" onChange={setSelectedTags} />
           ) : (
             <Text size="sm" c="dimmed">
               {tagsQuery ? 'No tags match this search.' : 'No tags available.'}
             </Text>
           )}
-        </Group>
-        {organizationTagsError && (
-          <Alert color="red" radius="md" mt="sm">
-            {organizationTagsError}
-          </Alert>
-        )}
-      </div>
-      <div>
-        <Text size="xs" fw={700} c="dimmed" tt="uppercase" mb={8}>
-          Sports
-        </Text>
-        <TextInput
-          value={sportSearchTerm}
-          onChange={(event) => setSportSearchTerm(event.currentTarget.value)}
-          placeholder="Search sport..."
-          mb="sm"
-        />
-        <Group gap="xs" align="center">
-          <Chip
-            radius="xl"
-            checked={allSportsSelected}
-            disabled={sportsLoading || !sports.length}
-            onChange={(checked) => {
-              if (checked) {
-                setSelectedSports([]);
-              }
-            }}
-          >
-            All
-          </Chip>
-          {sportsLoading ? (
-            <Loader size="sm" aria-label="Loading sports" />
-          ) : visibleSports.length ? (
-            visibleSports.map((sport) => (
-              <Chip
-                key={sport}
-                radius="xl"
-                checked={selectedSports.includes(sport)}
-                onChange={(checked) => {
-                  setSelectedSports((current) => {
-                    if (checked) {
-                      const next = new Set(current);
-                      next.add(sport);
-                      return Array.from(next);
-                    }
-                    return current.filter((value) => value !== sport);
-                  });
-                }}
-              >
-                {sport}
-              </Chip>
-            ))
-          ) : (
-            <Text size="sm" c="dimmed">
-              {sportsQuery ? 'No sports match this search.' : 'No sports available.'}
-            </Text>
-          )}
-        </Group>
-        {sportsError && (
-          <Alert color="red" radius="md" mt="sm">
-            {sportsError}
-          </Alert>
-        )}
-      </div>
-
-      <DivisionDiscoveryFilters
-        value={divisionFilters}
-        onChange={setDivisionFilters}
-        selectedSports={selectedSports}
-      />
-
-      {location && (
-        <div>
-          <Text size="xs" fw={700} c="dimmed" tt="uppercase" mb={8}>
-            Distance
-          </Text>
-          <Text size="sm" fw={600} mb={6}>
-            {typeof maxDistance === 'number' ? `Within ${Math.round(kmToMiles(maxDistance))} mi` : 'Any distance'}
-          </Text>
-          <Slider
-            min={DISTANCE_SLIDER_MIN_MILES}
-            max={DISTANCE_SLIDER_MAX_MILES}
-            step={1}
-            value={[clampMiles(typeof maxDistance === 'number' ? kmToMiles(maxDistance) : kmToMiles(defaultMaxDistance))]}
-            onValueChange={(value) => setMaxDistance(milesToKm(value[0] ?? DISTANCE_SLIDER_MIN_MILES))}
-            getAriaLabel={() => 'Maximum distance in miles'}
-            getAriaValueText={(_, value) => `${value} miles`}
+          {organizationTagsError && <Alert color="red">{organizationTagsError}</Alert>}
+        </FilterPopover>
+      ),
+    },
+    {
+      key: 'organization-division',
+      node: (
+        <FilterPopover
+          id={`${panelId}-organization-division`}
+          label="Division"
+          value={hasDivisionFilters ? 'Applied' : undefined}
+          valueLabel={hasDivisionFilters ? 'Applied' : undefined}
+          icon={UsersRound}
+          active={hasDivisionFilters}
+          open={openFilter === 'organization-division'}
+          onOpenChange={setOpen('organization-division')}
+          onClear={() => setDivisionFilters(EMPTY_DIVISION_FILTERS)}
+        >
+          <DivisionDiscoveryFilters
+            value={divisionFilters}
+            onChange={setDivisionFilters}
+            selectedSports={selectedSports}
           />
-          <div aria-hidden="true" className="mt-1 flex justify-between gap-2 text-xs text-muted-foreground">
-            {DISTANCE_SLIDER_MARKS.map((mark) => <span key={mark.value}>{mark.label} mi</span>)}
-          </div>
-        </div>
-      )}
-    </div>
-  );
+        </FilterPopover>
+      ),
+    },
+    {
+      key: 'organization-distance',
+      node: (
+        <FilterPopover
+          id={`${panelId}-organization-distance`}
+          label="Distance"
+          value={location && distanceMiles !== null ? `${distanceMiles} mi` : undefined}
+          valueLabel={location ? (distanceMiles !== null ? `${distanceMiles} mi` : 'Any distance') : 'Set location'}
+          icon={MapPin}
+          active={Boolean(location && distanceMiles !== null)}
+          open={openFilter === 'organization-distance'}
+          onOpenChange={setOpen('organization-distance')}
+          onClear={() => setMaxDistance(null)}
+        >
+          <div className="discover-filter-popover-heading">Distance</div>
+          {location ? (
+            <label className="discover-filter-range">
+              <span>Within {distanceMiles ?? Math.round(kmToMiles(defaultMaxDistance))} mi</span>
+              <input
+                type="range"
+                min={DISTANCE_SLIDER_MIN_MILES}
+                max={DISTANCE_SLIDER_MAX_MILES}
+                step={1}
+                value={clampMiles(distanceMiles ?? kmToMiles(defaultMaxDistance))}
+                onChange={(event) => setMaxDistance(milesToKm(Number(event.currentTarget.value)))}
+                aria-label="Filter by distance"
+              />
+              <span className="discover-filter-range-scale"><span>10 mi</span><span>100 mi</span></span>
+            </label>
+          ) : (
+            <Text size="sm" c="dimmed">Set a location to enable distance filtering.</Text>
+          )}
+          {distanceMiles !== null && <button type="button" className="discover-filter-clear-link" onClick={() => setMaxDistance(null)}>Clear distance</button>}
+        </FilterPopover>
+      ),
+    },
+  ];
+  const filtersKey = [
+    selectedTags.join('|'),
+    divisionFilters.genders.join('|'),
+    divisionFilters.ageDivisionTypeIds.join('|'),
+    divisionFilters.skillDivisionTypeIds.join('|'),
+    divisionFilters.priceMinDollars ?? '',
+    divisionFilters.priceMaxDollars ?? '',
+    distanceMiles ?? '',
+    location ? 'location' : 'no-location',
+    organizationTags.length,
+    activeFilterCount,
+  ].join('::');
 
   return (
     <div className="space-y-6 mb-8">
-      <Group justify="space-between" align="center" gap="md" wrap="wrap">
+      <div className="discover-event-controls mb-8 space-y-4">
         <DiscoverSearchControls
           value={searchTerm}
           onValueChange={setSearchTerm}
@@ -1767,137 +1722,82 @@ function OrganizationsTabContent(props: {
           onOpenMap={onOpenMap}
           searchLabel="Search organizations"
         />
-        <Text size="sm" c="dimmed">
-          {results.length} organization{results.length === 1 ? '' : 's'}
-          {location ? ' near you.' : '. Enable location for distance filtering.'}
-        </Text>
-      </Group>
+        <DiscoverFilterRows
+          sports={sports}
+          selectedSports={selectedSports}
+          setSelectedSports={setSelectedSports}
+          sportsLoading={sportsLoading}
+          sportsError={sportsError}
+          filters={organizationFilterItems}
+          filtersKey={filtersKey}
+          filterAriaLabel="Organization filters"
+          activeFilterCount={activeFilterCount}
+          resetFilters={resetFilters}
+        />
+      </div>
 
-      <Sheet open={isFiltersOpen} onOpenChange={(open) => setIsFiltersOpen(open)}>
-        <SheetContent side="bottom" className="max-h-[85dvh] overflow-y-auto">
-          <SheetHeader>
-            <SheetTitle>Filter Organizations</SheetTitle>
-            <SheetDescription>Adjust organization, division, and distance filters.</SheetDescription>
-          </SheetHeader>
-          <div className="px-4 pb-6">
-            <Group justify="space-between" align="center" mb="md">
-              <Text fw={700} size="sm">
-                Filters
-              </Text>
-              <Button variant="subtle" size="compact-sm" onClick={resetFilters} disabled={!activeFilterCount}>
-                Reset
-              </Button>
-            </Group>
-            {filterPanel}
-          </div>
-        </SheetContent>
-      </Sheet>
-
-      <div className="grid gap-6 lg:grid-cols-[18rem_minmax(0,1fr)]">
-        <aside className="hidden lg:block lg:sticky lg:top-24 lg:h-[calc(100dvh-6.5rem)]">
-          <Paper withBorder p={0} radius="lg" className="h-full overflow-hidden">
-            <div className="discover-filter-panel h-full overflow-y-auto p-4">
-              <Group justify="space-between" align="center" mb="md">
-                <Text fw={700} size="sm">
-                  Filters
-                </Text>
-                <Button variant="subtle" size="compact-sm" onClick={resetFilters} disabled={!activeFilterCount}>
-                  Reset
-                </Button>
-              </Group>
-              {filterPanel}
-            </div>
-          </Paper>
-        </aside>
-
-        <div className="space-y-4">
-          <Button
-            variant="default"
-            leftSection={<SlidersHorizontal size={16} />}
-            onClick={() => setIsFiltersOpen(true)}
-            className="lg:hidden"
-          >
-            Filters{activeFilterCount ? ` (${activeFilterCount})` : ''}
-          </Button>
-
-          {activeFilters.length > 0 && (
-            <Paper withBorder p="sm" radius="lg" className="discover-active-filters">
-              <Group justify="space-between" align="flex-start" gap="xs" wrap="wrap">
-                <Group gap="xs" align="center">
-                  <Text fw={600} size="sm" c="dimmed">
-                    Active filters
-                  </Text>
-                  {activeFilters.map((filter) => (
-                    <button
-                      key={filter.key}
-                      type="button"
-                      className="discover-active-filter-chip"
-                      onClick={filter.onRemove}
-                    >
-                      <span>{filter.label}</span>
-                      <X size={12} />
-                    </button>
-                  ))}
-                </Group>
-                <Button variant="subtle" size="compact-sm" onClick={resetFilters}>
-                  Clear all
-                </Button>
-              </Group>
-            </Paper>
-          )}
-
-          {error && (
-            <Alert color="red" radius="md">
-              {error}
-            </Alert>
-          )}
-
-          {loading ? (
-            <Loading text="Loading organizations..." />
-          ) : !hasResults ? (
-            <Paper withBorder p="xl" radius="md">
-              <Text fw={600} mb={4}>
-                No organizations found
-              </Text>
-              <Text size="sm" c="dimmed">
-                {activeFilterCount
-                  ? 'Try adjusting your current filters.'
-                  : 'Enable location or search to find organizations near you.'}
-              </Text>
-              <Text size="xs" c="dimmed" mt="xs">
-                Organizations without a location are hidden until you search for them.
-              </Text>
-            </Paper>
-          ) : (
-            <ResponsiveCardGrid>
-              {results.map(({ organization, distanceKm }) => (
-                <OrganizationCard
-                  key={organization.$id}
-                  organization={organization}
-                  onClick={() => onSelectOrganization(organization)}
-                  actions={
-                    typeof distanceKm === 'number' ? (
-                      <Text size="xs" c="dimmed">
-                        {distanceKm.toFixed(1)} km away
-                      </Text>
-                    ) : undefined
-                  }
-                />
-              ))}
-            </ResponsiveCardGrid>
-          )}
-          <div ref={sentinelRef} aria-hidden="true" />
-          {loadingMore && (
-            <Group justify="center" py="md">
-              <Loader size="sm" />
-            </Group>
-          )}
-          {!hasMore && results.length > 0 && (
-            <Text size="sm" c="dimmed" ta="center">
-              No more organizations to load
+      <div className="space-y-4">
+        <Group className="discover-results-header" justify="space-between" align="center" gap="sm" wrap="wrap">
+          <div className="discover-results-summary">
+            <Text size="sm" c="dimmed">
+              {results.length} organization{results.length === 1 ? '' : 's'}
+              {location ? ' near you.' : '. Enable location for distance filtering.'}
             </Text>
-          )}
-        </div>
+            <ActiveEventFilters filters={activeFilters} className="discover-active-event-filters" label="Active filters" />
+          </div>
+        </Group>
+
+        {error && (
+          <Alert color="red" radius="md">
+            {error}
+          </Alert>
+        )}
+
+        {loading ? (
+          <Loading text="Loading organizations..." />
+        ) : !hasResults ? (
+          <Paper withBorder p="xl" radius="md">
+            <Text fw={600} mb={4}>
+              No organizations found
+            </Text>
+            <Text size="sm" c="dimmed">
+              {activeFilterCount
+                ? 'Try adjusting your current filters.'
+                : 'Enable location or search to find organizations near you.'}
+            </Text>
+            <Text size="xs" c="dimmed" mt="xs">
+              Organizations without a location are hidden until you search for them.
+            </Text>
+          </Paper>
+        ) : (
+          <ResponsiveCardGrid>
+            {results.map(({ organization, distanceKm }) => (
+              <OrganizationCard
+                key={organization.$id}
+                organization={organization}
+                onClick={() => onSelectOrganization(organization)}
+                actions={
+                  typeof distanceKm === 'number' ? (
+                    <Text size="xs" c="dimmed">
+                      {distanceKm.toFixed(1)} km away
+                    </Text>
+                  ) : undefined
+                }
+              />
+            ))}
+          </ResponsiveCardGrid>
+        )}
+        <div ref={sentinelRef} aria-hidden="true" />
+        {loadingMore && (
+          <Group justify="center" py="md">
+            <Loader size="sm" />
+          </Group>
+        )}
+        {!hasMore && results.length > 0 && (
+          <Text size="sm" c="dimmed" ta="center">
+            No more organizations to load
+          </Text>
+        )}
       </div>
     </div>
   );
@@ -1947,39 +1847,27 @@ function TeamsTabContent(props: {
     divisionTypeOptions,
     onSelectTeam,
   } = props;
-  const [sportSearchTerm, setSportSearchTerm] = useState('');
-  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
-  const allSportsSelected = selectedSports.length === 0;
-  const sportsQuery = sportSearchTerm.trim().toLowerCase();
+  const [openFilter, setOpenFilter] = useState<string | null>(null);
+  const panelId = useId();
   const activeQuery = searchTerm.trim();
-  const visibleSports = useMemo(() => {
-    if (!sportsQuery) {
-      return sports;
-    }
-    return sports.filter((sport) => sport.toLowerCase().includes(sportsQuery));
-  }, [sports, sportsQuery]);
-  const divisionOptionsBySport = useMemo(() => {
-    const groups: Array<{ sport: string; options: TeamDivisionFilterOption[] }> = [];
-    const groupIndexes = new Map<string, number>();
-    divisionTypeOptions.forEach((option) => {
-      const existingIndex = groupIndexes.get(option.sport);
-      if (typeof existingIndex === 'number') {
-        groups[existingIndex].options.push(option);
-        return;
-      }
-      groupIndexes.set(option.sport, groups.length);
-      groups.push({ sport: option.sport, options: [option] });
-    });
-    return groups;
-  }, [divisionTypeOptions]);
-
   const divisionOptionByValue = useMemo(
     () => new Map(divisionTypeOptions.map((option) => [option.value, option])),
     [divisionTypeOptions],
   );
+  const divisionLabels = selectedDivisionTypeValues
+    .map((value) => divisionOptionByValue.get(value)?.label)
+    .filter((label): label is string => Boolean(label));
+  const divisionSummary = divisionLabels.length === 1
+    ? divisionLabels[0]
+    : divisionLabels.length > 1
+      ? `${divisionLabels[0]} +${divisionLabels.length - 1}`
+      : undefined;
+  const teamDivisionOptions = divisionTypeOptions.map((option) => ({
+    value: option.value,
+    label: option.label,
+  }));
 
   const activeFilters: Array<{ key: string; label: string; onRemove: () => void }> = [];
-
   if (activeQuery) {
     activeFilters.push({
       key: 'query',
@@ -1987,7 +1875,6 @@ function TeamsTabContent(props: {
       onRemove: () => setSearchTerm(''),
     });
   }
-
   selectedSports.forEach((sport) => {
     activeFilters.push({
       key: `sport-${sport}`,
@@ -1995,12 +1882,9 @@ function TeamsTabContent(props: {
       onRemove: () => setSelectedSports((current) => current.filter((value) => value !== sport)),
     });
   });
-
   selectedDivisionTypeValues.forEach((value) => {
     const option = divisionOptionByValue.get(value);
-    if (!option) {
-      return;
-    }
+    if (!option) return;
     activeFilters.push({
       key: `division-${value}`,
       label: option.label,
@@ -2015,120 +1899,48 @@ function TeamsTabContent(props: {
   }, [setSearchTerm, setSelectedSports, setSelectedDivisionTypeValues]);
 
   const activeFilterCount = activeFilters.length;
-
-  const filterPanel = (
-    <div className="space-y-6">
-      <div>
-        <Text size="xs" fw={700} c="dimmed" tt="uppercase" mb={8}>
-          Sports
-        </Text>
-        <TextInput
-          value={sportSearchTerm}
-          onChange={(event) => setSportSearchTerm(event.currentTarget.value)}
-          placeholder="Search sport..."
-          mb="sm"
-        />
-        <Group gap="xs" align="center">
-          <Chip
-            radius="xl"
-            checked={allSportsSelected}
-            disabled={sportsLoading || !sports.length}
-            onChange={(checked) => {
-              if (checked) {
-                setSelectedSports([]);
-              }
-            }}
-          >
-            All
-          </Chip>
-          {sportsLoading ? (
-            <Loader size="sm" aria-label="Loading sports" />
-          ) : visibleSports.length ? (
-            visibleSports.map((sport) => (
-              <Chip
-                key={sport}
-                radius="xl"
-                checked={selectedSports.includes(sport)}
-                onChange={(checked) => {
-                  setSelectedSports((current) => {
-                    if (checked) {
-                      const next = new Set(current);
-                      next.add(sport);
-                      return Array.from(next);
-                    }
-                    return current.filter((value) => value !== sport);
-                  });
-                }}
-              >
-                {sport}
-              </Chip>
-            ))
+  const setOpen = (id: string) => (open: boolean) => setOpenFilter(open ? id : null);
+  const teamFilterItems: DiscoverFilterItem[] = [
+    {
+      key: 'team-division',
+      node: (
+        <FilterPopover
+          id={`${panelId}-team-division`}
+          label="Division"
+          value={divisionSummary}
+          valueLabel={divisionSummary}
+          icon={BarChart3}
+          active={selectedDivisionTypeValues.length > 0}
+          open={openFilter === 'team-division'}
+          onOpenChange={setOpen('team-division')}
+          onClear={() => setSelectedDivisionTypeValues([])}
+        >
+          <div className="discover-filter-popover-heading">Division type</div>
+          {!selectedSports.length ? (
+            <Text size="sm" c="dimmed">Select one or more sports to choose division types.</Text>
+          ) : !teamDivisionOptions.length ? (
+            <Text size="sm" c="dimmed">No division types are available for the selected sports.</Text>
           ) : (
-            <Text size="sm" c="dimmed">
-              {sportsQuery ? 'No sports match this search.' : 'No sports available.'}
-            </Text>
+            <FilterOptionList
+              options={teamDivisionOptions}
+              value={selectedDivisionTypeValues}
+              allLabel="Any division type"
+              onChange={setSelectedDivisionTypeValues}
+            />
           )}
-        </Group>
-        {sportsError && (
-          <Alert color="red" radius="md" mt="sm">
-            {sportsError}
-          </Alert>
-        )}
-      </div>
-
-      <div>
-        <Text size="xs" fw={700} c="dimmed" tt="uppercase" mb={8}>
-          Division Types
-        </Text>
-        {!selectedSports.length ? (
-          <Text size="sm" c="dimmed">
-            Select one or more sports to choose division types.
-          </Text>
-        ) : !divisionOptionsBySport.length ? (
-          <Text size="sm" c="dimmed">
-            No division types are available for the selected sports.
-          </Text>
-        ) : (
-          <div className="space-y-3">
-            {divisionOptionsBySport.map((group) => (
-              <div key={group.sport}>
-                {selectedSports.length > 1 && (
-                  <Text size="xs" fw={600} c="dimmed" mb={6}>
-                    {group.sport}
-                  </Text>
-                )}
-                <Group gap="xs" align="center">
-                  {group.options.map((option) => (
-                    <Chip
-                      key={option.value}
-                      radius="xl"
-                      checked={selectedDivisionTypeValues.includes(option.value)}
-                      onChange={(checked) => {
-                        setSelectedDivisionTypeValues((current) => {
-                          if (checked) {
-                            const next = new Set(current);
-                            next.add(option.value);
-                            return Array.from(next);
-                          }
-                          return current.filter((value) => value !== option.value);
-                        });
-                      }}
-                    >
-                      {option.label}
-                    </Chip>
-                  ))}
-                </Group>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
+        </FilterPopover>
+      ),
+    },
+  ];
+  const filtersKey = [
+    selectedDivisionTypeValues.join('|'),
+    divisionTypeOptions.map((option) => option.value).join('|'),
+    activeFilterCount,
+  ].join('::');
 
   return (
     <div className="space-y-6 mb-8">
-      <Group justify="space-between" align="center" gap="md" wrap="wrap">
+      <div className="discover-event-controls mb-8 space-y-4">
         <DiscoverSearchControls
           value={searchTerm}
           onValueChange={setSearchTerm}
@@ -2137,127 +1949,76 @@ function TeamsTabContent(props: {
           onOpenMap={onOpenMap}
           searchLabel="Search teams"
         />
-        <Text size="sm" c="dimmed">
-          {teams.length}
-          {totalTeams !== teams.length ? ` of ${totalTeams}` : ''} open team{teams.length === 1 ? '' : 's'}
-          {activeQuery ? ` matching "${activeQuery}".` : '.'}
-        </Text>
-      </Group>
+        <DiscoverFilterRows
+          sports={sports}
+          selectedSports={selectedSports}
+          setSelectedSports={setSelectedSports}
+          sportsLoading={sportsLoading}
+          sportsError={sportsError}
+          filters={teamFilterItems}
+          filtersKey={filtersKey}
+          filterAriaLabel="Team filters"
+          activeFilterCount={activeFilterCount}
+          resetFilters={resetFilters}
+        />
+      </div>
 
-        <Sheet open={isFiltersOpen} onOpenChange={(open) => setIsFiltersOpen(open)}>
-          <SheetContent side="bottom" className="max-h-[85dvh] overflow-y-auto">
-            <SheetHeader>
-              <SheetTitle>Filter Teams</SheetTitle>
-              <SheetDescription>Adjust sport and division filters.</SheetDescription>
-            </SheetHeader>
-            <div className="px-4 pb-6">
-              <Group justify="space-between" align="center" mb="md">
-                <Text fw={700} size="sm">Filters</Text>
-                <Button variant="subtle" size="compact-sm" onClick={resetFilters} disabled={!activeFilterCount}>
-                  Reset
-                </Button>
-              </Group>
-              {filterPanel}
-            </div>
-          </SheetContent>
-        </Sheet>
-        <Button
-          variant="default"
-          leftSection={<SlidersHorizontal size={16} />}
-          onClick={() => setIsFiltersOpen(true)}
-          className="mb-4 lg:hidden"
-        >
-          Filters{activeFilterCount ? ` (${activeFilterCount})` : ''}
-        </Button>
-      <div className="grid gap-6 lg:grid-cols-[18rem_minmax(0,1fr)]">
-        <aside className="hidden lg:block lg:sticky lg:top-24 lg:h-[calc(100dvh-6.5rem)]">
-          <Paper withBorder p={0} radius="lg" className="h-full overflow-hidden">
-            <div className="discover-filter-panel h-full overflow-y-auto p-4">
-              <Group justify="space-between" align="center" mb="md">
-                <Text fw={700} size="sm">
-                  Filters
-                </Text>
-                <Button variant="subtle" size="compact-sm" onClick={resetFilters} disabled={!activeFilterCount}>
-                  Reset
-                </Button>
-              </Group>
-              {filterPanel}
-            </div>
-          </Paper>
-        </aside>
-
-        <div className="space-y-4">
-          {activeFilters.length > 0 && (
-            <Paper withBorder p="sm" radius="lg" className="discover-active-filters">
-              <Group justify="space-between" align="flex-start" gap="xs" wrap="wrap">
-                <Group gap="xs" align="center">
-                  <Text fw={600} size="sm" c="dimmed">
-                    Active filters
-                  </Text>
-                  {activeFilters.map((filter) => (
-                    <button
-                      key={filter.key}
-                      type="button"
-                      className="discover-active-filter-chip"
-                      onClick={filter.onRemove}
-                    >
-                      <span>{filter.label}</span>
-                      <X size={12} />
-                    </button>
-                  ))}
-                </Group>
-                <Button variant="subtle" size="compact-sm" onClick={resetFilters}>
-                  Clear all
-                </Button>
-              </Group>
-            </Paper>
-          )}
-
-          {error && (
-            <Alert color="red" radius="md">
-              {error}
-            </Alert>
-          )}
-
-          {loading ? (
-            <Loading text="Loading open teams..." />
-          ) : teams.length === 0 ? (
-            <Paper withBorder p="xl" radius="md">
-              <Text fw={600} mb={4}>
-                No open-registration teams found
-              </Text>
-              <Text size="sm" c="dimmed">
-                Try another team, sport, or division search.
-              </Text>
-            </Paper>
-          ) : (
-            <ResponsiveCardGrid>
-              {teams.map((team) => (
-                <TeamCard
-                  key={team.$id}
-                  team={team}
-                  onClick={() => onSelectTeam(team)}
-                  actions={team.affiliateUrl?.trim() ? undefined : (
-                    <Text size="xs" c="green" fw={600}>
-                      Open registration
-                    </Text>
-                  )}
-                />
-              ))}
-            </ResponsiveCardGrid>
-          )}
-          <div ref={sentinelRef} aria-hidden="true" />
-          {loadingMore && (
-            <Group justify="center" py="md">
-              <Loader size="sm" />
-            </Group>
-          )}
-          {!hasMore && teams.length > 0 && (
-            <Text size="sm" c="dimmed" ta="center">
-              No more teams to load
+      <div className="space-y-4">
+        <Group className="discover-results-header" justify="space-between" align="center" gap="sm" wrap="wrap">
+          <div className="discover-results-summary">
+            <Text size="sm" c="dimmed">
+              {teams.length}
+              {totalTeams !== teams.length ? ` of ${totalTeams}` : ''} open team{teams.length === 1 ? '' : 's'}
+              {activeQuery ? ` matching "${activeQuery}".` : '.'}
             </Text>
-          )}
-        </div>
+            <ActiveEventFilters filters={activeFilters} className="discover-active-event-filters" label="Active filters" />
+          </div>
+        </Group>
+
+        {error && (
+          <Alert color="red" radius="md">
+            {error}
+          </Alert>
+        )}
+
+        {loading ? (
+          <Loading text="Loading open teams..." />
+        ) : teams.length === 0 ? (
+          <Paper withBorder p="xl" radius="md">
+            <Text fw={600} mb={4}>
+              No open-registration teams found
+            </Text>
+            <Text size="sm" c="dimmed">
+              Try another team, sport, or division search.
+            </Text>
+          </Paper>
+        ) : (
+          <ResponsiveCardGrid>
+            {teams.map((team) => (
+              <TeamCard
+                key={team.$id}
+                team={team}
+                onClick={() => onSelectTeam(team)}
+                actions={team.affiliateUrl?.trim() ? undefined : (
+                  <Text size="xs" c="green" fw={600}>
+                    Open registration
+                  </Text>
+                )}
+              />
+            ))}
+          </ResponsiveCardGrid>
+        )}
+        <div ref={sentinelRef} aria-hidden="true" />
+        {loadingMore && (
+          <Group justify="center" py="md">
+            <Loader size="sm" />
+          </Group>
+        )}
+        {!hasMore && teams.length > 0 && (
+          <Text size="sm" c="dimmed" ta="center">
+            No more teams to load
+          </Text>
+        )}
       </div>
     </div>
   );
@@ -2314,17 +2075,9 @@ function RentalsTabContent(props: {
     onSelectOrganization,
   } = props;
 
-  const [sportSearchTerm, setSportSearchTerm] = useState('');
-  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
-  const allSportsSelected = selectedSports.length === 0;
-  const sportsQuery = sportSearchTerm.trim().toLowerCase();
+  const [openFilter, setOpenFilter] = useState<string | null>(null);
+  const panelId = useId();
   const activeQuery = searchTerm.trim();
-  const visibleSports = useMemo(() => {
-    if (!sportsQuery) {
-      return sports;
-    }
-    return sports.filter((sport) => sport.toLowerCase().includes(sportsQuery));
-  }, [sports, sportsQuery]);
 
   const filteredListings = useMemo(() => {
     const [startHour, endHour] = timeRange;
@@ -2441,115 +2194,92 @@ function RentalsTabContent(props: {
 
   const activeFilterCount = activeFilters.length;
 
-  const filterPanel = (
-    <div className="space-y-6">
-      <div>
-        <Text size="xs" fw={700} c="dimmed" tt="uppercase" mb={8}>
-          Sports
-        </Text>
-        <TextInput
-          value={sportSearchTerm}
-          onChange={(event) => setSportSearchTerm(event.currentTarget.value)}
-          placeholder="Search sport..."
-          mb="sm"
-        />
-        <Group gap="xs" align="center">
-          <Chip
-            radius="xl"
-            checked={allSportsSelected}
-            disabled={sportsLoading || !sports.length}
-            onChange={(checked) => {
-              if (checked) {
-                setSelectedSports([]);
-              }
-            }}
-          >
-            All
-          </Chip>
-          {sportsLoading ? (
-            <Loader size="sm" aria-label="Loading sports" />
-          ) : visibleSports.length ? (
-            visibleSports.map((sport) => (
-              <Chip
-                key={sport}
-                radius="xl"
-                checked={selectedSports.includes(sport)}
-                onChange={(checked) => {
-                  setSelectedSports((current) => {
-                    if (checked) {
-                      const next = new Set(current);
-                      next.add(sport);
-                      return Array.from(next);
-                    }
-                    return current.filter((value) => value !== sport);
-                  });
-                }}
-              >
-                {sport}
-              </Chip>
-            ))
+  const timeRangeActive = timeRange[0] !== defaultTimeRange[0] || timeRange[1] !== defaultTimeRange[1];
+  const timeRangeLabel = `${formatHourLabel(timeRange[0])} - ${formatHourLabel(timeRange[1])}`;
+  const distanceMiles = typeof maxDistance === 'number' ? Math.round(kmToMiles(maxDistance)) : null;
+  const setOpen = (id: string) => (open: boolean) => setOpenFilter(open ? id : null);
+  const rentalFilterItems: DiscoverFilterItem[] = [
+    {
+      key: 'rental-time-range',
+      node: (
+        <FilterPopover
+          id={`${panelId}-rental-time-range`}
+          label="Time"
+          value={timeRangeActive ? timeRangeLabel : undefined}
+          valueLabel={timeRangeActive ? timeRangeLabel : undefined}
+          icon={Clock3}
+          active={timeRangeActive}
+          open={openFilter === 'rental-time-range'}
+          onOpenChange={setOpen('rental-time-range')}
+          onClear={() => setTimeRange(defaultTimeRange)}
+        >
+          <div className="discover-filter-popover-heading">Available time</div>
+          <div className="discover-time-range-slider">
+            <Slider
+              min={0}
+              max={24}
+              minStepsBetweenValues={1}
+              step={1}
+              value={timeRange}
+              onValueChange={(value) => setTimeRange([value[0] ?? 0, value[1] ?? 24])}
+              getAriaLabel={(index) => index === 0 ? 'Earliest rental time' : 'Latest rental time'}
+              getAriaValueText={(_, value) => formatHourLabel(value)}
+            />
+            <div aria-hidden="true" className="mt-1 flex justify-between gap-2 text-xs text-muted-foreground">
+              {[0, 12, 24].map((hour) => <span key={hour}>{formatHourTickLabel(hour)}</span>)}
+            </div>
+          </div>
+        </FilterPopover>
+      ),
+    },
+    {
+      key: 'rental-distance',
+      node: (
+        <FilterPopover
+          id={`${panelId}-rental-distance`}
+          label="Distance"
+          value={location && distanceMiles !== null ? `${distanceMiles} mi` : undefined}
+          valueLabel={location ? (distanceMiles !== null ? `${distanceMiles} mi` : 'Any distance') : 'Set location'}
+          icon={MapPin}
+          active={Boolean(location && distanceMiles !== null)}
+          open={openFilter === 'rental-distance'}
+          onOpenChange={setOpen('rental-distance')}
+          onClear={() => setMaxDistance(null)}
+        >
+          <div className="discover-filter-popover-heading">Distance</div>
+          {location ? (
+            <label className="discover-filter-range">
+              <span>Within {distanceMiles ?? Math.round(kmToMiles(defaultMaxDistance))} mi</span>
+              <input
+                type="range"
+                min={DISTANCE_SLIDER_MIN_MILES}
+                max={DISTANCE_SLIDER_MAX_MILES}
+                step={1}
+                value={clampMiles(distanceMiles ?? kmToMiles(defaultMaxDistance))}
+                onChange={(event) => setMaxDistance(milesToKm(Number(event.currentTarget.value)))}
+                aria-label="Filter by distance"
+              />
+              <span className="discover-filter-range-scale"><span>10 mi</span><span>100 mi</span></span>
+            </label>
           ) : (
-            <Text size="sm" c="dimmed">
-              {sportsQuery ? 'No sports match this search.' : 'No sports available.'}
-            </Text>
+            <Text size="sm" c="dimmed">Set a location to enable distance filtering.</Text>
           )}
-        </Group>
-        {sportsError && (
-          <Alert color="red" radius="md" mt="sm">
-            {sportsError}
-          </Alert>
-        )}
-      </div>
-
-      <div>
-        <Text size="xs" fw={700} c="dimmed" tt="uppercase" mb={8}>
-          Time Range
-        </Text>
-        <div className="discover-time-range-slider">
-          <Slider
-            min={0}
-            max={24}
-            minStepsBetweenValues={1}
-            step={1}
-            value={timeRange}
-            onValueChange={(value) => setTimeRange([value[0] ?? 0, value[1] ?? 24])}
-            getAriaLabel={(index) => index === 0 ? 'Earliest rental time' : 'Latest rental time'}
-            getAriaValueText={(_, value) => formatHourLabel(value)}
-          />
-          <div aria-hidden="true" className="mt-1 flex justify-between gap-2 text-xs text-muted-foreground">
-            {[0, 12, 24].map((hour) => <span key={hour}>{formatHourTickLabel(hour)}</span>)}
-          </div>
-        </div>
-      </div>
-
-      {location && (
-        <div>
-          <Text size="xs" fw={700} c="dimmed" tt="uppercase" mb={8}>
-            Distance
-          </Text>
-          <Text size="sm" fw={600} mb={6}>
-            {typeof maxDistance === 'number' ? `Within ${Math.round(kmToMiles(maxDistance))} mi` : 'Any distance'}
-          </Text>
-          <Slider
-            min={DISTANCE_SLIDER_MIN_MILES}
-            max={DISTANCE_SLIDER_MAX_MILES}
-            step={1}
-            value={[clampMiles(typeof maxDistance === 'number' ? kmToMiles(maxDistance) : kmToMiles(defaultMaxDistance))]}
-            onValueChange={(value) => setMaxDistance(milesToKm(value[0] ?? DISTANCE_SLIDER_MIN_MILES))}
-            getAriaLabel={() => 'Maximum distance in miles'}
-            getAriaValueText={(_, value) => `${value} miles`}
-          />
-          <div aria-hidden="true" className="mt-1 flex justify-between gap-2 text-xs text-muted-foreground">
-            {DISTANCE_SLIDER_MARKS.map((mark) => <span key={mark.value}>{mark.label} mi</span>)}
-          </div>
-        </div>
-      )}
-    </div>
-  );
+          {distanceMiles !== null && <button type="button" className="discover-filter-clear-link" onClick={() => setMaxDistance(null)}>Clear distance</button>}
+        </FilterPopover>
+      ),
+    },
+  ];
+  const filtersKey = [
+    timeRange.join('|'),
+    defaultTimeRange.join('|'),
+    distanceMiles ?? '',
+    location ? 'location' : 'no-location',
+    activeFilterCount,
+  ].join('::');
 
   return (
     <div className="space-y-6 mb-8">
-      <Group justify="space-between" align="center" gap="md" wrap="wrap">
+      <div className="discover-event-controls mb-8 space-y-4">
         <DiscoverSearchControls
           value={searchTerm}
           onValueChange={setSearchTerm}
@@ -2558,126 +2288,75 @@ function RentalsTabContent(props: {
           onOpenMap={onOpenMap}
           searchLabel="Search rentals"
         />
-        <Text size="sm" c="dimmed">
-          {rentalCards.length} rental listing{rentalCards.length === 1 ? '' : 's'}
-          {location ? ' near you.' : '.'}
-        </Text>
-      </Group>
+        <DiscoverFilterRows
+          sports={sports}
+          selectedSports={selectedSports}
+          setSelectedSports={setSelectedSports}
+          sportsLoading={sportsLoading}
+          sportsError={sportsError}
+          filters={rentalFilterItems}
+          filtersKey={filtersKey}
+          filterAriaLabel="Rental filters"
+          activeFilterCount={activeFilterCount}
+          resetFilters={resetFilters}
+        />
+      </div>
 
-      <Sheet open={isFiltersOpen} onOpenChange={(open) => setIsFiltersOpen(open)}>
-        <SheetContent side="bottom" className="max-h-[85dvh] overflow-y-auto">
-          <SheetHeader>
-            <SheetTitle>Filter Rentals</SheetTitle>
-            <SheetDescription>Adjust sport, time, and distance filters.</SheetDescription>
-          </SheetHeader>
-          <div className="px-4 pb-6">
-            <Group justify="space-between" align="center" mb="md">
-              <Text fw={700} size="sm">Filters</Text>
-              <Button variant="subtle" size="compact-sm" onClick={resetFilters} disabled={!activeFilterCount}>
-                Reset
-              </Button>
-            </Group>
-            {filterPanel}
-          </div>
-        </SheetContent>
-      </Sheet>
-      <Button
-        variant="default"
-        leftSection={<SlidersHorizontal size={16} />}
-        onClick={() => setIsFiltersOpen(true)}
-        className="mb-4 lg:hidden"
-      >
-        Filters{activeFilterCount ? ` (${activeFilterCount})` : ''}
-      </Button>
-      <div className="grid gap-6 lg:grid-cols-[18rem_minmax(0,1fr)]">
-        <aside className="hidden lg:block lg:sticky lg:top-24 lg:h-[calc(100dvh-6.5rem)]">
-          <Paper withBorder p={0} radius="lg" className="h-full overflow-hidden">
-            <div className="discover-filter-panel h-full overflow-y-auto p-4">
-              <Group justify="space-between" align="center" mb="md">
-                <Text fw={700} size="sm">
-                  Filters
-                </Text>
-                <Button variant="subtle" size="compact-sm" onClick={resetFilters} disabled={!activeFilterCount}>
-                  Reset
-                </Button>
-              </Group>
-              {filterPanel}
-            </div>
-          </Paper>
-        </aside>
-
-        <div className="space-y-4">
-          {activeFilters.length > 0 && (
-            <Paper withBorder p="sm" radius="lg" className="discover-active-filters">
-              <Group justify="space-between" align="flex-start" gap="xs" wrap="wrap">
-                <Group gap="xs" align="center">
-                  <Text fw={600} size="sm" c="dimmed">
-                    Active filters
-                  </Text>
-                  {activeFilters.map((filter) => (
-                    <button
-                      key={filter.key}
-                      type="button"
-                      className="discover-active-filter-chip"
-                      onClick={filter.onRemove}
-                    >
-                      <span>{filter.label}</span>
-                      <X size={12} />
-                    </button>
-                  ))}
-                </Group>
-                <Button variant="subtle" size="compact-sm" onClick={resetFilters}>
-                  Clear all
-                </Button>
-              </Group>
-            </Paper>
-          )}
-
-          {rentalsError && (
-            <Alert color="red">
-              {rentalsError}
-            </Alert>
-          )}
-
-          {rentalsLoading ? (
-            <Loading text="Loading rentals..." />
-          ) : rentalCards.length === 0 ? (
-            <Paper withBorder p="xl" radius="md">
-              <Text fw={600} mb={4}>
-                No rentals available
-              </Text>
-              <Text size="sm" c="dimmed">
-                Try adjusting your current filters to explore more fields.
-              </Text>
-            </Paper>
-          ) : (
-            <ResponsiveCardGrid>
-              {rentalCards.map(({ key, organization, listings, actionLabel }) => (
-                <OrganizationCard
-                  key={key}
-                  organization={organization}
-                  onClick={() => onSelectOrganization(organization, listings)}
-                  actions={
-                    <Text size="xs" c="dimmed">
-                      {actionLabel}
-                    </Text>
-                  }
-                />
-              ))}
-            </ResponsiveCardGrid>
-          )}
-          <div ref={sentinelRef} aria-hidden="true" />
-          {rentalsLoadingMore && (
-            <Group justify="center" py="md">
-              <Loader size="sm" />
-            </Group>
-          )}
-          {!hasMoreRentals && rentalCards.length > 0 && (
-            <Text size="sm" c="dimmed" ta="center">
-              No more rentals to load
+      <div className="space-y-4">
+        <Group className="discover-results-header" justify="space-between" align="center" gap="sm" wrap="wrap">
+          <div className="discover-results-summary">
+            <Text size="sm" c="dimmed">
+              {rentalCards.length} rental listing{rentalCards.length === 1 ? '' : 's'}
+              {location ? ' near you.' : '.'}
             </Text>
-          )}
-        </div>
+            <ActiveEventFilters filters={activeFilters} className="discover-active-event-filters" label="Active filters" />
+          </div>
+        </Group>
+
+        {rentalsError && (
+          <Alert color="red">
+            {rentalsError}
+          </Alert>
+        )}
+
+        {rentalsLoading ? (
+          <Loading text="Loading rentals..." />
+        ) : rentalCards.length === 0 ? (
+          <Paper withBorder p="xl" radius="md">
+            <Text fw={600} mb={4}>
+              No rentals available
+            </Text>
+            <Text size="sm" c="dimmed">
+              Try adjusting your current filters to explore more fields.
+            </Text>
+          </Paper>
+        ) : (
+          <ResponsiveCardGrid>
+            {rentalCards.map(({ key, organization, listings, actionLabel }) => (
+              <OrganizationCard
+                key={key}
+                organization={organization}
+                onClick={() => onSelectOrganization(organization, listings)}
+                actions={
+                  <Text size="xs" c="dimmed">
+                    {actionLabel}
+                  </Text>
+                }
+              />
+            ))}
+          </ResponsiveCardGrid>
+        )}
+        <div ref={sentinelRef} aria-hidden="true" />
+        {rentalsLoadingMore && (
+          <Group justify="center" py="md">
+            <Loader size="sm" />
+          </Group>
+        )}
+        {!hasMoreRentals && rentalCards.length > 0 && (
+          <Text size="sm" c="dimmed" ta="center">
+            No more rentals to load
+          </Text>
+        )}
       </div>
     </div>
   );

@@ -241,10 +241,35 @@ describe('Discover organization loading', () => {
     await waitFor(() => {
       expect(screen.queryByText('Loading organizations...')).not.toBeInTheDocument();
     });
-    expect(container.querySelector('aside')).toContainElement(
-      screen.getByTestId('division-discovery-filters'),
-    );
+    expect(container.querySelector('aside')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Division', exact: true })).toBeInTheDocument();
     expect(listOrganizationsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['organizations', 'Tags'],
+    ['rentals', 'Time'],
+    ['teams', 'Division'],
+  ])('uses the shared filter row on the %s tab', async (tab, filterLabel) => {
+    navigationSearchParams = `tab=${tab}`;
+    window.history.replaceState({}, '', `/discover?${navigationSearchParams}`);
+    if (tab === 'rentals') {
+      listOrganizationsMock.mockResolvedValue({
+        organizations: [],
+        pagination: { limit: 100, offset: 0, nextOffset: 0, hasMore: false },
+      });
+    }
+    if (tab === 'teams') {
+      searchOpenRegistrationTeamsMock.mockResolvedValue({
+        teams: [],
+        pagination: { limit: 100, offset: 0, nextOffset: 0, hasMore: false, totalCount: 0 },
+      });
+    }
+
+    render(<DiscoverPage />);
+
+    expect(await screen.findByRole('button', { name: filterLabel, exact: true })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'All sports', exact: true })).toBeInTheDocument();
   });
 
   it('restores organization filters from the URL and keeps them shareable', async () => {

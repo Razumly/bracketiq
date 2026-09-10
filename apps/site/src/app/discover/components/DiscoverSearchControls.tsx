@@ -55,7 +55,7 @@ export default function DiscoverSearchControls({
           onChange={(event) => onValueChange(event.currentTarget.value)}
           placeholder={placeholder}
           leftSection={<Search aria-hidden="true" size={16} />}
-          className="min-w-0 flex-1"
+          className="discover-search-input min-w-0 flex-1"
         />
         <Button
           type="submit"
