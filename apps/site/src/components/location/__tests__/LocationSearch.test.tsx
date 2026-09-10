@@ -61,8 +61,8 @@ describe('LocationSearch', () => {
 
     const locationButton = screen.getByRole('button', { name: 'Set Location' });
     await user.click(locationButton);
-    await screen.findByPlaceholderText('Enter city, state, or ZIP');
-
+    const locationInput = await screen.findByPlaceholderText('Enter city, state, or ZIP');
+    await user.click(locationInput);
     await user.keyboard('{Escape}');
 
     await waitFor(() => expect(locationButton).toHaveFocus());
