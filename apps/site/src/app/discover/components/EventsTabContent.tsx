@@ -2,6 +2,7 @@
 
 import {
   useCallback,
+  useEffect,
   useMemo,
   useState,
   type Dispatch,
@@ -214,6 +215,16 @@ function EventsTabView<TEventType extends string>(
   const tagsQuery = tagSearchTerm.trim().toLowerCase();
   const activeQuery = searchTerm.trim();
   const divisionOptions = useDivisionDiscoveryOptions(selectedSports);
+  useEffect(() => {
+    if (divisionOptions.loading || divisionOptions.error) return;
+    const availableSkillIds = new Set(divisionOptions.skillOptions.map((option) => option.value.trim().toLowerCase()));
+    const nextSkillIds = divisionFilters.skillDivisionTypeIds.filter((id) => availableSkillIds.has(id.trim().toLowerCase()));
+    const skillsChanged = nextSkillIds.length !== divisionFilters.skillDivisionTypeIds.length
+      || nextSkillIds.some((id, index) => id !== divisionFilters.skillDivisionTypeIds[index]);
+    if (skillsChanged) {
+      setDivisionFilters({ ...divisionFilters, skillDivisionTypeIds: nextSkillIds });
+    }
+  }, [divisionFilters, divisionOptions.error, divisionOptions.loading, divisionOptions.skillOptions, setDivisionFilters]);
 
   const visibleEventTags = useMemo(() => {
     const matchingTags = tagsQuery
