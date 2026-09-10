@@ -518,6 +518,11 @@ svg {
   width: min(22rem, calc(100vw - 2rem));
 }
 
+.discover-filter-popover--dates {
+  max-height: none;
+  overflow: visible;
+}
+
 .discover-filter-popover-heading {
   margin-bottom: 0.9rem;
   color: var(--discover-text);
@@ -961,10 +966,7 @@ svg {
 }
 
 .discover-map-filter-scroll {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.75rem;
+  width: 100%;
 }
 
 .discover-map-filter-scroll .discover-filter-control {
@@ -984,48 +986,6 @@ svg {
   display: none;
 }
 
-.discover-map-date-filter {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  min-height: 2.875rem;
-  padding-left: 0.75rem;
-  border: 1px solid var(--discover-border);
-  border-radius: 0.5rem;
-  font-size: 0.8125rem;
-}
-
-.discover-map-date-filter > span {
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-.discover-map-date-filter > div {
-  min-width: 6rem;
-  max-width: 11.5rem;
-}
-
-.discover-map-date-filter > div > div > button[aria-haspopup='dialog'] {
-  border: 0;
-  font-size: 0.8125rem;
-}
-
-.discover-map-reset {
-  min-width: 3.5rem;
-  min-height: 2.75rem;
-  margin-left: auto;
-  border: 0;
-  background: transparent;
-  color: var(--discover-filter-selected-text);
-  font-size: 0.875rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.discover-map-reset:disabled {
-  color: var(--discover-text-muted);
-  cursor: default;
-}
 
 .discover-map-search-toggle,
 .discover-map-filter-toggle {
@@ -1629,14 +1589,6 @@ svg {
     max-width: none;
   }
 
-  .discover-map-date-filter {
-    justify-content: space-between;
-  }
-
-  .discover-map-reset {
-    margin-left: 0;
-    text-align: left;
-  }
 
   .discover-map-workspace--split {
     grid-template-columns: minmax(0, 1fr);

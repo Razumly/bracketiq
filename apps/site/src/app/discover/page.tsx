@@ -1,5 +1,5 @@
 'use client';
-import { Dispatch, RefObject, SetStateAction, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { Dispatch, RefObject, SetStateAction, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -10,13 +10,10 @@ import {
   Loader,
   Paper,
   Text,
-  TextInput,
   Title,
 } from '@/components/organization/organization-operation-ui';
-import { Slider } from '@/components/ui/slider';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
-import { BarChart3, Clock3, MapPin, Tag, UsersRound } from 'lucide-react';
 
 import Navigation from '@/components/layout/Navigation';
 import Loading from '@/components/ui/Loading';
@@ -44,13 +41,12 @@ import {
   resolveDiscoverSportFilters,
   type DiscoverTabValue,
 } from '@/lib/discoverFilters';
-import { formatDisplayTime } from '@/lib/dateUtils';
 import { normalizeExternalHttpUrl } from '@/lib/externalUrl';
 import EventsTabContent, { type EventSortValue } from './components/EventsTabContent';
 import DiscoverSearchControls from './components/DiscoverSearchControls';
 import DiscoverMapModal from './components/DiscoverMapModal';
-import DivisionDiscoveryFilters, { type DivisionDiscoveryFilterValue } from './components/DivisionDiscoveryFilters';
-import { DiscoverFilterRows, FilterOptionList, FilterPopover, resolveOpenFilter, type DiscoverFilterItem } from './components/DiscoverFilterBar';
+import type { DivisionDiscoveryFilterValue } from './components/DivisionDiscoveryFilters';
+import DiscoverTabFilterBar, { formatRentalHourLabel } from './components/DiscoverTabFilterBar';
 import {
   buildTeamDivisionFilterOptions,
   filterOpenRegistrationTeams,
@@ -98,20 +94,9 @@ const EMPTY_DIVISION_FILTERS: DivisionDiscoveryFilterValue = {
   priceMinDollars: null,
   priceMaxDollars: null,
 };
-const DISTANCE_SLIDER_MIN_MILES = 10;
-const DISTANCE_SLIDER_MAX_MILES = 100;
-const DISTANCE_SLIDER_MARKS = [
-  { value: 10, label: '10' },
-  { value: 25, label: '25' },
-  { value: 50, label: '50' },
-  { value: 75, label: '75' },
-  { value: DISTANCE_SLIDER_MAX_MILES, label: String(DISTANCE_SLIDER_MAX_MILES) },
-];
 
 const kmToMiles = (value: number): number => value / KM_PER_MILE;
 const milesToKm = (value: number): number => value * KM_PER_MILE;
-const clampMiles = (value: number): number =>
-  Math.min(DISTANCE_SLIDER_MAX_MILES, Math.max(DISTANCE_SLIDER_MIN_MILES, Math.round(value)));
 const stringArraysEqual = (left: string[], right: string[]): boolean => (
   left.length === right.length && left.every((value, index) => value === right[index])
 );
@@ -1242,6 +1227,15 @@ function DiscoverPageContent() {
     [teams, teamSelectedSports, teamSelectedDivisionTypeValues, teamDivisionTypeOptions],
   );
 
+  const handleSelectTeam = (team: Team) => {
+    const affiliateUrl = normalizeExternalHttpUrl(team.affiliateUrl);
+    if (affiliateUrl) {
+      window.open(affiliateUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    router.push(team.organizationId ? `/organizations/${team.organizationId}?tab=teams` : '/teams');
+  };
+
   /**
    * Auth guard
    */
@@ -1412,24 +1406,14 @@ function DiscoverPageContent() {
               selectedDivisionTypeValues={teamSelectedDivisionTypeValues}
               setSelectedDivisionTypeValues={setTeamSelectedDivisionTypeValues}
               divisionTypeOptions={teamDivisionTypeOptions}
-              onSelectTeam={(team) => {
-                const affiliateUrl = normalizeExternalHttpUrl(team.affiliateUrl);
-                if (affiliateUrl) {
-                  window.open(affiliateUrl, '_blank', 'noopener,noreferrer');
-                  return;
-                }
-                if (team.organizationId) {
-                  router.push(`/organizations/${team.organizationId}?tab=teams`);
-                  return;
-                }
-                router.push('/teams');
-              }}
+              onSelectTeam={handleSelectTeam}
             />
           </TabsContent>
         </Tabs>
       </Container>
       <DiscoverMapModal
         opened={mapOpened}
+        activeTab={activeTab}
         onClose={() => setMapOpened(false)}
         location={location}
         locationInfo={locationInfo}
@@ -1442,6 +1426,35 @@ function DiscoverPageContent() {
         eventTags={eventTags}
         eventTagsLoading={eventTagsLoading}
         eventTagsError={eventTagsError}
+        selectedEventTypes={selectedEventTypes}
+        setSelectedEventTypes={setSelectedEventTypes}
+        eventTypeOptions={EVENT_TYPE_OPTIONS}
+        divisionFilters={eventDivisionFilters}
+        setDivisionFilters={setEventDivisionFilters}
+        organizationFilters={{
+          selectedTags: selectedOrganizationTags,
+          setSelectedTags: setSelectedOrganizationTags,
+          organizationTags,
+          organizationTagsLoading,
+          organizationTagsError,
+          divisionFilters: organizationDivisionFilters,
+          setDivisionFilters: setOrganizationDivisionFilters,
+          maxDistance: organizationsMaxDistance,
+          setMaxDistance: setOrganizationsMaxDistance,
+        }}
+        rentalFilters={{
+          timeRange,
+          setTimeRange,
+          defaultTimeRange,
+          maxDistance: rentalsMaxDistance,
+          setMaxDistance: setRentalsMaxDistance,
+        }}
+        teamFilters={{
+          selectedSports: teamSelectedSports,
+          setSelectedSports: setTeamSelectedSports,
+          selectedDivisionTypeValues: teamSelectedDivisionTypeValues,
+          setSelectedDivisionTypeValues: setTeamSelectedDivisionTypeValues,
+        }}
         sports={sportOptions}
         sportsLoading={sportsLoading}
         sportsError={sportsError?.message ?? null}
@@ -1454,6 +1467,7 @@ function DiscoverPageContent() {
         defaultMaxDistance={DEFAULT_MAX_DISTANCE}
         onEventClick={handleSelectEvent}
         onOrganizationClick={handleSelectOrganization}
+        onTeamClick={handleSelectTeam}
       />
     </>
   );
@@ -1518,23 +1532,7 @@ function OrganizationsTabContent(props: {
     onSelectOrganization,
   } = props;
 
-  const [tagSearchTerm, setTagSearchTerm] = useState('');
-  const [openFilter, setOpenFilter] = useState<string | null>(null);
-  const panelId = useId();
-  const tagsQuery = tagSearchTerm.trim().toLowerCase();
   const activeQuery = searchTerm.trim();
-  const visibleOrganizationTags = useMemo(() => {
-    const matchingTags = tagsQuery
-      ? organizationTags.filter((tag) => tag.name.toLowerCase().includes(tagsQuery))
-      : organizationTags;
-    return matchingTags
-      .slice()
-      .sort((a, b) => {
-        const countDiff = (b.organizationCount ?? 0) - (a.organizationCount ?? 0);
-        return countDiff || a.name.localeCompare(b.name);
-      })
-      .slice(0, 5);
-  }, [organizationTags, tagsQuery]);
 
   const hasResults = results.length > 0;
   const activeFilters: Array<{ key: string; label: string; onRemove: () => void }> = [];
@@ -1594,123 +1592,6 @@ function OrganizationsTabContent(props: {
   }, [setDivisionFilters, setSearchTerm, setSelectedSports, setSelectedTags, setMaxDistance]);
 
   const activeFilterCount = activeFilters.length;
-  const tagOptions = visibleOrganizationTags.map((tag) => ({
-    value: tag.slug ?? tag.name,
-    label: tag.name,
-    count: tag.organizationCount,
-  }));
-  const tagLabels = selectedTags
-    .map((tagSlug) => tagOptions.find((option) => option.value === tagSlug)?.label ?? tagSlug)
-    .filter(Boolean);
-  const tagSummary = tagLabels.length === 1 ? tagLabels[0] : tagLabels.length > 1 ? `${tagLabels[0]} +${tagLabels.length - 1}` : undefined;
-  const setOpen = (id: string) => (open: boolean) => setOpenFilter((current) => resolveOpenFilter(current, id, open));
-  const distanceMiles = typeof maxDistance === 'number' ? Math.round(kmToMiles(maxDistance)) : null;
-  const organizationFilterItems: DiscoverFilterItem[] = [
-    {
-      key: 'organization-tags',
-      node: (
-        <FilterPopover
-          id={`${panelId}-organization-tags`}
-          label="Tags"
-          valueLabel={tagSummary}
-          value={tagSummary}
-          icon={Tag}
-          active={selectedTags.length > 0}
-          open={openFilter === 'organization-tags'}
-          onOpenChange={setOpen('organization-tags')}
-          onClear={() => setSelectedTags([])}
-        >
-          <div className="discover-filter-popover-heading">Organization tags</div>
-          <TextInput
-            aria-label="Search organization tags"
-            placeholder="Search organization tags"
-            value={tagSearchTerm}
-            onChange={(event) => setTagSearchTerm(event.currentTarget.value)}
-          />
-          {organizationTagsLoading ? (
-            <Loader size="sm" aria-label="Loading organization tags" />
-          ) : tagOptions.length ? (
-            <FilterOptionList options={tagOptions} value={selectedTags} allLabel="All tags" onChange={setSelectedTags} />
-          ) : (
-            <Text size="sm" c="dimmed">
-              {tagsQuery ? 'No tags match this search.' : 'No tags available.'}
-            </Text>
-          )}
-          {organizationTagsError && <Alert color="red">{organizationTagsError}</Alert>}
-        </FilterPopover>
-      ),
-    },
-    {
-      key: 'organization-division',
-      node: (
-        <FilterPopover
-          id={`${panelId}-organization-division`}
-          label="Division"
-          value={hasDivisionFilters ? 'Applied' : undefined}
-          valueLabel={hasDivisionFilters ? 'Applied' : undefined}
-          icon={UsersRound}
-          active={hasDivisionFilters}
-          open={openFilter === 'organization-division'}
-          onOpenChange={setOpen('organization-division')}
-          onClear={() => setDivisionFilters(EMPTY_DIVISION_FILTERS)}
-        >
-          <DivisionDiscoveryFilters
-            value={divisionFilters}
-            onChange={setDivisionFilters}
-            selectedSports={selectedSports}
-          />
-        </FilterPopover>
-      ),
-    },
-    {
-      key: 'organization-distance',
-      node: (
-        <FilterPopover
-          id={`${panelId}-organization-distance`}
-          label="Distance"
-          value={location && distanceMiles !== null ? `${distanceMiles} mi` : undefined}
-          valueLabel={location ? (distanceMiles !== null ? `${distanceMiles} mi` : 'Any distance') : 'Set location'}
-          icon={MapPin}
-          active={Boolean(location && distanceMiles !== null)}
-          open={openFilter === 'organization-distance'}
-          onOpenChange={setOpen('organization-distance')}
-          onClear={() => setMaxDistance(null)}
-        >
-          <div className="discover-filter-popover-heading">Distance</div>
-          {location ? (
-            <label className="discover-filter-range">
-              <span>Within {distanceMiles ?? Math.round(kmToMiles(defaultMaxDistance))} mi</span>
-              <input
-                type="range"
-                min={DISTANCE_SLIDER_MIN_MILES}
-                max={DISTANCE_SLIDER_MAX_MILES}
-                step={1}
-                value={clampMiles(distanceMiles ?? kmToMiles(defaultMaxDistance))}
-                onChange={(event) => setMaxDistance(milesToKm(Number(event.currentTarget.value)))}
-                aria-label="Filter by distance"
-              />
-              <span className="discover-filter-range-scale"><span>10 mi</span><span>100 mi</span></span>
-            </label>
-          ) : (
-            <Text size="sm" c="dimmed">Set a location to enable distance filtering.</Text>
-          )}
-          {distanceMiles !== null && <button type="button" className="discover-filter-clear-link" onClick={() => setMaxDistance(null)}>Clear distance</button>}
-        </FilterPopover>
-      ),
-    },
-  ];
-  const filtersKey = [
-    selectedTags.join('|'),
-    divisionFilters.genders.join('|'),
-    divisionFilters.ageDivisionTypeIds.join('|'),
-    divisionFilters.skillDivisionTypeIds.join('|'),
-    divisionFilters.priceMinDollars ?? '',
-    divisionFilters.priceMaxDollars ?? '',
-    distanceMiles ?? '',
-    location ? 'location' : 'no-location',
-    organizationTags.length,
-    activeFilterCount,
-  ].join('::');
 
   return (
     <div className="space-y-6 mb-8">
@@ -1723,15 +1604,16 @@ function OrganizationsTabContent(props: {
           onOpenMap={onOpenMap}
           searchLabel="Search organizations"
         />
-        <DiscoverFilterRows
+        <DiscoverTabFilterBar
+          target="organizations"
+          location={location}
+          defaultMaxDistance={defaultMaxDistance}
           sports={sports}
           selectedSports={selectedSports}
           setSelectedSports={setSelectedSports}
           sportsLoading={sportsLoading}
           sportsError={sportsError}
-          filters={organizationFilterItems}
-          filtersKey={filtersKey}
-          filterAriaLabel="Organization filters"
+          filters={{ selectedTags, setSelectedTags, organizationTags, organizationTagsLoading, organizationTagsError, divisionFilters, setDivisionFilters, maxDistance, setMaxDistance }}
           activeFilterCount={activeFilterCount}
           resetFilters={resetFilters}
         />
@@ -1848,25 +1730,11 @@ function TeamsTabContent(props: {
     divisionTypeOptions,
     onSelectTeam,
   } = props;
-  const [openFilter, setOpenFilter] = useState<string | null>(null);
-  const panelId = useId();
   const activeQuery = searchTerm.trim();
   const divisionOptionByValue = useMemo(
     () => new Map(divisionTypeOptions.map((option) => [option.value, option])),
     [divisionTypeOptions],
   );
-  const divisionLabels = selectedDivisionTypeValues
-    .map((value) => divisionOptionByValue.get(value)?.label)
-    .filter((label): label is string => Boolean(label));
-  const divisionSummary = divisionLabels.length === 1
-    ? divisionLabels[0]
-    : divisionLabels.length > 1
-      ? `${divisionLabels[0]} +${divisionLabels.length - 1}`
-      : undefined;
-  const teamDivisionOptions = divisionTypeOptions.map((option) => ({
-    value: option.value,
-    label: option.label,
-  }));
 
   const activeFilters: Array<{ key: string; label: string; onRemove: () => void }> = [];
   if (activeQuery) {
@@ -1900,44 +1768,6 @@ function TeamsTabContent(props: {
   }, [setSearchTerm, setSelectedSports, setSelectedDivisionTypeValues]);
 
   const activeFilterCount = activeFilters.length;
-  const setOpen = (id: string) => (open: boolean) => setOpenFilter((current) => resolveOpenFilter(current, id, open));
-  const teamFilterItems: DiscoverFilterItem[] = [
-    {
-      key: 'team-division',
-      node: (
-        <FilterPopover
-          id={`${panelId}-team-division`}
-          label="Division"
-          value={divisionSummary}
-          valueLabel={divisionSummary}
-          icon={BarChart3}
-          active={selectedDivisionTypeValues.length > 0}
-          open={openFilter === 'team-division'}
-          onOpenChange={setOpen('team-division')}
-          onClear={() => setSelectedDivisionTypeValues([])}
-        >
-          <div className="discover-filter-popover-heading">Division type</div>
-          {!selectedSports.length ? (
-            <Text size="sm" c="dimmed">Select one or more sports to choose division types.</Text>
-          ) : !teamDivisionOptions.length ? (
-            <Text size="sm" c="dimmed">No division types are available for the selected sports.</Text>
-          ) : (
-            <FilterOptionList
-              options={teamDivisionOptions}
-              value={selectedDivisionTypeValues}
-              allLabel="Any division type"
-              onChange={setSelectedDivisionTypeValues}
-            />
-          )}
-        </FilterPopover>
-      ),
-    },
-  ];
-  const filtersKey = [
-    selectedDivisionTypeValues.join('|'),
-    divisionTypeOptions.map((option) => option.value).join('|'),
-    activeFilterCount,
-  ].join('::');
 
   return (
     <div className="space-y-6 mb-8">
@@ -1950,15 +1780,16 @@ function TeamsTabContent(props: {
           onOpenMap={onOpenMap}
           searchLabel="Search teams"
         />
-        <DiscoverFilterRows
+        <DiscoverTabFilterBar
+          target="teams"
+          location={null}
+          defaultMaxDistance={DEFAULT_MAX_DISTANCE}
           sports={sports}
           selectedSports={selectedSports}
           setSelectedSports={setSelectedSports}
           sportsLoading={sportsLoading}
           sportsError={sportsError}
-          filters={teamFilterItems}
-          filtersKey={filtersKey}
-          filterAriaLabel="Team filters"
+          filters={{ selectedDivisionTypeValues, setSelectedDivisionTypeValues, divisionTypeOptions }}
           activeFilterCount={activeFilterCount}
           resetFilters={resetFilters}
         />
@@ -2076,8 +1907,6 @@ function RentalsTabContent(props: {
     onSelectOrganization,
   } = props;
 
-  const [openFilter, setOpenFilter] = useState<string | null>(null);
-  const panelId = useId();
   const activeQuery = searchTerm.trim();
 
   const filteredListings = useMemo(() => {
@@ -2181,7 +2010,7 @@ function RentalsTabContent(props: {
   if (timeRange[0] !== defaultTimeRange[0] || timeRange[1] !== defaultTimeRange[1]) {
     activeFilters.push({
       key: 'time-range',
-      label: `${formatHourLabel(timeRange[0])} - ${formatHourLabel(timeRange[1])}`,
+      label: `${formatRentalHourLabel(timeRange[0])} - ${formatRentalHourLabel(timeRange[1])}`,
       onRemove: () => setTimeRange(defaultTimeRange),
     });
   }
@@ -2195,88 +2024,6 @@ function RentalsTabContent(props: {
 
   const activeFilterCount = activeFilters.length;
 
-  const timeRangeActive = timeRange[0] !== defaultTimeRange[0] || timeRange[1] !== defaultTimeRange[1];
-  const timeRangeLabel = `${formatHourLabel(timeRange[0])} - ${formatHourLabel(timeRange[1])}`;
-  const distanceMiles = typeof maxDistance === 'number' ? Math.round(kmToMiles(maxDistance)) : null;
-  const setOpen = (id: string) => (open: boolean) => setOpenFilter((current) => resolveOpenFilter(current, id, open));
-  const rentalFilterItems: DiscoverFilterItem[] = [
-    {
-      key: 'rental-time-range',
-      node: (
-        <FilterPopover
-          id={`${panelId}-rental-time-range`}
-          label="Time"
-          value={timeRangeActive ? timeRangeLabel : undefined}
-          valueLabel={timeRangeActive ? timeRangeLabel : undefined}
-          icon={Clock3}
-          active={timeRangeActive}
-          open={openFilter === 'rental-time-range'}
-          onOpenChange={setOpen('rental-time-range')}
-          onClear={() => setTimeRange(defaultTimeRange)}
-        >
-          <div className="discover-filter-popover-heading">Available time</div>
-          <div className="discover-time-range-slider">
-            <Slider
-              min={0}
-              max={24}
-              minStepsBetweenValues={1}
-              step={1}
-              value={timeRange}
-              onValueChange={(value) => setTimeRange([value[0] ?? 0, value[1] ?? 24])}
-              getAriaLabel={(index) => index === 0 ? 'Earliest rental time' : 'Latest rental time'}
-              getAriaValueText={(_, value) => formatHourLabel(value)}
-            />
-            <div aria-hidden="true" className="mt-1 flex justify-between gap-2 text-xs text-muted-foreground">
-              {[0, 12, 24].map((hour) => <span key={hour}>{formatHourTickLabel(hour)}</span>)}
-            </div>
-          </div>
-        </FilterPopover>
-      ),
-    },
-    {
-      key: 'rental-distance',
-      node: (
-        <FilterPopover
-          id={`${panelId}-rental-distance`}
-          label="Distance"
-          value={location && distanceMiles !== null ? `${distanceMiles} mi` : undefined}
-          valueLabel={location ? (distanceMiles !== null ? `${distanceMiles} mi` : 'Any distance') : 'Set location'}
-          icon={MapPin}
-          active={Boolean(location && distanceMiles !== null)}
-          open={openFilter === 'rental-distance'}
-          onOpenChange={setOpen('rental-distance')}
-          onClear={() => setMaxDistance(null)}
-        >
-          <div className="discover-filter-popover-heading">Distance</div>
-          {location ? (
-            <label className="discover-filter-range">
-              <span>Within {distanceMiles ?? Math.round(kmToMiles(defaultMaxDistance))} mi</span>
-              <input
-                type="range"
-                min={DISTANCE_SLIDER_MIN_MILES}
-                max={DISTANCE_SLIDER_MAX_MILES}
-                step={1}
-                value={clampMiles(distanceMiles ?? kmToMiles(defaultMaxDistance))}
-                onChange={(event) => setMaxDistance(milesToKm(Number(event.currentTarget.value)))}
-                aria-label="Filter by distance"
-              />
-              <span className="discover-filter-range-scale"><span>10 mi</span><span>100 mi</span></span>
-            </label>
-          ) : (
-            <Text size="sm" c="dimmed">Set a location to enable distance filtering.</Text>
-          )}
-          {distanceMiles !== null && <button type="button" className="discover-filter-clear-link" onClick={() => setMaxDistance(null)}>Clear distance</button>}
-        </FilterPopover>
-      ),
-    },
-  ];
-  const filtersKey = [
-    timeRange.join('|'),
-    defaultTimeRange.join('|'),
-    distanceMiles ?? '',
-    location ? 'location' : 'no-location',
-    activeFilterCount,
-  ].join('::');
 
   return (
     <div className="space-y-6 mb-8">
@@ -2289,15 +2036,16 @@ function RentalsTabContent(props: {
           onOpenMap={onOpenMap}
           searchLabel="Search rentals"
         />
-        <DiscoverFilterRows
+        <DiscoverTabFilterBar
+          target="rentals"
+          location={location}
+          defaultMaxDistance={defaultMaxDistance}
           sports={sports}
           selectedSports={selectedSports}
           setSelectedSports={setSelectedSports}
           sportsLoading={sportsLoading}
           sportsError={sportsError}
-          filters={rentalFilterItems}
-          filtersKey={filtersKey}
-          filterAriaLabel="Rental filters"
+          filters={{ timeRange, setTimeRange, defaultTimeRange, maxDistance, setMaxDistance }}
           activeFilterCount={activeFilterCount}
           resetFilters={resetFilters}
         />
@@ -2361,24 +2109,4 @@ function RentalsTabContent(props: {
       </div>
     </div>
   );
-}
-
-function formatHourLabel(hour: number) {
-  const date = new Date();
-  date.setHours(hour, 0, 0, 0);
-  return formatDisplayTime(date);
-}
-
-function formatHourTickLabel(hour: number) {
-  const normalizedHour = ((hour % 24) + 24) % 24;
-  if (normalizedHour === 0) {
-    return '12am';
-  }
-  if (normalizedHour === 12) {
-    return '12pm';
-  }
-  if (normalizedHour < 12) {
-    return `${normalizedHour}am`;
-  }
-  return `${normalizedHour - 12}pm`;
 }
