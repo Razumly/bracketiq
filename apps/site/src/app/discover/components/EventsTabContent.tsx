@@ -13,20 +13,22 @@ import {
   Button,
   Checkbox,
   Chip,
+  DatePickerInput,
   Group,
   Loader,
   Paper,
   Select,
-  Slider,
   Text,
   TextInput,
-} from '@mantine/core';
-import { ArrowUpDown, CalendarDays, X } from 'lucide-react';
+} from '@/components/organization/organization-operation-ui';
+import { Slider } from '@/components/ui/slider';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { ArrowUpDown, CalendarDays, SlidersHorizontal, X } from 'lucide-react';
 
 import EventCard from '@/components/ui/EventCard';
 import ResponsiveCardGrid from '@/components/ui/ResponsiveCardGrid';
 import Loading from '@/components/ui/Loading';
-import { DatePickerInput } from '@/components/organization/organization-operation-ui';
+
 import {
   eventListFilterKey,
   useEventListFiltering,
@@ -225,6 +227,7 @@ function EventsTabView<TEventType extends string>(
   }, [onEventSortChange]);
   const [sportSearchTerm, setSportSearchTerm] = useState('');
   const [tagSearchTerm, setTagSearchTerm] = useState('');
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const allEventTypesSelected = selectedEventTypes.length === eventTypeOptions.length;
   const allSportsSelected = selectedSports.length === 0;
   const allTagsSelected = selectedTags.length === 0;
@@ -683,11 +686,14 @@ function EventsTabView<TEventType extends string>(
             min={DISTANCE_SLIDER_MIN_MILES}
             max={DISTANCE_SLIDER_MAX_MILES}
             step={1}
-            value={clampMiles(typeof maxDistance === 'number' ? kmToMiles(maxDistance) : kmToMiles(defaultMaxDistance))}
-            onChange={(value) => setMaxDistance(milesToKm(value))}
-            marks={DISTANCE_SLIDER_MARKS}
-            mb="sm"
+            value={[clampMiles(typeof maxDistance === 'number' ? kmToMiles(maxDistance) : kmToMiles(defaultMaxDistance))]}
+            onValueChange={(value) => setMaxDistance(milesToKm(value[0] ?? DISTANCE_SLIDER_MIN_MILES))}
+            getAriaLabel={() => 'Maximum distance in miles'}
+            getAriaValueText={(_, value) => `${value} miles`}
           />
+          <div aria-hidden="true" className="mt-1 flex justify-between gap-2 text-xs text-muted-foreground">
+            {DISTANCE_SLIDER_MARKS.map((mark) => <span key={mark.value}>{mark.label} mi</span>)}
+          </div>
         </div>
       )}
     </div>
@@ -832,6 +838,31 @@ function EventsTabView<TEventType extends string>(
     <>
       {renderSearchActions()}
 
+      <Sheet open={isFiltersOpen} onOpenChange={(open) => setIsFiltersOpen(open)}>
+        <SheetContent side="bottom" className="max-h-[85dvh] overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>Filter Events</SheetTitle>
+            <SheetDescription>Adjust event type, sport, date, division, and distance filters.</SheetDescription>
+          </SheetHeader>
+          <div className="px-4 pb-6">
+            <Group justify="space-between" align="center" mb="md">
+              <Text fw={700} size="sm">Filters</Text>
+              <Button variant="subtle" size="compact-sm" onClick={resetFilters} disabled={!activeFilterCount}>
+                Reset
+              </Button>
+            </Group>
+            {filterPanel}
+          </div>
+        </SheetContent>
+      </Sheet>
+      <Button
+        variant="default"
+        leftSection={<SlidersHorizontal size={16} />}
+        onClick={() => setIsFiltersOpen(true)}
+        className="mb-4 lg:hidden"
+      >
+        Filters{activeFilterCount ? ` (${activeFilterCount})` : ''}
+      </Button>
       <div className="grid gap-6 lg:grid-cols-[18rem_minmax(0,1fr)]">
         <aside className="hidden lg:block lg:sticky lg:top-24 lg:h-[calc(100dvh-6.5rem)]">
           <Paper

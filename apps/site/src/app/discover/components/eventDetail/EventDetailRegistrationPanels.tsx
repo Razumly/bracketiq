@@ -1,4 +1,4 @@
-import { Button, Group } from '@mantine/core';
+import { Button, Group } from '@/components/organization/organization-operation-ui';
 import { QrCode } from 'lucide-react';
 
 import type { Event, Team } from '@/types';

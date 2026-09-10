@@ -1,4 +1,4 @@
-import { Alert, Button, Group, Paper, Select, Text } from '@mantine/core';
+import { Alert, Button, Group, Paper, Select, Text } from '@/components/organization/organization-operation-ui';
 
 import type { ConsentLinks, EventRegistration } from '@/lib/registrationService';
 import { formatAgeRange } from '@/lib/age';

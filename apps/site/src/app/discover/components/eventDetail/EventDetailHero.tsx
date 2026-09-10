@@ -1,5 +1,5 @@
 import Image from 'next/image';
-import { Text } from '@mantine/core';
+import { Text } from '@/components/organization/organization-operation-ui';
 import { CalendarDays, MapPin, Users } from 'lucide-react';
 
 type EventDetailHeroProps = {

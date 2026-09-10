@@ -1,4 +1,4 @@
-import { Avatar, Text } from '@mantine/core';
+import { Avatar, Text } from '@/components/organization/organization-operation-ui';
 import { ShieldCheck } from 'lucide-react';
 
 import UserCard from '@/components/ui/UserCard';

@@ -1,4 +1,4 @@
-import { Paper, Text } from '@mantine/core';
+import { Paper, Text } from '@/components/organization/organization-operation-ui';
 
 import { formatAgeRange } from '@/lib/age';
 import { formatEnumDisplayLabel } from '@/lib/enumUtils';

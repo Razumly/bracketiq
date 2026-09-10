@@ -105,7 +105,7 @@ describe('EventDetailDialogs', () => {
         expect(screen.getByRole('heading', { name: 'Jordan Lee' })).toBeInTheDocument();
         expect(screen.getByText('@jordanlee')).toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: 'Invite to Team' }));
-        fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+        fireEvent.click(screen.getAllByRole('button', { name: 'Close' })[0]!);
         expect(onInvite).toHaveBeenCalledTimes(1);
         expect(onClose).toHaveBeenCalledTimes(1);
     });

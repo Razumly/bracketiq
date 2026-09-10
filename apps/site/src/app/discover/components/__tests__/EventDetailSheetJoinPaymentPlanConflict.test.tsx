@@ -266,9 +266,8 @@ describe('EventDetailSheet payment-plan join conflicts', () => {
       expect(questionsDialogAfterSigning).not.toBeVisible();
     }
     expect(passwordDialog).not.toBeVisible();
-    const signingCloseButton = signingDialog.querySelector<HTMLButtonElement>('.mantine-Modal-close');
-    expect(signingCloseButton).not.toBeNull();
-    fireEvent.click(signingCloseButton!);
+    const signingCloseButton = within(signingDialog).getByRole('button', { name: 'Close' });
+    fireEvent.click(signingCloseButton);
 
     await waitFor(() => {
       expect(signingDialog).not.toBeVisible();

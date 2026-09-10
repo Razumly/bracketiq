@@ -7,7 +7,7 @@ import {
     Stack,
     Text,
     TextInput,
-} from '@mantine/core';
+} from '@/components/organization/organization-operation-ui';
 
 import type { UserData } from '@/types';
 import { getUserFullName, getUserHandle } from '@/types';
@@ -61,7 +61,7 @@ export function InlineEventAuthDialog({
             onClose={onClose}
             centered
             title={mode === 'login' ? 'Sign in to register' : 'Create account'}
-            zIndex={EVENT_DETAIL_DIALOG_Z_INDEX}
+            styles={{ content: { zIndex: EVENT_DETAIL_DIALOG_Z_INDEX } }}
         >
             <form
                 onSubmit={(event) => {
@@ -190,7 +190,7 @@ export function FreeAgentActionsDialog({
             onClose={onClose}
             centered
             title={user ? getUserFullName(user) : 'Free Agent Actions'}
-            zIndex={EVENT_DETAIL_DIALOG_Z_INDEX}
+            styles={{ content: { zIndex: EVENT_DETAIL_DIALOG_Z_INDEX } }}
         >
             <Stack gap="sm">
                 {handle ? (

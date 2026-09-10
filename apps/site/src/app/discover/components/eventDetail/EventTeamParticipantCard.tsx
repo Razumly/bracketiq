@@ -1,5 +1,5 @@
 import Image from 'next/image';
-import { Alert, Button, Text } from '@mantine/core';
+import { Alert, Button, Text } from '@/components/organization/organization-operation-ui';
 
 import TeamRegistrationFlow from '@/components/ui/TeamRegistrationFlow';
 import { resolveDivisionDisplayName } from '@/lib/divisionDisplay';
@@ -81,7 +81,7 @@ export function EventTeamParticipantCard({
                         <div className="text-xs text-gray-400">Team</div>
                     </div>
                     {flow.registrationError ? (
-                        <Alert color="red" variant="light" py="xs">
+                        <Alert color="red" variant="light" className="py-2">
                             <Text size="xs">{flow.registrationError}</Text>
                         </Alert>
                     ) : null}

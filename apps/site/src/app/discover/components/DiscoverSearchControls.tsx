@@ -1,6 +1,6 @@
 'use client';
 
-import { Button, Group, TextInput } from '@mantine/core';
+import { Button, Group, TextInput } from '@/components/organization/organization-operation-ui';
 import { MapPinned, Search } from 'lucide-react';
 import LocationSearch from '@/components/location/LocationSearch';
 
@@ -22,13 +22,13 @@ export default function DiscoverSearchControls({
   searchLabel = 'Search',
 }: DiscoverSearchControlsProps) {
   return (
-    <Group align="center" gap="sm" wrap="wrap" style={{ flex: '1 1 100%', minWidth: 0, width: '100%' }}>
+    <Group align="center" gap="sm" wrap="wrap" style={{ flex: '1 1 100%', minWidth: 0, width: '100%', maxWidth: '100%' }}>
       <form
         onSubmit={(event) => {
           event.preventDefault();
           onSearch();
         }}
-        style={{ display: 'flex', flex: '1 1 420px', minWidth: 0, width: '100%' }}
+        style={{ display: 'flex', flex: '1 1 420px', minWidth: 0, width: '100%', maxWidth: '100%' }}
       >
         <TextInput
           aria-label={searchLabel}
@@ -36,13 +36,6 @@ export default function DiscoverSearchControls({
           onChange={(event) => onValueChange(event.currentTarget.value)}
           placeholder={placeholder}
           style={{ flex: 1, minWidth: 0 }}
-          styles={{
-            input: {
-              borderTopRightRadius: 0,
-              borderBottomRightRadius: 0,
-              borderRight: 0,
-            },
-          }}
         />
         <Button
           type="submit"

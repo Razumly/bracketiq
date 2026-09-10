@@ -1,4 +1,4 @@
-import { Badge, Card, SimpleGrid, Text, Title } from '@mantine/core';
+import { Badge, Paper, SimpleGrid, Text, Title } from '@/components/organization/organization-operation-ui';
 import type { Sport } from '@/types';
 
 const SPORT_FLAG_FIELDS: Array<keyof Sport> = [
@@ -61,7 +61,7 @@ interface SportConfigPanelProps {
 }
 
 const SportConfigPanel: React.FC<SportConfigPanelProps> = ({ sport }) => (
-  <Card shadow="xs" radius="md" padding="lg">
+  <Paper shadow="xs" radius="md" p="lg">
     <Title order={4}>Sport Configuration</Title>
     <Text size="sm" c="dimmed" mt="xs">
       Scoring rules enabled for {sport.name || 'this sport'}.
@@ -77,7 +77,7 @@ const SportConfigPanel: React.FC<SportConfigPanelProps> = ({ sport }) => (
         </Badge>
       ))}
     </SimpleGrid>
-  </Card>
+  </Paper>
 );
 
 export default SportConfigPanel;

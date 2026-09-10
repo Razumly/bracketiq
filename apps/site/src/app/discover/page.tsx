@@ -7,17 +7,16 @@ import {
   Button,
   Chip,
   Container,
-  Drawer,
   Group,
   Loader,
   Paper,
-  RangeSlider,
-  Slider,
-  Tabs,
   Text,
   TextInput,
   Title,
-} from '@mantine/core';
+} from '@/components/organization/organization-operation-ui';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Slider } from '@/components/ui/slider';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 import { SlidersHorizontal, X } from 'lucide-react';
 
@@ -1262,7 +1261,7 @@ function DiscoverPageContent() {
       <Navigation />
       <Container fluid py="xl" className="discover-shell">
         <div className="discover-page-header mb-8">
-          <Title order={1} size="h2" mb={6} className="discover-title">
+          <Title order={1} mb={6} className="discover-title">
             Discover
           </Title>
           <Text c="dimmed" className="discover-subtitle">
@@ -1272,25 +1271,20 @@ function DiscoverPageContent() {
 
         <Tabs
           value={activeTab}
-          onChange={(value) => {
+          onValueChange={(value) => {
             const next = (value as DiscoverTab) ?? 'events';
             setActiveTab(next);
           }}
-          variant="pills"
-          radius="xl"
-          classNames={{
-            list: 'discover-segment-list',
-            tab: 'discover-segment-tab',
-          }}
+          className="discover-tabs"
         >
-          <Tabs.List mb="lg" grow>
-            <Tabs.Tab value="events">Events</Tabs.Tab>
-            <Tabs.Tab value="organizations">Organizations</Tabs.Tab>
-            <Tabs.Tab value="rentals">Rentals</Tabs.Tab>
-            <Tabs.Tab value="teams">Teams</Tabs.Tab>
-          </Tabs.List>
+          <TabsList className="discover-segment-list mb-6 w-full" variant="default">
+            <TabsTrigger value="events" className="discover-segment-tab">Events</TabsTrigger>
+            <TabsTrigger value="organizations" className="discover-segment-tab">Organizations</TabsTrigger>
+            <TabsTrigger value="rentals" className="discover-segment-tab">Rentals</TabsTrigger>
+            <TabsTrigger value="teams" className="discover-segment-tab">Teams</TabsTrigger>
+          </TabsList>
 
-          <Tabs.Panel value="events">
+          <TabsContent value="events">
             <EventsTabContent
               location={location}
               searchTerm={searchTerm}
@@ -1335,9 +1329,9 @@ function DiscoverPageContent() {
               eventSort={eventSort}
               onEventSortChange={setEventSort}
             />
-          </Tabs.Panel>
+          </TabsContent>
 
-          <Tabs.Panel value="organizations">
+          <TabsContent value="organizations">
             <OrganizationsTabContent
               searchTerm={searchTerm}
               setSearchTerm={setSearchTerm}
@@ -1367,9 +1361,9 @@ function DiscoverPageContent() {
               error={organizationsError}
               onSelectOrganization={handleSelectOrganization}
             />
-          </Tabs.Panel>
+          </TabsContent>
 
-          <Tabs.Panel value="rentals">
+          <TabsContent value="rentals">
             <RentalsTabContent
               searchTerm={searchTerm}
               setSearchTerm={setSearchTerm}
@@ -1395,9 +1389,9 @@ function DiscoverPageContent() {
               defaultTimeRange={defaultTimeRange}
               onSelectOrganization={(org, listings) => handleSelectRentalOrganization(org, listings)}
             />
-          </Tabs.Panel>
+          </TabsContent>
 
-          <Tabs.Panel value="teams">
+          <TabsContent value="teams">
             <TeamsTabContent
               searchTerm={searchTerm}
               setSearchTerm={setSearchTerm}
@@ -1431,7 +1425,7 @@ function DiscoverPageContent() {
                 router.push('/teams');
               }}
             />
-          </Tabs.Panel>
+          </TabsContent>
         </Tabs>
       </Container>
       <DiscoverMapModal
@@ -1525,7 +1519,7 @@ function OrganizationsTabContent(props: {
 
   const [sportSearchTerm, setSportSearchTerm] = useState('');
   const [tagSearchTerm, setTagSearchTerm] = useState('');
-  const [filtersOpened, setFiltersOpened] = useState(false);
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const allSportsSelected = selectedSports.length === 0;
   const allTagsSelected = selectedTags.length === 0;
   const sportsQuery = sportSearchTerm.trim().toLowerCase();
@@ -1749,11 +1743,14 @@ function OrganizationsTabContent(props: {
             min={DISTANCE_SLIDER_MIN_MILES}
             max={DISTANCE_SLIDER_MAX_MILES}
             step={1}
-            value={clampMiles(typeof maxDistance === 'number' ? kmToMiles(maxDistance) : kmToMiles(defaultMaxDistance))}
-            onChange={(value) => setMaxDistance(milesToKm(value))}
-            marks={DISTANCE_SLIDER_MARKS}
-            mb="sm"
+            value={[clampMiles(typeof maxDistance === 'number' ? kmToMiles(maxDistance) : kmToMiles(defaultMaxDistance))]}
+            onValueChange={(value) => setMaxDistance(milesToKm(value[0] ?? DISTANCE_SLIDER_MIN_MILES))}
+            getAriaLabel={() => 'Maximum distance in miles'}
+            getAriaValueText={(_, value) => `${value} miles`}
           />
+          <div aria-hidden="true" className="mt-1 flex justify-between gap-2 text-xs text-muted-foreground">
+            {DISTANCE_SLIDER_MARKS.map((mark) => <span key={mark.value}>{mark.label} mi</span>)}
+          </div>
         </div>
       )}
     </div>
@@ -1776,24 +1773,25 @@ function OrganizationsTabContent(props: {
         </Text>
       </Group>
 
-      <Drawer
-        opened={filtersOpened}
-        onClose={() => setFiltersOpened(false)}
-        title="Filter Organizations"
-        position="bottom"
-        size="auto"
-        padding="md"
-      >
-        <Group justify="space-between" align="center" mb="md">
-          <Text fw={700} size="sm">
-            Filters
-          </Text>
-          <Button variant="subtle" size="compact-sm" onClick={resetFilters} disabled={!activeFilterCount}>
-            Reset
-          </Button>
-        </Group>
-        {filterPanel}
-      </Drawer>
+      <Sheet open={isFiltersOpen} onOpenChange={(open) => setIsFiltersOpen(open)}>
+        <SheetContent side="bottom" className="max-h-[85dvh] overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>Filter Organizations</SheetTitle>
+            <SheetDescription>Adjust organization, division, and distance filters.</SheetDescription>
+          </SheetHeader>
+          <div className="px-4 pb-6">
+            <Group justify="space-between" align="center" mb="md">
+              <Text fw={700} size="sm">
+                Filters
+              </Text>
+              <Button variant="subtle" size="compact-sm" onClick={resetFilters} disabled={!activeFilterCount}>
+                Reset
+              </Button>
+            </Group>
+            {filterPanel}
+          </div>
+        </SheetContent>
+      </Sheet>
 
       <div className="grid gap-6 lg:grid-cols-[18rem_minmax(0,1fr)]">
         <aside className="hidden lg:block lg:sticky lg:top-24 lg:h-[calc(100dvh-6.5rem)]">
@@ -1816,7 +1814,7 @@ function OrganizationsTabContent(props: {
           <Button
             variant="default"
             leftSection={<SlidersHorizontal size={16} />}
-            onClick={() => setFiltersOpened(true)}
+            onClick={() => setIsFiltersOpen(true)}
             className="lg:hidden"
           >
             Filters{activeFilterCount ? ` (${activeFilterCount})` : ''}
@@ -1950,6 +1948,7 @@ function TeamsTabContent(props: {
     onSelectTeam,
   } = props;
   const [sportSearchTerm, setSportSearchTerm] = useState('');
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const allSportsSelected = selectedSports.length === 0;
   const sportsQuery = sportSearchTerm.trim().toLowerCase();
   const activeQuery = searchTerm.trim();
@@ -2145,6 +2144,31 @@ function TeamsTabContent(props: {
         </Text>
       </Group>
 
+        <Sheet open={isFiltersOpen} onOpenChange={(open) => setIsFiltersOpen(open)}>
+          <SheetContent side="bottom" className="max-h-[85dvh] overflow-y-auto">
+            <SheetHeader>
+              <SheetTitle>Filter Teams</SheetTitle>
+              <SheetDescription>Adjust sport and division filters.</SheetDescription>
+            </SheetHeader>
+            <div className="px-4 pb-6">
+              <Group justify="space-between" align="center" mb="md">
+                <Text fw={700} size="sm">Filters</Text>
+                <Button variant="subtle" size="compact-sm" onClick={resetFilters} disabled={!activeFilterCount}>
+                  Reset
+                </Button>
+              </Group>
+              {filterPanel}
+            </div>
+          </SheetContent>
+        </Sheet>
+        <Button
+          variant="default"
+          leftSection={<SlidersHorizontal size={16} />}
+          onClick={() => setIsFiltersOpen(true)}
+          className="mb-4 lg:hidden"
+        >
+          Filters{activeFilterCount ? ` (${activeFilterCount})` : ''}
+        </Button>
       <div className="grid gap-6 lg:grid-cols-[18rem_minmax(0,1fr)]">
         <aside className="hidden lg:block lg:sticky lg:top-24 lg:h-[calc(100dvh-6.5rem)]">
           <Paper withBorder p={0} radius="lg" className="h-full overflow-hidden">
@@ -2291,6 +2315,7 @@ function RentalsTabContent(props: {
   } = props;
 
   const [sportSearchTerm, setSportSearchTerm] = useState('');
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const allSportsSelected = selectedSports.length === 0;
   const sportsQuery = sportSearchTerm.trim().toLowerCase();
   const activeQuery = searchTerm.trim();
@@ -2480,22 +2505,21 @@ function RentalsTabContent(props: {
         <Text size="xs" fw={700} c="dimmed" tt="uppercase" mb={8}>
           Time Range
         </Text>
-        <RangeSlider
-          className="discover-time-range-slider"
-          min={0}
-          max={24}
-          step={1}
-          minRange={1}
-          value={timeRange}
-          onChange={(value) => setTimeRange(value as [number, number])}
-          marks={[
-            { value: 0, label: formatHourTickLabel(0) },
-            { value: 12, label: formatHourTickLabel(12) },
-            { value: 24, label: formatHourTickLabel(24) },
-          ]}
-          label={(value) => formatHourLabel(value)}
-          size="sm"
-        />
+        <div className="discover-time-range-slider">
+          <Slider
+            min={0}
+            max={24}
+            minStepsBetweenValues={1}
+            step={1}
+            value={timeRange}
+            onValueChange={(value) => setTimeRange([value[0] ?? 0, value[1] ?? 24])}
+            getAriaLabel={(index) => index === 0 ? 'Earliest rental time' : 'Latest rental time'}
+            getAriaValueText={(_, value) => formatHourLabel(value)}
+          />
+          <div aria-hidden="true" className="mt-1 flex justify-between gap-2 text-xs text-muted-foreground">
+            {[0, 12, 24].map((hour) => <span key={hour}>{formatHourTickLabel(hour)}</span>)}
+          </div>
+        </div>
       </div>
 
       {location && (
@@ -2510,11 +2534,14 @@ function RentalsTabContent(props: {
             min={DISTANCE_SLIDER_MIN_MILES}
             max={DISTANCE_SLIDER_MAX_MILES}
             step={1}
-            value={clampMiles(typeof maxDistance === 'number' ? kmToMiles(maxDistance) : kmToMiles(defaultMaxDistance))}
-            onChange={(value) => setMaxDistance(milesToKm(value))}
-            marks={DISTANCE_SLIDER_MARKS}
-            mb="sm"
+            value={[clampMiles(typeof maxDistance === 'number' ? kmToMiles(maxDistance) : kmToMiles(defaultMaxDistance))]}
+            onValueChange={(value) => setMaxDistance(milesToKm(value[0] ?? DISTANCE_SLIDER_MIN_MILES))}
+            getAriaLabel={() => 'Maximum distance in miles'}
+            getAriaValueText={(_, value) => `${value} miles`}
           />
+          <div aria-hidden="true" className="mt-1 flex justify-between gap-2 text-xs text-muted-foreground">
+            {DISTANCE_SLIDER_MARKS.map((mark) => <span key={mark.value}>{mark.label} mi</span>)}
+          </div>
         </div>
       )}
     </div>
@@ -2537,6 +2564,31 @@ function RentalsTabContent(props: {
         </Text>
       </Group>
 
+      <Sheet open={isFiltersOpen} onOpenChange={(open) => setIsFiltersOpen(open)}>
+        <SheetContent side="bottom" className="max-h-[85dvh] overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>Filter Rentals</SheetTitle>
+            <SheetDescription>Adjust sport, time, and distance filters.</SheetDescription>
+          </SheetHeader>
+          <div className="px-4 pb-6">
+            <Group justify="space-between" align="center" mb="md">
+              <Text fw={700} size="sm">Filters</Text>
+              <Button variant="subtle" size="compact-sm" onClick={resetFilters} disabled={!activeFilterCount}>
+                Reset
+              </Button>
+            </Group>
+            {filterPanel}
+          </div>
+        </SheetContent>
+      </Sheet>
+      <Button
+        variant="default"
+        leftSection={<SlidersHorizontal size={16} />}
+        onClick={() => setIsFiltersOpen(true)}
+        className="mb-4 lg:hidden"
+      >
+        Filters{activeFilterCount ? ` (${activeFilterCount})` : ''}
+      </Button>
       <div className="grid gap-6 lg:grid-cols-[18rem_minmax(0,1fr)]">
         <aside className="hidden lg:block lg:sticky lg:top-24 lg:h-[calc(100dvh-6.5rem)]">
           <Paper withBorder p={0} radius="lg" className="h-full overflow-hidden">

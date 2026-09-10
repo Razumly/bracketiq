@@ -1,6 +1,5 @@
-import { createRef, useState, type ComponentProps, type PropsWithChildren } from 'react';
-import { MantineProvider } from '@mantine/core';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { createRef, useState, type ComponentProps } from 'react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { Event } from '@/types';
 import { createSport } from '@/types/defaults';
@@ -51,9 +50,7 @@ function Harness(overrides: Partial<Props>) {
     />
   );
 }
-function wrapper({ children }: PropsWithChildren) {
-  return <MantineProvider env="test">{children}</MantineProvider>;
-}
+
 function cardNames() {
   return screen.queryAllByTestId('event-card').map((card) => card.textContent);
 }
@@ -64,9 +61,21 @@ it('sorts Weekly cards by the next occurrence instead of the season start', () =
     start: '2099-06-01T18:00:00Z',
     nextOccurrence: { slotId: 'weekly-slot', occurrenceDate: '2099-09-16', start: '2099-09-16T18:00:00Z', end: '2099-09-16T20:00:00Z' },
   });
-  const earlier = buildEvent({ $id: 'earlier', name: 'Earlier event', start: '2099-09-10T18:00:00Z' });
-  render(<Harness events={[weekly, earlier]} selectedEventTypes={['EVENT', 'WEEKLY_EVENT']} defaultSort="soonest" />, { wrapper });
+  const earlier = buildEvent({ $id: 'earlier', name: 'Earlier event', eventType: 'EVENT', start: '2099-09-10T18:00:00Z' });
+  render(<Harness events={[weekly, earlier]} selectedEventTypes={['EVENT', 'WEEKLY_EVENT']} defaultSort="soonest" />);
   expect(cardNames()).toEqual(['Earlier event', 'Weekly season']);
+});
+
+it('opens the mobile filter sheet with filter controls', async () => {
+  const user = userEvent.setup();
+  render(<Harness selectedSports={['Basketball']} />);
+
+  await user.click(screen.getByRole('button', { name: 'Filters (1)' }));
+
+  const filterDialog = screen.getByRole('dialog', { name: 'Filter Events' });
+  expect(filterDialog).toBeInTheDocument();
+  expect(within(filterDialog).getByText('Sports')).toBeInTheDocument();
+  expect(within(filterDialog).getByText('Date Range')).toBeInTheDocument();
 });
 const originalFetch = globalThis.fetch;
 beforeEach(() => {
@@ -85,7 +94,7 @@ it('blocks event creation until the caller enables it', async () => {
   const user = userEvent.setup();
   const onCreateEvent = jest.fn();
   const view = render(<Harness createEventDisabled onCreateEvent={onCreateEvent}
-    createEventHelperText="Create a field for this organization before creating an event." />, { wrapper });
+    createEventHelperText="Create a field for this organization before creating an event." />);
   await user.click(screen.getByRole('button', { name: 'Create event' }));
   expect(onCreateEvent).not.toHaveBeenCalled();
   expect(screen.getByText('Create a field for this organization before creating an event.')).toBeInTheDocument();
@@ -99,12 +108,12 @@ it('filters the complete cache locally, updates counts, removes chips, and opens
   const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
   const onFilterChange = jest.fn();
   const onEventClick = jest.fn();
-  render(<Harness onFilterChange={onFilterChange} onEventClick={onEventClick} />, { wrapper });
+  render(<Harness onFilterChange={onFilterChange} onEventClick={onEventClick} />);
   expect(screen.getByText('37 events available.')).toBeInTheDocument();
-  await user.click(screen.getByLabelText('Basketball'));
+  await user.click(screen.getByRole('button', { name: 'Basketball', exact: true }));
   expect(cardNames()).toEqual(['Basketball late', 'Basketball middle']);
   expect(screen.getByText('2 events available.')).toBeInTheDocument();
-  await user.click(screen.getByRole('button', { name: 'Basketball' }));
+  await user.click(screen.getByRole('button', { name: 'Basketball', exact: true, pressed: true }));
   expect(cardNames()).toHaveLength(3);
   await user.type(screen.getByRole('textbox', { name: 'Search', exact: true }), 'middle');
   expect(cardNames()).toEqual(['Basketball middle']);
@@ -120,8 +129,8 @@ it('filters the complete cache locally, updates counts, removes chips, and opens
 it.each(['Soonest', 'Price (Low to High)'])('sorts cached cards by %s without fetching', async (label) => {
   const user = userEvent.setup();
   const onFilterChange = jest.fn();
-  render(<Harness onFilterChange={onFilterChange} />, { wrapper });
-  await user.click(screen.getByRole('textbox', { name: 'Sort events' }));
+  render(<Harness onFilterChange={onFilterChange} />);
+  await user.click(screen.getByRole('combobox', { name: 'Sort events' }));
   await user.click(screen.getByRole('option', { name: label }));
   expect(cardNames()).toEqual(['Volleyball early', 'Basketball middle', 'Basketball late']);
   expect(onFilterChange).not.toHaveBeenCalled();
@@ -130,8 +139,8 @@ it.each(['Soonest', 'Price (Low to High)'])('sorts cached cards by %s without fe
 it('delegates a controlled sort and waits for the caller value', async () => {
   const user = userEvent.setup();
   const onEventSortChange = jest.fn<void, [EventSortValue]>();
-  const view = render(<Harness eventSort="recommended" onEventSortChange={onEventSortChange} />, { wrapper });
-  await user.click(screen.getByRole('textbox', { name: 'Sort events' }));
+  const view = render(<Harness eventSort="recommended" onEventSortChange={onEventSortChange} />);
+  await user.click(screen.getByRole('combobox', { name: 'Sort events' }));
   await user.click(screen.getByRole('option', { name: 'Soonest' }));
   expect(onEventSortChange).toHaveBeenCalledWith('soonest');
   expect(cardNames()[0]).toBe('Basketball late');
@@ -144,7 +153,7 @@ it('keeps filters and cached results while a partial-cache refresh fails', async
   let reject!: (error: Error) => void;
   const onFilterChange = jest.fn(() => new Promise<void>((_resolve, fail) => { reject = fail; }));
   const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
-  render(<Harness hasMoreEvents onFilterChange={onFilterChange} />, { wrapper });
+  render(<Harness hasMoreEvents onFilterChange={onFilterChange} />);
   const input = screen.getByRole('textbox', { name: 'Search', exact: true });
   await user.type(input, 'Basketball');
   await act(async () => { jest.advanceTimersByTime(250); });
@@ -162,7 +171,7 @@ it('keeps filters and cached results while a partial-cache refresh fails', async
 
 it('retains filters during initial loading and applies them when events arrive', async () => {
   const user = userEvent.setup();
-  const view = render(<Harness isLoadingInitial events={[]} />, { wrapper });
+  const view = render(<Harness isLoadingInitial events={[]} />);
   const input = screen.getByRole('textbox', { name: 'Search', exact: true });
   await user.type(input, 'middle');
   expect(cardNames()).toHaveLength(0);

@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { Alert, Button, Group, Text } from '@mantine/core';
+import { Alert, Button, Group, Text } from '@/components/organization/organization-operation-ui';
 
 import { formatPrice } from '@/types';
 

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import Image from 'next/image';
-import { Alert, Button, FileInput, Group, Modal, Stack, Text } from '@mantine/core';
+import { Alert, Button, FileInput, Group, Modal, Stack, Text } from '@/components/organization/organization-operation-ui';
 
 import {
     getManualPaymentProviderLabel,
@@ -71,7 +71,7 @@ export function ManualPaymentProofDialog({
             title="Submit payment proof"
             centered
             size="lg"
-            zIndex={zIndex}
+            styles={{ content: { zIndex } }}
         >
             <Stack gap="md">
                 <Alert color="yellow" variant="light">

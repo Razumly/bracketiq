@@ -1,8 +1,4 @@
-import { act, fireEvent, screen, waitFor } from '@testing-library/react';
-import { MantineProvider } from '@mantine/core';
-import { ModalsProvider } from '@mantine/modals';
-import { Notifications } from '@mantine/notifications';
-import { renderWithMantine } from '../../../../test/utils/renderWithMantine';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import DiscoverPage from '../page';
 
 const pushMock = jest.fn();
@@ -191,7 +187,7 @@ describe('Discover organization loading', () => {
     navigationSearchParams = 'tab=events';
     mockDebouncedValue = '';
     getEventsPageMock.mockResolvedValue({ events: [], pagination: { nextOffset: 18, hasMore: true, totalCount: 100 } });
-    renderWithMantine(<DiscoverPage />);
+    render(<DiscoverPage />);
     await waitFor(() => expect(screen.getByTestId('event-loading-state')).toHaveTextContent('Ready'));
     fireEvent.change(screen.getByRole('textbox', { name: 'Event test search' }), { target: { value: 'Basketball' } });
     await waitFor(() => expect(getEventsPageMock).toHaveBeenLastCalledWith(
@@ -205,7 +201,7 @@ describe('Discover organization loading', () => {
     const initial = new Promise((resolve) => { finishInitial = resolve; });
     const page = { events: [], pagination: { nextOffset: 0, hasMore: false, totalCount: 0 } };
     getEventsPageMock.mockReturnValueOnce(initial).mockResolvedValue(page);
-    renderWithMantine(<DiscoverPage />);
+    render(<DiscoverPage />);
     await waitFor(() => expect(getEventsPageMock).toHaveBeenCalledTimes(1));
     fireEvent.change(screen.getByRole('textbox', { name: 'Event test search' }), { target: { value: 'Basketball' } });
     await waitFor(() => expect(getEventsPageMock).toHaveBeenCalledTimes(2));
@@ -223,7 +219,7 @@ describe('Discover organization loading', () => {
       .mockResolvedValueOnce({ events: [], pagination: { nextOffset: 18, hasMore: true, totalCount: 100 } })
       .mockReturnValueOnce(oldPage)
       .mockResolvedValue({ events: [event], pagination: { nextOffset: 1, hasMore: false, totalCount: 1 } });
-    renderWithMantine(<DiscoverPage />);
+    render(<DiscoverPage />);
     await waitFor(() => expect(screen.getByTestId('event-loading-state')).toHaveTextContent('Ready'));
     act(() => { intersectionCallbacks.forEach((callback) => callback([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver)); });
     await waitFor(() => expect(getEventsPageMock).toHaveBeenCalledTimes(2));
@@ -238,7 +234,7 @@ describe('Discover organization loading', () => {
   });
 
   it('loads the first organization page once and clears the loading state', async () => {
-    const { container } = renderWithMantine(<DiscoverPage />);
+    const { container } = render(<DiscoverPage />);
 
     expect(screen.getByRole('heading', { name: 'Discover', level: 1 })).toBeInTheDocument();
     expect(await screen.findByTestId('organization-card')).toHaveTextContent('Rose City Sports');
@@ -266,7 +262,7 @@ describe('Discover organization loading', () => {
     mockSportsResult.sports = [{ $id: 'soccer', name: 'Soccer' }];
     window.history.replaceState({}, '', `/discover?${navigationSearchParams}`);
 
-    renderWithMantine(<DiscoverPage />);
+    render(<DiscoverPage />);
 
     await waitFor(() => {
       expect(listOrganizationsMock).toHaveBeenCalledWith(100, 0, expect.objectContaining({
@@ -299,7 +295,7 @@ describe('Discover organization loading', () => {
     mockLocation = { lat: 45.5231, lng: -122.6765 };
     window.history.replaceState({}, '', `/discover?${navigationSearchParams}`);
 
-    renderWithMantine(<DiscoverPage />);
+    render(<DiscoverPage />);
 
     await waitFor(() => {
       expect(listOrganizationsMock).toHaveBeenCalledWith(100, 0, expect.objectContaining({
@@ -325,7 +321,7 @@ describe('Discover organization loading', () => {
     mockLocation = { lat: 45.5231, lng: -122.6765 };
     window.history.replaceState({}, '', `/discover?${navigationSearchParams}`);
 
-    renderWithMantine(<DiscoverPage />);
+    render(<DiscoverPage />);
 
     await waitFor(() => {
       expect(listOrganizationsMock).toHaveBeenCalledWith(100, 0, expect.objectContaining({
@@ -364,7 +360,7 @@ describe('Discover organization loading', () => {
         pagination: { limit: 100, offset: 1, nextOffset: 2, hasMore: false },
       });
 
-    renderWithMantine(<DiscoverPage />);
+    render(<DiscoverPage />);
 
     expect(await screen.findByText('Rose City Sports')).toBeInTheDocument();
     expect(intersectionCallbacks.length).toBeGreaterThan(0);
@@ -394,7 +390,7 @@ describe('Discover organization loading', () => {
       pagination: { limit: 18, offset: 0, nextOffset: 1, hasMore: false },
     });
 
-    renderWithMantine(<DiscoverPage />);
+    render(<DiscoverPage />);
 
     const card = await screen.findByTestId('team-card-team_external');
     expect(card).toHaveTextContent('External registration');
@@ -437,7 +433,7 @@ describe('Discover organization loading', () => {
         pagination: { limit: 100, offset: 1, nextOffset: 2, hasMore: false },
       });
 
-    renderWithMantine(<DiscoverPage />);
+    render(<DiscoverPage />);
 
     expect(await screen.findByText('Rose City Field Rentals')).toBeInTheDocument();
     expect(intersectionCallbacks.length).toBeGreaterThan(0);
@@ -486,18 +482,11 @@ describe('Discover organization loading', () => {
         pagination: { limit: 100, offset: 0, nextOffset: 1, hasMore: false },
       });
 
-    const { rerender } = renderWithMantine(<DiscoverPage />);
+    const { rerender } = render(<DiscoverPage />);
     await waitFor(() => expect(listOrganizationsMock).toHaveBeenCalledTimes(1));
 
     mockLocation = { lat: 45.5231, lng: -122.6765 };
-    rerender(
-      <MantineProvider>
-        <ModalsProvider>
-          <Notifications />
-          <DiscoverPage />
-        </ModalsProvider>
-      </MantineProvider>,
-    );
+    rerender(<DiscoverPage />);
 
     expect(await screen.findByText('Salmon Creek Indoor Field Rentals')).toBeInTheDocument();
     expect(listOrganizationsMock).toHaveBeenCalledTimes(2);
@@ -523,7 +512,7 @@ describe('Discover organization loading', () => {
     });
     window.history.replaceState({}, '', `/discover?${navigationSearchParams}`);
 
-    renderWithMantine(<DiscoverPage />);
+    render(<DiscoverPage />);
 
     await waitFor(() => {
       expect(getEventsPageMock).toHaveBeenCalledWith(
@@ -545,7 +534,7 @@ describe('Discover organization loading', () => {
     mockLocation = { lat: 40.7127753, lng: -74.0059728 };
     window.history.replaceState({}, '', `/discover?${navigationSearchParams}`);
 
-    renderWithMantine(<DiscoverPage />);
+    render(<DiscoverPage />);
 
     await waitFor(() => {
       expect(getEventsPageMock).toHaveBeenCalledWith(

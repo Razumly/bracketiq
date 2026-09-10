@@ -329,7 +329,7 @@ describe('DiscoverMapModal', () => {
       expect(mockedEventService.getEventsPaginated).toHaveBeenCalledTimes(1);
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Re-emit Vancouver location' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Re-emit Vancouver location', hidden: true }));
 
     await new Promise((resolve) => {
       window.setTimeout(resolve, 0);

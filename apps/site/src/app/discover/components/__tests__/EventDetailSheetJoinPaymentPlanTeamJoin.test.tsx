@@ -528,12 +528,7 @@ describe('EventDetailSheet payment-plan team join', () => {
 
     const teamSelect = await screen.findByPlaceholderText(/Choose a team/i);
     fireEvent.click(teamSelect);
-    const teamOption = Array.from(document.querySelectorAll('[data-combobox-option]')).find((element) =>
-      /Camka Team/i.test(element.textContent ?? ''),
-    );
-    if (!teamOption) {
-      throw new Error('Expected a combobox option for Camka Team.');
-    }
+    const teamOption = await screen.findByRole('option', { name: /Camka Team/i });
     expect(teamOption.textContent).toBe('Camka Team');
     expect(teamOption.textContent).not.toContain('c_skill_open_age_18plus');
     fireEvent.keyDown(teamSelect, { key: 'Escape' });
