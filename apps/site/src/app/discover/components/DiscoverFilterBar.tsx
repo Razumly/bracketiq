@@ -74,6 +74,15 @@ export function calculateVisibleFilterCount(
   return fitCount;
 }
 
+export function resolveOpenFilter<TFilter extends string>(
+  current: TFilter | null,
+  id: TFilter,
+  open: boolean,
+): TFilter | null {
+  if (open) return id;
+  return current === id ? null : current;
+}
+
 export type FilterOption = { value: string; label: string; count?: number };
 export type DiscoverFilterItem = { key: string; node: ReactNode };
 
@@ -827,7 +836,7 @@ export default function DiscoverFilterBar<TEventType extends string = Event['eve
   const [openFilter, setOpenFilter] = useState<string | null>(null);
   const [tagSearch, setTagSearch] = useState('');
   const panelId = useId();
-  const setOpen = (id: string) => (open: boolean) => setOpenFilter(open ? id : null);
+  const setOpen = (id: string) => (open: boolean) => setOpenFilter((current) => resolveOpenFilter(current, id, open));
 
   const eventTypeOptionsData = eventTypeOptions.map((type) => ({
     value: type,

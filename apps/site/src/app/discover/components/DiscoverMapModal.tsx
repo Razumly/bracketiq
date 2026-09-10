@@ -67,7 +67,7 @@ import {
   GOOGLE_MAPS_SCRIPT_ID,
 } from '@/lib/googleMapsLoader';
 import { getNextRentalOccurrence } from '../utils/rentals';
-import { FilterPopover } from './DiscoverFilterBar';
+import { FilterPopover, resolveOpenFilter } from './DiscoverFilterBar';
 
 type MapCenter = { lat: number; lng: number };
 type MapSearchTarget = 'events' | 'organizations' | 'rentals';
@@ -1443,7 +1443,7 @@ export default function DiscoverMapModal({
                   icon={Tag}
                   active={!allTagsSelected}
                   open={openFilter === 'tags'}
-                  onOpenChange={(nextOpen) => setOpenFilter(nextOpen ? 'tags' : null)}
+                  onOpenChange={(nextOpen) => setOpenFilter((current) => resolveOpenFilter(current, 'tags', nextOpen))}
                   onClear={() => setSelectedTags([])}
                 >
                   <TextInput
@@ -1497,7 +1497,7 @@ export default function DiscoverMapModal({
                   icon={CircleDot}
                   active={!allSportsSelected}
                   open={openFilter === 'sports'}
-                  onOpenChange={(nextOpen) => setOpenFilter(nextOpen ? 'sports' : null)}
+                  onOpenChange={(nextOpen) => setOpenFilter((current) => resolveOpenFilter(current, 'sports', nextOpen))}
                   onClear={() => setSelectedSports([])}
                 >
                   <TextInput
@@ -1576,7 +1576,7 @@ export default function DiscoverMapModal({
                   icon={Navigation}
                   active={typeof maxDistance === 'number'}
                   open={openFilter === 'distance'}
-                  onOpenChange={(nextOpen) => setOpenFilter(nextOpen ? 'distance' : null)}
+                  onOpenChange={(nextOpen) => setOpenFilter((current) => resolveOpenFilter(current, 'distance', nextOpen))}
                   onClear={() => setMaxDistance(null)}
                 >
                   <Text size="sm" fw={600} mb={12}>
