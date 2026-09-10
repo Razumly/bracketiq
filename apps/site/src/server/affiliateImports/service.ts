@@ -79,6 +79,7 @@ import type {
 } from './affiliateSupplyPersistence';
 import { normalizeAffiliateSupplyIdentity, targetRuleFor } from './affiliateSupplyLifecycle';
 import { hashAffiliateAgentValue } from './agentGatewayContracts';
+import { analyzeAffiliateDescriptionQuality } from "./descriptionQuality";
 import {
   type AffiliateDateDisplayMode,
   type AffiliateCandidateInput,
@@ -4109,13 +4110,23 @@ const affiliateOrganizationDescription = (params: {
   candidate: AffiliateCandidateRecord;
   sourceOrganization: any;
   canonical: boolean;
-}): string | null =>
-  firstAffiliateNullableString(
-    params.canonical ? params.sourceOrganization.description : null,
+  existingOrganization: { originType?: unknown; ownershipStatus?: unknown } | null;
+}): string | null => {
+  const preserveSourceDescription =
+    params.canonical &&
+    !(params.existingOrganization?.originType === "AFFILIATE_IMPORTED" &&
+      params.existingOrganization.ownershipStatus === "UNCLAIMED");
+  if (preserveSourceDescription) {
+    return firstAffiliateNullableString(
+      params.sourceOrganization.description,
+      params.candidate.description,
+    );
+  }
+  return firstAffiliateNullableString(
     params.candidate.description,
-    params.candidate.scheduleText,
-    params.candidate.statusText,
+    params.canonical ? params.sourceOrganization.description : null,
   );
+};
 
 const affiliateOrganizationWebsite = (params: {
   candidate: AffiliateCandidateRecord;
@@ -4217,6 +4228,7 @@ const buildAffiliateOrganizationData = async (
     candidate,
     sourceOrganization,
     canonical,
+    existingOrganization,
   });
   const website = affiliateOrganizationWebsite({
     candidate,
@@ -5221,6 +5233,25 @@ type AffiliateScrapeCandidateClassification =
   | { candidate: AffiliateCandidateInput; rejection?: never }
   | { candidate?: never; rejection: { title: string; reasons: string[] } };
 
+const affiliateDescriptionQualityRejectionReason = (params: {
+  candidate: AffiliateCandidateInput;
+  supplyBacked: boolean;
+}): string | null => {
+  if (
+    !params.supplyBacked ||
+    (params.candidate.listingKind !== "EVENT" &&
+      params.candidate.listingKind !== "CLUB")
+  ) {
+    return null;
+  }
+  const issue = analyzeAffiliateDescriptionQuality({
+    kind: params.candidate.listingKind === "CLUB" ? "ORGANIZATION" : "EVENT",
+    name: params.candidate.title,
+    description: params.candidate.description,
+  })[0];
+  return issue ? `description:${issue.code}` : null;
+};
+
 const classifyAffiliateScrapeCandidate = async (params: {
   candidate: AffiliateCandidateInput;
   sourceOrganization: AffiliateSourceOrganizationLocation | null;
@@ -5271,6 +5302,7 @@ const classifyAffiliateScrapeCandidates = async (params: {
   candidates: AffiliateCandidateInput[];
   sourceOrganization: AffiliateSourceOrganizationLocation | null;
   referenceDate: Date;
+  supplyBacked: boolean;
 }): Promise<{
   rejectedCandidates: Array<{ title: string; reasons: string[] }>;
   importableCandidates: AffiliateCandidateInput[];
@@ -5279,6 +5311,14 @@ const classifyAffiliateScrapeCandidates = async (params: {
   const importableCandidates: AffiliateCandidateInput[] = [];
   const now = new Date();
   for (const candidate of params.candidates) {
+    const descriptionReason = affiliateDescriptionQualityRejectionReason({
+      candidate,
+      supplyBacked: params.supplyBacked,
+    });
+    if (descriptionReason) {
+      rejectedCandidates.push({ title: candidate.title, reasons: [descriptionReason] });
+      continue;
+    }
     const classification = await classifyAffiliateScrapeCandidate({
       candidate,
       sourceOrganization: params.sourceOrganization,
@@ -6131,6 +6171,7 @@ export const runAffiliateSourceScrape = async (
       candidates: extracted.extractedCandidates,
       sourceOrganization: context.sourceOrganization,
       referenceDate: extracted.effectiveReferenceDate,
+      supplyBacked: Boolean(context.activeSupplySourceId),
     });
     const automation = buildAffiliateAutomationDecision({
       context,

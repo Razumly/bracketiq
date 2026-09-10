@@ -152,9 +152,20 @@ const producerRepairReasonCodes = new Set([
 
 const producerHandoffPattern = /(?:(?:producer|package[- ]evidence|exact[- ]commit|producer-workspace|repository|commit).{0,160}(?:unavailable|inaccessible|missing|cannot|could not|not resolve|not reachable)|(?:unavailable|inaccessible|missing|cannot|could not|not resolve|not reachable).{0,160}(?:producer|package[- ]evidence|exact[- ]commit|producer-workspace|repository|commit))/i;
 
+const allSourceLabelsBlacklisted = (sourceLabels: readonly string[]): boolean => (
+  sourceLabels.length > 0 && sourceLabels.every(isAffiliateSportBlacklisted)
+);
+
+const exclusionGuidance: ReviewGuidance = {
+  reviewOwner: 'USER',
+  reviewQuestion: 'Should this blacklisted source activity remain excluded?',
+  recommendedAction: 'Confirm the exact blacklisted determinations when the source must remain excluded. Blacklisted activities cannot become executable sports.',
+};
+
 export const affiliateMappingReviewGuidance = (input: {
   requestedNextAction?: string | null;
   reasonCodes?: string[];
+  sourceSportLabels?: string[];
   rationale?: string | null;
   blockingIssues?: string[];
   errorMessage?: string | null;
@@ -199,6 +210,19 @@ export const affiliateMappingReviewGuidance = (input: {
       recommendedAction: 'Compare the source identity with the live record. Choose whether to merge, replace, keep separate, or stop this source.',
     };
   }
+  const sourceSportLabels = input.sourceSportLabels ?? [];
+  const sportReasonCodes: Record<string, true> = {
+    SPORT_VARIANT_UNRESOLVED: true,
+    SPORT_NOT_IN_CATALOG: true,
+    SPORT_BLACKLISTED: true,
+  };
+  if (
+    allSourceLabelsBlacklisted(sourceSportLabels)
+    && substantiveReasonCodes.length > 0
+    && substantiveReasonCodes.every((reasonCode) => sportReasonCodes[reasonCode] === true)
+  ) {
+    return exclusionGuidance;
+  }
   if (reasonCodes.includes('SPORT_VARIANT_UNRESOLVED')) {
     return {
       reviewOwner: 'USER',
@@ -214,11 +238,7 @@ export const affiliateMappingReviewGuidance = (input: {
     };
   }
   if (reasonCodes.includes('SPORT_BLACKLISTED')) {
-    return {
-      reviewOwner: 'USER',
-      reviewQuestion: 'Should this blacklisted source activity remain excluded?',
-      recommendedAction: 'Confirm the exact blacklisted determinations when the source must remain excluded. Blacklisted activities cannot become executable sports.',
-    };
+    return exclusionGuidance;
   }
   if (reasonCodes.includes('RETRY_LIMIT_EXCEEDED')) {
     return {
@@ -373,9 +393,11 @@ export const listAffiliateMappingHumanReviewJobs = async (
       ? affiliateSportSourceLabelUnion(details.sportDeterminations)
       : stringValues(humanReview.sourceSportLabels);
     const staleCatalog = details.catalogCurrent === false;
+    const pureBlacklistedSourceReview = allSourceLabelsBlacklisted(sourceSportLabels);
     const guidance = affiliateMappingReviewGuidance({
       requestedNextAction,
       reasonCodes,
+      sourceSportLabels,
       rationale,
       blockingIssues,
       errorMessage,
@@ -399,7 +421,7 @@ export const listAffiliateMappingHumanReviewJobs = async (
       rationale,
       blockingIssues,
       hasSelectedLogo: Boolean(intake?.selectedLogoArtifactId),
-      ...(staleCatalog
+      ...(staleCatalog && !pureBlacklistedSourceReview
         ? {
           reviewOwner: 'SYSTEM' as const,
           reviewQuestion: 'Is the claim-time sport catalog stale?',
@@ -599,18 +621,27 @@ export const resolveAffiliateMappingSportDecision = async (
     const humanReview = humanReviewFor(resultSummary);
     const reasonCodes = stringValues(humanReview.reasonCodes);
     const substantiveReasonCodes = reasonCodes.filter((reasonCode) => reasonCode !== 'RETRY_LIMIT_EXCEEDED');
-    const sportReasonCodes = new Set([
-      'SPORT_VARIANT_UNRESOLVED',
-      'SPORT_NOT_IN_CATALOG',
-      'SPORT_BLACKLISTED',
-    ]);
-    if (substantiveReasonCodes.some((reasonCode) => !sportReasonCodes.has(reasonCode))) {
+    const sportReasonCodes: Record<string, true> = {
+      SPORT_VARIANT_UNRESOLVED: true,
+      SPORT_NOT_IN_CATALOG: true,
+      SPORT_BLACKLISTED: true,
+    };
+    if (substantiveReasonCodes.some((reasonCode) => sportReasonCodes[reasonCode] !== true)) {
       throw new AffiliateMappingSportResolutionConflictError(
         'A human sport resolution cannot mutate a row with non-sport review reasons.',
       );
     }
     const determinations = sportDeterminationsFor(resultSummary);
     const determinationsByHash = determinationByHashFor(resultSummary);
+    const determinationLabels = determinations.flatMap((determination) => determination.sourceLabels);
+    const pureBlacklistedSourceReview = allSourceLabelsBlacklisted(
+      determinationLabels.length ? determinationLabels : stringValues(humanReview.sourceSportLabels),
+    );
+    if (input.action === 'REFRESH_CATALOG' && pureBlacklistedSourceReview) {
+      throw new AffiliateMappingSportResolutionInputError(
+        'A mapping with only blacklisted source activities cannot refresh or add a catalog sport.',
+      );
+    }
     const claimCatalog = claimCatalogFor(resultSummary);
     const prior = priorArchiveFor(resultSummary);
     await assertActiveQueueOwnership(transaction, jobId, stringValue(job.intakeId) ?? '');
@@ -659,7 +690,7 @@ export const resolveAffiliateMappingSportDecision = async (
         : nextSummary;
     }
 
-    if (!claimCatalog || claimCatalog.sha256 !== currentCatalog.sha256) {
+    if (input.action === 'SELECT_SPORTS' && (!claimCatalog || claimCatalog.sha256 !== currentCatalog.sha256)) {
       throw new AffiliateMappingSportResolutionConflictError(
         'The claim-time catalog is stale. Refresh the catalog before choosing a sport.',
       );
@@ -700,6 +731,12 @@ export const resolveAffiliateMappingSportDecision = async (
         if (!determination || !['VARIANT_UNRESOLVED', 'UNSUPPORTED'].includes(determination.status)) {
           throw new AffiliateMappingSportResolutionInputError(
             `Unknown or non-selectable determination ${resolution.determinationSha256}.`,
+          );
+        }
+        const blacklistedSourceLabels = determination.sourceLabels.filter(isAffiliateSportBlacklisted);
+        if (blacklistedSourceLabels.length > 0) {
+          throw new AffiliateMappingSportResolutionInputError(
+            `Cannot select canonical sports for blacklisted source label(s): ${blacklistedSourceLabels.join(', ')}.`,
           );
         }
         const rawNames = resolution.canonicalSportNames.map((name) => name.trim());

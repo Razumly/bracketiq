@@ -56,11 +56,34 @@ describe('affiliate sport repair', () => {
     }));
   });
 
+  it('does not repair a blacklisted catalog label or map it to a supported replacement', () => {
+    const injectedCatalog = [...catalog, 'Track and Field'];
+    expect(repairAffiliateSportLabel('Track and Field', injectedCatalog)).toEqual(expect.objectContaining({
+      canRepair: false,
+      canonicalSportNames: [],
+      excludedBlacklistedSportNames: ['Track and Field'],
+    }));
+    expect(repairAffiliateSportLabel('Track and Field and Football', injectedCatalog)).toEqual(expect.objectContaining({
+      canRepair: true,
+      canonicalSportNames: ['Football'],
+      excludedBlacklistedSportNames: ['Track and Field'],
+    }));
+  });
+
   it('does not turn a vague other-sports phrase into the Other catalog row', () => {
     expect(repairAffiliateSportLabel('Baseball, Softball, and other field sports', catalog)).toEqual(expect.objectContaining({
       canRepair: true,
       canonicalSportNames: ['Baseball', 'Softball'],
     }));
+  });
+
+  it('removes blacklisted sports from merged executable organization sports', () => {
+    const injectedCatalog = [...catalog, 'Track and Field'];
+    expect(mergeAffiliateOrganizationSports(
+      ['Track and Field', 'Tennis'],
+      ['Track and Field', 'Indoor Volleyball'],
+      injectedCatalog,
+    )).toEqual(['Tennis', 'Indoor Volleyball']);
   });
 
   it.each(['Multi-sport', 'Field sports', 'Padel', 'Cheerleading and Dance'])('leaves %s unresolved', (source) => {

@@ -124,11 +124,7 @@ const main = async () => {
     );
     const descriptionIssues = candidateDescriptions.rows.flatMap((candidate) => {
       if (candidate.listingKind !== 'EVENT' && candidate.listingKind !== 'CLUB') return [];
-      return analyzeAffiliateDescriptionQuality({
-        kind: candidate.listingKind === 'CLUB' ? 'ORGANIZATION' : 'EVENT',
-        name: candidate.title,
-        description: candidate.description,
-      }).map((issue) => ({
+      return analyzeAffiliateDescriptionQuality({ kind: candidate.listingKind === 'CLUB' ? 'ORGANIZATION' : 'EVENT', name: candidate.title, description: candidate.description }).map((issue) => ({
         candidateId: candidate.id,
         listingKind: candidate.listingKind,
         title: candidate.title,
@@ -203,7 +199,7 @@ const main = async () => {
         issueCount: descriptionIssues.length,
         issues: descriptionIssues.slice(0, 100),
         truncated: descriptionIssues.length > 100,
-        note: 'This deterministic scan catches missing copy, discovery narration, and repeated event titles. The reviewer must also compare event and organization descriptions with stored first-party evidence.',
+        note: 'This deterministic scan checks missing copy, recognized discovery narration, and URL-only descriptions. The reviewer must compare source wording and subject relevance with stored first-party evidence.',
       },
       liveSafety: {
         state: liveSafetyRows.length === 0 ? 'NOT_APPLIED' : 'EXISTING_REVIEW_STATE',

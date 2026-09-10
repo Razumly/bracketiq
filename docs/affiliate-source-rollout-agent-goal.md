@@ -85,7 +85,7 @@ The goal agent must follow `$ingest-affiliate-intakes` and the affiliate source 
   transitions; it never authorizes live organization, source, mapping, logo,
   candidate, publication, or approval writes.
 - Inspect at least five candidates and every produced candidate kind. Verify classification, official URLs, dates, descriptions, tags, divisions, prices, registration type, capacity, location, and coordinates against the rendered source.
-- Write public event and organization descriptions from stored first-party evidence. Describe the activity, audience, format, schedule, venue, services, or material terms in natural language. Do not narrate that a record was listed, found, scraped, captured, or mapped from a site, and do not start an event description by repeating its full title. When event-specific prose is absent, one concise organization-level activity fallback may be reused across related events if the evidence supports it.
+- Use the first-party site's own wording, terminology, meaning, and tone for event and organization descriptions. Describe the activity or organization, not what the agent found. Keep discovery notes, validation notes, and provenance outside public copy. Governed EVENT and CLUB packages require a description selector from claim-owned HTML. Select relevant prose without navigation or repeated headings. Do not rewrite valid source wording only to remove a repeated event name. An applicable source program paragraph may serve related events. Report an evidence gap when no suitable prose can be selected. Do not invent a fallback or use schedule/status notes.
 - Give each canonical organization the most specific defensible location. Prefer a source-backed street address. When no address is published, use an evidenced city, locality, metro, or region from first-party content, stored intake discovery context, or explicit parent-directory evidence. Record the fallback evidence and geocode the locality through the server-side Google Places path. City or region centroid coordinates are valid for an organization; do not leave its location or coordinates null only because a street address is unavailable.
 - Treat each source event as one parent record. Group every division under its exact event identity/detail-page context and never merge divisions across adjacent cards, dates, venues, or registration pages. Preserve the organization's exact division label as the display name, then independently select BracketIQ's canonical `gender` (`M`, `F`, `C`), `ratingType` (`AGE` or `SKILL`), `divisionTypeId`, `skillDivisionTypeId`, and `ageDivisionTypeId`. Use Coed only when the source says coed/mixed or leaves gender unspecified; preserve ambiguous labels and flag them for review rather than guessing.
 - Keep source prices and capacities on their owning divisions. Do not copy or average a division price. Use an event-level fallback only for a genuinely single-price or single-division event; when division prices differ, expose a compact event price range and keep late fees, discounts, membership requirements, and other caveats in the details.
@@ -131,7 +131,7 @@ The coordinator may mark a source complete only when:
 - setup code is idempotent and locally reproducible;
 - mapping/candidates use the existing import contract;
 - extracted data matches the rendered source;
-- event and organization descriptions are natural, source-derived public copy without discovery narration or repeated event titles;
+- event and organization descriptions use the first-party site's wording without discovery narration or unsupported claims;
 - organization location and coordinates use the best defensible source, intake, or directory evidence, with a city or region centroid when no street address is published;
 - accepted events have event-specific valid non-zero coordinates or an explicit evidence-backed source-organization fallback, while invalid event locations are excluded and appear in stable scrape-run rejection summaries;
 - source division names remain intact while canonical gender/age/skill fields are populated from evidence;
@@ -154,7 +154,9 @@ If evidence does not support an exact current catalog name, do not write a
 source package, generated scraper, or candidate. Preserve exact source labels
 and artifact citations in v2 determinations. Bare Soccer/Volleyball is
 `SPORT_VARIANT_UNRESOLVED`; an evidenced family without an exact current entry
-is `SPORT_NOT_IN_CATALOG`; an exact blacklisted activity is `BLACKLISTED`.
+is `SPORT_NOT_IN_CATALOG` only when it is not blacklisted; an exact blacklisted
+activity is `BLACKLISTED` with `SPORT_BLACKLISTED`. Never request a catalog
+addition or substitute another sport for a blacklisted activity.
 Complete those outcomes as governed `HUMAN_REVIEW_REQUIRED` without creating an
 approval job. A surface-specific resolved package must still use the exact
 injected catalog name and evidence-backed determination union.
@@ -206,8 +208,9 @@ volleyball to `Indoor Volleyball`, sand volleyball to `Beach Volleyball`, and
 grass/outdoor-field volleyball to `Grass Volleyball`, provided each exact name
 is in the injected catalog. Bare Soccer or Volleyball is
 `SPORT_VARIANT_UNRESOLVED`; an evidenced family with no exact entry is
-`SPORT_NOT_IN_CATALOG`; a policy-blacklisted activity is `BLACKLISTED` and
-must remain excluded. This matrix is evidence guidance, not keyword
+`SPORT_NOT_IN_CATALOG` only when it is not blacklisted. A policy-blacklisted
+activity is `BLACKLISTED` with `SPORT_BLACKLISTED` and must remain excluded.
+This matrix is evidence guidance, not keyword
 substitution. Preserve citations and source labels for human review.
 
 Only a determination-complete package may reach `REVIEW_REQUIRED`; completion

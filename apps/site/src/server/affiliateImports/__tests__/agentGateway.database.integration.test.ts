@@ -499,7 +499,7 @@ const seedReviewerEffectRecoveryFixture = async (
   const sportName = catalog.sports[0]?.name;
   if (!sportName) throw new Error("The local sports catalog is empty.");
   const sourcePageBytes = Buffer.from(
-    `<html><body><article class="event"><a href="/events/${label}">Register</a><h1 class="title">${label} legacy event</h1><span class="sport">${sportName}</span></article></body></html>`,
+    `<html><body><article class="event"><a href="/events/${label}">Register</a><h1 class="title">${label} legacy event</h1><p class="description">Join our weekly games for local players.</p><span class="sport">${sportName}</span></article></body></html>`,
     "utf8",
   );
   const sourcePageHash = createHash("sha256").update(sourcePageBytes).digest("hex");
@@ -520,6 +520,13 @@ const seedReviewerEffectRecoveryFixture = async (
     listUrlRef: "source-page",
     itemSelector: ".event",
     fields: [
+      {
+        field: "description" as const,
+        selector: ".description",
+        mode: "TEXT" as const,
+        attribute: null,
+        transform: "TRIM" as const,
+      },
       {
         field: "officialActionUrl" as const,
         selector: "a",

@@ -1048,6 +1048,43 @@ describe("affiliate Agent Gateway contracts", () => {
     ).toBe(false);
   });
 
+  it("rejects authored or URL-producing descriptions at the command boundary", () => {
+    const commandWithDescription = (field: unknown) => ({
+      type: "VALIDATE_DECLARATIVE_PACKAGE",
+      data: {
+        evidenceManifestHash: evidenceManifestFixture.hash,
+        candidatePackage: {
+          schemaVersion: 1,
+          supplySourceId: "supply-source-1",
+          listingKind: "EVENT",
+          listUrlRef: "url-ref-1",
+          itemSelector: ".event-card",
+          fields: [field],
+          evidenceRefs: ["url-ref-1"],
+        },
+      },
+    });
+    expect(affiliateAgentCommandSchema.safeParse(commandWithDescription({
+      field: "description",
+      mode: "CONSTANT",
+      value: "We found this event on a website.",
+    })).success).toBe(false);
+    expect(affiliateAgentCommandSchema.safeParse(commandWithDescription({
+      field: "description",
+      selector: ".description",
+      mode: "TEXT",
+      attribute: null,
+      transform: "ABSOLUTE_URL",
+    })).success).toBe(false);
+    expect(affiliateAgentCommandSchema.safeParse(commandWithDescription({
+      field: "description",
+      selector: "a",
+      mode: "ATTRIBUTE",
+      attribute: "href",
+      transform: "TRIM",
+    })).success).toBe(false);
+  });
+
   it("parses the complete role and terminal-disposition matrix", () => {
     const parsed = terminalResultCases.map((resultCase) =>
       affiliateAgentTerminalResultEnvelopeSchema.parse(

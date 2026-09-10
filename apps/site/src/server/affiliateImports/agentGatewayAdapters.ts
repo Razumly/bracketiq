@@ -60,6 +60,7 @@ import {
   createAffiliateSourceSearchClient,
 } from "./affiliateProviderFactory";
 import { extractAffiliateCandidatesFromPage } from "./mappingExtractor";
+import { analyzeAffiliateDescriptionQuality } from "./descriptionQuality";
 import {
   affiliateScrapeMappingSchema,
   type AffiliateCandidateInput,
@@ -67,6 +68,7 @@ import {
   type AffiliateScrapeMapping,
   type ScrapedPage,
 } from "./types";
+import { isAffiliateSportBlacklisted } from "./affiliateSportMapping";
 import { loadAffiliateSportsCatalogSnapshot } from "./affiliateSportsCatalog";
 import {
   AffiliateSportVerificationError,
@@ -3547,6 +3549,10 @@ const assertProductionMappingPackage: (
   if (!fields.has("title") || !fields.has("officialActionUrl")) {
     throw packageValidationError("The declarative package must map title and official action URL.");
   }
+  if ((candidatePackage.listingKind === "EVENT" || candidatePackage.listingKind === "CLUB")
+    && !fields.has("description")) {
+    throw packageValidationError("EVENT and CLUB packages must map a source description.");
+  }
   const constantSportValues = candidatePackage.fields
     .filter((field) => field.mode === "CONSTANT")
     .map((field) => field.value);
@@ -3627,12 +3633,25 @@ const extractProductionValidationCandidates = (
   ))) {
     throw packageValidationError("The declarative package output must include title and official action URL.");
   }
+  if (candidatePackage.listingKind === "EVENT" || candidatePackage.listingKind === "CLUB") {
+    for (let index = 0; index < candidates.length; index += 1) {
+      const candidate = candidates[index]!;
+      const issue = analyzeAffiliateDescriptionQuality({ kind: candidatePackage.listingKind === "CLUB" ? "ORGANIZATION" : "EVENT", name: candidate.title, description: candidate.description })[0];
+      if (issue) {
+        throw packageValidationError(`Candidate ${index + 1}: ${issue.code}. ${issue.message}`);
+      }
+    }
+  }
   const observedSportNames = sortUniqueAffiliateSportNames(
     candidates.flatMap((candidate) => [
       ...(candidate.sportName ? [candidate.sportName] : []),
       ...(candidate.sportNames ?? []),
     ]),
   );
+  const blacklistedSportName = observedSportNames.find(isAffiliateSportBlacklisted);
+  if (blacklistedSportName) {
+    throw packageValidationError(`SPORT_BLACKLISTED: ${blacklistedSportName} cannot be an executable sport.`);
+  }
   return {
     listUrl,
     candidates,

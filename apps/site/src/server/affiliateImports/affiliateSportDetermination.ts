@@ -554,6 +554,8 @@ export const assertAffiliateSportCompletionReady = ({
     isCatalogSnapshot(catalog) ? catalog.sports.map((sport) => sport.name) : catalog,
   );
   const hashes = new Set<string>();
+  // Historical determination envelopes remain parseable and hashable. Apply
+  // blacklist status policy only at the current completion boundary.
   for (let index = 0; index < parsedDeterminations.length; index += 1) {
     const parsed = parsedDeterminations[index];
     const hash = affiliateSportDeterminationSha256(parsed);
@@ -564,8 +566,27 @@ export const assertAffiliateSportCompletionReady = ({
     )) {
       throw new AffiliateSportVerificationError(['sportDeterminations', index, 'canonicalSportNames'], 'Resolved determination contains a missing or blacklisted catalog sport.');
     }
-    if (parsed.status === 'BLACKLISTED' && parsed.sourceLabels.every((name) => !isAffiliateSportBlacklisted(name))) {
-      throw new AffiliateSportVerificationError(['sportDeterminations', index, 'sourceLabels'], 'Blacklisted determination does not identify a blacklisted source label.');
+    const hasBlacklistedSourceLabel = parsed.sourceLabels.some(isAffiliateSportBlacklisted);
+    const hasNonBlacklistedSourceLabel = parsed.sourceLabels.some(
+      (sourceLabel) => !isAffiliateSportBlacklisted(sourceLabel),
+    );
+    if (hasBlacklistedSourceLabel && parsed.status !== 'BLACKLISTED') {
+      throw new AffiliateSportVerificationError(
+        ['sportDeterminations', index, 'status'],
+        'Determinations with blacklisted source labels must use BLACKLISTED and cannot contain canonical sport names.',
+      );
+    }
+    if (parsed.status === 'BLACKLISTED' && !hasBlacklistedSourceLabel) {
+      throw new AffiliateSportVerificationError(
+        ['sportDeterminations', index, 'sourceLabels'],
+        'Blacklisted determination does not identify a blacklisted source label.',
+      );
+    }
+    if (parsed.status === 'BLACKLISTED' && hasNonBlacklistedSourceLabel) {
+      throw new AffiliateSportVerificationError(
+        ['sportDeterminations', index, 'sourceLabels'],
+        'BLACKLISTED determinations cannot mix blacklisted and non-blacklisted source labels; split the determinations.',
+      );
     }
   }
   const userDecisionIndex = parsedDeterminations.findIndex(

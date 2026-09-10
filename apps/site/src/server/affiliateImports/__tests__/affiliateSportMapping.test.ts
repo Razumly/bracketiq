@@ -55,10 +55,33 @@ describe('affiliate sport mapping policy', () => {
       ...injectedCatalog,
       sportName,
     ])).toEqual(expect.objectContaining({
-      code: 'SPORT_NOT_IN_CATALOG',
+      code: 'SPORT_BLACKLISTED',
       sportName,
       canonicalSuggestion: null,
       message: expect.stringContaining('blacklisted'),
+    }));
+  });
+
+  it('keeps Track and Field blacklisted when an injected catalog also contains it', () => {
+    expect(validateAffiliateAgentSportName(
+      'Track and Field',
+      'sportName',
+      ['Grass Soccer', 'Track and Field'],
+    )).toEqual(expect.objectContaining({
+      code: 'SPORT_BLACKLISTED',
+      canonicalSuggestion: null,
+    }));
+  });
+
+  it('does not broaden blacklist matching beyond the exact source label', () => {
+    expect(isAffiliateSportBlacklisted('Track and Field program')).toBe(false);
+    expect(validateAffiliateAgentSportName(
+      'Track and Field program',
+      'sportName',
+      injectedCatalog,
+    )).toEqual(expect.objectContaining({
+      code: 'SPORT_NOT_IN_CATALOG',
+      canonicalSuggestion: null,
     }));
   });
 

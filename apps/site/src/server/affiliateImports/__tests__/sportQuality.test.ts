@@ -54,17 +54,19 @@ describe('affiliate sport quality', () => {
     },
   );
 
-  it('routes blacklisted sports to catalog review even when the source label is exact', () => {
+  it('routes blacklisted sports to exclusion review even when the source label is exact', () => {
     const result = analyzeAffiliateSportQuality({
-      candidates: [candidate('Golf')],
-      organization: organization(['Golf']),
-      catalog: [...catalog, { id: 'Golf', name: 'Golf' }],
+      candidates: [candidate('Track and Field')],
+      organization: organization(['Track and Field']),
+      catalog: [...catalog, { id: 'Track and Field', name: 'Track and Field' }],
     });
     expect(result.passed).toBe(false);
+    expect(result.unsupportedSportNames).toEqual([]);
     expect(result.issues).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        code: 'SPORT_NOT_IN_CATALOG',
-        sportName: 'Golf',
+        code: 'SPORT_BLACKLISTED',
+        sportName: 'Track and Field',
+        canonicalSuggestion: null,
         message: expect.stringContaining('blacklisted'),
       }),
     ]));

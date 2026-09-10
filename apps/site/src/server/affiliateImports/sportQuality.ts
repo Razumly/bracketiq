@@ -36,6 +36,7 @@ export type AffiliateSportQualityIssue = {
     | 'SPORT_NAME_REQUIRED'
     | 'SPORT_NAME_NOT_CANONICAL'
     | 'SPORT_NOT_IN_CATALOG'
+    | 'SPORT_BLACKLISTED'
     | 'SPORT_DETERMINATION_MISMATCH';
   message: string;
 };
@@ -101,7 +102,7 @@ export const analyzeAffiliateSportQuality = (input: {
         ...subject,
         sportName,
         canonicalSuggestion: null,
-        code: 'SPORT_NOT_IN_CATALOG',
+        code: 'SPORT_BLACKLISTED',
         message: `The sport ${sportName} is blacklisted because BracketIQ does not support tournament or league scoring for it.`,
       });
       return;

@@ -2736,6 +2736,154 @@ describe('affiliate import service', () => {
     });
   });
 
+  it.each([
+    {
+      label: 'missing',
+      descriptionMarkup: '',
+      expectedReason: 'description:MISSING_DESCRIPTION',
+    },
+    {
+      label: 'narrative',
+      descriptionMarkup: '<span class="description">Listed by Example Sports on the official website.</span>',
+      expectedReason: 'description:DISCOVERY_NARRATION',
+    },
+    {
+      label: 'URL-only',
+      descriptionMarkup: '<span class="description">https://example.com/events/league</span>',
+      expectedReason: 'description:URL_DESCRIPTION',
+    },
+  ])('rejects $label source copy without overwriting a published event', async ({
+    descriptionMarkup,
+    expectedReason,
+  }) => {
+    const source = {
+      id: 'source_governed_copy',
+      name: 'Governed Source',
+      supplySourceId: 'supply_governed_copy',
+      activeMappingId: 'mapping_governed_copy',
+      listUrl: 'https://example.com/events',
+      organizationId: 'org_governed_copy',
+      metadata: {},
+    };
+    const existingCandidate = {
+      id: 'candidate_governed_published',
+      sourceId: source.id,
+      listingKind: 'EVENT',
+      title: 'Published governed event',
+      status: 'PUBLISHED',
+      description: 'Original public event description.',
+      publishedEventId: 'event_governed_published',
+      publishedTeamId: null,
+      publishedFacilityId: null,
+      publishedOrganizationId: null,
+    };
+    const existingEvent = {
+      id: existingCandidate.publishedEventId,
+      state: 'PUBLISHED',
+      eventType: 'EVENT',
+      sourceType: 'AFFILIATE_IMPORT',
+      sourceId: existingCandidate.id,
+      sourceUrl: source.listUrl,
+      description: existingCandidate.description,
+    };
+    prismaMock.affiliateScrapeSources.findUnique.mockResolvedValue(source);
+    prismaMock.affiliateScrapeMappings.findUnique.mockResolvedValue({
+      id: source.activeMappingId,
+      sourceId: source.id,
+      mapping: {
+        kind: 'EVENT',
+        listUrl: source.listUrl,
+        itemSelector: '.event',
+        fields: {
+          title: { selector: '.title' },
+          officialActionUrl: {
+            selector: 'a',
+            mode: 'attribute',
+            attribute: 'href',
+            transform: 'absoluteUrl',
+          },
+          startsAt: { selector: '.start', transform: 'dateTime' },
+          sportName: { selector: 'body', mode: 'literal', value: 'Basketball' },
+          city: { selector: 'body', mode: 'literal', value: 'Portland, OR' },
+          venueName: { selector: 'body', mode: 'literal', value: 'Example Sports Complex' },
+          description: { selector: '.description' },
+        },
+      },
+    });
+    prismaMock.affiliateSupplySources.findUnique.mockResolvedValue({
+      id: source.supplySourceId,
+      canonicalUrl: source.listUrl,
+      operatorDomain: 'example.com',
+      targetKind: 'EVENT',
+      rolloutCohort: 'DEFAULT',
+      lifecycleGeneration: 0,
+    });
+    prismaMock.organizations.findUnique.mockResolvedValue({
+      id: source.organizationId,
+      name: source.name,
+      location: 'Portland, OR',
+    });
+    prismaMock.affiliateScrapeRuns.create.mockResolvedValue({
+      id: 'run_governed_copy',
+    });
+    prismaMock.affiliateScrapeRuns.update.mockImplementation(async ({ data }) => ({
+      id: 'run_governed_copy',
+      ...data,
+    }));
+    prismaMock.affiliateScrapeSources.update.mockResolvedValue({});
+    prismaMock.affiliateImportCandidates.update.mockImplementation(async ({ where, data }) => ({
+      ...existingCandidate,
+      id: where.id,
+      ...data,
+    }));
+    prismaMock.affiliateImportCandidates.findUnique.mockResolvedValue(existingCandidate);
+    prismaMock.events.findUnique.mockResolvedValue(existingEvent);
+    prismaMock.events.update.mockImplementation(async ({ where, data }) => ({
+      ...existingEvent,
+      id: where.id,
+      ...data,
+    }));
+    prismaMock.sports.findFirst.mockResolvedValue({ id: 'Basketball' });
+
+    const result = await runAffiliateSourceScrape(source.id, {
+      client: {
+        fetchPage: async () => ({
+          url: source.listUrl,
+          finalUrl: source.listUrl,
+          statusCode: 200,
+          fetchedAt: '2026-07-21T00:00:00.000Z',
+          body: `
+            <div class="event">
+              <span class="title">Published governed event</span>
+              <span class="start">2099-01-01T18:00:00.000Z</span>
+              <a href="/register">Register</a>
+              ${descriptionMarkup}
+            </div>
+          `,
+        }),
+      },
+    });
+
+    expect(result.candidates).toHaveLength(0);
+    expect(result.run).toEqual(expect.objectContaining({
+      status: 'SUCCEEDED',
+      candidateCount: 0,
+      logs: expect.objectContaining({
+        rejectedCount: 1,
+        rejectionSummary: { [expectedReason]: 1 },
+        rejectedCandidates: [{
+          title: 'Published governed event',
+          reasons: [expectedReason],
+        }],
+      }),
+    }));
+    expect(prismaMock.affiliateImportCandidates.update).not.toHaveBeenCalled();
+    expect(prismaMock.events.create).not.toHaveBeenCalled();
+    expect(prismaMock.events.update).not.toHaveBeenCalled();
+    expect(geocodeAddressToCoordinatesMock).not.toHaveBeenCalled();
+  });
+
+
   it('automatically publishes valid candidates for scheduled imports', async () => {
     const activeContract = buildAffiliateSupplyContractManifest({
       version: 1,
@@ -2824,6 +2972,7 @@ describe('affiliate import service', () => {
           sportName: { selector: 'body', mode: 'literal', value: 'Basketball' },
           city: { selector: 'body', mode: 'literal', value: 'Portland' },
           venueName: { selector: 'body', mode: 'literal', value: 'Automatic Sports Complex' },
+          description: { selector: '.description' },
         },
       },
     });
@@ -2847,7 +2996,7 @@ describe('affiliate import service', () => {
           finalUrl: 'https://example.com/events',
           statusCode: 200,
           fetchedAt: '2026-06-26T00:00:00.000Z',
-          body: '<div class="event"><span class="title">Automatic league</span><span class="start">2099-01-01T18:00:00.000Z</span><a href="/register">Register</a></div>',
+          body: '<div class="event"><span class="title">Automatic league</span><span class="start">2099-01-01T18:00:00.000Z</span><a href="/register">Register</a><span class="description">Adult basketball league with weekly games.</span></div>',
         }),
       },
     });
@@ -2863,14 +3012,21 @@ describe('affiliate import service', () => {
     }));
 
     expect(prismaMock.affiliateImportCandidates.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ status: 'DISCOVERED', title: 'Automatic league' }),
+      data: expect.objectContaining({
+        status: 'DISCOVERED',
+        title: 'Automatic league',
+        description: 'Adult basketball league with weekly games.',
+      }),
     });
     expect(prismaMock.affiliateImportCandidates.update).toHaveBeenCalledWith({
       where: { id: expect.any(String) },
       data: expect.objectContaining({ status: 'PUBLISHED', publishedEventId: expect.any(String) }),
     });
     expect(prismaMock.events.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ state: 'PUBLISHED' }),
+      data: expect.objectContaining({
+        state: 'PUBLISHED',
+        description: 'Adult basketball league with weekly games.',
+      }),
     });
     expect(prismaMock.organizations.update).toHaveBeenCalledWith({
       where: { id: 'org_automatic', updatedAt: null },
@@ -3109,6 +3265,7 @@ describe('affiliate import service', () => {
           startsAt: { selector: '.start', transform: 'dateTime' },
           city: { selector: 'body', mode: 'literal', value: 'New York, NY' },
           venueName: { selector: 'body', mode: 'literal', value: 'Unresolved Sports Complex' },
+          description: { selector: '.description' },
         },
       },
     });
@@ -3136,7 +3293,7 @@ describe('affiliate import service', () => {
           finalUrl: 'https://example.com/events',
           statusCode: 200,
           fetchedAt: '2026-08-01T00:00:00.000Z',
-          body: '<div class="event"><span class="title">Unresolved automatic league</span><span class="start">2099-01-01T18:00:00.000Z</span><a href="/register">Register</a></div>',
+          body: '<div class="event"><span class="title">Unresolved automatic league</span><span class="start">2099-01-01T18:00:00.000Z</span><a href="/register">Register</a><span class="description">Adult basketball league details.</span></div>',
         }),
       },
     });
@@ -3322,6 +3479,7 @@ describe('affiliate import service', () => {
             mode: 'literal',
             value: 'Example Sports Complex',
           },
+          description: { selector: '.description' },
         },
       },
     });
@@ -3355,7 +3513,7 @@ describe('affiliate import service', () => {
           finalUrl: 'https://example.com/events',
           statusCode: 200,
           fetchedAt: '2026-07-21T00:00:00.000Z',
-          body: '<div class="event"><span class="title">Held published league</span><span class="start">2099-01-01T18:00:00.000Z</span><a href="/register">Register</a></div>',
+          body: '<div class="event"><span class="title">Held published league</span><span class="start">2099-01-01T18:00:00.000Z</span><a href="/register">Register</a><span class="description">Adult basketball league details.</span></div>',
         }),
       },
     });
@@ -4406,7 +4564,7 @@ describe('affiliate import service', () => {
     });
     prismaMock.affiliateImportCandidates.update.mockResolvedValue({ id: 'candidate_direct_club' });
 
-    await publishAffiliateCandidate('candidate_direct_club', { publishedByUserId: 'admin_1' });
+    const organization = await publishAffiliateCandidate('candidate_direct_club', { publishedByUserId: 'admin_1' });
 
     expect(geocodeAddressToCoordinatesMock).not.toHaveBeenCalled();
     expect(prismaMock.organizations.upsert).toHaveBeenCalledWith(expect.objectContaining({
@@ -4415,6 +4573,8 @@ describe('affiliate import service', () => {
         name: 'Arizona Youth Football League',
         location: 'Phoenix, AZ',
         coordinates: [-112.074, 33.4484],
+        description: 'Arizona youth football league.',
+        publicIntroText: 'Arizona youth football league.',
         website: 'https://www.arizonayfl.com/',
         status: 'LISTED',
         publicPageEnabled: true,
@@ -4427,6 +4587,180 @@ describe('affiliate import service', () => {
         publishedOrganizationId: 'source_org',
       },
     });
+    expect(organization).toEqual(expect.objectContaining({
+      description: 'Arizona youth football league.',
+      publicIntroText: 'Arizona youth football league.',
+    }));
+  });
+
+  it('publishes mapped source wording over stale generated canonical affiliate copy', async () => {
+    const mappedDescription =
+      'Northwest Soccer Club offers youth soccer training and league play.';
+    const generatedDescription =
+      'Generated discovery summary: review the current registration status.';
+    prismaMock.affiliateImportCandidates.findUnique.mockResolvedValue({
+      id: 'candidate_unclaimed_canonical_club',
+      sourceId: 'source_unclaimed_canonical_club',
+      listingKind: 'CLUB',
+      title: 'Northwest Soccer Club',
+      sportName: 'Indoor Soccer',
+      description: mappedDescription,
+      officialActionUrl: 'https://northwest.example/club',
+      sourceUrl: 'https://directory.example/clubs',
+      publishedOrganizationId: 'source_org_unclaimed',
+    });
+    prismaMock.affiliateScrapeSources.findUnique.mockResolvedValue({
+      id: 'source_unclaimed_canonical_club',
+      name: 'Northwest Soccer Club',
+      sourceKey: 'northwest-soccer-club',
+      organizationId: 'source_org_unclaimed',
+    });
+    const sourceOrganization = {
+      id: 'source_org_unclaimed',
+      name: 'Northwest Soccer Club',
+      ownerId: 'owner_1',
+      originType: 'AFFILIATE_IMPORTED',
+      ownershipStatus: 'UNCLAIMED',
+      location: 'Portland, OR',
+      address: null,
+      coordinates: [-122.6765, 45.5231],
+      description: generatedDescription,
+      website: 'https://northwest.example/',
+      logoId: null,
+    };
+    prismaMock.organizations.findUnique.mockResolvedValue(sourceOrganization);
+    prismaMock.affiliateImportCandidates.update.mockResolvedValue({
+      id: 'candidate_unclaimed_canonical_club',
+    });
+
+    const organization = await publishAffiliateCandidate(
+      'candidate_unclaimed_canonical_club',
+      { publishedByUserId: 'admin_1' },
+    );
+
+    expect(prismaMock.organizations.upsert).toHaveBeenCalledWith({
+      where: { id: 'source_org_unclaimed' },
+      create: expect.objectContaining({
+        description: mappedDescription,
+        publicIntroText: mappedDescription,
+      }),
+      update: expect.objectContaining({
+        description: mappedDescription,
+        publicIntroText: mappedDescription,
+      }),
+    });
+    expect(organization).toEqual(expect.objectContaining({
+      description: mappedDescription,
+      publicIntroText: mappedDescription,
+    }));
+    expect(organization.description).not.toBe(generatedDescription);
+  });
+
+  it('does not publish schedule or status notes as a club profile description', async () => {
+    prismaMock.affiliateImportCandidates.findUnique.mockResolvedValue({
+      id: 'candidate_notes_only_club',
+      sourceId: 'source_notes_only_club',
+      listingKind: 'CLUB',
+      title: 'Notes Only Soccer Club',
+      sportName: 'Indoor Soccer',
+      description: null,
+      scheduleText: 'Review note: schedule is not confirmed.',
+      statusText: 'Mapping review required.',
+      officialActionUrl: 'https://notes-only.example/club',
+      sourceUrl: 'https://directory.example/notes-only-club',
+      publishedOrganizationId: 'source_org_notes_only',
+    });
+    prismaMock.affiliateScrapeSources.findUnique.mockResolvedValue({
+      id: 'source_notes_only_club',
+      name: 'Notes Only Soccer Club',
+      sourceKey: 'notes-only-soccer-club',
+      organizationId: 'source_org_notes_only',
+    });
+    prismaMock.organizations.findUnique.mockResolvedValue({
+      id: 'source_org_notes_only',
+      name: 'Notes Only Soccer Club',
+      ownerId: 'owner_1',
+      originType: 'AFFILIATE_IMPORTED',
+      ownershipStatus: 'UNCLAIMED',
+      location: 'Portland, OR',
+      address: null,
+      coordinates: [-122.6765, 45.5231],
+      description: null,
+      website: 'https://notes-only.example/',
+      logoId: null,
+    });
+    prismaMock.affiliateImportCandidates.update.mockResolvedValue({
+      id: 'candidate_notes_only_club',
+    });
+
+    const organization = await publishAffiliateCandidate(
+      'candidate_notes_only_club',
+      { publishedByUserId: 'admin_1' },
+    );
+
+    expect(prismaMock.organizations.upsert).toHaveBeenCalledWith({
+      where: { id: 'source_org_notes_only' },
+      create: expect.objectContaining({
+        description: null,
+        publicIntroText: null,
+      }),
+      update: expect.objectContaining({
+        description: null,
+        publicIntroText: null,
+      }),
+    });
+    expect(organization).toEqual(expect.objectContaining({
+      description: null,
+      publicIntroText: null,
+    }));
+  });
+
+  it('falls back to the canonical source description when the mapping has none', async () => {
+    const sourceDescription =
+      'Northwest Soccer Club provides youth soccer programs in Portland.';
+    prismaMock.affiliateImportCandidates.findUnique.mockResolvedValue({
+      id: 'candidate_source_fallback_club',
+      sourceId: 'source_source_fallback_club',
+      listingKind: 'CLUB',
+      title: 'Northwest Soccer Club',
+      sportName: 'Indoor Soccer',
+      description: null,
+      officialActionUrl: 'https://northwest.example/club',
+      sourceUrl: 'https://directory.example/clubs',
+      publishedOrganizationId: 'source_org_fallback',
+    });
+    prismaMock.affiliateScrapeSources.findUnique.mockResolvedValue({
+      id: 'source_source_fallback_club',
+      name: 'Northwest Soccer Club',
+      sourceKey: 'northwest-soccer-club-fallback',
+      organizationId: 'source_org_fallback',
+    });
+    prismaMock.organizations.findUnique.mockResolvedValue({
+      id: 'source_org_fallback',
+      name: 'Northwest Soccer Club',
+      ownerId: 'owner_1',
+      originType: 'AFFILIATE_IMPORTED',
+      ownershipStatus: 'UNCLAIMED',
+      location: 'Portland, OR',
+      address: null,
+      coordinates: [-122.6765, 45.5231],
+      description: sourceDescription,
+      website: 'https://northwest.example/',
+      logoId: null,
+    });
+    prismaMock.affiliateImportCandidates.update.mockResolvedValue({
+      id: 'candidate_source_fallback_club',
+    });
+
+    const organization = await publishAffiliateCandidate(
+      'candidate_source_fallback_club',
+      { publishedByUserId: 'admin_1' },
+    );
+
+    expect(organization).toEqual(expect.objectContaining({
+      description: sourceDescription,
+      publicIntroText: sourceDescription,
+    }));
   });
 
   it('does not relist a private source organization after its separate club target is published', async () => {

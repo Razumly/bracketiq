@@ -78,6 +78,66 @@ describe('affiliate sport determinations', () => {
     })).toThrow(/unresolved/i);
   });
 
+  it('rejects blacklisted source labels at current completion boundaries without rewriting history', () => {
+    const unsupportedHistorical = {
+      ...resolved,
+      sourceLabels: ['Track and Field'],
+      status: 'UNSUPPORTED' as const,
+      canonicalSportNames: [],
+      rationale: 'The historical envelope recorded Track and Field as unsupported.',
+      evidence: [citation({ artifactId: 'artifact-3', excerpt: 'Track and Field' })],
+    };
+    expect(affiliateSportDeterminationSchema.parse(unsupportedHistorical)).toEqual(unsupportedHistorical);
+    expect(affiliateSportDeterminationSha256(unsupportedHistorical)).toHaveLength(64);
+    expect(() => assertAffiliateSportCompletionReady({
+      determinations: [unsupportedHistorical],
+      catalog,
+      resultKind: 'HUMAN_REVIEW_REQUIRED',
+      reasonCodes: ['SPORT_NOT_IN_CATALOG'],
+    })).toThrow(/must use BLACKLISTED/i);
+
+    const resolvedReplacement = {
+      ...resolved,
+      sourceLabels: ['Track and Field'],
+      canonicalSportNames: ['Grass Soccer'],
+      rationale: 'The historical envelope incorrectly mapped Track and Field to Grass Soccer.',
+      evidence: [citation({ artifactId: 'artifact-5', excerpt: 'Track and Field' })],
+    };
+    expect(affiliateSportDeterminationSchema.parse(resolvedReplacement)).toEqual(resolvedReplacement);
+    expect(affiliateSportDeterminationSha256(resolvedReplacement)).toHaveLength(64);
+    expect(() => assertAffiliateSportCompletionReady({
+      determinations: [resolvedReplacement],
+      catalog,
+      resultKind: 'REVIEW_REQUIRED',
+    })).toThrow(/must use BLACKLISTED/i);
+
+    expect(() => affiliateSportDeterminationSchema.parse({
+      ...resolved,
+      sourceLabels: ['Track and Field'],
+      status: 'BLACKLISTED' as const,
+      canonicalSportNames: ['Grass Soccer'],
+    })).toThrow(/Only RESOLVED determinations may contain canonical sport names/i);
+  });
+
+  it('rejects mixed blacklisted and non-blacklisted labels in one exclusion determination', () => {
+    const mixed = {
+      ...resolved,
+      sourceLabels: ['Indoor Soccer', 'Track and Field'],
+      status: 'BLACKLISTED' as const,
+      canonicalSportNames: [],
+      rationale: 'The historical envelope combined Track and Field with Indoor Soccer.',
+      evidence: [citation({ artifactId: 'artifact-6', excerpt: 'Track and Field' })],
+    };
+    expect(affiliateSportDeterminationSchema.parse(mixed)).toEqual(mixed);
+    expect(affiliateSportDeterminationSha256(mixed)).toHaveLength(64);
+    expect(() => assertAffiliateSportCompletionReady({
+      determinations: [mixed],
+      catalog,
+      resultKind: 'HUMAN_REVIEW_REQUIRED',
+      reasonCodes: ['SPORT_BLACKLISTED'],
+    })).toThrow(/cannot mix blacklisted and non-blacklisted/i);
+  });
+
   it('canonicalizes citation URLs and sorts citation tuples', () => {
     expect(affiliateSportCitationTuple(citation())).toEqual([
       'artifact-1',
@@ -149,6 +209,17 @@ describe('affiliate sport determinations', () => {
     })).toThrow(/missing or blacklisted/i);
   });
 
+  it.each(['Missing Sport', 'Golf'])('rejects resolved %s despite a permitted source label', (sportName) => {
+    expect(() => assertAffiliateSportCompletionReady({
+      determinations: [{ ...resolved, canonicalSportNames: [sportName] }],
+      catalog,
+      resultKind: 'REVIEW_REQUIRED',
+    })).toThrow(expect.objectContaining({
+      name: 'AffiliateSportVerificationError',
+      path: ['sportDeterminations', 0, 'canonicalSportNames'],
+    }));
+  });
+
   it('requires consumed metadata only for consumed human resolutions and caps rationale', () => {
     const pending = {
       schemaVersion: 1 as const,
@@ -187,16 +258,23 @@ describe('affiliate sport determinations', () => {
     })).not.toThrow();
     const blacklisted = {
       ...resolved,
-      sourceLabels: ['Golf'],
+      sourceLabels: ['Track and Field'],
       status: 'BLACKLISTED' as const,
       resolutionBasis: 'SOURCE_EVIDENCE' as const,
       canonicalSportNames: [],
-      evidence: [citation({ artifactId: 'artifact-4' })],
+      rationale: 'The source explicitly names Track and Field, which remains excluded.',
+      evidence: [citation({ artifactId: 'artifact-4', excerpt: 'Track and Field' })],
     };
     expect(() => assertAffiliateSportCompletionReady({
       determinations: sortAffiliateSportDeterminations([resolved, blacklisted]),
       catalog,
       resultKind: 'REVIEW_REQUIRED',
+    })).not.toThrow();
+    expect(() => assertAffiliateSportCompletionReady({
+      determinations: [blacklisted],
+      catalog,
+      resultKind: 'HUMAN_REVIEW_REQUIRED',
+      reasonCodes: ['SPORT_BLACKLISTED'],
     })).not.toThrow();
     expect(() => assertAffiliateSportCompletionReady({
       determinations: [unresolved],

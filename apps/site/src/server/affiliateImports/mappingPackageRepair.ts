@@ -256,10 +256,10 @@ export const affiliateMappingProducerRepairEligibility = (input: {
   const eventCapacityInvalid = /(?:(?:event|division).{0,180}(?:capacity|participant limit)|(?:capacity|participant limit).{0,180}(?:event|division))/i.test(evidence);
   if (eventCapacityInvalid) return producerRepair('EVENT_CAPACITY_INVALID');
 
-  const eventDescriptionInvalid = /(?:(?:event|candidate).{0,180}(?:description|copy).{0,180}(?:listed|found|source|title|repeat|generic|unnatural)|(?:description|copy).{0,180}(?:listed|found|source|title|repeat|generic|unnatural).{0,180}(?:event|candidate))/i.test(evidence);
+  const eventDescriptionInvalid = /(?:(?:event|candidate).{0,180}(?:description|copy).{0,180}(?:listed|found|source|generic|unnatural)|(?:description|copy).{0,180}(?:listed|found|source|generic|unnatural).{0,180}(?:event|candidate))/i.test(evidence);
   if (eventDescriptionInvalid) return producerRepair('EVENT_DESCRIPTION_INVALID');
 
-  const organizationDescriptionInvalid = /(?:(?:organization|club|facility).{0,180}(?:description|copy).{0,180}(?:listed|found|source|name|repeat|generic|unnatural)|(?:description|copy).{0,180}(?:listed|found|source|name|repeat|generic|unnatural).{0,180}(?:organization|club|facility))/i.test(evidence);
+  const organizationDescriptionInvalid = /(?:(?:organization|club|facility).{0,180}(?:description|copy).{0,180}(?:listed|found|source|generic|unnatural)|(?:description|copy).{0,180}(?:listed|found|source|generic|unnatural).{0,180}(?:organization|club|facility))/i.test(evidence);
   if (organizationDescriptionInvalid) return producerRepair('ORGANIZATION_DESCRIPTION_INVALID');
 
   const duplicateSafetyInvalid = /(?:duplicate.{0,120}(?:unsafe|safety|candidate|scrape)|(?:unstable|mismatch).{0,120}(?:scrape|hash))/i.test(evidence);

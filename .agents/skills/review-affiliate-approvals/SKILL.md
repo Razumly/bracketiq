@@ -129,7 +129,7 @@ Use this matrix as mandatory evidence guidance, not keyword substitution:
 | grass/outdoor-field volleyball | `Grass Volleyball` |
 | only `Volleyball`, with no usable surface evidence | `SPORT_VARIANT_UNRESOLVED` |
 | an evidenced sport family with no exact catalog entry | `SPORT_NOT_IN_CATALOG` |
-| an exact blacklisted activity | `BLACKLISTED`; omit from executable sports and preserve evidence |
+| an exact blacklisted activity | `BLACKLISTED` with `SPORT_BLACKLISTED`; omit from executable sports and preserve evidence |
 
 Generic labels, discovery `sportHints`, campaign metadata, organization names,
 URL tokens, `DEFAULT_SPORTS`, and the former two-argument validator are not
@@ -141,15 +141,17 @@ catalog drift, or emitted-name disagreement are producer repair; use
 choose a surface.
 
 - Compare the organization description and inspected event descriptions with
-  stored first-party page evidence. Public copy must describe the organization
-  or activity naturally. It must not say where the record was listed, found,
-  scraped, captured, or mapped, and an event description must not begin by
-  repeating the full event title. A concise organization-level fallback may be
-  shared across related events only when event-specific prose is absent and the
-  fallback accurately describes the activity. Set `descriptionQualityVerified`
-  only after this check. Reject concrete event copy defects with
-  `EVENT_DESCRIPTION_INVALID` and organization copy defects with
-  `ORGANIZATION_DESCRIPTION_INVALID`, using `PRODUCER_REPAIR`.
+  stored first-party page evidence. Require the site's own wording,
+  terminology, meaning, and tone. Reject discovery narration, unrelated page
+  text, unsupported facts, and invented marketing claims. Keep provenance in
+  evidence fields. Do not rewrite valid source wording only to remove a
+  repeated event name. An applicable source program paragraph may serve
+  related events when it accurately describes their activity. Governed EVENT
+  and CLUB packages require a description selector from claim-owned HTML.
+  Do not accept authored constants or schedule/status notes as descriptions.
+  Set `descriptionQualityVerified` only after this check. Reject concrete event
+  copy defects with `EVENT_DESCRIPTION_INVALID` and organization copy defects
+  with `ORGANIZATION_DESCRIPTION_INVALID`, using `PRODUCER_REPAIR`.
 
 - For an `event-datetime-v1` package, independently recompute representative
   UTC instants in the source or coordinate timezone. Verify the producer's

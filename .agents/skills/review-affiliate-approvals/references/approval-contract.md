@@ -199,15 +199,18 @@ producer defect. Use `EVENT_DIVISION_GROUPING_INVALID` for missing or duplicate
 divisions and `EVENT_DIVISION_CLASSIFICATION_INVALID` for missing structured
 fields.
 
-`descriptionQualityVerified` requires an independent comparison of the
-organization description and inspected event descriptions with stored
-first-party evidence. Descriptions must sound like direct descriptions of the
-organization or activity. They must not narrate discovery with phrases such as
-`listed by`, `listed on`, `found on`, `according to the site`, `the source
-says`, `scraped from`, or `mapped from`. Event descriptions must not begin by
-repeating the full event title. A concise organization-level activity fallback
-may be reused when the site has no event-specific prose. Reject a concrete event
-defect with `EVENT_DESCRIPTION_INVALID` and an organization defect with
+`descriptionQualityVerified` requires an independent comparison of organization
+and event descriptions with stored first-party evidence. Use the site's own
+wording, terminology, meaning, and tone. Reject discovery narration, unrelated
+page text, unsupported facts, and invented marketing claims. Do not rewrite
+valid source wording only to remove a repeated event name.
+
+Governed EVENT and CLUB packages require a description selector from claimed
+HTML. An applicable source program paragraph may serve related events when it
+accurately describes their activity. Do not accept authored constants, URL-only
+values, or schedule/status notes as descriptions. Require an evidence gap when
+no suitable source prose can be selected. Reject concrete event defects with
+`EVENT_DESCRIPTION_INVALID` and organization defects with
 `ORGANIZATION_DESCRIPTION_INVALID`; both return to `PRODUCER_REPAIR`.
 
 The mapping-package evidence command is the authoritative bridge between the

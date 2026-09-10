@@ -81,16 +81,19 @@ organization. Record the fallback evidence in source metadata or notes. Do not
 leave a defensible organization locality or its coordinates null, and do not
 invent a street address. Conflicting locality evidence requires human review.
 
-Check every organization description and at least the inspected event
-descriptions against stored first-party evidence. Public copy must describe the
-organization or activity in natural language. It must not narrate that the row
-was listed, found, published, scraped, captured, or mapped from a site. An event
-description must not begin by repeating the full event title. Keep provenance in
+Compare every organization description and the inspected event descriptions
+with stored first-party evidence. Use the site's own wording, terminology,
+meaning, and tone. Do not explain what the agent found. Keep provenance in
 `sourceEvidence`, registry notes, and review artifacts instead of public copy.
-When event-specific prose is absent, one concise organization-level activity
-description may be reused across related events if the stored evidence supports
-it. Missing or invalid copy is a package defect; do not submit the unchanged
-package for review.
+Select prose without navigation or repeated headings. Do not rewrite valid
+source wording only to remove a repeated event name.
+
+Governed EVENT and CLUB packages require a source-backed `description`
+selector. Missing prose and discovery narration are package defects.
+An applicable source program paragraph may serve related events when it
+accurately describes their activity. Do not invent a fallback or use schedule
+or status notes. Report an evidence gap when no suitable source prose can be
+selected from the claimed HTML.
 
 For every multi-division event, prove that the divisions are grouped under the
 correct parent event and did not leak across adjacent cards, dates, venues, or

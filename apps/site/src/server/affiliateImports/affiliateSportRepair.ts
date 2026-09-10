@@ -1,4 +1,8 @@
 import { DEFAULT_SPORTS } from '../defaultSports';
+import {
+  BLACKLISTED_AFFILIATE_SPORT_NAMES,
+  isAffiliateSportBlacklisted,
+} from './affiliateSportMapping';
 
 type SportAlias = {
   alias: string;
@@ -21,10 +25,14 @@ export const mergeAffiliateOrganizationSports = (
   const catalogSet = new Set(catalogNames);
   const validExistingSports = Array.isArray(existingSports)
     ? existingSports.filter((sport): sport is string => (
-      typeof sport === 'string' && catalogSet.has(sport)
+      typeof sport === 'string'
+      && catalogSet.has(sport)
+      && !isAffiliateSportBlacklisted(sport)
     ))
     : [];
-  const validRepairedSports = repairedSportNames.filter((sport) => catalogSet.has(sport));
+  const validRepairedSports = repairedSportNames.filter((sport) => (
+    catalogSet.has(sport) && !isAffiliateSportBlacklisted(sport)
+  ));
   return Array.from(new Set([...validExistingSports, ...validRepairedSports]));
 };
 
@@ -66,9 +74,13 @@ const canonicalSportAliases = (canonicalSportNames: string[]): SportAlias[] => {
       !specialCanonicalNames.has(canonicalName)
       && canonicalName !== 'Other'
       && !surfaceLessSportNames.has(canonicalName)
+      && !isAffiliateSportBlacklisted(canonicalName)
     ))
     .map((canonicalName) => ({ alias: canonicalName, canonicalName }));
   return [...specialSportAliases, ...directAliases]
+    .filter(({ alias, canonicalName }) => (
+      !isAffiliateSportBlacklisted(alias) && !isAffiliateSportBlacklisted(canonicalName)
+    ))
     .sort((left, right) => right.alias.length - left.alias.length);
 };
 
@@ -105,7 +117,7 @@ const findAliases = (sourceSportName: string, aliases: SportAlias[]) => {
 };
 
 const blacklistedNamesInLabel = (sourceSportName: string): string[] => (
-  ['Cheerleading', 'Dance', 'Running', 'Swimming', 'Track and Field', 'Golf']
+  BLACKLISTED_AFFILIATE_SPORT_NAMES
     .filter((name) => new RegExp(`\\b${escapeRegExp(name)}\\b`, 'i').test(sourceSportName))
 );
 
@@ -129,7 +141,7 @@ export const repairAffiliateSportLabel = (
   const canonicalSportNames = Array.from(new Set(
     matches
       .map((match) => match.canonicalName)
-      .filter((name) => catalogSet.has(name)),
+      .filter((name) => catalogSet.has(name) && !isAffiliateSportBlacklisted(name)),
   ));
   const excludedBlacklistedSportNames = blacklistedNamesInLabel(sourceSportName);
 

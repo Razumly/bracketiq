@@ -167,25 +167,25 @@ Evergreen rows must have source-backed schedule text, no hidden dated session,
 and no tryout or evaluation classification. Record every transition to or from
 an evergreen mode and every applicable `EVENT_DATETIME_*` repair reason.
 
-Write event and organization descriptions from stored first-party page content.
-Describe the activity, audience, format, schedule, venue, experience, or material
-participation terms. Do not describe how the record was found. Phrases such as
-`listed by`, `listed on`, `found on`, `according to the site`, `the source
-says`, `the official page`, `scraped from`, or `mapped from` are provenance
-narration and do not belong in public copy. Do not start an event description by
-repeating its full title. For example, replace `Brooklyn Summer Casual Mixed
-League 2026 is listed by DiscNY as...` with natural copy such as `A casual mixed
-ultimate league with weekly summer play in New York City from June through
-August.` Keep the evidence citation in source metadata and review notes, not in
-the public description.
+Use the first-party site's own wording for event and organization descriptions.
+Keep its terminology, meaning, and tone. Select prose that describes the
+activity, audience, format, schedule, venue, or material participation terms.
+For organizations, select prose about their services, audience, and location.
+Do not add unsupported facts or marketing claims.
 
-When a page has no event-specific prose, write one concise, natural fallback
-from the organization's evidenced activity or program copy and reuse it for
-related events. The fallback must still tell a participant what the activity is;
-it must not be a discovery note or unsupported marketing copy. Organization
-descriptions follow the same rule. Describe what the organization offers, whom
-it serves, and where it operates when evidenced. Do not merely restate the name
-or narrate that the organization appears on a website or directory.
+Do not explain what the agent found. Do not add narration such as `listed by`,
+`according to the website`, or `scraped from`. Keep discovery notes, validation
+notes, evidence citations, and agent rationale outside public descriptions.
+Select relevant paragraphs without navigation or repeated headings. Do not
+rewrite valid source wording only to remove a repeated event name.
+
+Governed EVENT and CLUB packages must map a `description` selector from
+claim-owned PAGE_HTML. Use TEXT or a source text ATTRIBUTE with NONE or TRIM.
+Authored CONSTANT descriptions and URL conversion are not permitted.
+When event-specific prose is absent, select applicable source program prose
+only when it accurately describes the activity. If the claimed HTML has no
+suitable prose, report the description evidence gap. Do not use schedule or
+status notes as a substitute.
 
 For a `MANUAL_LOGO_REVIEW` repair, inspect every stored `LOGO_CANDIDATE`,
 `PAGE_BRANDING`, `PAGE_IMAGES`, screenshot, HTML/CSS reference, structured-data

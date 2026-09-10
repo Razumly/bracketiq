@@ -7,6 +7,7 @@ import {
   affiliateSportDeterminationsSchema,
   type AffiliateSportDetermination,
 } from "./affiliateSportDetermination";
+import { BLACKLISTED_AFFILIATE_SPORT_NAMES } from "./affiliateSportMapping";
 type CanonicalAffiliateAgentPrimitive = null | string | boolean | number;
 
 const isCanonicalAffiliateAgentPrimitive = (
@@ -714,8 +715,8 @@ export const AFFILIATE_AGENT_ROLES = [
 ] as const;
 
 export type AffiliateAgentRole = (typeof AFFILIATE_AGENT_ROLES)[number];
-export const AFFILIATE_AGENT_ROLE_CONTRACT_VERSION = 6 as const;
-export const AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION = 6 as const;
+export const AFFILIATE_AGENT_ROLE_CONTRACT_VERSION = 7 as const;
+export const AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION = 7 as const;
 
 export const AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX = "legacy-sport-repair-continuation:";
 export const AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX = "legacy-sport-repair-continuation-review:";
@@ -775,12 +776,18 @@ const terminalResultShapeForRole = (
 
 
 const LEGACY_SPORT_EVIDENCE_INSTRUCTIONS = [
-  "For legacy sport repair, use only the injected sportsCatalog and claim-owned first-party artifacts. Read the complete relevant Markdown and any further HTML or image pages needed before declaring evidence missing. A source label need not literally equal a canonical variant name: resolve the variant when cited text explicitly establishes its surface or format and ties that setting to the activity.",
-  "Indoor, gym, or hard-court volleyball supports Indoor Volleyball; sand or beach volleyball supports Beach Volleyball; explicitly grass or outdoor-field volleyball supports Grass Volleyball. An explicit indoor facility with hardwood volleyball courts, together with a statement that the source's volleyball happens there, supports Indoor Volleyball. Cite both the venue description and the activity-to-venue link. A venue name, city, URL, or existing database sport value alone is not proof.",
-  "Explicit outdoor grass/field soccer supports Grass Soccer; indoor/arena/boarded-field soccer supports Indoor Soccer; futsal rules or a futsal court supports Futsal; sand/beach soccer supports Beach Soccer. Only generic Soccer or Volleyball without usable surface evidence remains VARIANT_UNRESOLVED. An evidenced sport absent from the exact catalog is UNSUPPORTED. Keep blacklisted activities excluded. Do not invent a variant, generic alias, or user decision.",
+  "For legacy sport repair, use only the injected sportsCatalog and claim-owned first-party artifacts. Read the complete relevant Markdown and any further HTML or image pages needed before declaring evidence missing. A source label need not literally equal a canonical variant name: resolve the variant when cited text explicitly establishes its surface or format and ties that setting to the activity. " +
+    "Indoor, gym, or hard-court volleyball supports Indoor Volleyball; sand or beach volleyball supports Beach Volleyball; explicitly grass or outdoor-field volleyball supports Grass Volleyball. An explicit indoor facility with hardwood volleyball courts, together with a statement that the source's volleyball happens there, supports Indoor Volleyball. Cite both the venue description and the activity-to-venue link. A venue name, city, URL, or existing database sport value alone is not proof.",
+  "Explicit outdoor grass/field soccer supports Grass Soccer; indoor/arena/boarded-field soccer supports Indoor Soccer; futsal rules or a futsal court supports Futsal; sand/beach soccer supports Beach Soccer. Only generic Soccer or Volleyball without usable surface evidence remains VARIANT_UNRESOLVED. An evidenced sport absent from the exact catalog is UNSUPPORTED only when it is not blacklisted. Do not invent a variant, generic alias, or user decision. " +
+    `The affiliate blacklist is: ${BLACKLISTED_AFFILIATE_SPORT_NAMES.join(", ")}. Use BLACKLISTED with SPORT_BLACKLISTED for these activities. Keep canonicalSportNames empty. Exclude them from executable sports. Never request a catalog addition or substitute another sport. Put supported and blacklisted activities in separate determinations.`,
   'sportEvidence has {"evidenceRunId":"<claim repairContext.evidenceRunId>","sportsCatalogSha256":"<claim catalog sha256>","sportDeterminations":[{"sourceLabels":["<exact source label>"],"status":"<RESOLVED|VARIANT_UNRESOLVED|UNSUPPORTED|BLACKLISTED>","resolutionBasis":"SOURCE_EVIDENCE","canonicalSportNames":["<exact catalog name; empty unless RESOLVED>"],"rationale":"<evidence-backed explanation>","evidence":[{"artifactId":"<manifest artifactId>","artifactSha256":"<manifest sha256>","artifactKind":"<PAGE_HTML|PAGE_MARKDOWN|PAGE_SCREENSHOT>","pageUrl":"<artifact finalUrl or sourceUrl>","excerpt":"<exact supporting source excerpt>"}]}]}.',
   "Keep sourceLabels and canonicalSportNames sorted and unique. Order citations by artifactId, artifactSha256, artifactKind, pageUrl, and excerpt. Use read_artifact with view CITATION_TEXT to inspect the verifier's text and manifest citation metadata. Copy the exact supporting excerpt. If citation parsing reaches its limit, use another listed artifact such as Markdown; do not raise limits or request an unapproved capture. Include every cited artifact's evidenceRef in package or terminal evidenceRefs. Never invent a citation, use another run, or claim USER_DECISION without an authenticated decision.",
 ] as const;
+
+const SOURCE_DESCRIPTION_INSTRUCTION =
+  "Use the first-party site's own wording for public event and organization descriptions. Keep its terminology, meaning, and tone. Do not add unsupported facts or marketing claims. " +
+  "Event descriptions must describe the activity, audience, format, or participation details that the site gives. Organization descriptions must describe what the organization offers, whom it serves, and where it operates, when the site provides those facts. " +
+  "Do not explain what you found. Do not use discovery notes, search summaries, validation notes, or agent rationale as public descriptions. Do not add narration such as 'listed by', 'according to the website', or 'scraped from'. Keep provenance in evidence fields.";
 
 const ROLE_PROMPT_INSTRUCTIONS: Readonly<
   Record<AffiliateAgentRole, readonly string[]>
@@ -802,8 +809,9 @@ const ROLE_PROMPT_INSTRUCTIONS: Readonly<
     "listUrlRef is the evidenceRef of the listed PAGE_HTML artifact used for CSS extraction, not a raw URL and not its artifactId. Use PAGE_MARKDOWN for reading and sport citations, not as CSS listing input. The Gateway resolves the HTML artifact's stored finalUrl or sourceUrl. Existing stored HTML needs no capture profile. If the claim has no HTML artifact, report that specific evidence gap.",
     "Extract officialActionUrl from an evidenced link with an ATTRIBUTE selector and ABSOLUTE_URL transform. An outbound registration link in stored evidence does not require a new capture just to preserve that link.",
     "Build only the closed declarative package shape defined by the mapping contract. Keep live mappings and provider access behind the Gateway. Never submit executable code.",
-    "Validate the package before you commit it. Commit only the validated package receipt.",
-    "Set declarative package listingKind to the claim subject listingKind. The Gateway rejects packages whose listing kind differs from the persisted source target kind.",
+    SOURCE_DESCRIPTION_INSTRUCTION,
+    "Map a description field for every EVENT and CLUB package. Select relevant source prose from the claim-owned PAGE_HTML. Use TEXT or a source text ATTRIBUTE with NONE or TRIM; do not create a CONSTANT description. Select prose without navigation or repeated headings. If no suitable source prose is available, report the description evidence gap instead of inventing copy or using schedule/status notes.",
+    "Validate the package before you commit it. Commit only the validated package receipt. Set declarative package listingKind to the claim subject listingKind. The Gateway rejects packages whose listing kind differs from the persisted source target kind.",
     ...LEGACY_SPORT_EVIDENCE_INSTRUCTIONS,
     "For every legacy sport repair validation, put sportEvidence inside candidatePackage. Extract the exact resolved sport union: use a CONSTANT sportName field when the source label needs canonical normalization, or an evidence-backed selector that emits the exact catalog name. A sport citation alone does not create an extracted sport field. Include every sport citation's manifest evidenceRef in package evidenceRefs.",
     "Every legacy sport repair CONTRACT_GAP must include payload.sportEvidence and all cited evidenceRefs, even when reasonCodes are generic. A sport-related gap must use the matching SPORT_ reason codes. A non-sport gap may carry verified RESOLVED sports and explain the separate obstacle.",
@@ -816,6 +824,8 @@ const ROLE_PROMPT_INSTRUCTIONS: Readonly<
     "Read the committed package and listed reviewer evidence through read_artifact({evidenceRef}).",
     "Review the package without editing it or reusing producer context. For legacy sport repair, inspect the supplied catalog, sportEvidence, and original manifest-owned artifacts.",
     ...LEGACY_SPORT_EVIDENCE_INSTRUCTIONS,
+    SOURCE_DESCRIPTION_INSTRUCTION,
+    "Compare each extracted event or organization description with the original first-party evidence. Require source wording and the correct subject. Reject missing descriptions, discovery narration, unrelated page text, or unsupported claims. Do not rewrite producer copy during review.",
     "Do not approve or activate a package whose sport evidence is unresolved, unsupported, or based on an unauthenticated user decision.",
     "Return one evidence-backed terminal disposition through submit_result(...). Use only the listed terminal dispositions. Use human review or producer repair when evidence does not support approval or activation. Do not invent authority.",
   ],
@@ -1831,6 +1841,7 @@ const affiliateAgentDeclarativePackageFieldNames = [
   "city",
   "dateDisplayMode",
   "dateDisplayText",
+  "description",
   "divisions",
   "officialActionUrl",
   "sourceUrl",
@@ -1840,6 +1851,8 @@ const affiliateAgentDeclarativePackageFieldNames = [
   "title",
   "venueName",
 ] as const;
+
+const descriptionUrlAttributePattern = /^(?:href|src|srcset|action|formaction|poster|cite|longdesc|ping|background|usemap|xlink:href)$/i;
 
 const affiliateAgentDeclarativePackageSelectorFieldSchema = z
   .object({
@@ -1862,6 +1875,21 @@ const affiliateAgentDeclarativePackageSelectorFieldSchema = z
       context.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Text mode cannot name an attribute.",
+        path: ["attribute"],
+      });
+    }
+    if (field.field === "description" && field.transform === "ABSOLUTE_URL") {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Descriptions must preserve source text, not convert it to a URL.",
+        path: ["transform"],
+      });
+    }
+    if (field.field === "description" && field.mode === "ATTRIBUTE"
+      && field.attribute !== null && descriptionUrlAttributePattern.test(field.attribute)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Description selectors must read source prose, not URL attributes.",
         path: ["attribute"],
       });
     }

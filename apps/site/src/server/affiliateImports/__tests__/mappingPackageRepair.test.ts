@@ -230,6 +230,20 @@ describe('affiliate mapping producer repair eligibility', () => {
     }));
   });
 
+  it.each([
+    'The event description repeats the full event title.',
+    'The organization description repeats the organization name.',
+  ])('does not request a rewrite for obsolete style-only evidence: %s', (rationale) => {
+    expect(affiliateMappingProducerRepairEligibility({
+      ...base,
+      approvalDecision: { rationale },
+    })).toEqual(expect.objectContaining({
+      eligible: false,
+      repairReason: null,
+      disposition: 'HUMAN_REVIEW_REQUIRED',
+    }));
+  });
+
   it('preserves reason codes for jobs already marked for human review', () => {
     expect(affiliateMappingProducerRepairEligibility({
       approvalStatus: 'DEFERRED',

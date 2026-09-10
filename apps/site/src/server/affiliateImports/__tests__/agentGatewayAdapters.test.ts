@@ -230,10 +230,12 @@ type PackageEvidenceMetadata = Readonly<{
 const packageAdapterFixtureFor = (
   initialMetadata: PackageEvidenceMetadata,
   evidenceKind: "PAGE_HTML" | "PAGE_MARKDOWN" = "PAGE_HTML",
+  options: Readonly<{ listingKind?: "EVENT" | "CLUB"; html?: string }> = {},
 ) => {
+  const listingKind = options.listingKind ?? "EVENT";
   const evidenceBytes = Buffer.from(
     evidenceKind === "PAGE_HTML"
-      ? '<div class="event"><span class="title">Sample event</span><a class="link" href="https://outbound.example.test/events/sample">Details</a></div>'
+      ? options.html ?? '<div class="event"><span class="title">Sample event</span><p class="description">Join weekly outdoor games with players of all skill levels.</p><a class="link" href="https://outbound.example.test/events/sample">Details</a></div>'
       : '# Sample event\n\n[Details](https://outbound.example.test/events/sample)',
     "utf8",
   );
@@ -302,7 +304,7 @@ const packageAdapterFixtureFor = (
   const source = {
     id: "scrape-source-package",
     supplySourceId: "supply-source-package",
-    targetKind: "EVENT",
+    targetKind: listingKind,
     lifecycleGeneration: 7,
   };
   const mappingJobUpdate = jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
@@ -342,10 +344,17 @@ const packageAdapterFixtureFor = (
   const candidatePackage = {
     schemaVersion: 1 as const,
     supplySourceId: "supply-source-package",
-    listingKind: "EVENT" as const,
+    listingKind,
     listUrlRef: "list-evidence",
     itemSelector: ".event",
     fields: [
+      {
+        field: "description" as const,
+        selector: ".description",
+        mode: "TEXT" as const,
+        attribute: null,
+        transform: "TRIM" as const,
+      },
       {
         field: "officialActionUrl" as const,
         selector: ".link",
@@ -394,7 +403,7 @@ const packageAdapterFixtureFor = (
       type: "MAPPING_PRODUCER" as const,
       supplySourceId: "supply-source-package",
       mappingJobId: "mapping-job-package",
-      listingKind: "EVENT" as const,
+      listingKind,
       pass: 1,
     },
     evidenceManifest: {
@@ -535,6 +544,13 @@ const legacyApprovalFixture = () => {
     listUrlRef: "sport-evidence-1",
     itemSelector: "a",
     fields: [
+      {
+        field: "description" as const,
+        selector: ":scope",
+        mode: "TEXT" as const,
+        attribute: null,
+        transform: "TRIM" as const,
+      },
       {
         field: "officialActionUrl" as const,
         selector: ":scope",
@@ -1471,9 +1487,169 @@ describe("production Affiliate Agent activation effect", () => {
 
 });
 
-describe("production Affiliate Agent package URL provenance", () => {
+describe("production Affiliate Agent package evidence", () => {
   afterEach(() => {
     jest.restoreAllMocks();
+  });
+
+  it("rejects a blacklisted sport from a normal producer without repair context", async () => {
+    const fixture = packageAdapterFixtureFor({
+      sourceUrl: "https://source.example/events",
+      finalUrl: "https://source.example/events",
+    }, "PAGE_HTML", {
+      html: '<article class="event"><h2 class="title">Spring Meet</h2><p class="description">Join our running and field events.</p><span class="sport">Track and Field</span><a class="link" href="/register">Register</a></article>',
+    });
+    const candidatePackage = {
+      ...fixture.candidatePackage,
+      fields: [
+        ...fixture.candidatePackage.fields,
+        { field: "sportName" as const, selector: ".sport", mode: "TEXT" as const, attribute: null, transform: "TRIM" as const },
+      ].sort((left, right) => left.field < right.field ? -1 : left.field > right.field ? 1 : 0),
+    };
+    const adapter = fixture.adapters.commands.transactional.VALIDATE_DECLARATIVE_PACKAGE!;
+    await expect(adapter.execute({
+      transaction: fixture.transaction as unknown as Prisma.TransactionClient,
+      claim: fixture.claim,
+      receiptId: "blacklisted-description-validation",
+      command: {
+        type: "VALIDATE_DECLARATIVE_PACKAGE",
+        data: { candidatePackage, evidenceManifestHash: fixture.claim.evidenceManifest.hash },
+      },
+    })).rejects.toMatchObject({
+      code: "COMMAND_SCHEMA_INVALID",
+      safeMessage: expect.stringContaining("SPORT_BLACKLISTED"),
+    });
+    expect(fixture.mappingJobUpdate).not.toHaveBeenCalled();
+    expect(fixture.transaction.affiliateAgentGatewayArtifacts.createMany).not.toHaveBeenCalled();
+  });
+
+  it("preserves first-party event wording in validated candidates", async () => {
+    const fixture = packageAdapterFixtureFor({
+      sourceUrl: "https://source.example/events",
+      finalUrl: "https://source.example/events",
+    }, "PAGE_HTML", {
+      html: '<article class="event"><h2 class="title">Summer Games</h2><p class="description">We welcome <strong>new players</strong> &amp; experienced teams. Players must be listed by a coach before Friday. Visit our official website to register.</p><a class="link" href="/register">Register</a></article>',
+    });
+    const adapter = fixture.adapters.commands.transactional.VALIDATE_DECLARATIVE_PACKAGE!;
+    await adapter.execute({
+      transaction: fixture.transaction as unknown as Prisma.TransactionClient,
+      claim: fixture.claim,
+      receiptId: "source-description-validation",
+      command: {
+        type: "VALIDATE_DECLARATIVE_PACKAGE",
+        data: { candidatePackage: fixture.candidatePackage, evidenceManifestHash: fixture.claim.evidenceManifest.hash },
+      },
+    });
+    expect(fixture.mappingJob.resultSummary).toEqual(expect.objectContaining({
+      gatewayCandidatePackage: expect.objectContaining({
+        validationOutput: expect.objectContaining({
+          candidates: [expect.objectContaining({
+            description: "We welcome new players & experienced teams. Players must be listed by a coach before Friday. Visit our official website to register.",
+          })],
+        }),
+      }),
+    }));
+  });
+
+  it("rejects organization discovery narration before saving a reviewable package", async () => {
+    const fixture = packageAdapterFixtureFor({
+      sourceUrl: "https://source.example/clubs",
+      finalUrl: "https://source.example/clubs",
+    }, "PAGE_HTML", {
+      listingKind: "CLUB",
+      html: '<article class="event"><h2 class="title">Community Club</h2><p class="description">This organization was found on DiscNY.</p><a class="link" href="/join">Join</a></article>',
+    });
+    const adapter = fixture.adapters.commands.transactional.VALIDATE_DECLARATIVE_PACKAGE!;
+    await expect(adapter.execute({
+      transaction: fixture.transaction as unknown as Prisma.TransactionClient,
+      claim: fixture.claim,
+      receiptId: "narrative-description-validation",
+      command: {
+        type: "VALIDATE_DECLARATIVE_PACKAGE",
+        data: { candidatePackage: fixture.candidatePackage, evidenceManifestHash: fixture.claim.evidenceManifest.hash },
+      },
+    })).rejects.toMatchObject({
+      code: "COMMAND_SCHEMA_INVALID",
+      safeMessage: expect.stringContaining("DISCOVERY_NARRATION"),
+    });
+    expect(fixture.mappingJobUpdate).not.toHaveBeenCalled();
+    expect(fixture.transaction.affiliateAgentGatewayArtifacts.createMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects named-event found-by narration", async () => {
+    const fixture = packageAdapterFixtureFor({
+      sourceUrl: "https://source.example/events",
+      finalUrl: "https://source.example/events",
+    }, "PAGE_HTML", {
+      html: '<article class="event"><h2 class="title">Summer League</h2><p class="description">Summer League was found by our mapping agent and offers weekly play.</p><a class="link" href="/register">Register</a></article>',
+    });
+    const adapter = fixture.adapters.commands.transactional.VALIDATE_DECLARATIVE_PACKAGE!;
+    await expect(adapter.execute({
+      transaction: fixture.transaction as unknown as Prisma.TransactionClient,
+      claim: fixture.claim,
+      receiptId: "found-by-description-validation",
+      command: {
+        type: "VALIDATE_DECLARATIVE_PACKAGE",
+        data: { candidatePackage: fixture.candidatePackage, evidenceManifestHash: fixture.claim.evidenceManifest.hash },
+      },
+    })).rejects.toMatchObject({
+      code: "COMMAND_SCHEMA_INVALID",
+      safeMessage: expect.stringContaining("DISCOVERY_NARRATION"),
+    });
+    expect(fixture.mappingJobUpdate).not.toHaveBeenCalled();
+  });
+
+  it("rejects a URL-only value from a permitted text attribute", async () => {
+    const fixture = packageAdapterFixtureFor({
+      sourceUrl: "https://source.example/events",
+      finalUrl: "https://source.example/events",
+    }, "PAGE_HTML", {
+      html: '<article class="event"><h2 class="title">Summer Games</h2><p class="description" data-description="/register"></p><a class="link" href="/register">Register</a></article>',
+    });
+    const candidatePackage = {
+      ...fixture.candidatePackage,
+      fields: fixture.candidatePackage.fields.map((field) => field.field === "description"
+        ? { ...field, mode: "ATTRIBUTE" as const, attribute: "data-description" }
+        : field),
+    };
+    const adapter = fixture.adapters.commands.transactional.VALIDATE_DECLARATIVE_PACKAGE!;
+    await expect(adapter.execute({
+      transaction: fixture.transaction as unknown as Prisma.TransactionClient,
+      claim: fixture.claim,
+      receiptId: "url-description-validation",
+      command: {
+        type: "VALIDATE_DECLARATIVE_PACKAGE",
+        data: { candidatePackage, evidenceManifestHash: fixture.claim.evidenceManifest.hash },
+      },
+    })).rejects.toMatchObject({
+      code: "COMMAND_SCHEMA_INVALID",
+      safeMessage: expect.stringContaining("URL_DESCRIPTION"),
+    });
+    expect(fixture.mappingJobUpdate).not.toHaveBeenCalled();
+  });
+
+  it("rejects a later candidate without source prose instead of accepting a partial description mapping", async () => {
+    const fixture = packageAdapterFixtureFor({
+      sourceUrl: "https://source.example/events",
+      finalUrl: "https://source.example/events",
+    }, "PAGE_HTML", {
+      html: '<article class="event"><h2 class="title">Summer Games</h2><p class="description">Join our weekly outdoor games.</p><a class="link" href="/summer">Register</a></article><article class="event"><h2 class="title">Winter Games</h2><a class="link" href="/winter">Register</a></article>',
+    });
+    const adapter = fixture.adapters.commands.transactional.VALIDATE_DECLARATIVE_PACKAGE!;
+    await expect(adapter.execute({
+      transaction: fixture.transaction as unknown as Prisma.TransactionClient,
+      claim: fixture.claim,
+      receiptId: "missing-description-validation",
+      command: {
+        type: "VALIDATE_DECLARATIVE_PACKAGE",
+        data: { candidatePackage: fixture.candidatePackage, evidenceManifestHash: fixture.claim.evidenceManifest.hash },
+      },
+    })).rejects.toMatchObject({
+      code: "COMMAND_SCHEMA_INVALID",
+      safeMessage: expect.stringContaining("Candidate 2: MISSING_DESCRIPTION"),
+    });
+    expect(fixture.mappingJobUpdate).not.toHaveBeenCalled();
+    expect(fixture.transaction.affiliateAgentGatewayArtifacts.createMany).not.toHaveBeenCalled();
   });
 
   it("rejects Markdown CSS listing evidence before writing validation artifacts", async () => {
@@ -1552,8 +1728,9 @@ describe("production Affiliate Agent package URL provenance", () => {
       ...fixture.candidatePackage,
       fields: [
         fixture.candidatePackage.fields[0]!,
-        { field: "sportName" as const, mode: "CONSTANT" as const, value: "Grass Soccer" },
         fixture.candidatePackage.fields[1]!,
+        { field: "sportName" as const, mode: "CONSTANT" as const, value: "Grass Soccer" },
+        fixture.candidatePackage.fields[2]!,
       ],
       sportEvidence: citation.sportEvidence,
       evidenceRefs: ["list-evidence", "sport-evidence-1"],
@@ -1808,7 +1985,7 @@ describe("production Affiliate Agent capture adapter", () => {
     const calls: string[] = [];
     const storedObjects = new Map<string, StoredObject>();
     const evidenceBytes = Buffer.from(
-      '<div class="event"><span class="title">Sample event</span><span class="tags">Soccer</span><span class="division">Adults</span><a class="link" href="/events/sample">Details</a></div>',
+      '<div class="event"><span class="title">Sample event</span><p class="description">Join weekly outdoor games with players of all skill levels.</p><span class="tags">Soccer</span><span class="division">Adults</span><a class="link" href="/events/sample">Details</a></div>',
       "utf8",
     );
     const evidenceHash = createHash("sha256").update(evidenceBytes).digest("hex");
@@ -1925,6 +2102,13 @@ describe("production Affiliate Agent capture adapter", () => {
       listUrlRef: "list-evidence",
       itemSelector: ".event",
       fields: [
+        {
+          field: "description" as const,
+          selector: ".description",
+          mode: "TEXT" as const,
+          attribute: null,
+          transform: "TRIM" as const,
+        },
         {
           field: "divisions" as const,
           selector: ".division",

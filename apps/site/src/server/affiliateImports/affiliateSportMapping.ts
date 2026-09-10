@@ -38,7 +38,7 @@ export type AffiliateAgentSportIssue = {
   path: string;
   sportName: string | null;
   canonicalSuggestion: string | null;
-  code: 'SPORT_NAME_REQUIRED' | 'SPORT_NAME_NOT_CANONICAL' | 'SPORT_NOT_IN_CATALOG';
+  code: 'SPORT_NAME_REQUIRED' | 'SPORT_NAME_NOT_CANONICAL' | 'SPORT_NOT_IN_CATALOG' | 'SPORT_BLACKLISTED';
   message: string;
 };
 
@@ -69,7 +69,7 @@ export const validateAffiliateAgentSportName = (
       path,
       sportName,
       canonicalSuggestion: null,
-      code: 'SPORT_NOT_IN_CATALOG',
+      code: 'SPORT_BLACKLISTED',
       message: `The sport ${sportName} is blacklisted because BracketIQ does not support tournament or league scoring for it. Send it to human review; do not add it to the catalog or replace it with another sport.`,
     };
   }

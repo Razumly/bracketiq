@@ -1743,3 +1743,100 @@ directory. The accepted result is `run/mission-producer-result.json`.
 The tooling and bounded repair trial are complete. Mission now needs a
 human catalog decision, not another blind retry. No additional claim or
 publication was authorized.
+
+## Affiliate blacklist and source descriptions
+
+The operator directed that Track and Field remain blacklisted and be removed.
+The operator also required event and organization descriptions to use the
+first-party site's wording, not an explanation of what an agent found.
+This direction supersedes the catalog-addition recommendation in the role-6
+Mission result. The historical result and its evidence remain unchanged.
+
+Source role/prompt version 7 now states the blacklist and description rules.
+Current completion rejects blacklisted labels classified as UNSUPPORTED or
+resolved to another sport. Blacklisted activities require BLACKLISTED and
+SPORT_BLACKLISTED. Separate supported determinations may remain executable.
+Legacy repair and organization sport merging cannot reintroduce a blacklist
+member, even when an injected catalog contains that name.
+
+Governed EVENT and CLUB packages now support a required description selector.
+The Gateway checks every extracted description before saving validation
+evidence. Missing prose and discovery narration fail validation. Authored
+description constants and URL conversion are not permitted. Source wording
+takes precedence over title-restatement style advice. The independent reviewer
+must compare the selected prose with first-party evidence.
+
+Unclaimed affiliate organization descriptions now prefer new mapped source
+prose over stale generated copy. Owner-managed copy remains protected.
+Schedule and status notes are no longer organization description fallbacks.
+The description and publicIntroText use the same selected text.
+
+### Local proof and production hold
+
+The recorded Mission smoke check passed against the new source. It read and
+hashed the original role-6 result without changing it. Current completion
+rejected UNSUPPORTED. A local BLACKLISTED draft passed both original HTML and
+Markdown citations and produced no executable sports. A source-prose fixture
+preserved first-person wording and decoded HTML entities. No production write
+ran during this check.
+
+Read-only production inventory found no Track and Field catalog row,
+organization sport value, event sport value, or Supply Target. One candidate
+remains: `90296c9e-c325-4fd7-b361-560bd87a65a0`, in NEEDS_REVIEW for Mission.
+Its organization remains UNLISTED with public pages and widgets disabled.
+Its source remains REVIEW_REQUIRED with automatic scraping disabled.
+
+The held candidate is not removed. A governed source exclusion requires
+independent reviewer evidence and a recorded human lifecycle decision.
+Mission has no eligible exclusion claim. The legacy admin deletion route
+would bypass that process and does not record source exclusion. Do not use it
+as a substitute. Deployment of role/prompt 7 and any new worker start require
+separate current authorization.
+
+### Review record
+
+The review fixed point is `7db3cb7ebe9d782c36e97125b1224cc0e94547de`.
+The initial Standards and Spec reviews found the following defects.
+Three focused regressions reproduced R1 and R2 before their source fixes.
+The production exclusion remains blocked independently of the source review.
+
+| Finding | Axis | Correction | State |
+| --- | --- | --- | --- |
+| R1 | Sport Standards and Spec | Restore the RESOLVED catalog and canonical blacklist check. | Fixed, re-reviewed, verified |
+| R2 | Sport Spec | Reject extracted blacklist members for normal Gateway packages too. | Fixed, re-reviewed, verified |
+| R3 | Description Spec | Check description quality on every supply-backed scrape before persistence. | Fixed, re-reviewed, verified |
+| R4 | Description Standards and Spec | Distinguish subject discovery from participation prose. | Fixed, re-reviewed, verified |
+| R5 | Description Standards and Spec | Reject URL attributes and URL-only description values. | Fixed, re-reviewed, verified |
+| R6 | Description Standards and Spec | Align the mandatory approval reference with source wording. | Fixed, re-reviewed, verified |
+| R7 | Description Standards and Spec | Remove the obsolete title-restatement report claim. | Fixed, re-reviewed, verified |
+| R8 | Sport consumer follow-up | Block blacklist replacement/refresh loops; preserve valid exclusion confirmations. | Fixed, re-reviewed, verified |
+| R9 | Description Standards and Spec | Stop inferring producer defects from obsolete title/name repetition evidence. | Fixed, re-reviewed, verified |
+
+Standards and Spec re-reviews passed for both sections. All nine findings are
+closed. The text checks cover recognized narration forms. The independent
+reviewer remains responsible for source fidelity and subject relevance.
+
+### Verification evidence
+
+The pre-review local gate passed 774 tests in 27 suites. This includes the Gateway
+and lifecycle PostgreSQL integration suites. The fresh isolated database
+`bracketiq_e2e_70_policy` received all 219 migrations before the tests.
+Prisma reported that its schema was up to date.
+
+The full TypeScript check and targeted ESLint check passed. The real OMP SDK
+probe passed execute_command, check_result, and submit_result under the pinned
+Bun 1.3.14 runtime. It made no provider call. The recorded Mission smoke passed
+under Node. All 99 protected production records still matched their baseline.
+
+The post-fix gate passed 790 tests in the same 27 suites. It includes the
+retained missing, narrative, and URL-only refresh regressions. The first
+post-fix run exposed clause-leading `Listed by` narration. The source check
+was corrected without changing that fixture. TypeScript, ESLint, the recorded
+Mission smoke, and all three SDK scenarios also passed after integration of
+the review fixes.
+
+The expanded final gate passed 815 tests in 28 suites. TypeScript, targeted
+ESLint, the recorded Mission smoke, and all three SDK scenarios passed.
+The last terminal-agent narration correction passed another 128 tests in the
+three affected suites and targeted ESLint. No production image was published.
+No runtime or production record changed for this policy update.
