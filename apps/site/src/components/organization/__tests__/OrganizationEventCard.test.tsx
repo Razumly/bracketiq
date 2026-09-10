@@ -88,4 +88,21 @@ describe('OrganizationEventCard schedule display', () => {
     expect(screen.getByText('Jul 16, 2099')).toBeInTheDocument();
     expect(screen.queryByText(/\b\d{1,2}:\d{2}\s(?:AM|PM)\b/)).not.toBeInTheDocument();
   });
+  it('keeps the date range for date-only events without display text', () => {
+    renderWithMantine(
+      <OrganizationEventCard
+        event={createEvent({
+          dateDisplayMode: 'DATE_ONLY',
+          dateDisplayText: null,
+          start: '2099-07-16T12:00:00.000Z',
+          end: '2099-07-18T12:00:00.000Z',
+          timeZone: 'UTC',
+        })}
+        onClick={jest.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Jul 16, 2099 – Jul 18, 2099')).toBeInTheDocument();
+    expect(screen.queryByText(/\b\d{1,2}:\d{2}\s(?:AM|PM)\b/)).not.toBeInTheDocument();
+  });
 });

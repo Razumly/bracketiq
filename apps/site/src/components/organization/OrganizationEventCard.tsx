@@ -54,7 +54,7 @@ function eventDate(event: Event): string {
   }
   const schedule = getDisplaySchedule(event);
   const first = formatScheduleDate(schedule.start, schedule.timeZone);
-  if (displayMode === 'DATE_ONLY') return event.dateDisplayText?.trim() || first || 'Date to be announced';
+  if (displayMode === 'DATE_ONLY' && event.dateDisplayText?.trim()) return event.dateDisplayText.trim();
   if (!first) return 'Date to be announced';
   const last = schedule.end ? formatScheduleDate(schedule.end, schedule.timeZone) : null;
   if (!last || first === last) return first;
