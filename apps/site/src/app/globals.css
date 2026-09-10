@@ -250,7 +250,8 @@ svg {
   color: var(--ocean-primary);
 }
 
-.discover-shell {
+.discover-shell,
+.discover-filter-popover {
   --discover-bg: var(--bq-canvas);
   --discover-surface: var(--bq-surface);
   --discover-surface-muted: var(--bq-surface-muted);
