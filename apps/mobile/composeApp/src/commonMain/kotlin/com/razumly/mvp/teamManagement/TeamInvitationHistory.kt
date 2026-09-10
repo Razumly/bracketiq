@@ -19,6 +19,11 @@ import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.network.userMessage
 import com.razumly.mvp.core.util.newId
 
+private fun pendingInvitationFallback(status: String?): String? = when (status) {
+    null, "PENDING", "SENT", "FAILED" -> "Pending acceptance"
+    else -> null
+}
+
 @Composable
 internal fun TeamInvitationHistory(invites: List<Invite>, onAction: (Invite, String, String, (Result<String>) -> Unit) -> Unit) {
     var activeId by remember { mutableStateOf<String?>(null) }
@@ -45,7 +50,7 @@ internal fun TeamInvitationHistory(invites: List<Invite>, onAction: (Invite, Str
             Card {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(listOfNotNull(invite.firstName, invite.lastName).joinToString(" ").ifBlank { invite.email.ifBlank { "Player" } })
-                    Text(invite.invitationLabel ?: "Invitation ${invite.status?.lowercase() ?: "pending"}")
+                    Text(invite.invitationLabel ?: pendingInvitationFallback(invite.status) ?: "Invitation ${invite.status?.lowercase()}")
                     Text("Created ${invite.createdAt ?: "—"}", style = MaterialTheme.typography.bodySmall)
                     invite.finalizedAt?.let { Text("Final outcome $it", style = MaterialTheme.typography.bodySmall) }
                     Row {
@@ -58,7 +63,7 @@ internal fun TeamInvitationHistory(invites: List<Invite>, onAction: (Invite, Str
                     }
                     TextButton(onClick = { expanded = !expanded }) { Text("Attempts and deliveries") }
                     if (expanded) invites.filter { it.id == invite.id || invite.userId != null && it.userId == invite.userId }.forEach { attempt ->
-                        Text("${attempt.invitationLabel ?: attempt.status} · ${attempt.finalizedAt ?: attempt.createdAt}", style = MaterialTheme.typography.bodySmall)
+                        Text("${attempt.invitationLabel ?: pendingInvitationFallback(attempt.status) ?: attempt.status} · ${attempt.finalizedAt ?: attempt.createdAt}", style = MaterialTheme.typography.bodySmall)
                         Text("Sender ${attempt.senderName ?: "Unavailable"}", style = MaterialTheme.typography.bodySmall)
                         attempt.actingGuardianId?.let { Text("Guardian ${attempt.actingGuardianName ?: "Unavailable"}", style = MaterialTheme.typography.bodySmall) }
                         attempt.deliveries.forEach { delivery ->

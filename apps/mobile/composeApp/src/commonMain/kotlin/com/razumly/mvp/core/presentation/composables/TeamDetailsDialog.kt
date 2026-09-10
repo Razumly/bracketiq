@@ -309,7 +309,7 @@ fun TeamDetailsDialog(
                             PlayerCard(
                                 player = player,
                                 isPending = canManageRoster,
-                                pendingLabel = syncedTeam.playerRegistrations.firstOrNull { it.userId == player.id }?.invitationLabel ?: "Awaiting player",
+                                pendingLabel = syncedTeam.playerRegistrations.firstOrNull { it.userId == player.id }?.invitationLabel ?: "Pending acceptance",
                                 modifier = Modifier.fillMaxWidth()
                             )
                             if (canManageRoster && player.isManagedPlayer) {

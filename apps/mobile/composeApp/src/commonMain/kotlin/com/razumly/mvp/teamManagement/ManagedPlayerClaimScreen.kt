@@ -129,7 +129,10 @@ fun ManagedPlayerClaimScreen(
                         TextButton(enabled = !saving, onClick = component::decline) { Text("Decline") }
                         InvitationBlockAction(invitation, enabled = !saving, onSave = component::declineAndBlock)
                     } else if (invitation != null) {
-                        Text(invitation.invitationLabel ?: "Invitation ${invitation.status?.lowercase()}")
+                        Text(invitation.invitationLabel ?: when (invitation.status) {
+                            "PENDING", "SENT", "FAILED" -> "Pending acceptance"
+                            else -> "Invitation ${invitation.status?.lowercase()}"
+                        })
                     } else {
                         Button(enabled = !saving && (!currentPreview.guardianSetupRequired || reviewed || guardianDeclared),
                             onClick = { component.claim(review = true) }) { Text("Review decline options") }

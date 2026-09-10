@@ -16,7 +16,7 @@ import kotlin.test.assertNotNull
 class TeamDtosTest {
     @Test
     fun team_response_keeps_invitation_identity_and_label_after_membership_normalization() {
-        for (label in listOf("Awaiting player", "Awaiting guardian", "Invitation expired")) {
+        for (label in listOf("Pending acceptance", "Awaiting guardian", "Invitation expired")) {
             val dto = jsonMVP.decodeFromString<TeamApiDto>(
                 """{"id":"team-1","playerRegistrations":[{"id":"roster-1","userId":"player-1","status":"INVITED","invitationId":"attempt-1","invitationLabel":"$label"}]}""",
             )

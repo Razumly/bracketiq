@@ -58,16 +58,16 @@ databaseTests('Event signup cutover through persisted application reads', () => 
     const today = new Date();
     const adultBirthday = new Date(Date.UTC(today.getUTCFullYear() - 18, today.getUTCMonth(), today.getUTCDate()));
     const cases = [
-      { name: 'adult-label', birthday: adultBirthday, expired: false, label: 'Awaiting player' },
-      { name: 'child-label', birthday: new Date('2020-01-01'), expired: false, label: 'Awaiting guardian' },
-      { name: 'expired-label', birthday: new Date('2020-01-01'), expired: true, label: 'Invitation expired' },
+      { name: 'adult-label', birthday: adultBirthday, isMinor: false, expired: false, label: 'Pending acceptance' },
+      { name: 'child-label', birthday: new Date('2020-01-01'), isMinor: true, expired: false, label: 'Awaiting guardian' },
+      { name: 'expired-label', birthday: new Date('2020-01-01'), isMinor: true, expired: true, label: 'Invitation expired' },
     ];
     for (const entry of cases) {
       await prisma.userData.create({ data: { id: id(entry.name), userName: id(entry.name),
         firstName: 'Test', lastName: 'Player', dateOfBirth: entry.birthday, isManagedPlayer: true } });
       const invite = await prisma.invites.create({ data: { id: id(`${entry.name}-invite`),
         type: 'TEAM', teamId: id('label-team'), userId: id(entry.name), status: 'PENDING',
-        isMinor: true, dateOfBirth: new Date('2020-01-01'),
+        isMinor: entry.isMinor, dateOfBirth: new Date('2020-01-01'),
         linkExpiresAt: new Date(Date.now() + (entry.expired ? -86_400_000 : 86_400_000)) } });
       const [view] = await withTeamInvitationViews(prisma, [invite]);
       expect(view).toMatchObject({ invitationLabel: entry.label });

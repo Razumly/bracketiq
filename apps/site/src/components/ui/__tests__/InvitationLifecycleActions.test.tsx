@@ -13,7 +13,7 @@ jest.mock('@/lib/userService', () => ({ userService: {
 
 import { userService } from '@/lib/userService';
 const service = jest.mocked(userService);
-const invite: Invite = { $id: 'attempt-1', type: 'TEAM', teamId: 'team', userId: 'child', status: 'PENDING', canBlockSender: true, childFullName: 'First Child', invitationLabel: 'Invitation pending', isCurrentAttempt: true };
+const invite: Invite = { $id: 'attempt-1', type: 'TEAM', teamId: 'team', userId: 'child', status: 'PENDING', canBlockSender: true, childFullName: 'First Child', invitationLabel: 'Pending acceptance', isCurrentAttempt: true };
 
 beforeEach(() => {
   jest.clearAllMocks();

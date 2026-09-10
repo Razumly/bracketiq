@@ -4,6 +4,7 @@ import { MantineProvider } from '@mantine/core';
 
 import { renderWithMantine } from '../../../../test/utils/renderWithMantine';
 import { buildTeam, buildUser } from '../../../../test/factories';
+import type { Invite, Team, UserData } from '@/types';
 
 jest.mock('next/image', () => ({
   __esModule: true,
@@ -37,7 +38,9 @@ jest.mock('@/lib/teamService', () => ({
     createTeamMemberInvite: jest.fn(),
     getTeamById: jest.fn(),
     updateTeamDetails: jest.fn(),
+    removePlayerFromTeam: jest.fn(),
     getRegistrationQuestions: jest.fn(),
+    saveRegistrationQuestions: jest.fn(),
     getTeamJoinRequestContext: jest.fn(),
     listTeamJoinRequests: jest.fn(),
     requestToJoinTeam: jest.fn(),
@@ -103,7 +106,7 @@ jest.mock('@/components/schedule/ScheduleCalendarPanel', () => ({
   ),
 }));
 
-import TeamDetailModal from '../TeamDetailModal';
+import TeamDetailModal, { type TeamDetailPageTab } from '../TeamDetailModal';
 import { useApp } from '@/app/providers';
 
 const userServiceMock = jest.requireMock('@/lib/userService').userService as {
@@ -122,7 +125,9 @@ const teamServiceMock = jest.requireMock('@/lib/teamService').teamService as {
   createTeamMemberInvite: jest.Mock;
   getTeamById: jest.Mock;
   updateTeamDetails: jest.Mock;
+  removePlayerFromTeam: jest.Mock;
   getRegistrationQuestions: jest.Mock;
+  saveRegistrationQuestions: jest.Mock;
   getTeamJoinRequestContext: jest.Mock;
   listTeamJoinRequests: jest.Mock;
   requestToJoinTeam: jest.Mock;
@@ -154,7 +159,9 @@ describe('TeamDetailModal', () => {
     teamServiceMock.createTeamMemberInvite.mockReset();
     teamServiceMock.getTeamById.mockReset();
     teamServiceMock.updateTeamDetails.mockReset();
+    teamServiceMock.removePlayerFromTeam.mockReset();
     teamServiceMock.getRegistrationQuestions.mockReset();
+    teamServiceMock.saveRegistrationQuestions.mockReset();
     teamServiceMock.getTeamJoinRequestContext.mockReset();
     teamServiceMock.listTeamJoinRequests.mockReset();
     teamServiceMock.requestToJoinTeam.mockReset();
@@ -179,6 +186,7 @@ describe('TeamDetailModal', () => {
     teamServiceMock.getTeamById.mockResolvedValue(undefined);
     teamServiceMock.updateTeamDetails.mockResolvedValue(undefined);
     teamServiceMock.getRegistrationQuestions.mockResolvedValue([]);
+    teamServiceMock.saveRegistrationQuestions.mockResolvedValue(undefined);
     teamServiceMock.getTeamJoinRequestContext.mockResolvedValue({
       questions: [],
       currentRequest: null,
@@ -196,23 +204,526 @@ describe('TeamDetailModal', () => {
     familyServiceMock.listChildren.mockResolvedValue([]);
   });
 
-  it('renders safely when eventFreeAgents prop is omitted', () => {
+  it('opens the full editor with roster invites and closes through the parent after cancel, dismissal, or save', async () => {
+    const captain = buildUser({
+      $id: 'captain_1',
+      firstName: 'Alex',
+      lastName: 'Stone',
+      fullName: 'Alex Stone',
+    });
     const team = buildTeam({
-      captainId: 'captain_1',
-      playerIds: [],
+      $id: 'team_1',
+      name: 'Original Team',
+      captainId: captain.$id,
+      playerIds: [captain.$id],
+      pending: [],
+      sport: 'Volleyball',
+      teamSize: 6,
+      joinPolicy: 'CLOSED',
+    });
+    const updatedTeam = buildTeam({ ...team, name: 'Updated Team', teamSize: 8 });
+    const onClose = jest.fn();
+    const onTeamUpdated = jest.fn();
+    (useApp as jest.Mock).mockReturnValue({ user: captain, authUser: null });
+    userServiceMock.getUsersByIds.mockResolvedValue([captain]);
+    teamServiceMock.updateTeamDetails.mockResolvedValueOnce(updatedTeam);
+
+    function DirectEditor() {
+      const [isOpen, setIsOpen] = React.useState(false);
+      return (
+        <>
+          <button onClick={() => setIsOpen(true)}>Open team editor</button>
+          <TeamDetailModal
+            currentTeam={team}
+            isOpen={isOpen}
+            onClose={() => {
+              onClose();
+              setIsOpen(false);
+            }}
+            onTeamUpdated={onTeamUpdated}
+            variant="edit"
+          />
+        </>
+      );
+    }
+
+    renderWithMantine(<DirectEditor />);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open team editor' }));
+    const editor = await screen.findByRole('dialog', { name: 'Edit Team Details' });
+    expect(within(editor).getByLabelText('Team Name', { exact: false })).toHaveValue('Original Team');
+    expect(within(editor).getByLabelText('Team Size')).toHaveValue('6');
+    expect(within(editor).getByLabelText('Sport', { selector: 'input' })).toHaveValue('Volleyball');
+    expect(within(editor).getByText('Join mode')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(within(editor).getByLabelText('Team Captain', { selector: 'input' })).toHaveValue('Alex Stone');
+      expect(within(editor).getByRole('heading', { name: 'Roster (1)' })).toBeVisible();
+      expect(within(editor).getByText('Alex Stone', { selector: '.team-roster-player-card *' })).toBeVisible();
+    });
+    const cancelButton = within(editor).getByRole('button', { name: 'Cancel' });
+    const inviteButton = within(editor).getByRole('button', { name: 'Invite Roster Members' });
+    const saveButton = within(editor).getByRole('button', { name: 'Save Team Details' });
+    expect(cancelButton.compareDocumentPosition(inviteButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(inviteButton.compareDocumentPosition(saveButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /add players/i, hidden: true })).not.toBeInTheDocument();
+    expect(screen.queryByText('Danger Zone')).not.toBeInTheDocument();
+
+    fireEvent.click(inviteButton);
+    const inviteDialog = await screen.findByRole('dialog', { name: 'Invite to Original Team' });
+    expect(inviteDialog).toBeVisible();
+    fireEvent.click(inviteDialog.querySelector<HTMLButtonElement>('button.mantine-Modal-close')!);
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Invite to Original Team' })).not.toBeInTheDocument());
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onTeamUpdated).not.toHaveBeenCalled();
+
+    fireEvent.click(cancelButton);
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onTeamUpdated).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open team editor' }));
+    const dismissibleEditor = await screen.findByRole('dialog', { name: 'Edit Team Details' });
+    fireEvent.click(dismissibleEditor.querySelector<HTMLButtonElement>('button.mantine-Modal-close')!);
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(onClose).toHaveBeenCalledTimes(2);
+    expect(onTeamUpdated).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open team editor' }));
+    const reopenedEditor = await screen.findByRole('dialog', { name: 'Edit Team Details' });
+    fireEvent.change(within(reopenedEditor).getByLabelText('Team Name', { exact: false }), { target: { value: 'Updated Team' } });
+    fireEvent.change(within(reopenedEditor).getByLabelText('Team Size'), { target: { value: '8' } });
+    fireEvent.click(within(reopenedEditor).getByRole('button', { name: 'Save Team Details' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(onClose).toHaveBeenCalledTimes(3);
+    expect(onTeamUpdated).toHaveBeenCalledWith(updatedTeam);
+    expect(teamServiceMock.updateTeamDetails).toHaveBeenCalledWith(
+      team.$id,
+      expect.objectContaining({ name: 'Updated Team', teamSize: 8, captainId: captain.$id }),
+    );
+  });
+
+  it('keeps a successfully invited player in the editor roster when the initial roster load finishes late', async () => {
+    const captain = buildUser({
+      $id: 'manager_1',
+      firstName: 'Morgan',
+      lastName: 'Manager',
+      fullName: 'Morgan Manager',
+    });
+    const invitedPlayer = buildUser({
+      $id: 'player_2',
+      firstName: 'Jordan',
+      lastName: 'Player',
+      fullName: 'Jordan Player',
+    });
+    const team = buildTeam({
+      $id: 'team_1',
+      name: 'Test team',
+      captainId: captain.$id,
+      managerId: captain.$id,
+      playerIds: [captain.$id],
       pending: [],
       teamSize: 6,
     });
+    let resolveInitialRoster!: (users: Array<typeof captain>) => void;
+    const initialRoster = new Promise<Array<typeof captain>>((resolve) => {
+      resolveInitialRoster = resolve;
+    });
+    (useApp as jest.Mock).mockReturnValue({ user: captain, authUser: null });
+    userServiceMock.getUsersByIds
+      .mockImplementation(async (ids: string[]) => [captain, invitedPlayer].filter((player) => ids.includes(player.$id)))
+      .mockReturnValueOnce(initialRoster);
+    userServiceMock.searchUsers.mockResolvedValue([invitedPlayer]);
+    userServiceMock.getUserById.mockResolvedValue(invitedPlayer);
+    teamServiceMock.getTeamById.mockResolvedValue(buildTeam({
+      ...team,
+      playerIds: [captain.$id, invitedPlayer.$id],
+      pending: [invitedPlayer.$id],
+    }));
 
-    expect(() => {
-      renderWithMantine(
+    renderWithMantine(
+      <TeamDetailModal
+        currentTeam={team}
+        isOpen
+        onClose={jest.fn()}
+        variant="edit"
+      />,
+    );
+
+    const editor = await screen.findByRole('dialog', { name: 'Edit Team Details' });
+    fireEvent.click(within(editor).getByRole('button', { name: 'Invite Roster Members' }));
+    const inviteDialog = await screen.findByRole('dialog', { name: 'Invite to Test team' });
+    fireEvent.click(within(inviteDialog).getByRole('tab', { name: 'Invite User' }));
+    fireEvent.change(
+      within(inviteDialog).getByPlaceholderText(/search player/i),
+      { target: { value: 'Jordan' } },
+    );
+    await within(inviteDialog).findByText('Jordan Player');
+    fireEvent.click(within(inviteDialog).getByRole('button', { name: /^invite$/i }));
+
+    await within(editor).findByText('Jordan Player', { selector: '.team-roster-player-card *' });
+    fireEvent.click(inviteDialog.querySelector<HTMLButtonElement>('button.mantine-Modal-close')!);
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Invite to Test team' })).not.toBeInTheDocument());
+    expect(within(editor).getByText('Jordan Player', { selector: '.team-roster-player-card *' })).toBeVisible();
+
+    await act(async () => {
+      resolveInitialRoster([captain]);
+      await initialRoster;
+    });
+
+    await waitFor(() => {
+      expect(within(editor).getByText('Morgan Manager', { selector: '.team-roster-player-card *' })).toBeVisible();
+      expect(within(editor).getByText('Jordan Player', { selector: '.team-roster-player-card *' })).toBeVisible();
+      expect(within(editor).getByRole('heading', { name: 'Roster (2)' })).toBeVisible();
+    });
+  });
+
+  it('cancels the SENT invitation for a pending roster player without removing an active player', async () => {
+    const manager = buildUser({ $id: 'manager_1', firstName: 'Morgan', lastName: 'Manager' });
+    const captain = buildUser({ $id: 'captain_1', firstName: 'Alex', lastName: 'Captain' });
+    const pendingPlayer = buildUser({ $id: 'player_2', firstName: 'Jordan', lastName: 'Player' });
+    const team = buildTeam({
+      $id: 'team_1',
+      managerId: manager.$id,
+      captainId: captain.$id,
+      playerIds: [captain.$id],
+      pending: [pendingPlayer.$id],
+      pendingPlayers: [pendingPlayer],
+      playerRegistrations: [{
+        id: 'registration_2',
+        userId: pendingPlayer.$id,
+        status: 'INVITED',
+        invitationId: 'invite_player_2',
+      }],
+    });
+    const onTeamUpdated = jest.fn();
+    let resolveCancellation!: (success: boolean) => void;
+    const cancellation = new Promise<boolean>((resolve) => { resolveCancellation = resolve; });
+    (useApp as jest.Mock).mockReturnValue({ user: manager, authUser: null });
+    userServiceMock.getUsersByIds.mockImplementation(async (ids: string[]) => (
+      [manager, captain, pendingPlayer].filter((player) => ids.includes(player.$id))
+    ));
+    userServiceMock.listInvites.mockResolvedValue([{
+      $id: 'invite_player_2',
+      type: 'TEAM',
+      teamId: team.$id,
+      userId: pendingPlayer.$id,
+      role: 'player',
+      status: 'SENT',
+    }]);
+    userServiceMock.deleteInviteById.mockReturnValue(cancellation);
+    teamServiceMock.removePlayerFromTeam.mockResolvedValue(buildTeam({ ...team, pending: [] }));
+
+    function TeamEditor() {
+      const [currentTeam, setCurrentTeam] = React.useState(team);
+      return (
         <TeamDetailModal
-          currentTeam={team}
-          isOpen={false}
+          currentTeam={currentTeam}
+          isOpen
           onClose={jest.fn()}
-        />,
+          onTeamUpdated={(updatedTeam) => {
+            onTeamUpdated(updatedTeam);
+            setCurrentTeam(updatedTeam);
+          }}
+          variant="edit"
+        />
       );
-    }).not.toThrow();
+    }
+
+    renderWithMantine(<TeamEditor />);
+    const editor = await screen.findByRole('dialog', { name: 'Edit Team Details' });
+    const playerName = await within(editor).findByText('Jordan Player', { selector: '.team-roster-player-card *' });
+    const playerCard = playerName.closest<HTMLElement>('.team-roster-player-card')!;
+    const cancelButton = within(playerCard).getByRole('button', { name: 'Cancel', exact: true });
+    fireEvent.click(cancelButton);
+
+    expect(teamServiceMock.removePlayerFromTeam).not.toHaveBeenCalled();
+    await waitFor(() => expect(userServiceMock.deleteInviteById).toHaveBeenCalledWith('invite_player_2'));
+    expect(cancelButton).toBeDisabled();
+    expect(playerCard).toBeVisible();
+    expect(onTeamUpdated).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveCancellation(true);
+      await cancellation;
+    });
+
+    await waitFor(() => {
+      expect(within(editor).queryByText('Jordan Player', { selector: '.team-roster-player-card *' })).not.toBeInTheDocument();
+      expect(within(editor).getByRole('heading', { name: 'Roster (1)' })).toBeVisible();
+    });
+    expect(onTeamUpdated).toHaveBeenLastCalledWith(expect.objectContaining({ pending: [] }));
+    expect(userServiceMock.deleteInviteById).toHaveBeenCalledTimes(1);
+    expect(teamServiceMock.removePlayerFromTeam).not.toHaveBeenCalled();
+  });
+
+  it('resolves a FAILED managed player invitation in one list call after roster Cancel', async () => {
+    const manager = buildUser({ $id: 'manager_1', firstName: 'Morgan', lastName: 'Manager' });
+    const captain = buildUser({ $id: 'captain_1', firstName: 'Alex', lastName: 'Captain' });
+    const player = buildUser({ $id: 'player_2', firstName: 'Jordan', lastName: 'Player', isManagedPlayer: true });
+    const team = buildTeam({
+      $id: 'team_1',
+      managerId: manager.$id,
+      captainId: captain.$id,
+      playerIds: [captain.$id, player.$id],
+      pending: [player.$id],
+      pendingPlayers: [player],
+      playerRegistrations: [{ id: 'registration_2', userId: player.$id, status: 'INVITED' }],
+    });
+    const invite: Invite = {
+      $id: 'invite_player_2',
+      type: 'TEAM',
+      teamId: team.$id,
+      userId: player.$id,
+      role: 'player',
+      status: 'FAILED',
+      isAssigned: true,
+    };
+    let resolveInvites!: (invites: Invite[]) => void;
+    const invites = new Promise<Invite[]>((resolve) => { resolveInvites = resolve; });
+    const onTeamUpdated = jest.fn();
+    (useApp as jest.Mock).mockReturnValue({ user: manager, authUser: null });
+    userServiceMock.getUsersByIds.mockImplementation(async (ids: string[]) => (
+      [manager, captain, player].filter((entry) => ids.includes(entry.$id))
+    ));
+    userServiceMock.listInvites.mockImplementation((filters: { type?: string }) => (
+      filters.type === 'TEAM' ? invites : Promise.resolve([])
+    ));
+
+    renderWithMantine(
+      <TeamDetailModal currentTeam={team} isOpen onClose={jest.fn()} onTeamUpdated={onTeamUpdated} variant="edit" />,
+    );
+    const editor = await screen.findByRole('dialog', { name: 'Edit Team Details' });
+    const playerName = await within(editor).findByText('Jordan Player', { selector: '.team-roster-player-card *' });
+    const playerCard = playerName.closest<HTMLElement>('.team-roster-player-card')!;
+    fireEvent.click(within(playerCard).getByRole('button', { name: 'Cancel', exact: true }));
+
+    expect(userServiceMock.listInvites.mock.calls.filter(([filters]) => filters.type === 'TEAM')).toEqual([
+      [{ teamId: 'team_1', type: 'TEAM' }],
+    ]);
+    expect(within(playerCard).getByRole('button', { name: 'Cancel', exact: true })).toBeDisabled();
+    expect(userServiceMock.deleteInviteById).not.toHaveBeenCalled();
+    expect(onTeamUpdated).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveInvites([invite]);
+      await invites;
+    });
+
+    await waitFor(() => expect(playerCard).not.toBeInTheDocument());
+    expect(userServiceMock.deleteInviteById).toHaveBeenCalledWith('invite_player_2');
+    expect(teamServiceMock.removePlayerFromTeam).not.toHaveBeenCalled();
+    expect(onTeamUpdated).toHaveBeenLastCalledWith(expect.objectContaining({
+      pending: [],
+      pendingPlayers: [],
+      playerIds: [captain.$id],
+      playerRegistrations: [expect.objectContaining({ userId: player.$id, status: 'REMOVED' })],
+    }));
+  });
+
+  it('uses the loaded current SENT attempt for roster Cancel without another invite lookup', async () => {
+    const manager = buildUser({ $id: 'manager_1', firstName: 'Morgan', lastName: 'Manager' });
+    const captain = buildUser({ $id: 'captain_1', firstName: 'Alex', lastName: 'Captain' });
+    const player = buildUser({ $id: 'player_2', firstName: 'Jordan', lastName: 'Player' });
+    const team = buildTeam({
+      $id: 'team_1',
+      managerId: manager.$id,
+      captainId: captain.$id,
+      playerIds: [captain.$id],
+      pending: [player.$id],
+    });
+    const invite: Invite = {
+      $id: 'invite_player_2',
+      type: 'TEAM',
+      teamId: team.$id,
+      userId: player.$id,
+      status: 'SENT',
+      invitationLabel: 'Pending acceptance',
+    };
+    let resolveInvites!: (invites: Invite[]) => void;
+    const loadedInvites = new Promise<Invite[]>((resolve) => { resolveInvites = resolve; });
+    (useApp as jest.Mock).mockReturnValue({ user: manager, authUser: null });
+    userServiceMock.getUsersByIds.mockImplementation(async (ids: string[]) => (
+      [manager, captain, player].filter((entry) => ids.includes(entry.$id))
+    ));
+    userServiceMock.listInvites.mockImplementation((filters: { types?: readonly string[] }) => (
+      filters.types?.includes('TEAM') ? loadedInvites : Promise.resolve([])
+    ));
+
+    renderWithMantine(
+      <TeamDetailModal currentTeam={team} isOpen onClose={jest.fn()} variant="page" />,
+    );
+    const invitationLabel = await screen.findByText('Pending acceptance', { selector: '.team-roster-player-card *' });
+    const playerCard = invitationLabel.closest<HTMLElement>('.team-roster-player-card')!;
+    await act(async () => {
+      resolveInvites([
+        { ...invite, $id: 'old_invite', status: 'PENDING', isCurrentAttempt: false },
+        invite,
+      ]);
+      await loadedInvites;
+    });
+    userServiceMock.listInvites.mockClear();
+    fireEvent.click(within(playerCard).getByRole('button', { name: 'Cancel', exact: true }));
+
+    await waitFor(() => expect(playerCard).not.toBeInTheDocument());
+    expect(userServiceMock.deleteInviteById).toHaveBeenCalledWith('invite_player_2');
+    expect(userServiceMock.listInvites).not.toHaveBeenCalled();
+    expect(teamServiceMock.removePlayerFromTeam).not.toHaveBeenCalled();
+  });
+
+  it('keeps concurrent roster cancellations removed when an older roster load finishes late', async () => {
+    const manager = buildUser({ $id: 'manager_1', firstName: 'Morgan', lastName: 'Manager' });
+    const captain = buildUser({ $id: 'captain_1', firstName: 'Alex', lastName: 'Captain' });
+    const firstPlayer = buildUser({ $id: 'player_2', firstName: 'Jordan', lastName: 'Player' });
+    const secondPlayer = buildUser({ $id: 'player_3', firstName: 'Taylor', lastName: 'Player' });
+    const team = buildTeam({
+      $id: 'team_1',
+      managerId: manager.$id,
+      captainId: captain.$id,
+      playerIds: [captain.$id],
+      pending: [firstPlayer.$id, secondPlayer.$id],
+      playerRegistrations: [
+        { id: 'registration_2', userId: firstPlayer.$id, status: 'INVITED', invitationId: 'invite_player_2' },
+        { id: 'registration_3', userId: secondPlayer.$id, status: 'INVITED', invitationId: 'invite_player_3' },
+      ],
+    });
+    let resolveFirst!: (success: boolean) => void;
+    let resolveSecond!: (success: boolean) => void;
+    let resolveRoster!: (players: UserData[]) => void;
+    const firstCancellation = new Promise<boolean>((resolve) => { resolveFirst = resolve; });
+    const secondCancellation = new Promise<boolean>((resolve) => { resolveSecond = resolve; });
+    const staleRoster = new Promise<UserData[]>((resolve) => { resolveRoster = resolve; });
+    const onTeamUpdated = jest.fn();
+    const refreshTeam = jest.fn();
+    (useApp as jest.Mock).mockReturnValue({ user: manager, authUser: null });
+    userServiceMock.getUsersByIds.mockImplementation(async (ids: string[]) => (
+      [manager, captain, firstPlayer, secondPlayer].filter((player) => ids.includes(player.$id))
+    ));
+    userServiceMock.deleteInviteById.mockImplementation((inviteId: string) => (
+      inviteId === 'invite_player_2' ? firstCancellation : secondCancellation
+    ));
+
+    function TeamEditor() {
+      const [currentTeam, setCurrentTeam] = React.useState(team);
+      refreshTeam.mockImplementation(() => setCurrentTeam({ ...team }));
+      return (
+        <TeamDetailModal
+          currentTeam={currentTeam}
+          isOpen
+          onClose={jest.fn()}
+          onTeamUpdated={(updatedTeam) => {
+            onTeamUpdated(updatedTeam);
+            setCurrentTeam(updatedTeam);
+          }}
+          variant="edit"
+        />
+      );
+    }
+
+    renderWithMantine(<TeamEditor />);
+    const editor = await screen.findByRole('dialog', { name: 'Edit Team Details' });
+    const firstName = await within(editor).findByText('Jordan Player', { selector: '.team-roster-player-card *' });
+    const secondName = await within(editor).findByText('Taylor Player', { selector: '.team-roster-player-card *' });
+    await waitFor(() => expect(userServiceMock.listInvites).toHaveBeenCalled());
+    const firstCancel = within(firstName.closest<HTMLElement>('.team-roster-player-card')!).getByRole('button', { name: 'Cancel', exact: true });
+    const secondCancel = within(secondName.closest<HTMLElement>('.team-roster-player-card')!).getByRole('button', { name: 'Cancel', exact: true });
+    act(() => {
+      fireEvent.click(firstCancel);
+      fireEvent.click(firstCancel);
+      fireEvent.click(secondCancel);
+    });
+    expect(userServiceMock.deleteInviteById).toHaveBeenCalledTimes(2);
+
+    userServiceMock.getUsersByIds.mockReturnValueOnce(staleRoster);
+    act(() => refreshTeam());
+    await act(async () => {
+      resolveSecond(true);
+      await secondCancellation;
+    });
+    expect(onTeamUpdated).toHaveBeenLastCalledWith(expect.objectContaining({ pending: [firstPlayer.$id] }));
+    await act(async () => {
+      resolveFirst(true);
+      await firstCancellation;
+    });
+    expect(onTeamUpdated).toHaveBeenLastCalledWith(expect.objectContaining({ pending: [] }));
+
+    await act(async () => {
+      resolveRoster([captain, firstPlayer, secondPlayer]);
+      await staleRoster;
+    });
+    await waitFor(() => {
+      expect(within(editor).getByRole('heading', { name: 'Roster (1)' })).toBeVisible();
+      expect(within(editor).queryByText('Jordan Player', { selector: '.team-roster-player-card *' })).not.toBeInTheDocument();
+      expect(within(editor).queryByText('Taylor Player', { selector: '.team-roster-player-card *' })).not.toBeInTheDocument();
+    });
+    expect(teamServiceMock.removePlayerFromTeam).not.toHaveBeenCalled();
+  });
+
+  it('keeps the pending card until invitation cancellation can be confirmed and allows retry', async () => {
+    const manager = buildUser({ $id: 'manager_1', firstName: 'Morgan', lastName: 'Manager' });
+    const captain = buildUser({ $id: 'captain_1', firstName: 'Alex', lastName: 'Captain' });
+    const player = buildUser({ $id: 'player_2', firstName: 'Jordan', lastName: 'Player' });
+    const team = buildTeam({
+      $id: 'team_1',
+      managerId: manager.$id,
+      captainId: captain.$id,
+      playerIds: [captain.$id],
+      pending: [player.$id],
+    });
+    const invite: Invite = {
+      $id: 'invite_player_2',
+      type: 'TEAM',
+      teamId: team.$id,
+      userId: player.$id,
+      status: 'PENDING',
+    };
+    const onTeamUpdated = jest.fn<void, [Team]>();
+    (useApp as jest.Mock).mockReturnValue({ user: manager, authUser: null });
+    userServiceMock.getUsersByIds.mockImplementation(async (ids: string[]) => (
+      [manager, captain, player].filter((entry) => ids.includes(entry.$id))
+    ));
+    userServiceMock.listInvites.mockResolvedValue([
+      { ...invite, $id: 'final_invite', status: 'CANCELLED' },
+      { ...invite, $id: 'superseded_invite', isCurrentAttempt: false },
+      { ...invite, $id: 'other_team_invite', teamId: 'team_2' },
+    ]);
+
+    renderWithMantine(
+      <TeamDetailModal currentTeam={team} isOpen onClose={jest.fn()} onTeamUpdated={onTeamUpdated} variant="edit" />,
+    );
+    const editor = await screen.findByRole('dialog', { name: 'Edit Team Details' });
+    const playerName = await within(editor).findByText('Jordan Player', { selector: '.team-roster-player-card *' });
+    await waitFor(() => expect(userServiceMock.listInvites).toHaveBeenCalled());
+    const playerCard = playerName.closest<HTMLElement>('.team-roster-player-card')!;
+    const cancelButton = within(playerCard).getByRole('button', { name: 'Cancel', exact: true });
+    fireEvent.click(cancelButton);
+    expect(await within(editor).findByRole('alert')).toHaveTextContent(/invitation could not be found/i);
+    expect(cancelButton).toBeEnabled();
+    expect(playerCard).toBeVisible();
+    expect(userServiceMock.deleteInviteById).not.toHaveBeenCalled();
+    expect(onTeamUpdated).not.toHaveBeenCalled();
+
+    userServiceMock.listInvites.mockResolvedValue([invite]);
+    userServiceMock.deleteInviteById.mockRejectedValueOnce(new Error('Team access was denied.'));
+    fireEvent.click(cancelButton);
+    await waitFor(() => expect(within(editor).getByRole('alert')).toHaveTextContent('Team access was denied.'));
+    expect(cancelButton).toBeEnabled();
+    expect(playerCard).toBeVisible();
+    expect(onTeamUpdated).not.toHaveBeenCalled();
+
+    userServiceMock.deleteInviteById.mockResolvedValueOnce(false);
+    fireEvent.click(cancelButton);
+    await waitFor(() => expect(within(editor).getByRole('alert')).toHaveTextContent(/cancellation could not be confirmed/i));
+    expect(cancelButton).toBeEnabled();
+    expect(playerCard).toBeVisible();
+    expect(onTeamUpdated).not.toHaveBeenCalled();
+
+    fireEvent.click(cancelButton);
+    await waitFor(() => expect(playerCard).not.toBeInTheDocument());
+    expect(within(editor).queryByRole('alert')).not.toBeInTheDocument();
+    expect(onTeamUpdated).toHaveBeenLastCalledWith(expect.objectContaining({ pending: [] }));
+    expect(teamServiceMock.removePlayerFromTeam).not.toHaveBeenCalled();
   });
 
   it('uses jersey numbers for registered team player avatars', async () => {
@@ -397,6 +908,187 @@ describe('TeamDetailModal', () => {
       });
     });
     expect(onTeamUpdated).toHaveBeenCalledWith(updatedTeam);
+  });
+
+  it('saves a pending player jersey as INVITED metadata without changing the active roster', async () => {
+    const captain = buildUser({ $id: 'captain_1', firstName: 'Alex', lastName: 'Captain' });
+    const player = buildUser({ $id: 'player_2', firstName: 'Jordan', lastName: 'Player' });
+    const team = buildTeam({
+      $id: 'team_1',
+      captainId: captain.$id,
+      playerIds: [captain.$id, player.$id],
+      pending: [player.$id],
+      playerRegistrations: [
+        { id: 'registration_1', userId: captain.$id, status: 'ACTIVE', jerseyNumber: '12', isCaptain: true },
+        {
+          id: 'registration_2',
+          userId: player.$id,
+          status: 'INVITED',
+          jerseyNumber: '7',
+          position: 'Setter',
+          invitationId: 'invite_player_2',
+          invitationLabel: 'Awaiting guardian',
+        },
+      ],
+    });
+    const updatedTeam = buildTeam({
+      ...team,
+      playerRegistrations: team.playerRegistrations?.map((registration) => (
+        registration.userId === player.$id ? { ...registration, jerseyNumber: '18' } : registration
+      )),
+    });
+    userServiceMock.getUsersByIds.mockImplementation(async (ids: string[]) => (
+      [captain, player].filter((entry) => ids.includes(entry.$id))
+    ));
+    userServiceMock.listInvites.mockResolvedValue([{
+      $id: 'invite_player_2',
+      type: 'TEAM',
+      teamId: team.$id,
+      userId: player.$id,
+      status: 'PENDING',
+      invitationLabel: 'Pending acceptance',
+    }]);
+    teamServiceMock.updateTeamDetails.mockResolvedValueOnce(updatedTeam);
+
+    function TeamRoster() {
+      const [currentTeam, setCurrentTeam] = React.useState(team);
+      return (
+        <TeamDetailModal
+          currentTeam={currentTeam}
+          isOpen
+          onClose={jest.fn()}
+          onTeamUpdated={setCurrentTeam}
+          canManage
+          variant="page"
+        />
+      );
+    }
+
+    renderWithMantine(<TeamRoster />);
+    const jerseyInput = await screen.findByLabelText('Jersey number for Jordan Player');
+    const playerCard = jerseyInput.closest<HTMLElement>('.team-roster-player-card')!;
+    expect(jerseyInput).toHaveValue('7');
+    expect(within(playerCard).getByText('Awaiting guardian')).toBeVisible();
+    expect(within(playerCard).queryByText('Pending acceptance')).not.toBeInTheDocument();
+    expect(within(playerCard).getByRole('button', { name: 'Save jersey number for Jordan Player' })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText('Jersey number for Alex Captain'), { target: { value: '99' } });
+    fireEvent.change(jerseyInput, { target: { value: '18A' } });
+    expect(jerseyInput).toHaveValue('18');
+    fireEvent.click(within(playerCard).getByRole('button', { name: 'Save jersey number for Jordan Player' }));
+
+    await waitFor(() => {
+      expect(teamServiceMock.updateTeamDetails).toHaveBeenCalledWith('team_1', {
+        playerRegistrations: [{
+          id: 'registration_2',
+          teamId: 'team_1',
+          userId: player.$id,
+          status: 'INVITED',
+          jerseyNumber: '18',
+        }],
+      });
+      expect(screen.getByLabelText('Jersey number for Jordan Player')).toHaveValue('18');
+      expect(screen.getByLabelText('Jersey number for Alex Captain')).toHaveValue('12');
+      expect(screen.getByRole('button', { name: 'Save jersey number for Jordan Player' })).toBeDisabled();
+    });
+    const savedCard = screen.getByLabelText('Jersey number for Jordan Player').closest<HTMLElement>('.team-roster-player-card')!;
+    expect(within(savedCard).getByRole('button', { name: 'Cancel', exact: true })).toBeEnabled();
+    expect(within(savedCard).getByText('Awaiting guardian')).toBeVisible();
+    expect(within(savedCard).queryByRole('button', { name: 'Remove', exact: true })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Roster (2)' })).toBeVisible();
+    expect(teamServiceMock.removePlayerFromTeam).not.toHaveBeenCalled();
+  });
+
+  it('keeps invitation history in its manager page tab and roster controls in the roster tab', async () => {
+    const player = buildUser({ $id: 'player_1', firstName: 'Jordan', lastName: 'Player' });
+    const team = buildTeam({
+      $id: 'team_1',
+      playerIds: [player.$id],
+      pending: [player.$id],
+      playerRegistrations: [{ id: 'registration_1', userId: player.$id, status: 'INVITED' }],
+    });
+    const invite: Invite = {
+      $id: 'invite_player_1',
+      type: 'TEAM',
+      teamId: team.$id,
+      userId: player.$id,
+      firstName: 'Jordan',
+      lastName: 'Player',
+      status: 'PENDING',
+    };
+    userServiceMock.getUsersByIds.mockImplementation(async (ids: string[]) => (
+      ids.includes(player.$id) ? [player] : []
+    ));
+    userServiceMock.listInvites.mockImplementation(async (filters: { history?: boolean }) => (
+      filters.history ? [] : [invite]
+    ));
+    const onActiveTabChange = jest.fn();
+    function TeamPage() {
+      const [tab, setTab] = React.useState<TeamDetailPageTab>('roster');
+      return (
+        <TeamDetailModal
+          currentTeam={team}
+          isOpen
+          onClose={jest.fn()}
+          canManage
+          variant="page"
+          activeTab={tab}
+          onActiveTabChange={(nextTab) => {
+            onActiveTabChange(nextTab);
+            setTab(nextTab);
+          }}
+        />
+      );
+    }
+
+    renderWithMantine(<TeamPage />);
+    await screen.findByLabelText('Jersey number for Jordan Player');
+    expect(screen.getByText('Pending acceptance', { selector: '.team-roster-player-card *' })).toBeVisible();
+    expect(screen.queryByText('Invitation history', { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Cancel invitation' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Invite Roster Members' })).toBeVisible();
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Invitation History' }));
+    expect(onActiveTabChange).toHaveBeenLastCalledWith('invitations');
+    expect(await screen.findByRole('button', { name: 'Cancel invitation' })).toBeVisible();
+    expect(screen.getByText('Invitation history', { exact: true })).toBeVisible();
+    expect(screen.queryByLabelText('Jersey number for Jordan Player')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Invite Roster Members' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Roster' }));
+    expect(onActiveTabChange).toHaveBeenLastCalledWith('roster');
+    expect(screen.getByLabelText('Jersey number for Jordan Player')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Invite Roster Members' })).toBeVisible();
+    expect(screen.queryByText('Invitation history', { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Cancel invitation' })).not.toBeInTheDocument();
+  });
+
+  it('falls back from invitation history to roster when manager access is removed or detail is modal', async () => {
+    const team = buildTeam({ $id: 'team_1', playerIds: [], pending: [] });
+    const view = renderWithMantine(
+      <TeamDetailModal currentTeam={team} isOpen onClose={jest.fn()} canManage variant="page" activeTab="invitations" />,
+    );
+    expect(await screen.findByText('No invitation attempts.')).toBeVisible();
+    expect(screen.queryByText('Player Slots')).not.toBeInTheDocument();
+
+    view.rerender(
+      <MantineProvider>
+        <TeamDetailModal currentTeam={team} isOpen onClose={jest.fn()} canManage={false} variant="page" activeTab="invitations" />
+      </MantineProvider>,
+    );
+    expect(screen.getByText('Player Slots')).toBeVisible();
+    expect(screen.getByRole('radio', { name: 'Roster' })).toBeChecked();
+    expect(screen.queryByRole('radio', { name: 'Invitation History' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Invitation history', { exact: true })).not.toBeInTheDocument();
+
+    view.rerender(
+      <MantineProvider>
+        <TeamDetailModal currentTeam={team} isOpen onClose={jest.fn()} canManage variant="modal" activeTab="invitations" />
+      </MantineProvider>,
+    );
+    expect(await screen.findByText('Player Slots')).toBeVisible();
+    expect(screen.queryByRole('radio', { name: 'Invitation History' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Invitation history', { exact: true })).not.toBeInTheDocument();
   });
 
   it('renders roster player cards in the responsive grid', async () => {
@@ -977,7 +1669,7 @@ describe('TeamDetailModal', () => {
     expect(screen.queryByText('Unknown user')).not.toBeInTheDocument();
     expect(await screen.findByText(/Roster \(1\)/i)).toBeInTheDocument();
     expect(screen.queryByText(/Pending Invitations \(/i)).not.toBeInTheDocument();
-    expect(within(document.querySelector<HTMLElement>('.responsive-card-grid.team-roster-player-grid')!).queryByText(/Invitation pending/i)).not.toBeInTheDocument();
+    expect(within(document.querySelector<HTMLElement>('.responsive-card-grid.team-roster-player-grid')!).queryByText(/Pending acceptance/i)).not.toBeInTheDocument();
   });
   it('keeps accountless players in the roster grid with copy, resend, edit, and remove actions', async () => {
     const manager = buildUser({
@@ -1179,7 +1871,7 @@ describe('TeamDetailModal', () => {
       expect(screen.getByText('2/2')).toBeInTheDocument();
     });
     expect(screen.queryByText(/Pending Invitations \(/i)).not.toBeInTheDocument();
-    expect(within(document.querySelector<HTMLElement>('.responsive-card-grid.team-roster-player-grid')!).queryByText(/Invitation pending/i)).not.toBeInTheDocument();
+    expect(within(document.querySelector<HTMLElement>('.responsive-card-grid.team-roster-player-grid')!).queryByText(/Pending acceptance/i)).not.toBeInTheDocument();
   });
 
   it('shows only the replacement accountless manager', async () => {

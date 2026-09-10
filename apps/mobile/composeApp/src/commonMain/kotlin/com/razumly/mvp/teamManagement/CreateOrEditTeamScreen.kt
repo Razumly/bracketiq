@@ -1148,7 +1148,7 @@ fun CreateOrEditTeamScreen(
                     TeamPlayerRosterRow(
                         player = player,
                         isPending = true,
-                        pendingLabel = invitations.firstOrNull { it.userId == player.id && it.isCurrentAttempt }?.invitationLabel ?: "Invitation pending",
+                        pendingLabel = invitations.firstOrNull { it.userId == player.id && it.isCurrentAttempt }?.invitationLabel ?: "Pending acceptance",
                         jerseyNumber = jerseyNumber,
                         showEditDetails = showEditDetails,
                         canEditFields = canEditFields,
@@ -1914,7 +1914,7 @@ private fun UserInviteRow(
 @Composable
 private fun TeamPlayerRosterRow(
     player: UserData,
-    pendingLabel: String = "Invitation pending",
+    pendingLabel: String = "Pending acceptance",
     isPending: Boolean = false,
     jerseyNumber: String,
     showEditDetails: Boolean,
