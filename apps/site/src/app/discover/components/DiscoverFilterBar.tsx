@@ -312,10 +312,11 @@ export type FilterPopoverProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onClear?: () => void;
+  panelClassName?: string;
   children: ReactNode;
 };
 
-export function FilterPopover({ id, label, valueLabel, value, icon: Icon, active = false, open, onOpenChange, onClear, children }: FilterPopoverProps) {
+export function FilterPopover({ id, label, valueLabel, value, icon: Icon, active = false, open, onOpenChange, onClear, panelClassName, children }: FilterPopoverProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const wasOpenRef = useRef(false);
   useEffect(() => {
@@ -363,7 +364,7 @@ export function FilterPopover({ id, label, valueLabel, value, icon: Icon, active
         id={`${id}-panel`}
         align="start"
         aria-label={`${label} filter`}
-        className="discover-filter-popover p-4"
+        className={`discover-filter-popover p-4${panelClassName ? ` ${panelClassName}` : ''}`}
       >
         {children}
       </PopoverContent>
@@ -515,6 +516,7 @@ function DatesFilterItem<TEventType extends string>({ context }: DiscoverFilterI
     <FilterPopover
       id={`${panelId}-dates`}
       label="Dates"
+      panelClassName="discover-filter-popover--dates"
       valueLabel={dateActive ? value : undefined}
       value={dateActive ? value : undefined}
       icon={CalendarDays}

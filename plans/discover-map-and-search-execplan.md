@@ -4,7 +4,7 @@ This ExecPlan is a living document. The sections `Progress`, `Surprises & Discov
 
 ## Purpose / Big Picture
 
-The discover page should let someone search within the tab they are already viewing: events, organizations, rentals, or open-registration teams. It should also offer a map beside the existing location control, showing nearby events, organizations, and rental fields around the user's current or selected location. After the change, a user can open `/discover`, choose a tab, search from that tab's header, open the map modal, pan the map, press "Search this area", and select a result to focus the map or navigate to the relevant page. The map modal uses visible Events/Organizations/Rentals tabs and retains a hidden native category selector only as a compatibility seam, not as a user-facing dropdown.
+The Discover page lets users search within the active Events, Organizations, Rentals, or Teams tab. The map opens on that same tab and uses its filter values and controls. Visible map tabs support all four result types. The map does not retain a hidden category selector. Team results use their organization coordinates, and the UI states that these are organization locations. Users can move the map, select "Search this area", and select a result to open its details or navigation action. The Dates filter permits its nested calendar to extend beyond the outer date panel. Long non-date filter panels remain scrollable.
 
 ## Progress
 
@@ -27,6 +27,11 @@ The discover page should let someone search within the tab they are already view
 - [x] (2026-09-10, filter-race rerun) Passed `npm run build`. Restarted the user-authorized `site-ui-operations-prod` runtime. It became ready on port 3001.
 - [x] (2026-09-10, filter-race rerun) Verified page-level Dates to Price and Event type to Event tags switching on rebuilt `/discover`. Verified map Tags to Sports switching. Each new filter stayed open while the prior filter closed.
 - [x] (2026-09-10, filter-race rerun) Verified map tiles, markers, and the selected-event card in the rebuilt browser. The summary clamp stayed at three lines. This result supersedes the earlier generic Google Maps error. No production deploy occurred.
+- [x] (2026-09-10, date and map filter parity) Added a scoped Dates popover overflow rule. The outer date panel no longer clips the nested calendar or acts as its scroll container.
+- [x] (2026-09-10, date and map filter parity) Shared filter controls between the page and map. Added active-tab map opening and matching filters for Events, Organizations, Rentals, and Teams. Preserved the filter-race fix in `a7923e3f6`.
+- [x] (2026-09-10, date and map filter parity) Added team map results at organization coordinates. Added explicit organization-location labels and team selection actions. Removed the hidden native map category selector.
+- [x] (2026-09-10, date and map filter parity) Passed 51/51 focused Jest tests across `DiscoverMapModal.test.tsx`, `EventsTabContent.test.tsx`, and `page.test.tsx`. TypeScript, ESLint, and the CRLF-aware diff check passed.
+- [x] (2026-09-10, date and map filter parity) Recorded the browser verification limit. The existing `site-ui-operations-prod` runtime predates these source edits. No restart was authorized for this pass, so browser inspection could not validate this edit. No production deploy occurred.
 
 ## Surprises & Discoveries
 
@@ -42,6 +47,12 @@ The discover page should let someone search within the tab they are already view
   Evidence: Commit `a7923e3f6` prevents this stale close in both page-level and map-level filter owners. The focused `DiscoverMapModal.test.tsx` suite passed all 14 tests.
 - Observation (2026-09-10, filter-race rerun): The earlier generic Google Maps error is historical evidence from before this rerun.
   Evidence: The latest rebuilt `/discover` browser run rendered tiles and markers. Page-level and map-level filter switching left the new filter open.
+- Observation (2026-09-10, date and map filter parity): The outer Discover popover applied its height limit and scrolling to the nested Dates calendar.
+  Evidence: `apps/site/src/app/globals.css` applied `max-height` and `overflow-y` to `.discover-filter-popover`. The new `.discover-filter-popover--dates` rule permits visible overflow only for Dates.
+- Observation (2026-09-10, date and map filter parity): Team map results need a stated location source because teams have no direct coordinates.
+  Evidence: `DiscoverMapModal` loads nearby organizations with relations. It uses `buildTeamDivisionFilterOptions` and `filterOpenRegistrationTeams`, then displays each matching team at its organization coordinates.
+- Observation (2026-09-10, date and map filter parity): A running browser surface does not prove later source edits.
+  Evidence: The existing `site-ui-operations-prod` runtime predates this pass. No restart was authorized. Earlier browser results remain evidence for the earlier build only.
 
 ## Decision Log
 
@@ -51,11 +62,17 @@ The discover page should let someone search within the tab they are already view
 - Decision: Add a Teams discover tab for open-registration team results.
   Rationale: The existing discover page has separate result panels per entity type, and tab selection is the search scope. Team results need a place to render without overloading events, organizations, or rentals.
   Date/Author: 2026-05-14 / Codex
-- Decision: The map modal will focus markers for events, organizations, and rentals, while team search remains page-level because teams do not have their own coordinates.
+- Historical decision (superseded on 2026-09-10 by the date and map filter parity work): The map modal will focus markers for events, organizations, and rentals, while team search remains page-level because teams do not have their own coordinates.
   Rationale: Teams are attached to organizations, but not every team has a direct mappable location. Mapping team markers would imply a location model that does not exist.
   Date/Author: 2026-05-14 / Codex
 - Decision: Replace the map type dropdown with visible tabs. Add a default Nearby events rail and a floating selected-event detail card.
   Rationale: Match the supplied map reference layout.
+  Date/Author: 2026-09-10 / Codex
+- Decision: Use the active Discover tab when the map opens. Share page and map filter controls and values for all four tabs.
+  Rationale: A map opened from Organizations, Rentals, or Teams must not silently display event results. Shared controls keep filter labels and behavior consistent.
+  Date/Author: 2026-09-10 / Codex
+- Decision: Show open-registration teams at their loaded organization coordinates. State the organization-location meaning in markers, result rows, and selection details.
+  Rationale: This supports team discovery without claiming that a team has direct coordinates. It supersedes the earlier page-only team map decision.
   Date/Author: 2026-09-10 / Codex
 
 ## Outcomes & Retrospective
@@ -73,11 +90,21 @@ The focused Jest suite passed all 12 tests. TypeScript and diff checks also pass
 
 The rebuilt browser verified page-level Dates to Price and Event type to Event tags switching, plus map Tags to Sports switching. Each new filter stayed open while the prior filter closed. The map rendered tiles and markers. Selecting a nearby event showed the selected-event card, hid the rail, and exposed the View event action. The summary clamp stayed at three lines. The earlier generic Google Maps error describes the pre-rerun state, not this result. No production deploy occurred.
 
+2026-09-10 outcome (date and map filter parity): The Dates overflow fix is scoped to the date panel. The map opens on the current Discover tab. Events use the shared event filter bar and apply event type, dates, sports, tags, division, price, and distance filters. Organizations use tag slugs, sports, division filters, and distance in area requests. Rentals use the shared rental-resource sport helper and the same time-range rules as the page. Teams use the shared open-registration and division helpers. Their markers and details state that they use organization locations.
+
+The focused Jest run passed 51/51 tests across the map, event tab, and page suites. TypeScript, ESLint, and the CRLF-aware diff check passed. These results cover source behavior and code checks, not the rendered calendar or map layout. Browser verification could not validate this edit because `site-ui-operations-prod` predates the source edits and no restart was authorized. No production deploy occurred.
+
 ## Context and Orientation
 
 The discover page is `src/app/discover/page.tsx`. It owns the active tab, location state, event fetching through `eventService.getEventsPaginated(...)`, and organization/rental loading through `organizationService.listOrganizationsWithFields()`. The event tab's search input currently lives in `src/app/discover/components/EventsTabContent.tsx`; organization and rental search inputs are local functions inside `page.tsx`. The web location button is `src/components/location/LocationSearch.tsx`, and map loading should reuse `src/lib/googleMapsLoader.ts`.
 
 Teams are canonical teams stored through the Prisma `CanonicalTeams` model and exposed by `src/app/api/teams/route.ts`, which calls `listCanonicalTeamsForUser(...)` in `src/server/teams/teamMembership.ts`. Open-registration state is stored as `openRegistration` on canonical teams.
+
+## Context Boundary
+
+For the date and map filter parity work, read `apps/site/src/app/discover/components/DiscoverFilterBar.tsx`, `DiscoverTabFilterBar.tsx`, `DiscoverMapModal.tsx`, `DivisionDiscoveryFilters.tsx`, `apps/site/src/app/discover/page.tsx`, and the Discover rules in `apps/site/src/app/globals.css`. Use `apps/site/src/app/discover/rentalSportFilters.ts`, `utils/teamFilters.ts`, and `apps/site/src/components/events/event-list-filtering.ts` for existing matching rules. Use the three focused Discover test suites named in `Artifacts and Notes` for regression coverage.
+
+Expand to the event or organization service only to confirm a request parameter or loaded relation. Browser verification of these edits requires a runtime built from these source files. A runtime restart requires separate authorization. Do not use the earlier browser results as proof of this pass.
 
 ## Plan of Work
 
@@ -85,7 +112,7 @@ First, extend the team listing path so callers can pass `query` and `openRegistr
 
 Second, create a shared discover search control component with the text field and a search button on the right. Use it in Events, Organizations, Rentals, and the new Teams tab. The existing location button remains beside the search group, with a new map button next to it. Do not show a page-level type dropdown because tab selection already scopes the search.
 
-Third, add the map modal. It opens centered on the current discover location when available, otherwise it asks for current location and falls back to a default center. Initial map loading searches around that center. Panning the map far enough shows "Search this area"; pressing it refreshes event results around the camera center and re-filters organizations/rentals around that center. The modal search bar lets the user choose Events, Organizations, or Rentals, then selecting a result pans to that marker and opens its details. Marker info actions navigate to the existing event or organization pages.
+Third, add the map modal. It opens on the active Discover tab and uses the current location when available. Otherwise, it requests the current location and uses a default center if that request cannot supply one. The fallback must retain the opening tab. Moving the map exposes "Search this area". Selecting that action reloads the current result type around the map center. Events, Organizations, Rentals, and Teams share the page's filter values and controls. Server-backed filter changes reload the current area. Local rental and team filters update loaded results. Selection actions open the relevant event, organization, rental, or team destination. Team results use organization coordinates with explicit location labels.
 
 Fourth, validate with focused tests around team API filtering, current-tab search behavior where practical, TypeScript, lint, and rendered browser checks against `/discover`.
 
@@ -107,7 +134,7 @@ Run commands from `/Users/elesesy/StudioProjects/mvp-site`.
 
 ## Validation and Acceptance
 
-Acceptance is user-visible. On `/discover`, each tab search area has one input and a Search button to the right, and the search applies to the current tab only. The Teams tab shows only teams with open registration. The Map button appears next to Set Location, opens a modal, and initially searches around the user's selected/current location. Panning the map reveals a Search this area button, and pressing it refreshes nearby markers. Selecting an event, organization, or rental search result in the modal pans to the marker and exposes a navigation action.
+Acceptance is user-visible. On `/discover`, each tab search applies to the current tab only. The Teams tab shows only teams with open registration. The Map button opens the same category as the active page tab. Each map category exposes and applies the matching page filters. Map search remains separate from the page query. Moving the map reveals "Search this area", which refreshes nearby results when selected. Selecting a result exposes its details and navigation action. Teams appear at organization coordinates with clear organization-location labels. The Dates panel must not clip its nested calendar or become the calendar's scroll container. Long non-date option lists must remain scrollable.
 
 ## Idempotence and Recovery
 
@@ -135,7 +162,7 @@ Reference-layout and environment-rerun artifacts (2026-09-10; historical evidenc
 - Browser limitation (2026-09-10): Despite the configured key being available, the Google Maps canvas still showed the generic `Oops! Something went wrong` surface with no map tiles or markers. Map pixels and markers remain unverified; this run did not establish a specific Google Cloud error.
 - Selected-summary clamp (2026-09-10): The three-line selected-summary clamp was rebuilt and observed in the selected-event card. It remained at three lines in the browser rerun after copying the environment files.
 
-Filter-race fix and rebuilt-rerun artifacts (2026-09-10; latest evidence):
+Filter-race fix and rebuilt-rerun artifacts (2026-09-10; historical evidence before the date and map filter parity work):
 
 - Commit `a7923e3f6` fixed the stale popover close race. It covers page-level and map-level filter owners. A delayed close for the old filter no longer clears the newly selected filter.
 - The focused `DiscoverMapModal.test.tsx` suite passed all 14 tests after the fix. The earlier 12-test result remains historical evidence.
@@ -145,6 +172,17 @@ Filter-race fix and rebuilt-rerun artifacts (2026-09-10; latest evidence):
 - Rebuilt `/discover` browser verification passed. Page-level Dates to Price and Event type to Event tags switching kept the new filter open while closing the prior filter. Map Tags to Sports switching did the same.
 - The rebuilt map rendered tiles and markers. Selecting a nearby event showed the selected-event card and hid the rail. The View event action appeared. The selected-summary clamp stayed at three lines.
 - The generic Google Maps error above occurred before this rerun. It is historical evidence, not the latest map result. No production deploy occurred.
+
+Date and map filter parity artifacts (2026-09-10; latest source verification):
+
+- Added `.discover-filter-popover--dates` through the shared `FilterPopover` panel class hook. Other filter panels retain their scrolling rules.
+- Added `apps/site/src/app/discover/components/DiscoverTabFilterBar.tsx`. Both the page and map use its organization, rental, and team controls. Events use `DiscoverFilterBar`.
+- The map receives the active page tab and tab-specific state and setters. Event requests include event type, division, and price parameters. Organization requests include tag slugs, sports, division, price, and distance parameters. Rental and team results use the shared matching helpers.
+- Team results load through nearby organizations with relations. The UI labels the marker position as an organization location. The hidden native category selector was removed.
+- Focused Jest result reported by integration validation: 3 suites passed, 51/51 tests passed. The suites were `apps/site/src/app/discover/components/__tests__/DiscoverMapModal.test.tsx`, `apps/site/src/app/discover/components/__tests__/EventsTabContent.test.tsx`, and `apps/site/src/app/discover/__tests__/page.test.tsx`.
+- TypeScript passed. ESLint passed. The CRLF-aware diff check passed.
+- Browser inspection did not validate this edit. The existing `site-ui-operations-prod` runtime predates the source edits. No restart was authorized for this pass. Earlier rebuilt-browser results apply only to the earlier source state.
+- No production deploy occurred.
 
 ## Interfaces and Dependencies
 
@@ -159,3 +197,5 @@ Revision note (2026-09-10): Recorded the completed reference layout and its veri
 Revision note (2026-09-10, environment rerun): Replaced the current missing-key limitation with the copied-env production rebuild, ready authorized restart, and keyed browser evidence. Distinguished the available key from the unresolved Google Maps rendering failure, retained the three-line summary result, and preserved earlier verification history.
 
 Revision note (2026-09-10, filter-race rerun): Recorded commit `a7923e3f6`, the 14-test focused suite, code checks, build results, authorized runtime readiness, and rebuilt browser verification. Marked the earlier generic Maps error as pre-rerun history. The latest run rendered tiles and markers. Preserved earlier evidence and acceptance text. No production deploy occurred.
+
+Revision note (2026-09-10, date and map filter parity): Recorded the scoped Dates overflow fix, shared filters, active-tab map behavior, organization-location team results, and the 51/51 focused test result. Recorded the TypeScript, ESLint, and CRLF-aware diff check results. Corrected current category-selector and team map descriptions. Preserved earlier implementation and browser history. Browser verification of this edit remains incomplete because the runtime predates the edits and no restart was authorized. No production deploy occurred.
