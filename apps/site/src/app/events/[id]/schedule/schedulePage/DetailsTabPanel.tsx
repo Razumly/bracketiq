@@ -1,5 +1,5 @@
 import type { RefObject } from 'react';
-import { Tabs, Center, Loader } from '@mantine/core';
+import { Loader } from '@/components/organization/organization-operation-ui';
 import EventDetailSheet from '@/app/discover/components/EventDetailSheet';
 import type { Event, Organization, UserData } from '@/types';
 import EventForm, { type EventFormHandle } from '../components/EventForm';
@@ -51,7 +51,7 @@ export default function DetailsTabPanel({
   onWeeklyOccurrenceChange,
 }: DetailsTabPanelProps) {
   return (
-    <Tabs.Panel value="details" pt="md">
+    <>
       {shouldShowCreationSheet && user ? (
         editorSnapshot ? (
           <EventForm
@@ -71,7 +71,9 @@ export default function DetailsTabPanel({
             templateOrganizationId={isCreateMode ? templateOrganizationId : undefined}
           />
         ) : (
-          <Center mih={240}><Loader /></Center>
+          <div className="flex min-h-60 items-center justify-center">
+            <Loader />
+          </div>
         )
       ) : (
         <EventDetailSheet
@@ -83,6 +85,6 @@ export default function DetailsTabPanel({
           onClose={onClose}
         />
       )}
-    </Tabs.Panel>
+    </>
   );
 }

@@ -9198,29 +9198,31 @@ function EventScheduleContent() {
               )}
               {showFinanceTab && <Tabs.Tab value="finance">Finance</Tabs.Tab>}
             </Tabs.List>
-            <DetailsTabPanel
-              shouldShowCreationSheet={shouldShowCreationSheet}
-              user={user}
-              eventFormRenderKey={eventFormRenderKey}
-              eventFormRef={eventFormRef}
-              isActive={activeTab === "details"}
-              onClose={handleDetailsClose}
-              onDirtyStateChange={handleEventFormDirtyStateChange}
-              onDraftStateChange={handleEditorDraftStateChange}
-              onValidityChange={setIsEventFormValid}
-              onSubmitRequest={isCreateMode ? handlePublish : handleSaveEvent}
-              event={activeEvent}
-              editorSnapshot={editorSnapshot}
-              organization={activeOrganization}
-              defaultLocation={activeLocationDefaults}
-              isCreateMode={isCreateMode}
-              rentalPurchase={rentalPurchaseContext}
-              templateOrganizationId={
-                resolvedRentalOrgId ?? activeOrganization?.$id ?? undefined
-              }
-              selectedOccurrence={selectedOccurrence}
-              onWeeklyOccurrenceChange={updateWeeklyOccurrenceSelection}
-            />
+            <Tabs.Panel value="details" pt="md">
+              <DetailsTabPanel
+                shouldShowCreationSheet={shouldShowCreationSheet}
+                user={user}
+                eventFormRenderKey={eventFormRenderKey}
+                eventFormRef={eventFormRef}
+                isActive={activeTab === "details"}
+                onClose={handleDetailsClose}
+                onDirtyStateChange={handleEventFormDirtyStateChange}
+                onDraftStateChange={handleEditorDraftStateChange}
+                onValidityChange={setIsEventFormValid}
+                onSubmitRequest={isCreateMode ? handlePublish : handleSaveEvent}
+                event={activeEvent}
+                editorSnapshot={editorSnapshot}
+                organization={activeOrganization}
+                defaultLocation={activeLocationDefaults}
+                isCreateMode={isCreateMode}
+                rentalPurchase={rentalPurchaseContext}
+                templateOrganizationId={
+                  resolvedRentalOrgId ?? activeOrganization?.$id ?? undefined
+                }
+                selectedOccurrence={selectedOccurrence}
+                onWeeklyOccurrenceChange={updateWeeklyOccurrenceSelection}
+              />
+            </Tabs.Panel>
 
             {showParticipantsTab && (
               <Tabs.Panel value="participants" pt="md">
