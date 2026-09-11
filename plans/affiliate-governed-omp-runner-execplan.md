@@ -1880,8 +1880,8 @@ reviewer must make and cite its own current-policy determination.
 - [x] Implement package-free reviewer claims and bounded operator admission.
 - [x] Verify preview, admission, exclusion, replay, and denied side effects.
 - [x] Complete independent Standards and Spec review.
-- [ ] Obtain separate authorization for the exact production deployment and workers.
-- [ ] Execute one governed Mission exclusion.
+- [x] Obtain separate authorization for the exact production deployment and workers.
+- [x] Execute one governed Mission exclusion.
 - [ ] Process TPH Academy Austin, then Ultimate Chicago, with independent review.
 
 ### Discoveries and decisions
@@ -2060,3 +2060,127 @@ were removed. The local Postgres server remains running. No production image
 was published. No production service, claim, source, candidate, or target was
 changed. Mission's actual exclusion and the two supported-source trials still
 require the separately authorized production rollout.
+
+## Authorized Mission exclusion rollout
+
+The operator authorized the next bounded rollout. Use reviewed source
+`c0364064825c5a5f57e681b86077dfda08ec5902`. Its Site CI run
+`34555355451` passed. Publish the matching immutable worker and Gateway images.
+Refresh only affiliate-gateway, affiliate-agent-runner, mapping-producer-1,
+supply-reviewer-1, affiliate-model-auth-broker, and affiliate-model-gateway.
+Keep the broker volume, both logins, bearer files, security profiles, networks,
+and restart policy unchanged.
+
+Prepare deployment contract 8 with the source-exported role/prompt 8
+contracts. Keep admission closed during deployment. Run fresh preflight.
+After the exact Mission PREVIEW/APPLY, start only the root runner and
+reviewer 1 for one SOURCE_EXCLUSION_REVIEW claim. Close admission after the
+claim. Stop the runner and reviewer after its result. The producer stays
+stopped. TPH, Ultimate, publication, automatic scraping, coverage,
+replenishment, the five dormant services, site, and mobile remain out of scope.
+
+The initial read-only checks found closed admission, zero active claims and
+zero retained claim pointers. Mission remains PRE_MAPPED at generation 1.
+Its source is REVIEW_REQUIRED and its organization is UNLISTED with public
+pages and widgets disabled. TPH and Ultimate remain QUEUED at claim generation
+zero. Both distinct model accounts passed the health check with broker-managed
+refresh. All 99 original protected fingerprints matched.
+
+This rollout also captures 272 preexisting Gateway/history and selected
+domain/evidence fingerprints. Keep those records unchanged. The only permitted
+domain change is Mission's reviewed source exclusion and its new governed
+claim, receipts, audit events, and EXCLUDE_SOURCE transition.
+
+Private rollout files will be stored under
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v8-mission-exclusion-c03640648`.
+The reviewed source export is under
+`/home/bracketiq/.cache/affiliate-governed-builds/c0364064825c5a5f57e681b86077dfda08ec5902/apps/site`.
+The image publication run is `34559475479`.
+
+### Deployment and bounded claim evidence
+
+The authorized image publication completed successfully. GitHub's production
+environment gate required operator approval before the build could start.
+The approval applied only to this exact reviewed release.
+
+The immutable worker image is
+`ghcr.io/razumly/bracketiq-affiliate-governed@sha256:afaedf0accbebc81a1a40e9996f8cb6ae4433a2c8ee75bc4dc62b6314bc40946`.
+The immutable Gateway image is
+`ghcr.io/razumly/bracketiq-affiliate-gateway@sha256:db5c63dd6d1dba4340991850a05d241d7c6df60d8e9522e2f3822a3e08fff14f`.
+Both revision labels and shipped contract exports match the reviewed source.
+Producer/reviewer containment and the three real SDK scenarios passed in the
+published worker image.
+
+Deployment contract 8 has hash
+`079f8d488c89cf600809fd9d0a73a3a70b0bcadfccc7d7a50e26086cc00c0f5a`.
+Fresh preflight passed without blockers or warnings at
+`2026-09-11T04:08:40.903Z`, with report hash
+`47d68746d876b91dada0b07aff504329c8f385159e6bd87e5767825a8e97f420`.
+The five dormant services and all 272 preexisting protected rows were
+unchanged after the refresh. Both model accounts retained their identities
+and passed their health checks.
+
+The deployed Gateway returned the same eligible Mission PREVIEW twice with
+report hash
+`2b3893b8a92a8724de76990f48555827f84908384de2a8d862c801ad54e4ad3a`.
+APPLY created reviewer job `7da3401d-ace6-49ce-9f8d-857b7fafcb18`.
+Exact APPLY replay returned the same job with zero writes.
+
+One 300-second exact-job reviewer lease was opened. Claim
+`agw-claim-fcc228f5-4b03-4e07-bebe-94fb65f3df55` is generation 1, has
+SOURCE_EXCLUSION_REVIEW, and uses SINGLE_CLAIM. The safety monitor closed
+admission after the claim. Only the runner and reviewer 1 were started.
+The producer remains stopped. No TPH or Ultimate claim was admitted.
+
+### Completed exclusion and final safety
+
+The independent reviewer ran from `2026-09-11T04:12:52.850Z` to
+`2026-09-11T04:14:28.858Z`. It returned SOURCE_EXCLUSION_ASSESSED with
+recommendation EXCLUDE. Its own current-policy assessment identifies Track and
+Field as BLACKLISTED, cites the stored HTML running and field-event schedule,
+and leaves canonical sport names empty. The original UNSUPPORTED producer
+result remains unchanged.
+
+The Gateway accepted the result with zero authoritative schema corrections
+and no invocation failure. The result hash is
+`dd3b5c0163b6596db385b990c5778c288eadbe2a664a92647014d11c78bcf077`.
+The succeeded terminal-effect receipt is
+`agw-receipt-9701c022-0a9d-4c1d-b697-143d701386e6`.
+The terminal receipt is
+`agw-receipt-e0b72fb5-5f26-447f-9203-ac8cf191254b`.
+
+EXCLUDE_SOURCE transition `956a8057-a326-4dab-bb47-7347c08fae0d` records
+SUPPLY_REVIEWER authority and generation 2. Mission now has isExcluded true,
+excludedAt `2026-09-11T04:14:28.472Z`, stage SOURCE_EXCLUDED, and outcome
+SOURCE_EXCLUDED. Its scrape source status is EXCLUDED. Automatic scraping and
+root automation are disabled. Supply Target count remains zero.
+
+Exactly one reviewer claim ran. Its five receipts all succeeded: two artifact
+reads, one heartbeat, one terminal effect, and one terminal submission.
+No producer, mapping-package, approval, publication, or capture command ran.
+Exact post-completion admission APPLY replay returned the same reviewer job
+with zero writes.
+
+Admission is closed. The runner and reviewer 1 are stopped, and the producer
+was never started. Active claims and unresolved claim pointers are zero. The
+workspace is empty. The Gateway and both model services are healthy with
+restart policy no. Both model accounts remain distinct and healthy.
+
+All 272 preexisting fingerprints and all 99 original protected fingerprints
+remain unchanged. The original producer history, pinned artifacts, intake,
+mapping job, mapping, organization, and candidate are retained. TPH and
+Ultimate remain QUEUED at claim generation zero. Their roots and source
+settings are unchanged. All five dormant service identities and states are
+unchanged. The prior workload environment and canonical governed-deployment
+environment retain their original hashes.
+
+The private `run/final-safety.json`, `run/reviewer-outcome.json`,
+`run/post-completion-replay.json`, and `run/environment-preservation.json`
+contain the final proof. The monitor exited normally and created no temporary
+script file. The private deployment helpers and source export remain as
+reproducible operational evidence.
+
+The authorized Mission exclusion is complete. The next separate bounded
+operation is TPH Academy Austin, followed by Ultimate Chicago, with an
+independent reviewer for each resulting package. No broader work is authorized
+by this completion record.
