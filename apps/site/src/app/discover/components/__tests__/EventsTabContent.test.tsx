@@ -29,10 +29,11 @@ const events = [
 
 function Harness({
   initialDivisionFilters,
+  initialSelectedSports = [],
   ...overrides
-}: Partial<Props> & { initialDivisionFilters?: DivisionDiscoveryFilterValue }) {
+}: Partial<Props> & { initialDivisionFilters?: DivisionDiscoveryFilterValue; initialSelectedSports?: string[] }) {
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedSports, setSelectedSports] = useState<string[]>([]);
+  const [selectedSports, setSelectedSports] = useState(initialSelectedSports);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedStartDate, setSelectedStartDate] = useState<Date | null>(null);
   const [selectedEndDate, setSelectedEndDate] = useState<Date | null>(null);
@@ -61,6 +62,7 @@ function Harness({
       defaultMaxDistance={50} kmBetween={() => 0} events={events} totalEvents={37}
       isLoadingInitial={false} isLoadingMore={false} hasMoreEvents={false}
       sentinelRef={createRef<HTMLDivElement>()} eventsError={null}
+      onRetry={jest.fn()}
       onEventClick={jest.fn()} onCreateEvent={jest.fn()} {...overrides}
     />
   );
@@ -104,6 +106,18 @@ it('opens More sports as a dropdown with remaining sports', async () => {
   expect(within(sportsDialog).getByRole('button', { name: 'Rugby', exact: true })).toBeInTheDocument();
   expect(within(sportsDialog).getByRole('button', { name: 'Tennis', exact: true })).toBeInTheDocument();
 });
+it('searches the complete sport collection from More sports', async () => {
+  const user = userEvent.setup();
+  render(<Harness sports={['Basketball', 'Volleyball', 'Rugby', 'Tennis']} />);
+
+  await user.click(screen.getByRole('button', { name: 'More sports', exact: true }));
+  const searchInput = screen.getByRole('textbox', { name: 'Search sports', exact: true });
+  await user.type(searchInput, 'Tennis');
+
+  expect(screen.getByRole('button', { name: 'Tennis', exact: true })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Rugby', exact: true })).not.toBeInTheDocument();
+});
+
 
 it('keeps the Price maximum input focused while editing from More filters', async () => {
   const clientWidthDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
@@ -138,16 +152,42 @@ it('keeps the Price maximum input focused while editing from More filters', asyn
   }
 });
 
-it('shows every event filter trigger when the toolbar has room', () => {
+it('shows the skill trigger only for one sport when the toolbar has room', async () => {
+  const user = userEvent.setup();
+  globalThis.fetch = jest.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      sportSkills: [
+        {
+          sportId: 'volleyball',
+          sportName: 'Volleyball',
+          skills: [{ id: 'open', name: 'Open' }],
+        },
+      ],
+    }),
+  });
   const clientWidthDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
   Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, value: 2000 });
   try {
     render(<Harness />);
-    ['Dates', 'Price', /^Distance/, 'Event type', 'Event tags', 'Gender', 'Age group', 'Skill level'].forEach((name) => {
+    ['Dates', 'Price', /^Distance/, 'Event type', 'Event tags', 'Gender', 'Age group'].forEach((name) => {
       expect(screen.getByRole('button', { name, exact: typeof name === 'string' })).toBeInTheDocument();
     });
     expect(screen.queryByRole('button', { name: 'More filters' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'More sports' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Skill level(?:$|:)/ })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Volleyball', exact: true }));
+    await user.click(screen.getByRole('button', { name: 'Skill level', exact: true }));
+    await user.click(await screen.findByRole('button', { name: 'Open', exact: true }));
+    expect(screen.getByRole('button', { name: 'Open', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await user.keyboard('{Escape}');
+
+    await user.click(screen.getByRole('button', { name: 'Basketball', exact: true }));
+    expect(screen.queryByRole('button', { name: /^Skill level(?:$|:)/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Gender', exact: true })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Age group', exact: true })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Price', exact: true })).toBeInTheDocument();
   } finally {
     if (clientWidthDescriptor) {
       Object.defineProperty(HTMLElement.prototype, 'clientWidth', clientWidthDescriptor);
@@ -198,7 +238,7 @@ it('opens the shared date filter popover from the desktop filter row', async () 
   const dateDialog = screen.getByRole('dialog', { name: 'Dates filter' });
   expect(dateDialog.closest('.discover-filter-row')).toBeNull();
 });
-it('clears unavailable skill selections when sports change', async () => {
+it.each(['Basketball', 'All sports'])('clears skills when a single sport becomes ineligible through %s', async (sportButton) => {
   globalThis.fetch = jest.fn().mockResolvedValue({
     ok: true,
     json: async () => ({
@@ -219,7 +259,7 @@ it('clears unavailable skill selections when sports change', async () => {
     }),
   });
   const user = userEvent.setup();
-  render(<Harness initialDivisionFilters={{
+  render(<Harness initialSelectedSports={['Volleyball']} initialDivisionFilters={{
     genders: [],
     skillDivisionTypeIds: ['volleyball-beginner'],
     ageDivisionTypeIds: [],
@@ -228,7 +268,7 @@ it('clears unavailable skill selections when sports change', async () => {
   }} />);
 
   await waitFor(() => expect(screen.getByRole('button', { name: 'Division filters', exact: true })).toBeInTheDocument());
-  await user.click(screen.getByRole('button', { name: 'Basketball', exact: true }));
+  await user.click(screen.getByRole('button', { name: sportButton, exact: true }));
   await waitFor(() => expect(screen.queryByRole('button', { name: 'Division filters', exact: true })).not.toBeInTheDocument());
 });
 
@@ -302,6 +342,13 @@ it.each(['Soonest', 'Price (Low to High)'])('sorts cached cards by %s without fe
   expect(cardNames()).toEqual(['Volleyball early', 'Basketball middle', 'Basketball late']);
   expect(onFilterChange).not.toHaveBeenCalled();
 });
+it('keeps the server total for a matching scoped cache', () => {
+  render(<Harness initialSelectedSports={['Basketball']} hasScopedEventCache />);
+
+  expect(cardNames()).toEqual(['Basketball late', 'Basketball middle']);
+  expect(screen.getByText('37 events available.')).toBeInTheDocument();
+});
+
 
 it('delegates a controlled sort and waits for the caller value', async () => {
   const user = userEvent.setup();
@@ -313,6 +360,25 @@ it('delegates a controlled sort and waits for the caller value', async () => {
   expect(cardNames()[0]).toBe('Basketball late');
   view.rerender(<Harness eventSort="soonest" onEventSortChange={onEventSortChange} />);
   expect(cardNames()[0]).toBe('Volleyball early');
+});
+
+it('offers retry after a request failure instead of reporting empty or exhausted results', async () => {
+  const user = userEvent.setup();
+  const onRetry = jest.fn();
+  const view = render(
+    <Harness events={[]} totalEvents={0} eventsError="Events are unavailable" onRetry={onRetry} />,
+  );
+  expect(screen.getByRole('alert')).toHaveTextContent('Events are unavailable');
+  expect(screen.queryByText('No events match your filters')).not.toBeInTheDocument();
+  expect(screen.queryByText('0 events available.')).not.toBeInTheDocument();
+  expect(screen.queryByText("You've reached the end of the results.")).not.toBeInTheDocument();
+
+  await user.click(screen.getByRole('button', { name: 'Retry events' }));
+  expect(onRetry).toHaveBeenCalledTimes(1);
+
+  view.rerender(<Harness events={[]} totalEvents={0} onRetry={onRetry} />);
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(screen.getByText('No events match your filters')).toBeInTheDocument();
 });
 
 it('keeps filters and cached results while a partial-cache refresh fails', async () => {
@@ -334,6 +400,13 @@ it('keeps filters and cached results while a partial-cache refresh fails', async
   expect(input).toHaveValue('Basketball');
   expect(cardNames()).toHaveLength(2);
   expect(screen.queryByText('Updating events…')).not.toBeInTheDocument();
+  onFilterChange.mockImplementationOnce(async () => {});
+  await user.click(screen.getByRole('button', { name: 'Retry events' }));
+  await act(async () => { await Promise.resolve(); });
+  expect(onFilterChange).toHaveBeenCalledTimes(2);
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(input).toHaveValue('Basketball');
+  expect(cardNames()).toEqual(['Basketball late', 'Basketball middle']);
 });
 
 it('retains filters during initial loading and applies them when events arrive', async () => {

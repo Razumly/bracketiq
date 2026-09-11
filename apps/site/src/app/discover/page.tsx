@@ -10,19 +10,20 @@ import {
   Loader,
   Paper,
   Text,
-  Title,
 } from '@/components/organization/organization-operation-ui';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsContent } from '@/components/ui/tabs';
+import { Plus, SlidersHorizontal } from 'lucide-react';
 
 
 import Navigation from '@/components/layout/Navigation';
+import LocationSearch from '@/components/location/LocationSearch';
 import Loading from '@/components/ui/Loading';
 import OrganizationCard from '@/components/ui/OrganizationCard';
 import TeamCard from '@/components/ui/TeamCard';
 import ResponsiveCardGrid from '@/components/ui/ResponsiveCardGrid';
 import { useApp } from '@/app/providers';
 import { useLocation } from '@/app/hooks/useLocation';
-import { hasEventListFilters } from '@/components/events/event-list-filtering';
+import { eventListFilterKey, hasEventListFilters } from '@/components/events/event-list-filtering';
 import { useDebounce } from '@/app/hooks/useDebounce';
 import { ActiveEventFilters } from '@/components/events/EventFilterControls';
 import { Event, EventTag, Facility, Field, Organization, OrganizationTag, Team, TimeSlot } from '@/types';
@@ -43,10 +44,14 @@ import {
 } from '@/lib/discoverFilters';
 import { normalizeExternalHttpUrl } from '@/lib/externalUrl';
 import EventsTabContent, { type EventSortValue } from './components/EventsTabContent';
+import DiscoverSearchBar from './components/DiscoverSearchBar';
+import DiscoverResultsShell from './components/DiscoverResultsShell';
+import DiscoverFiltersModal from './components/DiscoverFiltersModal';
+import DiscoverFilterBar from './components/DiscoverFilterBar';
 import DiscoverSearchControls from './components/DiscoverSearchControls';
 import DiscoverMapModal from './components/DiscoverMapModal';
-import type { DivisionDiscoveryFilterValue } from './components/DivisionDiscoveryFilters';
-import DiscoverTabFilterBar, { formatRentalHourLabel } from './components/DiscoverTabFilterBar';
+import { useDivisionDiscoveryOptions, type DivisionDiscoveryFilterValue } from './components/DivisionDiscoveryFilters';
+import DiscoverTabFilterBar, { formatRentalHourLabel, hasDiscoveryDivisionFilters } from './components/DiscoverTabFilterBar';
 import {
   buildTeamDivisionFilterOptions,
   filterOpenRegistrationTeams,
@@ -123,8 +128,19 @@ function DiscoverPageContent() {
     [searchParamsString],
   );
   const { user, loading: authLoading, isAuthenticated, isGuest } = useApp();
-  const { location, locationInfo, requestLocation, setLocationFromInfo } = useLocation();
+  const { location, locationInfo, requestLocation, clearLocation, setLocationFromInfo } = useLocation();
 
+  const hasSearchPreset = Boolean(
+    urlPreset.query || urlSelectedSports.length || urlPreset.location
+    || urlPreset.tags.length || urlPreset.eventTypes.length
+    || urlPreset.genders.length || urlPreset.skillDivisionTypeIds.length
+    || urlPreset.ageDivisionTypeIds.length || urlPreset.teamDivisionTypeIds.length
+    || urlPreset.priceMinDollars !== null || urlPreset.priceMaxDollars !== null
+    || urlPreset.startDate || urlPreset.endDate || urlPreset.startHour !== null,
+  );
+  const [hasSearched, setHasSearched] = useState(hasSearchPreset);
+  const [searchExpanded, setSearchExpanded] = useState(!hasSearchPreset);
+  const [filtersOpened, setFiltersOpened] = useState(false);
   const [activeTab, setActiveTab] = useState<DiscoverTab>(() => urlPreset.tab);
 
   /**
@@ -136,9 +152,12 @@ function DiscoverPageContent() {
   const [hasMoreEvents, setHasMoreEvents] = useState(true);
   const [eventCacheHasFilters, setEventCacheHasFilters] = useState(false);
   const [eventCacheStartDate, setEventCacheStartDate] = useState<string>();
+  const [eventCacheSort, setEventCacheSort] = useState<EventSearchSort | null>(null);
+  const [eventCacheFilterKey, setEventCacheFilterKey] = useState<string | null>(null);
   const [eventOffset, setEventOffset] = useState(0);
   const [eventTotalCount, setEventTotalCount] = useState<number | null>(null);
   const [eventsError, setEventsError] = useState<string | null>(null);
+  const retryEventsFromStartRef = useRef(true);
   const hasLoadedEventsRef = useRef(false);
   const latestFirstPageRequestRef = useRef(0);
   const isFirstPageRequestInFlightRef = useRef(false);
@@ -215,6 +234,7 @@ function DiscoverPageContent() {
 
   const { sports, loading: sportsLoading, error: sportsError } = useSports();
   const sportOptions = useMemo(() => sports.map((sport) => sport.name), [sports]);
+  const eventDivisionOptions = useDivisionDiscoveryOptions(selectedSports, filtersOpened && activeTab === 'events');
   useEffect(() => {
     const controller = new AbortController();
     setEventTagsLoading(true);
@@ -281,6 +301,7 @@ function DiscoverPageContent() {
   const [rentalsLoadingMore, setRentalsLoadingMore] = useState(false);
   const [hasMoreRentals, setHasMoreRentals] = useState(true);
   const [rentalsError, setRentalsError] = useState<string | null>(null);
+  const retryRentalsFromStartRef = useRef(true);
   const rentalOffsetRef = useRef(0);
   const hasMoreRentalsRef = useRef(true);
   const rentalRequestInFlightRef = useRef(false);
@@ -307,6 +328,7 @@ function DiscoverPageContent() {
   const [organizationsLoadingMore, setOrganizationsLoadingMore] = useState(false);
   const [hasMoreOrganizations, setHasMoreOrganizations] = useState(true);
   const [organizationsError, setOrganizationsError] = useState<string | null>(null);
+  const retryOrganizationsFromStartRef = useRef(true);
   const organizationOffsetRef = useRef(0);
   const hasMoreOrganizationsRef = useRef(true);
   const organizationRequestInFlightRef = useRef(false);
@@ -326,17 +348,13 @@ function DiscoverPageContent() {
   const [hasMoreTeams, setHasMoreTeams] = useState(true);
   const [teamOffset, setTeamOffset] = useState(0);
   const [teamsError, setTeamsError] = useState<string | null>(null);
+  const retryTeamsFromStartRef = useRef(true);
   const [teamSelectedSports, setTeamSelectedSports] = useState<string[]>(() => (
     urlPreset.tab === 'teams' ? urlSelectedSports : []
   ));
   const [teamSelectedDivisionTypeValues, setTeamSelectedDivisionTypeValues] = useState<string[]>(() => (
     urlPreset.tab === 'teams' ? urlPreset.teamDivisionTypeIds : []
   ));
-
-  /**
-   * Map modal state
-   */
-  const [mapOpened, setMapOpened] = useState(false);
 
   const hasGuestSession = isGuest || (
     typeof window !== 'undefined' && window.localStorage.getItem('guest-session') === '1'
@@ -590,10 +608,24 @@ function DiscoverPageContent() {
 
       setEvents(page.events.filter((event) => !hiddenEventIds.has(event.$id)));
       setEventCacheStartDate(filters.dateFrom);
+      setEventCacheSort(serverEventSort);
       setEventCacheHasFilters(hasEventListFilters({
         searchTerm: filters.query ?? '', selectedEventTypes, eventTypeOptions: EVENT_TYPE_OPTIONS,
         selectedSports, selectedTags: selectedEventTags, selectedStartDate, selectedEndDate,
         location, maxDistance, hideWeeklyChildren: false, divisionFilters: eventDivisionFilters,
+      }));
+      setEventCacheFilterKey(eventListFilterKey({
+        searchTerm: filters.query ?? '',
+        selectedEventTypes,
+        eventTypeOptions: EVENT_TYPE_OPTIONS,
+        selectedSports,
+        selectedTags: selectedEventTags,
+        selectedStartDate,
+        selectedEndDate,
+        location,
+        maxDistance,
+        hideWeeklyChildren: false,
+        divisionFilters: eventDivisionFilters,
       }));
       setEventOffset(page.pagination.nextOffset);
       setEventTotalCount(page.pagination.totalCount);
@@ -604,6 +636,7 @@ function DiscoverPageContent() {
         return;
       }
       console.error('Failed to load events:', error);
+      retryEventsFromStartRef.current = true;
       setEventsError('Failed to load events. Please try again.');
     } finally {
       if (requestId === latestFirstPageRequestRef.current) {
@@ -619,6 +652,7 @@ function DiscoverPageContent() {
       isFirstPageRequestInFlightRef.current ||
       isLoadingMore ||
       isLoadMoreRequestInFlightRef.current ||
+      eventCacheSort !== serverEventSort ||
       !hasMoreEvents
     ) return;
     isLoadMoreRequestInFlightRef.current = true;
@@ -646,15 +680,15 @@ function DiscoverPageContent() {
     } catch (error) {
       if (requestId !== latestFirstPageRequestRef.current) return;
       console.error('Failed to load more events:', error);
+      retryEventsFromStartRef.current = false;
       setEventsError('Failed to load more events. Please try again.');
-      setHasMoreEvents(false);
     } finally {
       if (requestId === latestFirstPageRequestRef.current) {
         isLoadMoreRequestInFlightRef.current = false;
         setIsLoadingMore(false);
       }
     }
-  }, [buildEventFilters, eventOffset, isLoadingInitial, isLoadingMore, hasMoreEvents, hiddenEventIds, serverEventSort]);
+  }, [buildEventFilters, eventCacheSort, eventOffset, isLoadingInitial, isLoadingMore, hasMoreEvents, hiddenEventIds, serverEventSort]);
 
   useEffect(() => {
     if (hiddenEventIds.size === 0) {
@@ -713,6 +747,7 @@ function DiscoverPageContent() {
     } catch (error) {
       if (requestId !== latestRentalRequestRef.current) return;
       console.error('Failed to load rentals:', error);
+      retryRentalsFromStartRef.current = reset;
       setRentalsError('Failed to load rentals. Please try again.');
     } finally {
       if (requestId === latestRentalRequestRef.current) {
@@ -775,6 +810,7 @@ function DiscoverPageContent() {
     } catch (error) {
       if (requestId !== latestOrganizationRequestRef.current) return;
       console.error('Failed to load organizations:', error);
+      retryOrganizationsFromStartRef.current = reset;
       setOrganizationsError('Failed to load organizations. Please try again.');
     } finally {
       if (requestId === latestOrganizationRequestRef.current) {
@@ -814,6 +850,7 @@ function DiscoverPageContent() {
       setHasMoreTeams(page.pagination.hasMore);
     } catch (error) {
       console.error('Failed to load open registration teams:', error);
+      retryTeamsFromStartRef.current = reset;
       setTeamsError('Failed to load teams. Please try again.');
     } finally {
       setTeamsLoading(false);
@@ -834,6 +871,8 @@ function DiscoverPageContent() {
   }, [loadTeams]);
 
   const handleSearchSubmit = useCallback(() => {
+    setHasSearched(true);
+    setSearchExpanded(false);
     if (activeTab === 'events') {
       void loadFirstPage(searchTerm);
     }
@@ -877,7 +916,7 @@ function DiscoverPageContent() {
       return;
     }
     loadFirstPageRef.current();
-  }, [isAuthenticated, hasGuestSession, authLoading, activeTab]);
+  }, [isAuthenticated, hasGuestSession, authLoading, activeTab, serverEventSort]);
 
   const presetLocationAppliedRef = useRef(false);
   useEffect(() => {
@@ -909,6 +948,11 @@ function DiscoverPageContent() {
   }, [location?.lat, location?.lng]);
 
   const locationRequestAttemptedRef = useRef(false);
+  const handleClearLocation = useCallback(() => {
+    locationRequestAttemptedRef.current = true;
+    clearLocation();
+  }, [clearLocation]);
+
   useEffect(() => {
     if (location || urlPreset.location) {
       return;
@@ -942,10 +986,10 @@ function DiscoverPageContent() {
     if (activeTab === 'rentals') {
       void loadRentals(true);
     }
-    if (activeTab === 'teams') {
+    if (activeTab === 'teams' && !teamsError) {
       loadTeams();
     }
-  }, [activeTab, loadRentals, loadTeams]);
+  }, [activeTab, loadRentals, loadTeams, teamsError]);
 
   useEffect(() => {
     if (activeTab !== 'organizations') {
@@ -996,7 +1040,7 @@ function DiscoverPageContent() {
   const rentalsSentinelRef = useRef<HTMLDivElement | null>(null);
   const teamsSentinelRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    if (!sentinelRef.current) return;
+    if (!sentinelRef.current || eventsError) return;
     const el = sentinelRef.current;
     const observer = new IntersectionObserver(
       (entries) => {
@@ -1009,9 +1053,14 @@ function DiscoverPageContent() {
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, [loadMoreEvents]);
+  }, [eventsError, hasSearched, loadMoreEvents]);
 
   useEffect(() => {
+    if (
+      activeTab === 'organizations' && organizationsError
+      || activeTab === 'rentals' && rentalsError
+      || activeTab === 'teams' && teamsError
+    ) return;
     const sentinelByTab: Partial<Record<DiscoverTab, HTMLDivElement | null>> = {
       organizations: organizationsSentinelRef.current,
       rentals: rentalsSentinelRef.current,
@@ -1036,7 +1085,7 @@ function DiscoverPageContent() {
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, [activeTab, loadMoreOrganizations, loadMoreRentals, loadMoreTeams]);
+  }, [activeTab, hasSearched, loadMoreOrganizations, loadMoreRentals, loadMoreTeams, organizationsError, rentalsError, teamsError]);
 
   /**
    * Rentals derived data
@@ -1236,6 +1285,74 @@ function DiscoverPageContent() {
     router.push(team.organizationId ? `/organizations/${team.organizationId}?tab=teams` : '/teams');
   };
 
+  const activeSports = activeTab === 'teams' ? teamSelectedSports : selectedSports;
+  const setActiveSports = activeTab === 'teams' ? setTeamSelectedSports : setSelectedSports;
+  const locationLabel = locationInfo?.formattedAddress?.trim()
+    || [locationInfo?.city, locationInfo?.state].filter(Boolean).join(', ')
+    || (location ? 'Current location' : 'Anywhere');
+  const activeFilterCount = Number(Boolean(searchTerm.trim())) + activeSports.length + (
+    activeTab === 'events'
+      ? selectedEventTags.length
+        + (selectedEventTypes.length === EVENT_TYPE_OPTIONS.length ? 0 : selectedEventTypes.length)
+        + Number(Boolean(selectedStartDate)) + Number(Boolean(selectedEndDate))
+        + Number(hasDiscoveryDivisionFilters(eventDivisionFilters))
+        + Number(Boolean(location && maxDistance !== null))
+      : activeTab === 'organizations'
+        ? selectedOrganizationTags.length
+          + Number(hasDiscoveryDivisionFilters(organizationDivisionFilters))
+          + Number(Boolean(location && organizationsMaxDistance !== null))
+        : activeTab === 'rentals'
+          ? Number(timeRange[0] !== defaultTimeRange[0] || timeRange[1] !== defaultTimeRange[1])
+            + Number(Boolean(location && rentalsMaxDistance !== null))
+          : teamSelectedDivisionTypeValues.length
+  );
+  const resetActiveFilters = () => {
+    setSearchTerm('');
+    setActiveSports([]);
+    if (activeTab === 'events') {
+      setSelectedEventTypes([...EVENT_TYPE_OPTIONS]);
+      setSelectedEventTags([]);
+      updateMaxDistance(null);
+      setSelectedStartDate(null);
+      setSelectedEndDate(null);
+      setEventDivisionFilters(EMPTY_DIVISION_FILTERS);
+    } else if (activeTab === 'organizations') {
+      setSelectedOrganizationTags([]);
+      setOrganizationDivisionFilters(EMPTY_DIVISION_FILTERS);
+      setOrganizationsMaxDistance(null);
+    } else if (activeTab === 'rentals') {
+      setRentalsMaxDistance(null);
+      setTimeRange(defaultTimeRange);
+    } else {
+      setTeamSelectedDivisionTypeValues([]);
+    }
+  };
+
+  const organizationFilters = {
+    selectedTags: selectedOrganizationTags,
+    setSelectedTags: setSelectedOrganizationTags,
+    organizationTags,
+    organizationTagsLoading,
+    organizationTagsError,
+    divisionFilters: organizationDivisionFilters,
+    setDivisionFilters: setOrganizationDivisionFilters,
+    maxDistance: organizationsMaxDistance,
+    setMaxDistance: setOrganizationsMaxDistance,
+  };
+  const rentalFilters = {
+    timeRange,
+    setTimeRange,
+    defaultTimeRange,
+    maxDistance: rentalsMaxDistance,
+    setMaxDistance: setRentalsMaxDistance,
+  };
+  const teamFilters = {
+    selectedSports: teamSelectedSports,
+    setSelectedSports: setTeamSelectedSports,
+    selectedDivisionTypeValues: teamSelectedDivisionTypeValues,
+    setSelectedDivisionTypeValues: setTeamSelectedDivisionTypeValues,
+    divisionTypeOptions: teamDivisionTypeOptions,
+  };
   /**
    * Auth guard
    */
@@ -1250,41 +1367,23 @@ function DiscoverPageContent() {
   /**
    * Render
    */
-  return (
-    <>
-      <Navigation />
-      <Container fluid py="xl" className="discover-shell">
-        <div className="discover-page-header mb-8">
-          <Title order={1} fz="clamp(2rem, 4vw, 2.75rem)" fw={750} lh={1.05} mb={6} className="discover-title">
-            Discover
-          </Title>
-          <Text c="dimmed" className="discover-subtitle">
-            Explore upcoming events and available rentals {location ? 'near you' : 'in your area'}.
-          </Text>
-        </div>
-
+  const results = (
         <Tabs
           value={activeTab}
           onValueChange={(value) => {
             const next = (value as DiscoverTab) ?? 'events';
             setActiveTab(next);
           }}
-          className="discover-tabs"
+          className="discover-tabs min-w-0"
         >
-          <TabsList className="discover-segment-list mb-6 w-full" variant="line">
-            <TabsTrigger value="events" className="discover-segment-tab">Events</TabsTrigger>
-            <TabsTrigger value="organizations" className="discover-segment-tab">Organizations</TabsTrigger>
-            <TabsTrigger value="rentals" className="discover-segment-tab">Rentals</TabsTrigger>
-            <TabsTrigger value="teams" className="discover-segment-tab">Teams</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="events">
+          <TabsContent value="events" aria-label="Events">
             <EventsTabContent
+              showLegacyControls={false}
               location={location}
               searchTerm={searchTerm}
               setSearchTerm={setSearchTerm}
               onSearchSubmit={handleSearchSubmit}
-              onOpenMap={() => setMapOpened(true)}
+              onOpenMap={handleSearchSubmit}
               selectedEventTypes={selectedEventTypes}
               setSelectedEventTypes={setSelectedEventTypes}
               eventTypeOptions={EVENT_TYPE_OPTIONS}
@@ -1316,7 +1415,11 @@ function DiscoverPageContent() {
               hasScopedEventCache={eventCacheHasFilters}
               cacheStartDate={eventCacheStartDate}
               sentinelRef={sentinelRef}
+              cacheFilterKey={eventCacheFilterKey}
               eventsError={eventsError}
+              onRetry={() => {
+                void (retryEventsFromStartRef.current ? loadFirstPage() : loadMoreEvents());
+              }}
               onFilterChange={() => loadFirstPage(undefined, { background: true })}
               onEventClick={handleSelectEvent}
               onCreateEvent={handleCreateEventNavigation}
@@ -1325,12 +1428,13 @@ function DiscoverPageContent() {
             />
           </TabsContent>
 
-          <TabsContent value="organizations">
+          <TabsContent value="organizations" aria-label="Organizations">
             <OrganizationsTabContent
+              showLegacyControls={false}
               searchTerm={searchTerm}
               setSearchTerm={setSearchTerm}
               onSearchSubmit={handleSearchSubmit}
-              onOpenMap={() => setMapOpened(true)}
+              onOpenMap={handleSearchSubmit}
               location={location}
               selectedSports={selectedSports}
               setSelectedSports={setSelectedSports}
@@ -1353,22 +1457,25 @@ function DiscoverPageContent() {
               hasMore={hasMoreOrganizations}
               sentinelRef={organizationsSentinelRef}
               error={organizationsError}
+              onRetry={() => { void loadOrganizations(retryOrganizationsFromStartRef.current, searchTerm); }}
               onSelectOrganization={handleSelectOrganization}
             />
           </TabsContent>
 
-          <TabsContent value="rentals">
+          <TabsContent value="rentals" aria-label="Rentals">
             <RentalsTabContent
+              showLegacyControls={false}
               searchTerm={searchTerm}
               setSearchTerm={setSearchTerm}
               onSearchSubmit={handleSearchSubmit}
-              onOpenMap={() => setMapOpened(true)}
+              onOpenMap={handleSearchSubmit}
               location={location}
               rentalsLoading={rentalsLoading}
               rentalsLoadingMore={rentalsLoadingMore}
               hasMoreRentals={hasMoreRentals}
               sentinelRef={rentalsSentinelRef}
               rentalsError={rentalsError}
+              onRetry={() => { void loadRentals(retryRentalsFromStartRef.current, searchTerm); }}
               rentalListings={rentalListings}
               selectedSports={selectedSports}
               setSelectedSports={setSelectedSports}
@@ -1385,12 +1492,13 @@ function DiscoverPageContent() {
             />
           </TabsContent>
 
-          <TabsContent value="teams">
+          <TabsContent value="teams" aria-label="Teams">
             <TeamsTabContent
+              showLegacyControls={false}
               searchTerm={searchTerm}
               setSearchTerm={setSearchTerm}
               onSearchSubmit={handleSearchSubmit}
-              onOpenMap={() => setMapOpened(true)}
+              onOpenMap={handleSearchSubmit}
               teams={filteredTeams}
               totalTeams={teams.length}
               loading={teamsLoading}
@@ -1398,6 +1506,7 @@ function DiscoverPageContent() {
               hasMore={hasMoreTeams}
               sentinelRef={teamsSentinelRef}
               error={teamsError}
+              onRetry={() => { void loadTeams(retryTeamsFromStartRef.current); }}
               selectedSports={teamSelectedSports}
               setSelectedSports={setTeamSelectedSports}
               sports={sportOptions}
@@ -1410,14 +1519,18 @@ function DiscoverPageContent() {
             />
           </TabsContent>
         </Tabs>
-      </Container>
+  );
+  const map = (
       <DiscoverMapModal
-        opened={mapOpened}
+        opened
+        embedded
         activeTab={activeTab}
-        onClose={() => setMapOpened(false)}
+        searchQuery={searchTerm}
+        onClose={() => setHasSearched(false)}
         location={location}
         locationInfo={locationInfo}
         requestLocation={requestLocation}
+        clearLocation={handleClearLocation}
         kmBetween={kmBetween}
         selectedSports={selectedSports}
         setSelectedSports={setSelectedSports}
@@ -1431,30 +1544,9 @@ function DiscoverPageContent() {
         eventTypeOptions={EVENT_TYPE_OPTIONS}
         divisionFilters={eventDivisionFilters}
         setDivisionFilters={setEventDivisionFilters}
-        organizationFilters={{
-          selectedTags: selectedOrganizationTags,
-          setSelectedTags: setSelectedOrganizationTags,
-          organizationTags,
-          organizationTagsLoading,
-          organizationTagsError,
-          divisionFilters: organizationDivisionFilters,
-          setDivisionFilters: setOrganizationDivisionFilters,
-          maxDistance: organizationsMaxDistance,
-          setMaxDistance: setOrganizationsMaxDistance,
-        }}
-        rentalFilters={{
-          timeRange,
-          setTimeRange,
-          defaultTimeRange,
-          maxDistance: rentalsMaxDistance,
-          setMaxDistance: setRentalsMaxDistance,
-        }}
-        teamFilters={{
-          selectedSports: teamSelectedSports,
-          setSelectedSports: setTeamSelectedSports,
-          selectedDivisionTypeValues: teamSelectedDivisionTypeValues,
-          setSelectedDivisionTypeValues: setTeamSelectedDivisionTypeValues,
-        }}
+        organizationFilters={organizationFilters}
+        rentalFilters={rentalFilters}
+        teamFilters={teamFilters}
         sports={sportOptions}
         sportsLoading={sportsLoading}
         sportsError={sportsError?.message ?? null}
@@ -1469,6 +1561,146 @@ function DiscoverPageContent() {
         onOrganizationClick={handleSelectOrganization}
         onTeamClick={handleSelectTeam}
       />
+  );
+  const toolbar = (
+    <div className="discover-results-toolbar">
+      <Button
+        type="button"
+        variant="outline"
+        radius="xl"
+        aria-haspopup="dialog"
+        aria-expanded={filtersOpened}
+        onClick={() => setFiltersOpened(true)}
+        leftSection={<SlidersHorizontal aria-hidden="true" size={16} />}
+      >
+        Filters
+        {activeFilterCount > 0 && <span className="discover-filter-count">{activeFilterCount}<span className="sr-only"> active</span></span>}
+      </Button>
+      {activeTab === 'events' && (
+        <Button
+          type="button"
+          radius="xl"
+          onClick={handleCreateEventNavigation}
+          leftSection={<Plus aria-hidden="true" size={16} />}
+          className="discover-create-event"
+        >
+          Create event
+        </Button>
+      )}
+    </div>
+  );
+
+  return (
+    <>
+      <Navigation />
+      <Container fluid className="discover-shell discover-page">
+        <div className="discover-search-hero">
+          <DiscoverSearchBar
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            searchTerm={searchTerm}
+            onSearchTermChange={setSearchTerm}
+            locationControls={<LocationSearch />}
+            locationLabel={locationLabel}
+            selectedStartDate={selectedStartDate}
+            setSelectedStartDate={setSelectedStartDate}
+            selectedEndDate={selectedEndDate}
+            setSelectedEndDate={setSelectedEndDate}
+            selectedSports={activeSports}
+            setSelectedSports={setActiveSports}
+            sports={sportOptions}
+            sportsLoading={sportsLoading}
+            sportsError={sportsError?.message ?? null}
+            onSearch={handleSearchSubmit}
+            expanded={searchExpanded}
+            onExpandedChange={setSearchExpanded}
+          />
+        </div>
+        {hasSearched ? (
+          <div className="discover-split-results">
+            <DiscoverResultsShell results={results} map={map} toolbar={toolbar} />
+          </div>
+        ) : (
+          <div className="discover-browse-results">
+            {results}
+          </div>
+        )}
+        <DiscoverFiltersModal
+          opened={filtersOpened}
+          onClose={() => setFiltersOpened(false)}
+          onClearAll={resetActiveFilters}
+        >
+          {activeTab === 'events' ? (
+            <DiscoverFilterBar
+              location={location}
+              selectedSports={selectedSports}
+              setSelectedSports={setSelectedSports}
+              sports={sportOptions}
+              sportsLoading={sportsLoading}
+              sportsError={sportsError?.message ?? null}
+              selectedEventTypes={selectedEventTypes}
+              setSelectedEventTypes={setSelectedEventTypes}
+              eventTypeOptions={EVENT_TYPE_OPTIONS}
+              selectedTags={selectedEventTags}
+              setSelectedTags={setSelectedEventTags}
+              eventTags={eventTags}
+              eventTagsLoading={eventTagsLoading}
+              eventTagsError={eventTagsError}
+              maxDistance={maxDistance}
+              setMaxDistance={updateMaxDistance}
+              defaultMaxDistance={DEFAULT_MAX_DISTANCE}
+              selectedStartDate={selectedStartDate}
+              setSelectedStartDate={setSelectedStartDate}
+              selectedEndDate={selectedEndDate}
+              setSelectedEndDate={setSelectedEndDate}
+              divisionFilters={eventDivisionFilters}
+              setDivisionFilters={setEventDivisionFilters}
+              divisionOptions={eventDivisionOptions}
+              activeFilterCount={activeFilterCount}
+              resetFilters={resetActiveFilters}
+            />
+          ) : activeTab === 'organizations' ? (
+            <DiscoverTabFilterBar
+              target="organizations"
+              location={location}
+              defaultMaxDistance={DEFAULT_MAX_DISTANCE}
+              sports={sportOptions}
+              selectedSports={selectedSports}
+              setSelectedSports={setSelectedSports}
+              sportsLoading={sportsLoading}
+              sportsError={sportsError?.message ?? null}
+              filters={organizationFilters}
+              activeFilterCount={activeFilterCount}
+            />
+          ) : activeTab === 'rentals' ? (
+            <DiscoverTabFilterBar
+              target="rentals"
+              location={location}
+              defaultMaxDistance={DEFAULT_MAX_DISTANCE}
+              sports={sportOptions}
+              selectedSports={selectedSports}
+              setSelectedSports={setSelectedSports}
+              sportsLoading={sportsLoading}
+              sportsError={sportsError?.message ?? null}
+              filters={rentalFilters}
+              activeFilterCount={activeFilterCount}
+            />
+          ) : (
+            <DiscoverTabFilterBar
+              target="teams"
+              location={null}
+              defaultMaxDistance={DEFAULT_MAX_DISTANCE}
+              sports={sportOptions}
+              selectedSports={teamSelectedSports}
+              setSelectedSports={setTeamSelectedSports}
+              sportsLoading={sportsLoading}
+              sportsError={sportsError?.message ?? null}
+              filters={teamFilters}
+              activeFilterCount={activeFilterCount}
+            />
+          )}
+        </DiscoverFiltersModal>
+      </Container>
     </>
   );
 }
@@ -1478,6 +1710,7 @@ function OrganizationsTabContent(props: {
   setSearchTerm: (value: string) => void;
   onSearchSubmit: () => void;
   onOpenMap: () => void;
+  showLegacyControls?: boolean;
   location: { lat: number; lng: number } | null;
   selectedSports: string[];
   setSelectedSports: Dispatch<SetStateAction<string[]>>;
@@ -1500,6 +1733,7 @@ function OrganizationsTabContent(props: {
   hasMore: boolean;
   sentinelRef: RefObject<HTMLDivElement | null>;
   error: string | null;
+  onRetry: () => void;
   onSelectOrganization: (organization: Organization) => void;
 }) {
   const {
@@ -1507,6 +1741,7 @@ function OrganizationsTabContent(props: {
     setSearchTerm,
     onSearchSubmit,
     onOpenMap,
+    showLegacyControls = true,
     location,
     selectedSports,
     setSelectedSports,
@@ -1529,6 +1764,7 @@ function OrganizationsTabContent(props: {
     hasMore,
     sentinelRef,
     error,
+    onRetry,
     onSelectOrganization,
   } = props;
 
@@ -1595,6 +1831,7 @@ function OrganizationsTabContent(props: {
 
   return (
     <div className="space-y-6 mb-8">
+      {showLegacyControls && (
       <div className="discover-event-controls mb-8 space-y-4">
         <DiscoverSearchControls
           value={searchTerm}
@@ -1618,27 +1855,35 @@ function OrganizationsTabContent(props: {
           resetFilters={resetFilters}
         />
       </div>
+      )}
 
       <div className="space-y-4">
         <Group className="discover-results-header" justify="space-between" align="center" gap="sm" wrap="wrap">
           <div className="discover-results-summary">
-            <Text size="sm" c="dimmed">
-              {results.length} organization{results.length === 1 ? '' : 's'}
-              {location ? ' near you.' : '. Enable location for distance filtering.'}
-            </Text>
+            {(!error || hasResults) && (
+              <Text size="sm" c="dimmed">
+                {results.length} organization{results.length === 1 ? '' : 's'}
+                {location ? ' near you.' : '. Enable location for distance filtering.'}
+              </Text>
+            )}
             <ActiveEventFilters filters={activeFilters} className="discover-active-event-filters" label="Active filters" />
           </div>
         </Group>
 
         {error && (
           <Alert color="red" radius="md">
-            {error}
+            <Group justify="space-between" gap="sm" wrap="wrap">
+              <Text size="sm">{error}</Text>
+              <Button variant="default" onClick={onRetry} disabled={loading || loadingMore}>
+                Retry organizations
+              </Button>
+            </Group>
           </Alert>
         )}
 
         {loading ? (
           <Loading text="Loading organizations..." />
-        ) : !hasResults ? (
+        ) : !hasResults && !error ? (
           <Paper withBorder p="xl" radius="md">
             <Text fw={600} mb={4}>
               No organizations found
@@ -1676,7 +1921,7 @@ function OrganizationsTabContent(props: {
             <Loader size="sm" />
           </Group>
         )}
-        {!hasMore && results.length > 0 && (
+        {!error && !hasMore && results.length > 0 && (
           <Text size="sm" c="dimmed" ta="center">
             No more organizations to load
           </Text>
@@ -1691,6 +1936,7 @@ function TeamsTabContent(props: {
   setSearchTerm: (value: string) => void;
   onSearchSubmit: () => void;
   onOpenMap: () => void;
+  showLegacyControls?: boolean;
   teams: Team[];
   totalTeams: number;
   loading: boolean;
@@ -1698,6 +1944,7 @@ function TeamsTabContent(props: {
   hasMore: boolean;
   sentinelRef: RefObject<HTMLDivElement | null>;
   error: string | null;
+  onRetry: () => void;
   selectedSports: string[];
   setSelectedSports: Dispatch<SetStateAction<string[]>>;
   sports: string[];
@@ -1713,6 +1960,7 @@ function TeamsTabContent(props: {
     setSearchTerm,
     onSearchSubmit,
     onOpenMap,
+    showLegacyControls = true,
     teams,
     totalTeams,
     loading,
@@ -1720,6 +1968,7 @@ function TeamsTabContent(props: {
     hasMore,
     sentinelRef,
     error,
+    onRetry,
     selectedSports,
     setSelectedSports,
     sports,
@@ -1771,6 +2020,7 @@ function TeamsTabContent(props: {
 
   return (
     <div className="space-y-6 mb-8">
+      {showLegacyControls && (
       <div className="discover-event-controls mb-8 space-y-4">
         <DiscoverSearchControls
           value={searchTerm}
@@ -1794,28 +2044,36 @@ function TeamsTabContent(props: {
           resetFilters={resetFilters}
         />
       </div>
+      )}
 
       <div className="space-y-4">
         <Group className="discover-results-header" justify="space-between" align="center" gap="sm" wrap="wrap">
           <div className="discover-results-summary">
-            <Text size="sm" c="dimmed">
-              {teams.length}
-              {totalTeams !== teams.length ? ` of ${totalTeams}` : ''} open team{teams.length === 1 ? '' : 's'}
-              {activeQuery ? ` matching "${activeQuery}".` : '.'}
-            </Text>
+            {(!error || teams.length > 0) && (
+              <Text size="sm" c="dimmed">
+                {teams.length}
+                {totalTeams !== teams.length ? ` of ${totalTeams}` : ''} open team{teams.length === 1 ? '' : 's'}
+                {activeQuery ? ` matching "${activeQuery}".` : '.'}
+              </Text>
+            )}
             <ActiveEventFilters filters={activeFilters} className="discover-active-event-filters" label="Active filters" />
           </div>
         </Group>
 
         {error && (
           <Alert color="red" radius="md">
-            {error}
+            <Group justify="space-between" gap="sm" wrap="wrap">
+              <Text size="sm">{error}</Text>
+              <Button variant="default" onClick={onRetry} disabled={loading || loadingMore}>
+                Retry teams
+              </Button>
+            </Group>
           </Alert>
         )}
 
         {loading ? (
           <Loading text="Loading open teams..." />
-        ) : teams.length === 0 ? (
+        ) : teams.length === 0 && !error ? (
           <Paper withBorder p="xl" radius="md">
             <Text fw={600} mb={4}>
               No open-registration teams found
@@ -1846,7 +2104,7 @@ function TeamsTabContent(props: {
             <Loader size="sm" />
           </Group>
         )}
-        {!hasMore && teams.length > 0 && (
+        {!error && !hasMore && teams.length > 0 && (
           <Text size="sm" c="dimmed" ta="center">
             No more teams to load
           </Text>
@@ -1861,12 +2119,14 @@ function RentalsTabContent(props: {
   setSearchTerm: (value: string) => void;
   onSearchSubmit: () => void;
   onOpenMap: () => void;
+  showLegacyControls?: boolean;
   location: { lat: number; lng: number } | null;
   rentalsLoading: boolean;
   rentalsLoadingMore: boolean;
   hasMoreRentals: boolean;
   sentinelRef: RefObject<HTMLDivElement | null>;
   rentalsError: string | null;
+  onRetry: () => void;
   rentalListings: RentalListing[];
   selectedSports: string[];
   setSelectedSports: Dispatch<SetStateAction<string[]>>;
@@ -1886,12 +2146,14 @@ function RentalsTabContent(props: {
     setSearchTerm,
     onSearchSubmit,
     onOpenMap,
+    showLegacyControls = true,
     location,
     rentalsLoading,
     rentalsLoadingMore,
     hasMoreRentals,
     sentinelRef,
     rentalsError,
+    onRetry,
     rentalListings,
     selectedSports,
     setSelectedSports,
@@ -1921,7 +2183,7 @@ function RentalsTabContent(props: {
         }
       }
       if (activeQuery) {
-        const searchBlob = `${listing.organization.name} ${listing.organization.description ?? ''} ${listing.organization.location ?? ''} ${listing.facility?.name ?? ''} ${listing.facility?.location ?? ''} ${listing.field?.name ?? ''}`.toLowerCase();
+        const searchBlob = `${listing.organization.name} ${listing.organization.description ?? ''} ${listing.organization.location ?? ''} ${listing.facility?.name ?? ''} ${listing.facility?.location ?? ''} ${listing.field?.name ?? ''} ${listing.field?.location ?? ''}`.toLowerCase();
         if (!searchBlob.includes(activeQuery.toLowerCase())) {
           return false;
         }
@@ -2027,6 +2289,7 @@ function RentalsTabContent(props: {
 
   return (
     <div className="space-y-6 mb-8">
+      {showLegacyControls && (
       <div className="discover-event-controls mb-8 space-y-4">
         <DiscoverSearchControls
           value={searchTerm}
@@ -2050,27 +2313,35 @@ function RentalsTabContent(props: {
           resetFilters={resetFilters}
         />
       </div>
+      )}
 
       <div className="space-y-4">
         <Group className="discover-results-header" justify="space-between" align="center" gap="sm" wrap="wrap">
           <div className="discover-results-summary">
-            <Text size="sm" c="dimmed">
-              {rentalCards.length} rental listing{rentalCards.length === 1 ? '' : 's'}
-              {location ? ' near you.' : '.'}
-            </Text>
+            {(!rentalsError || rentalCards.length > 0) && (
+              <Text size="sm" c="dimmed">
+                {rentalCards.length} rental listing{rentalCards.length === 1 ? '' : 's'}
+                {location ? ' near you.' : '.'}
+              </Text>
+            )}
             <ActiveEventFilters filters={activeFilters} className="discover-active-event-filters" label="Active filters" />
           </div>
         </Group>
 
         {rentalsError && (
           <Alert color="red">
-            {rentalsError}
+            <Group justify="space-between" gap="sm" wrap="wrap">
+              <Text size="sm">{rentalsError}</Text>
+              <Button variant="default" onClick={onRetry} disabled={rentalsLoading || rentalsLoadingMore}>
+                Retry rentals
+              </Button>
+            </Group>
           </Alert>
         )}
 
         {rentalsLoading ? (
           <Loading text="Loading rentals..." />
-        ) : rentalCards.length === 0 ? (
+        ) : rentalCards.length === 0 && !rentalsError ? (
           <Paper withBorder p="xl" radius="md">
             <Text fw={600} mb={4}>
               No rentals available
@@ -2101,7 +2372,7 @@ function RentalsTabContent(props: {
             <Loader size="sm" />
           </Group>
         )}
-        {!hasMoreRentals && rentalCards.length > 0 && (
+        {!rentalsError && !hasMoreRentals && rentalCards.length > 0 && (
           <Text size="sm" c="dimmed" ta="center">
             No more rentals to load
           </Text>

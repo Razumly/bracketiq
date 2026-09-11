@@ -39,6 +39,7 @@ import {
 import { Popover as UiPopover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { Event, EventTag } from '@/types';
 import { formatEnumDisplayLabel } from '@/lib/enumUtils';
+import { DivisionDiscoveryFilterContent, getSingleSelectedSportKey } from './DivisionDiscoveryFilters';
 import type {
   DivisionDiscoveryFilterOptions,
   DivisionDiscoveryFilterValue,
@@ -84,7 +85,7 @@ export function resolveOpenFilter<TFilter extends string>(
 }
 
 export type FilterOption = { value: string; label: string; count?: number };
-export type DiscoverFilterItem = { key: string; node: ReactNode };
+export type DiscoverFilterItem = { key: string; searchText?: string; node: ReactNode };
 
 type OverflowFilterRowProps = {
   items: DiscoverFilterItem[];
@@ -93,13 +94,25 @@ type OverflowFilterRowProps = {
   moreLabel: string;
   trailing?: ReactNode;
   className?: string;
+  searchable?: boolean;
+  searchPlaceholder?: string;
 };
 
-function OverflowFilterRow({ items, contentKey, ariaLabel, moreLabel, trailing, className }: OverflowFilterRowProps) {
+function OverflowFilterRow({
+  items,
+  contentKey,
+  ariaLabel,
+  moreLabel,
+  trailing,
+  className,
+  searchable = false,
+  searchPlaceholder,
+}: OverflowFilterRowProps) {
   const rowRef = useRef<HTMLDivElement>(null);
   const [measurement, setMeasurement] = useState<{ key: string; count: number | null }>({ key: contentKey, count: null });
   const [moreOpen, setMoreOpen] = useState(false);
   const [measurementDirty, setMeasurementDirty] = useState(false);
+  const [itemSearchTerm, setItemSearchTerm] = useState('');
   const measurementIsStale = measurement.key !== contentKey;
   const measuredCount = measurementIsStale ? null : measurement.count;
   const preserveOpenOverflow = moreOpen && measurement.count !== null;
@@ -107,6 +120,10 @@ function OverflowFilterRow({ items, contentKey, ariaLabel, moreLabel, trailing, 
   const visibleCount = measuredCount ?? (preserveOpenOverflow ? measurement.count : null);
   const isMeasuring = visibleCount === null;
   const overflowItems = visibleCount === null ? [] : items.slice(visibleCount);
+  const normalizedItemSearchTerm = itemSearchTerm.trim().toLowerCase();
+  const menuItems = searchable && normalizedItemSearchTerm
+    ? items.filter((item) => (item.searchText ?? item.key).toLowerCase().includes(normalizedItemSearchTerm))
+    : overflowItems;
 
   /* eslint-disable react-hooks/set-state-in-effect -- The row width is a DOM measurement that controls overflow visibility. */
   useLayoutEffect(() => {
@@ -159,7 +176,6 @@ function OverflowFilterRow({ items, contentKey, ariaLabel, moreLabel, trailing, 
     return () => observer.disconnect();
   }, [moreOpen]);
 
-
   const showMore = isMeasuring || overflowItems.length > 0;
   const moreTrigger = (
     <Button
@@ -187,7 +203,13 @@ function OverflowFilterRow({ items, contentKey, ariaLabel, moreLabel, trailing, 
         );
       })}
       {showMore && (
-        <UiPopover open={moreOpen && !isMeasuring} onOpenChange={setMoreOpen}>
+        <UiPopover
+          open={moreOpen && !isMeasuring}
+          onOpenChange={(open) => {
+            setMoreOpen(open);
+            if (!open) setItemSearchTerm('');
+          }}
+        >
           <PopoverTrigger render={moreTrigger}>{moreLabel}</PopoverTrigger>
           {!isMeasuring && moreOpen && overflowItems.length > 0 && (
             <PopoverContent
@@ -195,19 +217,33 @@ function OverflowFilterRow({ items, contentKey, ariaLabel, moreLabel, trailing, 
               aria-label={moreLabel}
               className="discover-filter-popover discover-filter-more-menu p-2"
             >
+              {searchable && (
+                <TextInput
+                  aria-label={searchPlaceholder ?? `Search ${ariaLabel.toLowerCase()}`}
+                  placeholder={searchPlaceholder ?? `Search ${ariaLabel.toLowerCase()}`}
+                  value={itemSearchTerm}
+                  onChange={(event) => setItemSearchTerm(event.currentTarget.value)}
+                  className="discover-filter-more-search"
+                />
+              )}
               <div
                 className="discover-filter-more-items"
                 onClick={(event) => {
                   if (event.target instanceof Element && event.target.closest('.discover-sport-filter')) {
                     setMoreOpen(false);
+                    setItemSearchTerm('');
                   }
                 }}
               >
-                {overflowItems.map((item) => (
+                {menuItems.length > 0 ? menuItems.map((item) => (
                   <div key={item.key} className="discover-filter-more-item">
                     {item.node}
                   </div>
-                ))}
+                )) : (
+                  <Text size="sm" c="dimmed" p="xs">
+                    No {ariaLabel.toLowerCase()} match this search.
+                  </Text>
+                )}
               </div>
             </PopoverContent>
           )}
@@ -251,6 +287,7 @@ export function DiscoverFilterRows({
     : [
       {
         key: 'all-sports',
+        searchText: 'All sports',
         node: (
           <button
             type="button"
@@ -264,6 +301,7 @@ export function DiscoverFilterRows({
       },
       ...sports.map((sport) => ({
         key: sport,
+        searchText: sport,
         node: (
           <button
             type="button"
@@ -289,6 +327,8 @@ export function DiscoverFilterRows({
         contentKey={sportsKey}
         ariaLabel="Sports"
         moreLabel="More sports"
+        searchable
+        searchPlaceholder="Search sports"
       />
       <OverflowFilterRow
         items={filters}
@@ -486,6 +526,7 @@ type DiscoverFilterItemContext<TEventType extends string> = {
   priceActive: boolean;
   divisionFilters: DivisionDiscoveryFilterValue;
   setDivisionFilters: (value: DivisionDiscoveryFilterValue) => void;
+  divisionOptions: DivisionDiscoveryFilterOptions;
   genderOptions: FilterOption[];
   genderLabels: string[];
   ageOptions: FilterOption[];
@@ -689,7 +730,7 @@ function EventTagsFilterItem<TEventType extends string>({ context }: DiscoverFil
 }
 
 function GenderFilterItem<TEventType extends string>({ context }: DiscoverFilterItemProps<TEventType>) {
-  const { panelId, openFilter, setOpen, divisionFilters, setDivisionFilters, genderOptions, genderLabels } = context;
+  const { panelId, openFilter, setOpen, divisionFilters, setDivisionFilters, divisionOptions, genderOptions, genderLabels } = context;
   return (
     <FilterPopover
       id={`${panelId}-gender`}
@@ -703,13 +744,15 @@ function GenderFilterItem<TEventType extends string>({ context }: DiscoverFilter
       onClear={() => setDivisionFilters({ ...divisionFilters, genders: [] })}
     >
       <div className="discover-filter-popover-heading">Gender</div>
+      <DivisionDiscoveryFilterContent options={divisionOptions}>
       <FilterOptionList options={genderOptions} value={divisionFilters.genders} allLabel="Any gender" onChange={(genders) => setDivisionFilters({ ...divisionFilters, genders })} />
+      </DivisionDiscoveryFilterContent>
     </FilterPopover>
   );
 }
 
 function AgeGroupFilterItem<TEventType extends string>({ context }: DiscoverFilterItemProps<TEventType>) {
-  const { panelId, openFilter, setOpen, divisionFilters, setDivisionFilters, ageOptions, ageLabels } = context;
+  const { panelId, openFilter, setOpen, divisionFilters, setDivisionFilters, divisionOptions, ageOptions, ageLabels } = context;
   return (
     <FilterPopover
       id={`${panelId}-age-group`}
@@ -723,13 +766,15 @@ function AgeGroupFilterItem<TEventType extends string>({ context }: DiscoverFilt
       onClear={() => setDivisionFilters({ ...divisionFilters, ageDivisionTypeIds: [] })}
     >
       <div className="discover-filter-popover-heading">Age group</div>
+      <DivisionDiscoveryFilterContent options={divisionOptions}>
       <FilterOptionList options={ageOptions} value={divisionFilters.ageDivisionTypeIds} allLabel="Any age group" onChange={(ageDivisionTypeIds) => setDivisionFilters({ ...divisionFilters, ageDivisionTypeIds })} />
+      </DivisionDiscoveryFilterContent>
     </FilterPopover>
   );
 }
 
 function SkillLevelFilterItem<TEventType extends string>({ context }: DiscoverFilterItemProps<TEventType>) {
-  const { panelId, openFilter, setOpen, divisionFilters, setDivisionFilters, skillOptions, skillLabels } = context;
+  const { panelId, openFilter, setOpen, divisionFilters, setDivisionFilters, divisionOptions, skillOptions, skillLabels } = context;
   return (
     <FilterPopover
       id={`${panelId}-skill-level`}
@@ -743,7 +788,9 @@ function SkillLevelFilterItem<TEventType extends string>({ context }: DiscoverFi
       onClear={() => setDivisionFilters({ ...divisionFilters, skillDivisionTypeIds: [] })}
     >
       <div className="discover-filter-popover-heading">Skill level</div>
+      <DivisionDiscoveryFilterContent options={divisionOptions}>
       <FilterOptionList options={skillOptions} value={divisionFilters.skillDivisionTypeIds} allLabel="Any skill level" onChange={(skillDivisionTypeIds) => setDivisionFilters({ ...divisionFilters, skillDivisionTypeIds })} />
+      </DivisionDiscoveryFilterContent>
     </FilterPopover>
   );
 }
@@ -792,6 +839,7 @@ export type DiscoverFilterBarProps<TEventType extends string = Event['eventType'
   maxDistance: number | null;
   setMaxDistance: (value: number | null) => void;
   defaultMaxDistance: number;
+  showDistanceFilter?: boolean;
   selectedStartDate: Date | null;
   setSelectedStartDate: (value: Date | null) => void;
   selectedEndDate: Date | null;
@@ -823,6 +871,7 @@ export default function DiscoverFilterBar<TEventType extends string = Event['eve
   maxDistance,
   setMaxDistance,
   defaultMaxDistance,
+  showDistanceFilter = true,
   selectedStartDate,
   setSelectedStartDate,
   selectedEndDate,
@@ -861,9 +910,12 @@ export default function DiscoverFilterBar<TEventType extends string = Event['eve
   const genderLabels = selectedLabels(divisionFilters.genders, genderOptions);
   const ageLabels = selectedLabels(divisionFilters.ageDivisionTypeIds, ageOptions);
   const skillLabels = selectedLabels(divisionFilters.skillDivisionTypeIds, skillOptions);
+  const hasSingleSport = getSingleSelectedSportKey(selectedSports) !== null;
   useEffect(() => {
-    if (divisionOptions.loading || divisionOptions.error) return;
-    const availableSkillIds = new Set(divisionOptions.skillOptions.map((option) => option.value.trim().toLowerCase()));
+    if (hasSingleSport && (divisionOptions.loading || divisionOptions.error)) return;
+    const availableSkillIds = new Set(
+      hasSingleSport ? divisionOptions.skillOptions.map((option) => option.value.trim().toLowerCase()) : [],
+    );
     const nextSkillIds = divisionFilters.skillDivisionTypeIds.filter((id) => availableSkillIds.has(id.trim().toLowerCase()));
     if (
       nextSkillIds.length !== divisionFilters.skillDivisionTypeIds.length
@@ -871,7 +923,7 @@ export default function DiscoverFilterBar<TEventType extends string = Event['eve
     ) {
       setDivisionFilters({ ...divisionFilters, skillDivisionTypeIds: nextSkillIds });
     }
-  }, [divisionFilters, divisionOptions.error, divisionOptions.loading, divisionOptions.skillOptions, setDivisionFilters]);
+  }, [divisionFilters, divisionOptions.error, divisionOptions.loading, divisionOptions.skillOptions, hasSingleSport, setDivisionFilters]);
   const distanceMiles = typeof maxDistance === 'number' ? Math.round(maxDistance / KM_PER_MILE) : null;
   const distanceActive = Boolean(location && distanceMiles !== null);
   const priceActive = divisionFilters.priceMinDollars !== null || divisionFilters.priceMaxDollars !== null;
@@ -884,6 +936,7 @@ export default function DiscoverFilterBar<TEventType extends string = Event['eve
     maxDistance ?? '',
     location ? 'location' : 'no-location',
     distanceMiles ?? '',
+    showDistanceFilter,
     divisionFilters.genders.join('|'),
     divisionFilters.ageDivisionTypeIds.join('|'),
     divisionFilters.skillDivisionTypeIds.join('|'),
@@ -893,6 +946,7 @@ export default function DiscoverFilterBar<TEventType extends string = Event['eve
     divisionOptions.genders.length,
     divisionOptions.ages.length,
     divisionOptions.skillOptions.length,
+    hasSingleSport,
     hideWeeklyChildren ? 'hidden' : 'shown',
     activeFilterCount,
   ].join('::');
@@ -930,6 +984,7 @@ export default function DiscoverFilterBar<TEventType extends string = Event['eve
     priceActive,
     divisionFilters,
     setDivisionFilters,
+    divisionOptions,
     genderOptions,
     genderLabels,
     ageOptions,
@@ -942,12 +997,16 @@ export default function DiscoverFilterBar<TEventType extends string = Event['eve
   const filterItems: DiscoverFilterItem[] = [
     { key: 'dates', node: <DatesFilterItem context={filterContext} /> },
     { key: 'price', node: <PriceFilterItem context={filterContext} /> },
-    { key: 'distance', node: <DistanceFilterItem context={filterContext} /> },
+    ...(showDistanceFilter
+      ? [{ key: 'distance', node: <DistanceFilterItem context={filterContext} /> }]
+      : []),
     { key: 'event-types', node: <EventTypeFilterItem context={filterContext} /> },
     { key: 'event-tags', node: <EventTagsFilterItem context={filterContext} /> },
     { key: 'gender', node: <GenderFilterItem context={filterContext} /> },
     { key: 'age-group', node: <AgeGroupFilterItem context={filterContext} /> },
-    { key: 'skill-level', node: <SkillLevelFilterItem context={filterContext} /> },
+    ...(hasSingleSport
+      ? [{ key: 'skill-level', node: <SkillLevelFilterItem context={filterContext} /> }]
+      : []),
     ...(setHideWeeklyChildren
       ? [{ key: 'visibility', node: <VisibilityFilterItem context={filterContext} /> }]
       : []),

@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Alert,
+  Button,
   Group,
   Loader,
   MultiSelect,
@@ -47,23 +48,33 @@ export type DivisionDiscoveryFilterOptions = {
   genders: DivisionOption[];
   ages: DivisionOption[];
   skillOptions: Array<{ value: string; label: string }>;
+  retry?: () => void;
 };
 
 const normalize = (value: string): string => value.trim().toLowerCase();
+
+export const getSingleSelectedSportKey = (
+  selectedSports: string[],
+): string | null => {
+  const selectedSportKeys = new Set(
+    selectedSports.map(normalize).filter(Boolean),
+  );
+  return selectedSportKeys.size === 1
+    ? (selectedSportKeys.values().next().value ?? null)
+    : null;
+};
 
 export const buildSportSkillFilterOptions = (
   groups: SportSkillGroup[],
   selectedSports: string[],
 ): Array<{ value: string; label: string }> => {
-  const selectedSportKeys = new Set(
-    selectedSports.map(normalize).filter(Boolean),
-  );
+  const selectedSportKey = getSingleSelectedSportKey(selectedSports);
+  if (!selectedSportKey) return [];
   const eligibleGroups = groups
     .filter(
       (group) =>
-        selectedSportKeys.size === 0 ||
-        selectedSportKeys.has(normalize(group.sportId)) ||
-        selectedSportKeys.has(normalize(group.sportName ?? "")),
+        normalize(group.sportId) === selectedSportKey ||
+        normalize(group.sportName ?? "") === selectedSportKey,
     )
     .map((group) => ({
       ...group,
@@ -113,6 +124,11 @@ export function useDivisionDiscoveryOptions(
     status: "loading",
     types: {},
   });
+  const [requestVersion, setRequestVersion] = useState(0);
+  const retry = useCallback(() => {
+    setLoadState({ status: "loading", types: {} });
+    setRequestVersion((current) => current + 1);
+  }, []);
 
   useEffect(() => {
     if (!enabled) return;
@@ -140,7 +156,7 @@ export function useDivisionDiscoveryOptions(
         });
       });
     return () => controller.abort();
-  }, [enabled]);
+  }, [enabled, requestVersion]);
 
   const { types } = loadState;
   const loading = loadState.status === "loading";
@@ -156,7 +172,36 @@ export function useDivisionDiscoveryOptions(
     genders: types.genders ?? [],
     ages: types.ages ?? [],
     skillOptions,
+    retry,
   };
+}
+
+export function DivisionDiscoveryFilterContent({
+  options,
+  children,
+}: {
+  options: DivisionDiscoveryFilterOptions;
+  children?: ReactNode;
+}) {
+  if (options.loading)
+    return <Loader size="sm" aria-label="Loading division filters" />;
+  if (options.error) {
+    return (
+      <Alert color="red">
+        <Stack gap="sm">
+          <Text size="sm">{options.error}</Text>
+          {options.retry ? (
+            <Button variant="outline" size="sm" onClick={options.retry}>
+              Retry division filters
+            </Button>
+          ) : (
+            <Text size="sm">Reload this page to try again.</Text>
+          )}
+        </Stack>
+      </Alert>
+    );
+  }
+  return <>{children}</>;
 }
 
 export default function DivisionDiscoveryFilters({
@@ -168,11 +213,12 @@ export default function DivisionDiscoveryFilters({
   const loadedOptions = useDivisionDiscoveryOptions(selectedSports, !options);
   const resolvedOptions = options ?? loadedOptions;
   const { loading, error, genders, ages, skillOptions } = resolvedOptions;
+  const hasSingleSport = getSingleSelectedSportKey(selectedSports) !== null;
 
   useEffect(() => {
-    if (loading || error) return;
+    if (hasSingleSport && (loading || error)) return;
     const availableSkillIds = new Set(
-      skillOptions.map((option) => option.value),
+      hasSingleSport ? skillOptions.map((option) => normalize(option.value)) : [],
     );
     const nextSkillIds = value.skillDivisionTypeIds.filter((id) =>
       availableSkillIds.has(normalize(id)),
@@ -183,11 +229,10 @@ export default function DivisionDiscoveryFilters({
     ) {
       onChange({ ...value, skillDivisionTypeIds: nextSkillIds });
     }
-  }, [error, loading, onChange, skillOptions, value]);
+  }, [error, hasSingleSport, loading, onChange, skillOptions, value]);
 
-  if (loading)
-    return <Loader size="sm" aria-label="Loading division filters" />;
-  if (error) return <Alert color="red">{error}</Alert>;
+  if (loading || error)
+    return <DivisionDiscoveryFilterContent options={resolvedOptions} />;
 
   return (
     <Stack gap="sm">
@@ -219,7 +264,7 @@ export default function DivisionDiscoveryFilters({
           onChange({ ...value, ageDivisionTypeIds })
         }
       />
-      <MultiSelect
+      {hasSingleSport && <MultiSelect
         label="Skill level"
         placeholder="Any skill level"
         data={skillOptions}
@@ -229,7 +274,7 @@ export default function DivisionDiscoveryFilters({
         onChange={(skillDivisionTypeIds) =>
           onChange({ ...value, skillDivisionTypeIds })
         }
-      />
+      />}
       <Group grow align="flex-start">
         <NumberInput
           label="Minimum price"

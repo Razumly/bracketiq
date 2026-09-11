@@ -88,6 +88,40 @@ describe('event list filtering', () => {
     expect(onFilterChange).toHaveBeenCalledTimes(1);
   });
 
+  it('refreshes a complete cache when a future date changes recurring occurrences', async () => {
+    const onFilterChange = jest.fn().mockResolvedValue(undefined);
+    const { rerender } = renderHook(({ selectedStartDate }: { selectedStartDate: Date | null }) => {
+      const activeFilters = { ...filters, selectedStartDate };
+      return useEventListFiltering({
+        events: [], filters: activeFilters, filterKey: eventListFilterKey(activeFilters),
+        hasMoreEvents: false, hasScopedEventCache: false,
+        cacheStartDate: new Date(2026, 8, 4).toISOString(),
+        onFilterChange, debounceMs: 0,
+      });
+    }, { initialProps: { selectedStartDate: null as Date | null } });
+    rerender({ selectedStartDate: new Date(2026, 8, 20) });
+    await act(async () => { await Promise.resolve(); });
+    expect(onFilterChange).toHaveBeenCalledTimes(1);
+  });
+
+  it('refreshes a complete cache when division filters need authoritative eligibility', async () => {
+    const onFilterChange = jest.fn().mockResolvedValue(undefined);
+    const { rerender } = renderHook(({ gender }: { gender: string | null }) => {
+      const activeFilters = {
+        ...filters,
+        divisionFilters: gender ? { genders: [gender] } : undefined,
+      };
+      return useEventListFiltering({
+        events: [], filters: activeFilters, filterKey: eventListFilterKey(activeFilters),
+        hasMoreEvents: false, hasScopedEventCache: false, onFilterChange, debounceMs: 0,
+      });
+    }, { initialProps: { gender: null } });
+    rerender({ gender: 'F' });
+    await act(async () => { await Promise.resolve(); });
+    expect(onFilterChange).toHaveBeenCalledTimes(1);
+  });
+
+
   it('keeps rental classification without changing the event type', () => {
     const rental = makeEvent({ $id: 'rental', eventType: 'EVENT' });
     const hosted = makeEvent({ $id: 'hosted', eventType: 'EVENT' });
@@ -120,6 +154,29 @@ describe('event list filtering', () => {
     expect(result.current.isRefreshing).toBe(false);
   });
 
+  it('matches weekly events by the next displayed occurrence and falls back to the event start', () => {
+    const weeklyInsideRange = makeEvent({
+      $id: 'weekly-inside', eventType: 'WEEKLY_EVENT', start: '2026-06-01T18:00:00Z',
+      nextOccurrence: {
+        slotId: 'weekly-slot', occurrenceDate: '2026-09-16',
+        start: '2026-09-16T18:00:00Z', end: '2026-09-16T20:00:00Z',
+      },
+    });
+    const weeklyOutsideRange = makeEvent({
+      $id: 'weekly-outside', eventType: 'WEEKLY_EVENT', start: '2026-09-12T18:00:00Z',
+      nextOccurrence: {
+        slotId: 'later-slot', occurrenceDate: '2026-10-01',
+        start: '2026-10-01T18:00:00Z', end: '2026-10-01T20:00:00Z',
+      },
+    });
+    const oneTime = makeEvent({ $id: 'one-time', start: '2026-09-12T18:00:00Z' });
+    const earlier = makeEvent({ $id: 'earlier', start: '2026-09-01T18:00:00Z' });
+
+    expect(filterLoadedEvents([weeklyInsideRange, weeklyOutsideRange, oneTime, earlier], {
+      ...filters, selectedStartDate: new Date(2026, 8, 10), selectedEndDate: new Date(2026, 8, 16),
+    })).toEqual([weeklyInsideRange, oneTime]);
+  });
+
   it('filters the loaded cache without waiting for a server request', () => {
     const events = [
       makeEvent({ $id: 'basketball', name: 'Basketball night' }),
@@ -128,6 +185,75 @@ describe('event list filtering', () => {
 
     expect(filterLoadedEvents(events, { ...filters, searchTerm: 'basketball' })).toEqual([events[0]]);
     expect(filterLoadedEvents(events, { ...filters, selectedSports: ['Soccer'] })).toEqual([events[1]]);
+  });
+
+  it('keeps server-searchable event and organization fields in the local cache', () => {
+    const searchableEvent = makeEvent({
+      sourceUrl: 'https://example.com/tuesday',
+      scheduleText: 'Tuesday evening league',
+      priceText: '$25 per player',
+      statusText: 'Registration opens soon',
+      organization: {
+        $id: 'org-1',
+        name: 'Harbor Sports',
+        location: 'Austin, TX',
+        address: '1 Harbor Way',
+        description: 'Community sports programs',
+      } as Event['organization'],
+    });
+
+    ['example.com', 'tuesday', '$25', 'opens soon', 'Harbor Sports'].forEach((searchTerm) => {
+      expect(filterLoadedEvents([searchableEvent], { ...filters, searchTerm })).toEqual([searchableEvent]);
+    });
+  });
+
+  it('matches server end-date boundaries for ordinary events and weekly parents', () => {
+    const spanningEvent = makeEvent({
+      $id: 'spanning',
+      start: '2026-09-12T18:00:00.000Z',
+      end: '2026-09-14T20:00:00.000Z',
+    });
+    const weeklyParent = makeEvent({
+      $id: 'weekly-parent',
+      eventType: 'WEEKLY_EVENT',
+      start: '2026-09-01T18:00:00.000Z',
+      end: '2026-09-30T20:00:00.000Z',
+      nextOccurrence: {
+        slotId: 'weekly-slot',
+        occurrenceDate: '2026-09-20',
+        start: '2026-09-20T18:00:00.000Z',
+        end: '2026-09-20T20:00:00.000Z',
+      },
+    });
+
+    expect(filterLoadedEvents([spanningEvent, weeklyParent], {
+      ...filters,
+      selectedEndDate: new Date(2026, 8, 13),
+    })).toEqual([weeklyParent]);
+  });
+
+  it('matches only active entry divisions for division filters', () => {
+    const activeEntry = {
+      id: 'active-entry',
+      name: 'Women Open',
+      kind: 'LEAGUE',
+      role: 'ENTRY',
+      status: 'ACTIVE',
+      gender: 'F',
+      price: 1500,
+    } as NonNullable<Event['divisionDetails']>[number];
+    const inactiveEntry = { ...activeEntry, id: 'inactive-entry', status: 'INACTIVE' } as NonNullable<Event['divisionDetails']>[number];
+    const phaseDivision = { ...activeEntry, id: 'phase-division', role: 'PHASE' } as NonNullable<Event['divisionDetails']>[number];
+    const divisionFilters = { genders: ['F'] };
+    const noDivisions = makeEvent({ $id: 'no-divisions' });
+    const eligible = makeEvent({ $id: 'eligible', divisionDetails: [activeEntry] });
+    const inactive = makeEvent({ $id: 'inactive', divisionDetails: [inactiveEntry] });
+    const phase = makeEvent({ $id: 'phase', divisionDetails: [phaseDivision] });
+
+    expect(filterLoadedEvents([noDivisions, eligible, inactive, phase], {
+      ...filters,
+      divisionFilters,
+    })).toEqual([eligible]);
   });
 
   it('includes the user location in the refresh key', () => {

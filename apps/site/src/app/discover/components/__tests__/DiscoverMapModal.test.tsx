@@ -233,6 +233,27 @@ const renderModal = (location = VANCOUVER_WA_CENTER, options: Partial<ModalProps
   renderWithMantine(<MapFilterHarness {...options} location={location} />)
 );
 
+function PageMapHarness(props: Partial<ModalProps>) {
+  const [activeTab, setActiveTab] = useState(props.activeTab ?? 'events');
+  const [searchQuery, setSearchQuery] = useState(props.searchQuery ?? '');
+  return (
+    <>
+      <input aria-label="Discover query" value={searchQuery} onChange={(event) => setSearchQuery(event.currentTarget.value)} />
+      <select
+        aria-label="Discover target"
+        value={activeTab}
+        onChange={(event) => setActiveTab(event.currentTarget.value as ModalProps['activeTab'])}
+      >
+        <option value="events">Events</option>
+        <option value="organizations">Organizations</option>
+        <option value="rentals">Rentals</option>
+        <option value="teams">Teams</option>
+      </select>
+      <MapFilterHarness {...props} activeTab={activeTab} searchQuery={searchQuery} />
+    </>
+  );
+}
+
 const buildAffiliateRentalOrganization = (): Organization => ({
   $id: 'org-affiliate-rentals',
   name: 'Affiliate Rentals',
@@ -385,7 +406,7 @@ describe('DiscoverMapModal', () => {
       $id: 'org-salmon-creek',
       name: 'Salmon Creek Indoor',
     }]);
-    renderModal();
+    renderWithMantine(<PageMapHarness searchQuery="Unrelated page query" />);
 
     fireEvent.click(screen.getByRole('tab', { name: 'Organizations' }));
 
@@ -405,7 +426,14 @@ describe('DiscoverMapModal', () => {
     fireEvent.change(screen.getAllByLabelText('Map search')[0], {
       target: { value: 'Salmon Creek' },
     });
-    expect((await screen.findAllByText('Salmon Creek Indoor')).length).toBeGreaterThan(0);
+    fireEvent.submit(screen.getAllByLabelText('Map search')[0].closest('form')!);
+    const selection = await screen.findByRole('region', { name: 'Selected organization' });
+    expect(within(selection).getByRole('heading', { name: 'Salmon Creek Indoor' })).toBeInTheDocument();
+    expect(mockedOrganizationService.listOrganizationsInArea).toHaveBeenCalledTimes(1);
+
+    fireEvent.change(screen.getByLabelText('Discover target'), { target: { value: 'teams' } });
+    expect(screen.getByRole('tab', { name: 'Organizations' })).toHaveAttribute('aria-selected', 'true');
+    expect(within(selection).getByRole('heading', { name: 'Salmon Creek Indoor' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Simulate map idle' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Search this area' }));
@@ -420,6 +448,127 @@ describe('DiscoverMapModal', () => {
         }),
       );
     });
+  });
+
+  it('reloads embedded event results for the normalized page query and removes unrelated entries', async () => {
+    mockedEventService.getEventsPaginated.mockResolvedValue([
+      buildMapEvent({ $id: 'cascade', name: 'Cascade Clinic' }),
+      buildMapEvent({ $id: 'harbor', name: 'Harbor League' }),
+    ]);
+    renderWithMantine(<PageMapHarness embedded searchQuery="  CaScAdE  " />);
+
+    const rail = await screen.findByRole('complementary', { name: 'Nearby events' });
+    expect(within(rail).getByRole('button', { name: 'Select Cascade Clinic' })).toBeInTheDocument();
+    expect(within(rail).queryByRole('button', { name: 'Select Harbor League' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cascade Clinic', exact: true })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Harbor League', exact: true })).not.toBeInTheDocument();
+    expect(mockedEventService.getEventsPaginated).toHaveBeenLastCalledWith(
+      expect.objectContaining({ query: 'cascade' }), 100, 0, 'NEAREST',
+    );
+
+    fireEvent.click(within(rail).getByRole('button', { name: 'Select Cascade Clinic' }));
+    expect(await screen.findByRole('region', { name: 'Selected event' })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Discover query'), { target: { value: '  HARBOR ' } });
+
+    const updatedRail = await screen.findByRole('complementary', { name: 'Nearby events' });
+    expect(within(updatedRail).getByRole('button', { name: 'Select Harbor League' })).toBeInTheDocument();
+    expect(within(updatedRail).queryByRole('button', { name: 'Select Cascade Clinic' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Selected event' })).not.toBeInTheDocument();
+    expect(mockedEventService.getEventsPaginated).toHaveBeenLastCalledWith(
+      expect.objectContaining({ query: 'harbor' }), 100, 0, 'NEAREST',
+    );
+  });
+
+  it('follows the embedded page target and applies the query to organization requests and results', async () => {
+    mockedEventService.getEventsPaginated.mockResolvedValue([
+      buildMapEvent({ name: 'Cascade Clinic' }),
+    ]);
+    mockedOrganizationService.listOrganizationsInArea.mockResolvedValue([
+      buildMapOrganization('cascade', 'Cascade Sports Club', 0),
+      buildMapOrganization('harbor', 'Harbor Sports Club', 0.1),
+    ]);
+    renderWithMantine(<PageMapHarness embedded searchQuery="  CASCADE " />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Select Cascade Clinic' }));
+    expect(await screen.findByRole('region', { name: 'Selected event' })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Discover target'), { target: { value: 'organizations' } });
+
+    const rail = await screen.findByRole('complementary', { name: 'Nearby organizations' });
+    expect(within(rail).getByRole('button', { name: 'Select Cascade Sports Club' })).toBeInTheDocument();
+    expect(within(rail).queryByRole('button', { name: 'Select Harbor Sports Club' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Selected event' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Cascade Clinic', exact: true })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cascade Sports Club', exact: true })).toBeInTheDocument();
+    expect(mockedOrganizationService.listOrganizationsInArea).toHaveBeenLastCalledWith(expect.objectContaining({
+      query: 'cascade',
+      area: expect.objectContaining({ ...VANCOUVER_WA_CENTER }),
+    }));
+
+    fireEvent.change(screen.getByLabelText('Discover target'), { target: { value: 'events' } });
+    expect(await screen.findByRole('button', { name: 'Select Cascade Clinic' })).toBeInTheDocument();
+    expect(screen.queryByRole('complementary', { name: 'Nearby organizations' })).not.toBeInTheDocument();
+    expect(mockedEventService.getEventsPaginated).toHaveBeenCalledTimes(2);
+  });
+
+  it('filters embedded rental resources by their own names instead of only their organization', async () => {
+    const organization = buildAffiliateRentalOrganization();
+    organization.fields = [
+      {
+        $id: 'tennis', name: 'Outdoor Tennis', location: 'Vancouver',
+        lat: VANCOUVER_WA_CENTER.lat, long: VANCOUVER_WA_CENTER.lng,
+        rentalSlots: [{ $id: 'tennis-slot', startDate: '2099-01-01', startTimeMinutes: 12 * 60, repeating: false } as TimeSlot],
+      },
+    ];
+    mockedOrganizationService.listOrganizationsInArea.mockResolvedValue([organization]);
+    renderWithMantine(<PageMapHarness embedded activeTab="rentals" searchQuery="  TENNIS " />);
+
+    const rail = await screen.findByRole('complementary', { name: 'Nearby rentals' });
+    expect(within(rail).getByRole('button', { name: 'Select Outdoor Tennis' })).toBeInTheDocument();
+    expect(within(rail).queryByRole('button', { name: 'Select Affiliate Indoor Court' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Outdoor Tennis', exact: true })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Discover query'), { target: { value: '  Indoor ' } });
+    const updatedRail = await screen.findByRole('complementary', { name: 'Nearby rentals' });
+    expect(within(updatedRail).getByRole('button', { name: 'Select Affiliate Indoor Court' })).toBeInTheDocument();
+    expect(within(updatedRail).queryByRole('button', { name: 'Select Outdoor Tennis' })).not.toBeInTheDocument();
+  });
+
+  it('keeps embedded rentals that match only the organization description or location', async () => {
+    const organization = buildAffiliateRentalOrganization();
+    organization.description = 'Community sports center';
+    organization.location = 'Portland, OR';
+    mockedOrganizationService.listOrganizationsInArea.mockResolvedValue([organization]);
+    renderWithMantine(<PageMapHarness embedded activeTab="rentals" searchQuery="  COMMUNITY " />);
+
+    const rail = await screen.findByRole('complementary', { name: 'Nearby rentals' });
+    expect(within(rail).getByRole('button', { name: 'Select Affiliate Indoor Court' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Affiliate Indoor Court', exact: true })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Discover query'), { target: { value: '  PORTLAND ' } });
+    const updatedRail = await screen.findByRole('complementary', { name: 'Nearby rentals' });
+    expect(within(updatedRail).getByRole('button', { name: 'Select Affiliate Indoor Court' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Affiliate Indoor Court', exact: true })).toBeInTheDocument();
+  });
+
+  it('filters embedded teams by team text while keeping their organization locations', async () => {
+    const organization = buildMapOrganization('river-city', 'River City Sports Club', 0);
+    organization.teams = [
+      buildMapTeam({ $id: 'cascade', name: 'Cascade Crew' }),
+      buildMapTeam({ $id: 'harbor', name: 'Harbor Strikers', sport: 'Soccer' }),
+    ];
+    mockedOrganizationService.listOrganizationsInArea.mockResolvedValue([organization]);
+    renderWithMantine(<PageMapHarness embedded activeTab="teams" searchQuery="  CASCADE " />);
+
+    const rail = await screen.findByRole('complementary', { name: 'Nearby teams' });
+    const row = within(rail).getByRole('button', { name: 'Select Cascade Crew' });
+    expect(within(row).getByText('Organization location: River City Sports Club')).toBeInTheDocument();
+    expect(within(rail).queryByRole('button', { name: 'Select Harbor Strikers' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cascade Crew — organization location: River City Sports Club', exact: true })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Discover query'), { target: { value: 'soccer' } });
+    const updatedRail = await screen.findByRole('complementary', { name: 'Nearby teams' });
+    expect(within(updatedRail).getByRole('button', { name: 'Select Harbor Strikers' })).toBeInTheDocument();
+    expect(within(updatedRail).queryByRole('button', { name: 'Select Cascade Crew' })).not.toBeInTheDocument();
   });
 
   it('applies event type and all division constraints to the same division when price changes', async () => {

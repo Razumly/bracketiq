@@ -27,6 +27,7 @@ import {
   type EventSortValue,
 } from '@/components/events/EventFilterControls';
 import Loading from '@/components/ui/Loading';
+import ResponsiveCardGrid from '@/components/ui/ResponsiveCardGrid';
 import {
   eventListFilterKey,
   useEventListFiltering,
@@ -57,6 +58,7 @@ type EventsTabContentProps<TEventType extends string = Event['eventType']> = {
   setSearchTerm: (value: string) => void;
   onSearchSubmit?: () => void;
   onOpenMap?: () => void;
+  showLegacyControls?: boolean;
   selectedEventTypes: TEventType[];
   setSelectedEventTypes: (value: TEventType[]) => void;
   eventTypeOptions: readonly TEventType[];
@@ -87,8 +89,10 @@ type EventsTabContentProps<TEventType extends string = Event['eventType']> = {
   hasMoreEvents: boolean;
   hasScopedEventCache?: boolean;
   cacheStartDate?: string;
+  cacheFilterKey?: string | null;
   sentinelRef: RefObject<HTMLDivElement | null>;
   eventsError: string | null;
+  onRetry: () => void;
   onFilterChange?: () => Promise<void> | void;
   onEventClick: (event: Event) => void;
   onCreateEvent: () => void;
@@ -119,6 +123,7 @@ function eventViewOptions<T extends string>(props: EventsTabContentProps<T>) {
     onSearchSubmit: props.onSearchSubmit ?? (() => {}),
     divisionFilters: props.divisionFilters ?? EMPTY_DIVISION_FILTERS,
     setDivisionFilters: props.setDivisionFilters ?? (() => {}),
+    showLegacyControls: props.showLegacyControls ?? true,
     showCreateEventButton: props.showCreateEventButton ?? true,
     createEventDisabled: props.createEventDisabled ?? false,
     createEventHelperText: props.createEventHelperText ?? null,
@@ -150,6 +155,7 @@ function EventsTabView<TEventType extends string>(
     setSearchTerm,
     onSearchSubmit,
     onOpenMap,
+    showLegacyControls,
     selectedEventTypes,
     setSelectedEventTypes,
     eventTypeOptions,
@@ -180,8 +186,10 @@ function EventsTabView<TEventType extends string>(
     hasMoreEvents,
     hasScopedEventCache,
     cacheStartDate,
+    cacheFilterKey,
     sentinelRef,
     eventsError,
+    onRetry,
     onFilterChange,
     onEventClick,
     onCreateEvent,
@@ -277,15 +285,20 @@ function EventsTabView<TEventType extends string>(
     selectedStartDate,
     selectedTags,
   ]);
-  const { visibleEvents, refreshError } = useEventListFiltering({
+  const currentFilterKey = eventListFilterKey(eventFilters);
+  const { visibleEvents, refreshError, isRefreshing, retryRefresh } = useEventListFiltering({
     events,
     filters: eventFilters,
-    filterKey: eventListFilterKey(eventFilters),
+    filterKey: currentFilterKey,
     hasMoreEvents,
     hasScopedEventCache,
     cacheStartDate,
     onFilterChange,
   });
+  const resultsError = eventsError ?? refreshError;
+  const cacheMatchesCurrentFilters = hasScopedEventCache === true
+    && (cacheFilterKey === undefined || cacheFilterKey === currentFilterKey)
+    && !isRefreshing;
 
   const sortedEvents = useMemo(() => {
     const sourceEvents = hideWeeklyChildren
@@ -431,11 +444,13 @@ function EventsTabView<TEventType extends string>(
   const activeFilters = [...categoryFilterChips(), ...rangeFilterChips(), ...visibilityFilterChips()];
 
   const activeFilterCount = activeFilters.length;
-  const eventReadoutCount = activeFilterCount > 0
-    ? sortedEvents.length
-    : typeof totalEvents === 'number'
-      ? totalEvents
-      : sortedEvents.length;
+  const eventReadoutCount = cacheMatchesCurrentFilters && typeof totalEvents === 'number'
+    ? totalEvents
+    : activeFilterCount > 0
+      ? sortedEvents.length
+      : typeof totalEvents === 'number'
+        ? totalEvents
+        : sortedEvents.length;
   const hasActiveDistanceFilter = Boolean(location && typeof maxDistance === 'number');
 
 
@@ -490,7 +505,7 @@ function EventsTabView<TEventType extends string>(
   const renderEventCards = () => (
     isLoadingInitial ? (
       <Loading text="Loading events..." />
-    ) : sortedEvents.length === 0 ? (
+    ) : sortedEvents.length === 0 && !resultsError ? (
       <Paper withBorder p="xl" radius="lg">
         <Text fw={700} mb={6}>
           No events match your filters
@@ -504,25 +519,26 @@ function EventsTabView<TEventType extends string>(
       </Paper>
     ) : (
       <>
-        <div className="org-event-grid discover-event-grid">
+        <ResponsiveCardGrid className="discover-card-grid discover-event-grid">
           {sortedEvents.map((event) => (
             <OrganizationEventCard
               key={event.$id}
               event={event}
+              userLocation={location}
               onClick={() => {
                 trackEventClicked(event, 'discover_events');
                 onEventClick(event);
               }}
             />
           ))}
-        </div>
+        </ResponsiveCardGrid>
         <div ref={sentinelRef} style={{ height: 1 }} />
         {isLoadingMore && (
           <Group justify="center" mt="lg">
             <Loader />
           </Group>
         )}
-        {!hasMoreEvents && (
+        {!resultsError && !hasMoreEvents && (
           <Text size="sm" c="dimmed" ta="center" mt="lg">
             You&apos;ve reached the end of the results.
           </Text>
@@ -536,9 +552,11 @@ function EventsTabView<TEventType extends string>(
     <div className="space-y-4">
       <Group className="discover-results-header" justify="space-between" align="center" gap="sm" wrap="wrap">
         <div className="discover-results-summary">
-          <Text size="sm" c="dimmed">
-            {eventReadoutCount} event{eventReadoutCount === 1 ? '' : 's'} {hasActiveDistanceFilter ? 'near you' : 'available'}.
-          </Text>
+          {(!resultsError || sortedEvents.length > 0) && (
+            <Text size="sm" c="dimmed">
+              {eventReadoutCount} event{eventReadoutCount === 1 ? '' : 's'} {hasActiveDistanceFilter ? 'near you' : 'available'}.
+            </Text>
+          )}
           <ActiveEventFilters filters={activeFilters} className="discover-active-event-filters" label="Active filters" />
         </div>
         <Select
@@ -551,9 +569,18 @@ function EventsTabView<TEventType extends string>(
         />
       </Group>
 
-      {(eventsError || refreshError) && (
+      {resultsError && (
         <Alert color="red">
-          {eventsError ?? refreshError}
+          <Group justify="space-between" gap="sm" wrap="wrap">
+            <Text size="sm">{resultsError}</Text>
+            <Button
+              variant="default"
+              onClick={eventsError ? onRetry : retryRefresh}
+              disabled={isLoadingInitial || isLoadingMore || isRefreshing}
+            >
+              Retry events
+            </Button>
+          </Group>
         </Alert>
       )}
 
@@ -563,7 +590,7 @@ function EventsTabView<TEventType extends string>(
 
   return (
     <>
-      {renderSearchActions()}
+      {showLegacyControls && renderSearchActions()}
 
 
       <div className="discover-event-results">
