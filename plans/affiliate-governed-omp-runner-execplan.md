@@ -2308,3 +2308,31 @@ These trials do not authorize more retries or fleet expansion. The next
 decision is how to resolve or retain TPH's evidence hold, followed by a
 controlled repair batch. Full activation/publication proof remains a separate
 rollout gate.
+
+### User review decisions
+
+The user reviewed the retained TPH and Ultimate evidence.
+
+For TPH, the user approved the other valid sports and directed that Martial
+Arts and Dance not be added. Treat this as a source-specific inclusion scope:
+omit those two activities from the TPH mapping, retain source-supported
+catalog sports, and do not block or exclude the entire organization because
+of the omitted activities. Do not add a Martial Arts catalog row or infer a
+new global blacklist policy from this decision. Soccer and Volleyball still
+use exact, source-supported catalog variants; do not invent generic aliases.
+
+This decision resolves the human activity-scope question. A future governed
+repair must carry the decision in its claim context and map the retained
+sports. Preserve the completed producer hold and its evidence. The decision
+does not itself create a package or change TPH's current database hold.
+
+The user also approved Ultimate's reviewed content. No content decision
+remains open for that package. Preserve its first-party wording and meaning.
+The encoded quote and public rendering remain presentation checks before
+activation; the stored Open Graph description already contains the actual
+quotation mark. Do not rewrite the description as discovery narration.
+
+These are recorded content decisions only. No catalog, mapping, source,
+candidate, publication, queue, or runtime state changed. Ultimate remains
+independently approved and unpublished. Another claim or activation requires
+the separately authorized governed operation.
