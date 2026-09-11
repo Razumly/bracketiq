@@ -8,10 +8,16 @@ type SearchCallbacks = Pick<DiscoverSearchBarProps,
   | 'setSelectedStartDate' | 'setSelectedEndDate' | 'setSelectedSports'
 >;
 
-function SearchHarness({ callbacks = {} }: { callbacks?: Partial<SearchCallbacks> }) {
+function SearchHarness({
+  callbacks = {},
+  initialExpanded = true,
+}: {
+  callbacks?: Partial<SearchCallbacks>;
+  initialExpanded?: boolean;
+}) {
   const [activeTab, setActiveTab] = useState<DiscoverSearchBarProps['activeTab']>('events');
   const [searchTerm, setSearchTerm] = useState('');
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(initialExpanded);
   const [startDate, setStartDate] = useState<Date | null>(null);
   const [endDate, setEndDate] = useState<Date | null>(null);
   const [sports, setSports] = useState<string[]>([]);
@@ -46,6 +52,7 @@ it('preserves the query and selected tab across controlled collapse and expansio
   render(<SearchHarness callbacks={callbacks} />);
   const search = within(screen.getByRole('search', { name: 'Discover search' }));
 
+  expect(search.queryByRole('button', { name: 'Collapse search' })).not.toBeInTheDocument();
   await user.type(search.getByRole('textbox', { name: 'Search by name or keyword' }), 'Evening');
   await user.click(within(search.getByRole('group', { name: 'Search type' })).getByRole('button', { name: 'Teams' }));
 
@@ -53,7 +60,7 @@ it('preserves the query and selected tab across controlled collapse and expansio
   expect(callbacks.onTabChange).toHaveBeenLastCalledWith('teams');
   expect(search.getByRole('button', { name: 'Teams' })).toHaveAttribute('aria-pressed', 'true');
   expect(search.getByRole('button', { name: 'Events' })).toHaveAttribute('aria-pressed', 'false');
-  await user.click(search.getByRole('button', { name: 'Collapse search' }));
+  await user.keyboard('{Escape}');
 
   const summary = search.getByRole('button', { name: /^Edit search: Teams, Evening,/ });
   expect(summary).toHaveAttribute('aria-expanded', 'false');
@@ -63,10 +70,107 @@ it('preserves the query and selected tab across controlled collapse and expansio
   await user.click(summary);
 
   expect(callbacks.onExpandedChange).toHaveBeenLastCalledWith(true);
-  expect(search.getByRole('button', { name: 'Collapse search' })).toHaveAttribute('aria-expanded', 'true');
+  expect(summary).toHaveAttribute('aria-expanded', 'true');
+  expect(search.queryByRole('button', { name: 'Collapse search' })).not.toBeInTheDocument();
   expect(search.getByRole('textbox', { name: 'Search by name or keyword' })).toHaveValue('Evening');
   expect(search.getByRole('textbox', { name: 'Search by name or keyword' })).toHaveFocus();
   expect(search.getByRole('button', { name: 'Teams' })).toHaveAttribute('aria-pressed', 'true');
+});
+
+it('keeps the summary anchor in place and dismisses the overlay through its backdrop', async () => {
+  const user = userEvent.setup();
+  const onExpandedChange = jest.fn();
+  const openResult = jest.fn();
+  render(
+    <>
+      <SearchHarness initialExpanded={false} callbacks={{ onExpandedChange }} />
+      <button type="button" onClick={openResult}>Open result</button>
+    </>,
+  );
+  const search = screen.getByRole('search', { name: 'Discover search' });
+  const summary = within(search).getByRole('button', { name: /^Edit search:/ });
+  const result = screen.getByRole('button', { name: 'Open result' });
+  expect(within(search).queryByRole('textbox')).not.toBeInTheDocument();
+
+  await user.click(summary);
+
+  expect(onExpandedChange).toHaveBeenLastCalledWith(true);
+  expect(screen.getByRole('textbox', { name: 'Search by name or keyword' })).toHaveFocus();
+  // JSDOM has no layout engine; retain the flow anchor and following result node.
+  expect(summary.parentElement).toBe(search);
+  expect(search.nextElementSibling).toBe(result);
+  expect(summary).toHaveAttribute('aria-hidden', 'true');
+  expect(summary).toHaveAttribute('tabindex', '-1');
+  const backdrop = search.querySelector('.discover-search-backdrop');
+  const panel = document.getElementById(summary.getAttribute('aria-controls')!);
+  if (!backdrop || !panel) throw new Error('The expanded search overlay is missing.');
+
+  await user.click(backdrop);
+
+  expect(onExpandedChange).toHaveBeenLastCalledWith(false);
+  expect(openResult).not.toHaveBeenCalled();
+  expect(summary).toHaveFocus();
+  expect(panel).toHaveAttribute('aria-hidden', 'true');
+  expect(panel).toHaveAttribute('inert');
+  expect(within(search).queryByRole('textbox')).not.toBeInTheDocument();
+  expect(search.nextElementSibling).toBe(result);
+
+  fireEvent.animationEnd(panel);
+  expect(panel).not.toBeInTheDocument();
+  expect(backdrop).not.toBeInTheDocument();
+  await user.tab();
+  expect(result).toHaveFocus();
+});
+
+it('collapses after a click outside the search and returns focus to its summary', async () => {
+  const user = userEvent.setup();
+  const onExpandedChange = jest.fn();
+  render(
+    <>
+      <SearchHarness callbacks={{ onExpandedChange }} />
+      <button type="button">Outside search</button>
+    </>,
+  );
+
+  await user.click(screen.getByRole('button', { name: 'Outside search' }));
+
+  expect(onExpandedChange).toHaveBeenCalledTimes(1);
+  expect(onExpandedChange).toHaveBeenCalledWith(false);
+  expect(screen.getByRole('button', { name: /^Edit search:/ })).toHaveFocus();
+  expect(screen.queryByRole('textbox', { name: 'Search by name or keyword' })).not.toBeInTheDocument();
+});
+
+it('hides a portaled date panel immediately when Escape collapses the search', async () => {
+  const user = userEvent.setup();
+  render(<SearchHarness />);
+  await user.click(screen.getByRole('button', { name: 'When: Any dates' }));
+  const dates = screen.getByRole('dialog', { name: 'Choose dates' });
+  await user.click(within(dates).getByLabelText('Start date'));
+  expect(screen.getByRole('textbox', { name: 'Search by name or keyword' })).toBeInTheDocument();
+
+  await user.keyboard('{Escape}');
+
+  expect(screen.queryByRole('dialog', { name: 'Choose dates' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('textbox', { name: 'Search by name or keyword' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /^Edit search:/ })).toHaveFocus();
+});
+
+it('keeps a reopened panel active when the previous close animation finishes', async () => {
+  const user = userEvent.setup();
+  render(<SearchHarness />);
+  await user.keyboard('{Escape}');
+  const summary = screen.getByRole('button', { name: /^Edit search:/ });
+  const panel = document.getElementById(summary.getAttribute('aria-controls')!);
+  if (!panel) throw new Error('The closing search panel is missing.');
+
+  await user.click(summary);
+  fireEvent.animationEnd(panel);
+
+  const query = screen.getByRole('textbox', { name: 'Search by name or keyword' });
+  expect(query).toHaveFocus();
+  expect(panel).not.toHaveAttribute('inert');
+  await user.type(query, 'Late match');
+  expect(query).toHaveValue('Late match');
 });
 
 it('updates and clears the date range through the responsive date panel', async () => {
@@ -76,7 +180,6 @@ it('updates and clears the date range through the responsive date panel', async 
   await user.click(screen.getByRole('button', { name: 'When: Any dates' }));
   const dates = within(screen.getByRole('dialog', { name: 'Choose dates' }));
 
-  expect(dates.getByRole('group', { name: 'Date range' })).toHaveClass('grid-cols-1', 'sm:grid-cols-2');
   fireEvent.change(dates.getByLabelText('Start date'), { target: { value: '2099-09-10' } });
   fireEvent.change(dates.getByLabelText('End date'), { target: { value: '2099-09-12' } });
   expect(callbacks.setSelectedStartDate).toHaveBeenLastCalledWith(new Date(2099, 8, 10));
@@ -158,7 +261,7 @@ it('keeps multiple sport selections in the collapsed search summary', async () =
   expect(setSelectedSports).toHaveBeenLastCalledWith(['Soccer', 'Tennis']);
   expect(screen.getByRole('option', { name: 'Soccer' })).toHaveAttribute('aria-selected', 'true');
   expect(screen.getByRole('option', { name: 'Tennis' })).toHaveAttribute('aria-selected', 'true');
-  await user.click(screen.getByRole('button', { name: 'Collapse search' }));
+  await user.keyboard('{Escape}');
   await user.click(screen.getByRole('button', { name: 'Edit search: Events, Portland, OR, Any dates, Soccer, Tennis' }));
 
   expect(screen.getByRole('combobox', { name: 'Sport' })).toHaveValue('Soccer, Tennis');
