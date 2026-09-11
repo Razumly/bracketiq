@@ -28,6 +28,8 @@ const TAB_LABELS: Record<DiscoverTabValue, string> = {
   teams: 'Teams',
 };
 const TAB_VALUES: DiscoverTabValue[] = ['events', 'organizations', 'rentals', 'teams'];
+// Match the panel and backdrop exit duration in globals.css.
+const PANEL_EXIT_DURATION_MS = 140;
 
 export type DiscoverSearchBarProps = {
   activeTab: DiscoverTabValue;
@@ -119,6 +121,13 @@ export default function DiscoverSearchBar({
     if (expanded) queryRef.current?.focus({ preventScroll: true });
     else summaryRef.current?.focus({ preventScroll: true });
   }, [expanded]);
+
+  useEffect(() => {
+    if (expanded || !isPanelMounted) return;
+
+    const timeout = window.setTimeout(() => setIsPanelMounted(false), PANEL_EXIT_DURATION_MS);
+    return () => window.clearTimeout(timeout);
+  }, [expanded, isPanelMounted]);
 
   return (
     <div
