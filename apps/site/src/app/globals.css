@@ -722,6 +722,78 @@ svg {
   margin-bottom: 2rem;
 }
 
+.discover-search-bar {
+  position: relative;
+}
+
+.discover-search-summary[aria-expanded="true"] {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.discover-search-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgb(71 78 86 / 42%);
+  animation: discover-search-backdrop-in 180ms ease-out both;
+}
+
+.discover-search-panel {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 41;
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 1.5rem;
+  background: var(--background);
+  box-shadow: 0 18px 48px rgb(15 23 42 / 16%);
+  transform-origin: top center;
+  animation: discover-search-panel-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.discover-search-backdrop[data-state="closed"] {
+  pointer-events: none;
+  animation: discover-search-backdrop-out 140ms ease-in both;
+}
+
+.discover-search-panel[data-state="closed"] {
+  pointer-events: none;
+  animation: discover-search-panel-out 140ms ease-in both;
+}
+
+@keyframes discover-search-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes discover-search-backdrop-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes discover-search-panel-in {
+  from { opacity: 0; transform: translateY(-0.375rem) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes discover-search-panel-out {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(-0.375rem) scale(0.985); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .discover-search-backdrop,
+  .discover-search-panel {
+    animation-duration: 0.01ms !important;
+  }
+
+  .discover-search-panel {
+    transform: none !important;
+  }
+}
+
 .discover-search-hero fieldset > div > .relative,
 .discover-search-hero fieldset > div > .relative > span {
   width: 100%;

@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useId, useRef, type ReactNode } from 'react';
-import { CalendarDays, ChevronDown, ChevronUp, Search } from 'lucide-react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { CalendarDays, ChevronDown, Search } from 'lucide-react';
 import {
   Button,
   Loader,
@@ -86,30 +86,60 @@ export default function DiscoverSearchBar({
   const panelId = `${id}-controls`;
   const summaryRef = useRef<HTMLButtonElement>(null);
   const queryRef = useRef<HTMLInputElement>(null);
-  const wasExpanded = useRef(expanded);
+  const wasExpanded = useRef(false);
+  const insideClickRef = useRef<Event | null>(null);
+  const [isPanelMounted, setIsPanelMounted] = useState(expanded);
   const whereSummary = locationLabel.trim() || 'Anywhere';
   const isEventSearch = activeTab === 'events';
   const whenSummary = isEventSearch ? dateRangeLabel(selectedStartDate, selectedEndDate) : 'Events only';
   const sportSummary = selectedSports.join(', ') || 'All sports';
 
   useEffect(() => {
+    if (!expanded) return;
+
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (insideClickRef.current !== event) onExpandedChange(false);
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      onExpandedChange(false);
+    };
+    document.addEventListener('click', handleOutsideClick);
+    document.addEventListener('keydown', handleEscape, true);
+    return () => {
+      document.removeEventListener('click', handleOutsideClick);
+      document.removeEventListener('keydown', handleEscape, true);
+    };
+  }, [expanded, onExpandedChange]);
+
+  useEffect(() => {
     if (wasExpanded.current === expanded) return;
     wasExpanded.current = expanded;
-    if (expanded) queryRef.current?.focus();
-    else summaryRef.current?.focus();
+    if (expanded) queryRef.current?.focus({ preventScroll: true });
+    else summaryRef.current?.focus({ preventScroll: true });
   }, [expanded]);
 
   return (
-    <div role="search" aria-label="Discover search" className="mx-auto w-full min-w-0 max-w-5xl">
-      {!expanded ? (
+    <div
+      role="search"
+      aria-label="Discover search"
+      className="discover-search-bar mx-auto w-full min-w-0 max-w-5xl"
+      onClickCapture={(event) => { insideClickRef.current = event.nativeEvent; }}
+    >
         <button
           ref={summaryRef}
           type="button"
           aria-label={`Edit search: ${TAB_LABELS[activeTab]}${searchTerm.trim() ? `, ${searchTerm.trim()}` : ''}, ${whereSummary}, ${whenSummary}, ${sportSummary}`}
-          aria-expanded={false}
+          aria-expanded={expanded}
+          aria-hidden={expanded || undefined}
+          tabIndex={expanded ? -1 : undefined}
           aria-controls={panelId}
-          onClick={() => onExpandedChange(true)}
-          className="mx-auto flex min-h-11 w-full max-w-3xl items-center gap-3 rounded-3xl border border-border bg-background px-4 py-3 text-left shadow-sm outline-none transition-colors hover:bg-muted/50 focus-visible:ring-[3px] focus-visible:ring-ring motion-reduce:transition-none sm:rounded-full sm:px-6"
+          onClick={() => {
+            setIsPanelMounted(true);
+            onExpandedChange(true);
+          }}
+          className="discover-search-summary mx-auto flex min-h-11 w-full max-w-3xl items-center gap-3 rounded-3xl border border-border bg-background px-4 py-3 text-left shadow-sm outline-none transition-colors hover:bg-muted/50 focus-visible:ring-[3px] focus-visible:ring-ring motion-reduce:transition-none sm:rounded-full sm:px-6"
         >
           <span className="min-w-0 flex-1">
             <span className="mb-2 block truncate text-sm font-semibold text-foreground">
@@ -132,8 +162,25 @@ export default function DiscoverSearchBar({
             <Search className="size-5" />
           </span>
         </button>
-      ) : (
-        <div id={panelId} className="space-y-4">
+      {(expanded || isPanelMounted) && (
+        <div
+          aria-hidden="true"
+          className="discover-search-backdrop"
+          data-state={expanded ? 'open' : 'closed'}
+          onClick={() => onExpandedChange(false)}
+        />
+      )}
+      {(expanded || isPanelMounted) && (
+        <div
+          id={panelId}
+          className="discover-search-panel space-y-4"
+          data-state={expanded ? 'open' : 'closed'}
+          aria-hidden={!expanded || undefined}
+          inert={!expanded || undefined}
+          onAnimationEnd={(event) => {
+            if (event.target === event.currentTarget && !expanded) setIsPanelMounted(false);
+          }}
+        >
           <div className="flex flex-wrap items-center justify-center gap-2">
             <div role="group" aria-label="Search type" className="flex min-w-0 flex-wrap justify-center gap-1">
               {TAB_VALUES.map((tab) => (
@@ -150,19 +197,6 @@ export default function DiscoverSearchBar({
                 </Button>
               ))}
             </div>
-            <Button
-              type="button"
-              variant="subtle"
-              radius="xl"
-              aria-label="Collapse search"
-              aria-expanded={true}
-              aria-controls={panelId}
-              onClick={() => onExpandedChange(false)}
-              className="min-h-11 min-w-11 rounded-full"
-              leftSection={<ChevronUp aria-hidden="true" className="size-4" />}
-            >
-              <span className="hidden sm:inline">Collapse</span>
-            </Button>
           </div>
           <form
             id={searchFormId}
@@ -201,7 +235,14 @@ export default function DiscoverSearchBar({
                     <span className="min-w-0 flex-1 truncate text-sm" title={whenSummary}>{whenSummary}</span>
                     <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
                   </PopoverTrigger>
-                  <PopoverContent align="center" aria-label="Choose dates" className="w-[calc(100vw-2rem)] max-w-lg gap-4 rounded-2xl p-4">
+                  <PopoverContent
+                    align="center"
+                    aria-label="Choose dates"
+                    hidden={!expanded}
+                    inert={!expanded || undefined}
+                    finalFocus={expanded ? undefined : false}
+                    className="w-[calc(100vw-2rem)] max-w-lg gap-4 rounded-2xl p-4"
+                  >
                     <fieldset className="grid min-w-0 grid-cols-1 gap-3 border-0 p-0 sm:grid-cols-2">
                       <legend className="mb-3 text-base font-semibold">Date range</legend>
                       <TextInput
