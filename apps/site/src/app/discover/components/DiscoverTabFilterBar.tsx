@@ -1,13 +1,13 @@
 'use client';
 
-import { useId, useState, type Dispatch, type SetStateAction } from 'react';
+import { useEffect, useId, useState, type Dispatch, type SetStateAction } from 'react';
 import { BarChart3, Clock3, MapPin, Tag, UsersRound } from 'lucide-react';
 import { Alert, Loader, Text, TextInput } from '@/components/organization/organization-operation-ui';
 import { Slider } from '@/components/ui/slider';
 import { formatDisplayTime } from '@/lib/dateUtils';
 import type { OrganizationTag } from '@/types';
 import type { TeamDivisionFilterOption } from '../utils/teamFilters';
-import DivisionDiscoveryFilters, { type DivisionDiscoveryFilterValue } from './DivisionDiscoveryFilters';
+import DivisionDiscoveryFilters, { getSingleSelectedSportKey, type DivisionDiscoveryFilterValue } from './DivisionDiscoveryFilters';
 import { DiscoverFilterRows, FilterOptionList, FilterPopover, resolveOpenFilter, type DiscoverFilterItem, type DiscoverFilterRowsProps } from './DiscoverFilterBar';
 
 export const EMPTY_DISCOVERY_DIVISION_FILTERS: DivisionDiscoveryFilterValue = {
@@ -52,6 +52,7 @@ export type TeamDiscoveryFilters = {
 type Props = Omit<DiscoverFilterRowsProps, 'filters' | 'filtersKey' | 'filterAriaLabel' | 'moreFiltersLabel'> & {
   location: { lat: number; lng: number } | null;
   defaultMaxDistance: number;
+  showDistanceFilter?: boolean;
 } & (
   | { target: 'organizations'; filters: OrganizationDiscoveryFilters }
   | { target: 'rentals'; filters: RentalDiscoveryFilters }
@@ -74,7 +75,20 @@ export default function DiscoverTabFilterBar(props: Props) {
   const panelId = useId();
   const setOpen = (id: string) => (open: boolean) => setOpenFilter((current) => resolveOpenFilter(current, id, open));
   const items: DiscoverFilterItem[] = [];
-  const { target, selectedSports, location, defaultMaxDistance } = props;
+  const { target, selectedSports, location, defaultMaxDistance, showDistanceFilter = true } = props;
+  const organizationFilters = props.target === 'organizations' ? props.filters : null;
+  const hasSingleSport = getSingleSelectedSportKey(selectedSports) !== null;
+
+  useEffect(() => {
+    if (
+      !organizationFilters || hasSingleSport ||
+      organizationFilters.divisionFilters.skillDivisionTypeIds.length === 0
+    ) return;
+    organizationFilters.setDivisionFilters({
+      ...organizationFilters.divisionFilters,
+      skillDivisionTypeIds: [],
+    });
+  }, [hasSingleSport, organizationFilters]);
 
   if (props.target === 'organizations') {
     const filters = props.filters;
@@ -154,7 +168,7 @@ export default function DiscoverTabFilterBar(props: Props) {
         )}
       </FilterPopover>
     ) });
-  } else {
+  } else if (showDistanceFilter) {
     const { maxDistance, setMaxDistance } = props.filters;
     const miles = typeof maxDistance === 'number' ? Math.round(maxDistance / 1.60934) : null;
     const active = Boolean(location && miles !== null);
@@ -178,7 +192,7 @@ export default function DiscoverTabFilterBar(props: Props) {
 
   return <DiscoverFilterRows sports={props.sports} selectedSports={selectedSports} setSelectedSports={props.setSelectedSports}
     sportsLoading={props.sportsLoading} sportsError={props.sportsError} filters={items}
-    filtersKey={JSON.stringify([target, props.filters, Boolean(location), props.activeFilterCount])}
+    filtersKey={JSON.stringify([target, props.filters, Boolean(location), showDistanceFilter, props.activeFilterCount])}
     filterAriaLabel={target === 'organizations' ? 'Organization filters' : target === 'rentals' ? 'Rental filters' : 'Team filters'}
     activeFilterCount={props.activeFilterCount} resetFilters={props.resetFilters} />;
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { Event } from '@/types';
 
@@ -59,6 +59,14 @@ const getDivisionDetails = (event: Event): Array<Record<string, unknown>> => (
   (event.divisionDetails ?? event.divisions ?? [])
     .filter((division) => Boolean(division && typeof division === 'object'))
     .map((division) => division as unknown as Record<string, unknown>)
+    .filter((division) => {
+      const status = normalize(division.status);
+      const role = normalize(division.role);
+      const kind = normalize(division.kind);
+      return (!status || status === 'active')
+        && (!role || role === 'entry')
+        && (!kind || kind === 'league');
+    })
 );
 
 const hasDivisionFilters = (filters: EventDivisionFilterState): boolean => Boolean(
@@ -70,11 +78,12 @@ const hasDivisionFilters = (filters: EventDivisionFilterState): boolean => Boole
 );
 
 const matchesDivisionPrice = (priceCents: number, filters: EventDivisionFilterState): boolean => {
-  const aboveMinimum = filters.priceMinDollars === null || filters.priceMinDollars === undefined
-    || !Number.isFinite(priceCents) || priceCents >= filters.priceMinDollars * 100;
-  const belowMaximum = filters.priceMaxDollars === null || filters.priceMaxDollars === undefined
-    || !Number.isFinite(priceCents) || priceCents <= filters.priceMaxDollars * 100;
-  return aboveMinimum && belowMaximum;
+  const hasMinimum = filters.priceMinDollars !== null && filters.priceMinDollars !== undefined;
+  const hasMaximum = filters.priceMaxDollars !== null && filters.priceMaxDollars !== undefined;
+  if (!hasMinimum && !hasMaximum) return true;
+  if (!Number.isFinite(priceCents)) return false;
+  return (!hasMinimum || priceCents >= (filters.priceMinDollars as number) * 100)
+    && (!hasMaximum || priceCents <= (filters.priceMaxDollars as number) * 100);
 };
 
 const matchesDivisionDetail = (
@@ -93,7 +102,7 @@ const matchesDivisionDetail = (
 const matchesDivisionFilters = (event: Event, filters?: EventDivisionFilterState): boolean => {
   if (!filters || !hasDivisionFilters(filters)) return true;
   const details = getDivisionDetails(event);
-  if (!details.length) return true;
+  if (!details.length) return false;
   const selectedGenders = new Set((filters.genders ?? []).map(normalize));
   const selectedSkillIds = new Set((filters.skillDivisionTypeIds ?? []).map(normalize));
   const selectedAgeIds = new Set((filters.ageDivisionTypeIds ?? []).map(normalize));
@@ -103,7 +112,26 @@ const matchesDivisionFilters = (event: Event, filters?: EventDivisionFilterState
 export const matchesEventSearch = (event: Event, searchTerm: string): boolean => {
   const query = normalize(searchTerm);
   if (!query) return true;
-  const searchableText = [event.name, event.description, event.location, event.address, event.organizerName]
+  const organizationSearchableText = typeof event.organization === 'object' && event.organization
+    ? [
+      event.organization.name,
+      event.organization.location,
+      event.organization.address,
+      event.organization.description,
+    ]
+    : [];
+  const searchableText = [
+    event.name,
+    event.description,
+    event.location,
+    event.address,
+    event.organizerName,
+    event.sourceUrl,
+    event.scheduleText,
+    event.priceText,
+    event.statusText,
+    ...organizationSearchableText,
+  ]
     .filter(Boolean)
     .map(normalize)
     .join(' ');
@@ -132,11 +160,53 @@ const matchesTags = (event: Event, selectedTags?: readonly string[]): boolean =>
   return selectedTags.some((tag) => eventTags.has(normalize(tag)));
 };
 
+const isWeeklyParentEvent = (event: Event): boolean => (
+  event.eventType === 'WEEKLY_EVENT' && !event.parentEvent?.trim()
+);
+
+const eventTimestamp = (value: string | null | undefined): number => new Date(value ?? '').getTime();
+
+const hasValidWeeklySeasonBounds = (
+  isWeeklyParent: boolean,
+  startTime: number,
+  endTime: number,
+): boolean => {
+  if (!isWeeklyParent) return false;
+  return !Number.isFinite(endTime) || !Number.isFinite(startTime) || endTime >= startTime;
+};
+
+const eventDateAtOrAfter = (timestamp: number, date: Date | null): boolean => (
+  !date || !Number.isFinite(timestamp) || timestamp >= startOfDay(date)
+);
+
+const eventDateAtOrBefore = (timestamp: number, date: Date): boolean => (
+  !Number.isFinite(timestamp) || timestamp <= endOfDay(date)
+);
+
+const eventEndBoundary = (
+  event: Event,
+  isWeeklyParent: boolean,
+  weeklySeasonHasValidBounds: boolean,
+): string | null => {
+  if (!isWeeklyParent) return event.end ?? event.start;
+  return weeklySeasonHasValidBounds ? event.start : event.nextOccurrence?.start ?? event.start;
+};
+
 const matchesDateRange = (event: Event, startDate: Date | null, endDate: Date | null): boolean => {
-  const eventStart = new Date(event.start).getTime();
-  const startsAfterMinimum = !startDate || !Number.isFinite(eventStart) || eventStart >= startOfDay(startDate);
-  const startsBeforeMaximum = !endDate || !Number.isFinite(eventStart) || eventStart <= endOfDay(endDate);
-  return startsAfterMinimum && startsBeforeMaximum;
+  const isWeeklyParent = isWeeklyParentEvent(event);
+  const eventStartTime = eventTimestamp(event.start);
+  const eventEndTime = eventTimestamp(event.end);
+  const weeklySeasonHasValidBounds = hasValidWeeklySeasonBounds(isWeeklyParent, eventStartTime, eventEndTime);
+  const eventStart = eventTimestamp(isWeeklyParent ? event.nextOccurrence?.start ?? event.start : event.start);
+  const startsAfterMinimum = eventDateAtOrAfter(eventStart, startDate);
+  if (!endDate) return startsAfterMinimum;
+
+  const eventEnd = eventTimestamp(eventEndBoundary(event, isWeeklyParent, weeklySeasonHasValidBounds));
+  const startsBeforeMaximum = eventDateAtOrBefore(
+    weeklySeasonHasValidBounds ? eventStartTime : eventStart,
+    endDate,
+  );
+  return startsAfterMinimum && startsBeforeMaximum && eventDateAtOrBefore(eventEnd, endDate);
 };
 
 const matchesDistance = (event: Event, filters: EventListFilterState): boolean => {
@@ -217,10 +287,23 @@ export function useEventListFiltering<TEventType extends string>({
 }: UseEventListFilteringOptions<TEventType>) {
   const previousFilterKey = useRef(filterKey);
   const requestedStartDate = filters.selectedStartDate ?? filters.selectedEndDate;
-  const refreshOptions = useRef({ hasMoreEvents, hasScopedEventCache, cacheStartDate, requestedStartDate, onFilterChange });
+  const requiresServerResolution = Boolean(
+    requestedStartDate || hasDivisionFilters(filters.divisionFilters ?? {}),
+  );
+  const refreshOptions = useRef({
+    hasMoreEvents,
+    hasScopedEventCache,
+    cacheStartDate,
+    requestedStartDate,
+    requiresServerResolution,
+    onFilterChange,
+  });
   const hasServerFilteredCache = useRef(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [refreshAttempt, setRefreshAttempt] = useState(0);
+  const previousRefreshAttempt = useRef(0);
+  const retryRefresh = useCallback(() => setRefreshAttempt((attempt) => attempt + 1), []);
   const visibleEvents = useMemo(() => filterLoadedEvents(events, filters), [events, filters]);
 
   useEffect(() => {
@@ -228,16 +311,32 @@ export function useEventListFiltering<TEventType extends string>({
   }, [events, hasScopedEventCache]);
 
   useEffect(() => {
-    refreshOptions.current = { hasMoreEvents, hasScopedEventCache, cacheStartDate, requestedStartDate, onFilterChange };
-  }, [hasMoreEvents, hasScopedEventCache, cacheStartDate, requestedStartDate, onFilterChange]);
+    refreshOptions.current = {
+      hasMoreEvents,
+      hasScopedEventCache,
+      cacheStartDate,
+      requestedStartDate,
+      requiresServerResolution,
+      onFilterChange,
+    };
+  }, [
+    hasMoreEvents,
+    hasScopedEventCache,
+    cacheStartDate,
+    requestedStartDate,
+    requiresServerResolution,
+    onFilterChange,
+  ]);
 
   useEffect(() => {
-    if (previousFilterKey.current === filterKey) return;
+    const isRetry = previousRefreshAttempt.current !== refreshAttempt;
+    if (previousFilterKey.current === filterKey && !isRetry) return;
     previousFilterKey.current = filterKey;
+    previousRefreshAttempt.current = refreshAttempt;
     setIsRefreshing(false);
     setRefreshError(null);
     const options = refreshOptions.current;
-    if (![options.hasMoreEvents, options.hasScopedEventCache, expandsCacheStart(options.cacheStartDate, options.requestedStartDate), hasServerFilteredCache.current].some(Boolean)) return;
+    if (![options.hasMoreEvents, options.hasScopedEventCache, expandsCacheStart(options.cacheStartDate, options.requestedStartDate), options.requiresServerResolution, hasServerFilteredCache.current].some(Boolean)) return;
     if (!options.onFilterChange) return;
 
     let cancelled = false;
@@ -254,7 +353,7 @@ export function useEventListFiltering<TEventType extends string>({
         if (!cancelled) setIsRefreshing(false);
       }
     };
-    if (debounceMs <= 0) {
+    if (isRetry || debounceMs <= 0) {
       refresh();
       return () => { cancelled = true; };
     }
@@ -263,7 +362,7 @@ export function useEventListFiltering<TEventType extends string>({
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [debounceMs, filterKey]);
+  }, [debounceMs, filterKey, refreshAttempt]);
 
-  return { visibleEvents, isRefreshing, refreshError };
+  return { visibleEvents, isRefreshing, refreshError, retryRefresh };
 }

@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react';
+import { fireEvent, screen } from '@testing-library/react';
 
 import OrganizationEventCard from '../OrganizationEventCard';
 import { type Event } from '@/types';
@@ -104,5 +104,24 @@ describe('OrganizationEventCard schedule display', () => {
 
     expect(screen.getByText('Jul 16, 2099 – Jul 18, 2099')).toBeInTheDocument();
     expect(screen.queryByText(/\b\d{1,2}:\d{2}\s(?:AM|PM)\b/)).not.toBeInTheDocument();
+  });
+
+  it('updates the distance for the selected location and hides it when location is cleared', () => {
+    const event = createEvent({ coordinates: [0, 1] });
+    const onClick = jest.fn();
+    const { rerender } = renderWithMantine(
+      <OrganizationEventCard event={event} onClick={onClick} userLocation={{ lat: 0, lng: 0 }} />,
+    );
+    expect(screen.getByText('69.1 mi away')).toBeInTheDocument();
+
+    rerender(<OrganizationEventCard event={event} onClick={onClick} userLocation={{ lat: 0.999, lng: 0 }} />);
+    expect(screen.getByText('365 ft away')).toBeInTheDocument();
+    expect(screen.queryByText('69.1 mi away')).not.toBeInTheDocument();
+
+    rerender(<OrganizationEventCard event={event} onClick={onClick} />);
+    expect(screen.queryByText(/\b(?:mi|ft) away\b/)).not.toBeInTheDocument();
+    expect(screen.getByText('Beaverton Hoop YMCA')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: event.name }));
+    expect(onClick).toHaveBeenCalledTimes(1);
   });
 });

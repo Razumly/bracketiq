@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import DiscoverPage from '../page';
 
 const pushMock = jest.fn();
@@ -70,6 +71,11 @@ jest.mock('@/components/layout/Navigation', () => ({
   default: () => null,
 }));
 
+jest.mock('@/components/location/LocationSearch', () => ({
+  __esModule: true,
+  default: () => <button type="button">Choose location</button>,
+}));
+
 jest.mock('@/components/ui/Loading', () => ({
   __esModule: true,
   default: ({ text }: { text?: string }) => <div>{text ?? 'Loading'}</div>,
@@ -110,17 +116,27 @@ jest.mock('../components/EventsTabContent', () => ({
     const filters = { ...props, hideWeeklyChildren: false };
     const { visibleEvents } = useEventListFiltering({ ...props, filters, filterKey: eventListFilterKey(filters) });
     return <div>
-      <input aria-label="Event test search" value={props.searchTerm} onChange={(event) => props.setSearchTerm(event.target.value)} />
+      <select
+        aria-label="Event test sort"
+        value={props.eventSort}
+        onChange={(event) => props.onEventSortChange?.(event.target.value as NonNullable<typeof props.eventSort>)}
+      >
+        <option value="recommended">Recommended</option>
+        <option value="soonest">Soonest</option>
+        <option value="nearest">Nearest</option>
+        <option value="price-low">Price (Low to High)</option>
+      </select>
       <div data-testid="event-loading-state">{props.isLoadingInitial ? 'Loading' : 'Ready'}</div>
+      {props.eventsError && (
+        <div role="alert">
+          {props.eventsError}
+          <button onClick={props.onRetry}>Retry events</button>
+        </div>
+      )}
       {visibleEvents.map((event: { $id: string; name: string }) => <div key={event.$id}>{event.name}</div>)}
       <div ref={props.sentinelRef} />
     </div>;
   },
-}));
-
-jest.mock('../components/DiscoverSearchControls', () => ({
-  __esModule: true,
-  default: () => null,
 }));
 
 jest.mock('../components/DiscoverMapModal', () => ({
@@ -129,6 +145,7 @@ jest.mock('../components/DiscoverMapModal', () => ({
 }));
 
 jest.mock('../components/DivisionDiscoveryFilters', () => ({
+  ...jest.requireActual('../components/DivisionDiscoveryFilters'),
   __esModule: true,
   default: () => <div data-testid="division-discovery-filters">Division filters</div>,
 }));
@@ -189,7 +206,7 @@ describe('Discover organization loading', () => {
     getEventsPageMock.mockResolvedValue({ events: [], pagination: { nextOffset: 18, hasMore: true, totalCount: 100 } });
     render(<DiscoverPage />);
     await waitFor(() => expect(screen.getByTestId('event-loading-state')).toHaveTextContent('Ready'));
-    fireEvent.change(screen.getByRole('textbox', { name: 'Event test search' }), { target: { value: 'Basketball' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search by name or keyword' }), { target: { value: 'Basketball' } });
     await waitFor(() => expect(getEventsPageMock).toHaveBeenLastCalledWith(
       expect.objectContaining({ query: 'Basketball' }), 18, 0, 'RECOMMENDED',
     ));
@@ -203,7 +220,7 @@ describe('Discover organization loading', () => {
     getEventsPageMock.mockReturnValueOnce(initial).mockResolvedValue(page);
     render(<DiscoverPage />);
     await waitFor(() => expect(getEventsPageMock).toHaveBeenCalledTimes(1));
-    fireEvent.change(screen.getByRole('textbox', { name: 'Event test search' }), { target: { value: 'Basketball' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search by name or keyword' }), { target: { value: 'Basketball' } });
     await waitFor(() => expect(getEventsPageMock).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.getByTestId('event-loading-state')).toHaveTextContent('Ready'));
     await act(async () => { finishInitial(page); await initial; });
@@ -223,7 +240,7 @@ describe('Discover organization loading', () => {
     await waitFor(() => expect(screen.getByTestId('event-loading-state')).toHaveTextContent('Ready'));
     act(() => { intersectionCallbacks.forEach((callback) => callback([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver)); });
     await waitFor(() => expect(getEventsPageMock).toHaveBeenCalledTimes(2));
-    fireEvent.change(screen.getByRole('textbox', { name: 'Event test search' }), { target: { value: 'Basketball' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search by name or keyword' }), { target: { value: 'Basketball' } });
     expect(await screen.findByText('Basketball night')).toBeInTheDocument();
     await act(async () => {
       finishPage({ events: [{ ...event, $id: 'old', name: 'Basketball old query' }], pagination: { nextOffset: 36, hasMore: true, totalCount: 100 } });
@@ -233,16 +250,196 @@ describe('Discover organization loading', () => {
     expect(screen.getByText('Basketball night')).toBeInTheDocument();
   });
 
-  it('loads the first organization page once and clears the loading state', async () => {
-    const { container } = render(<DiscoverPage />);
+  it('restarts event pagination after a server sort change and ignores a late old-sort page', async () => {
+    navigationSearchParams = 'tab=events';
+    const { promise: oldPage, resolve: finishOldPage } = Promise.withResolvers<unknown>();
+    const event = {
+      $id: 'recommended-first', name: 'Recommended first', eventType: 'EVENT',
+      start: '2099-09-10T18:00:00Z', sportIds: [], divisions: [],
+    };
+    getEventsPageMock
+      .mockResolvedValueOnce({ events: [event], pagination: { nextOffset: 18, hasMore: true, totalCount: 40 } })
+      .mockReturnValueOnce(oldPage)
+      .mockResolvedValueOnce({
+        events: [{ ...event, $id: 'soonest-first', name: 'Soonest first' }],
+        pagination: { nextOffset: 12, hasMore: true, totalCount: 40 },
+      })
+      .mockResolvedValueOnce({
+        events: [{ ...event, $id: 'soonest-next', name: 'Soonest next' }],
+        pagination: { nextOffset: 24, hasMore: false, totalCount: 40 },
+      });
+    render(<DiscoverPage />);
+    expect(await screen.findByText('Recommended first')).toBeInTheDocument();
+    act(() => {
+      intersectionCallbacks[intersectionCallbacks.length - 1](
+        [{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver,
+      );
+    });
+    await waitFor(() => expect(getEventsPageMock).toHaveBeenCalledTimes(2));
 
-    expect(screen.getByRole('heading', { name: 'Discover', level: 1 })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Event test sort' }), { target: { value: 'soonest' } });
+    expect(await screen.findByText('Soonest first')).toBeInTheDocument();
+    expect(screen.queryByText('Recommended first')).not.toBeInTheDocument();
+    expect(getEventsPageMock).toHaveBeenLastCalledWith(expect.anything(), 18, 0, 'SOONEST');
+
+    await act(async () => {
+      finishOldPage({
+        events: [{ ...event, $id: 'recommended-next', name: 'Recommended next' }],
+        pagination: { nextOffset: 36, hasMore: true, totalCount: 40 },
+      });
+      await oldPage;
+    });
+    expect(screen.queryByText('Recommended next')).not.toBeInTheDocument();
+
+    act(() => {
+      intersectionCallbacks[intersectionCallbacks.length - 1](
+        [{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver,
+      );
+    });
+    expect(await screen.findByText('Soonest next')).toBeInTheDocument();
+    expect(screen.getByText('Soonest first')).toBeInTheDocument();
+    expect(getEventsPageMock).toHaveBeenLastCalledWith(expect.anything(), 18, 12, 'SOONEST');
+  });
+
+  it('keeps old-sort results separate when the replacement first page fails', async () => {
+    navigationSearchParams = 'tab=events';
+    const consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const event = {
+      $id: 'recommended-first', name: 'Recommended first', eventType: 'EVENT',
+      start: '2099-09-10T18:00:00Z', sportIds: [], divisions: [],
+    };
+    getEventsPageMock
+      .mockResolvedValueOnce({ events: [event], pagination: { nextOffset: 18, hasMore: true, totalCount: 40 } })
+      .mockRejectedValueOnce(new Error('Events are unavailable'))
+      .mockResolvedValueOnce({
+        events: [{ ...event, $id: 'soonest-next', name: 'Soonest next' }],
+        pagination: { nextOffset: 36, hasMore: false, totalCount: 40 },
+      });
+    try {
+      render(<DiscoverPage />);
+      expect(await screen.findByText('Recommended first')).toBeInTheDocument();
+      fireEvent.change(screen.getByRole('combobox', { name: 'Event test sort' }), { target: { value: 'soonest' } });
+      expect(await screen.findByRole('alert')).toBeInTheDocument();
+
+      await act(async () => {
+        intersectionCallbacks[intersectionCallbacks.length - 1](
+          [{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver,
+        );
+      });
+      expect(screen.getByText('Recommended first')).toBeInTheDocument();
+      expect(screen.queryByText('Soonest next')).not.toBeInTheDocument();
+      expect(getEventsPageMock).toHaveBeenCalledTimes(2);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it('retries the failed event page without dropping cards or advancing its offset', async () => {
+    navigationSearchParams = 'tab=events';
+    const consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const event = {
+      $id: 'first-event', name: 'First event', eventType: 'EVENT',
+      start: '2099-09-10T18:00:00Z', sportIds: [], divisions: [],
+    };
+    getEventsPageMock
+      .mockResolvedValueOnce({ events: [event], pagination: { nextOffset: 18, hasMore: true, totalCount: 20 } })
+      .mockRejectedValueOnce(new Error('Next events are unavailable'))
+      .mockResolvedValueOnce({
+        events: [{ ...event, $id: 'next-event', name: 'Next event' }],
+        pagination: { nextOffset: 20, hasMore: false, totalCount: 20 },
+      });
+    try {
+      render(<DiscoverPage />);
+      expect(await screen.findByText('First event')).toBeInTheDocument();
+      await act(async () => {
+        intersectionCallbacks[intersectionCallbacks.length - 1](
+          [{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver,
+        );
+      });
+      expect(await screen.findByRole('alert')).toHaveTextContent('Failed to load more events');
+      expect(screen.getByText('First event')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Retry events' }));
+
+      expect(await screen.findByText('Next event')).toBeInTheDocument();
+      expect(screen.getByText('First event')).toBeInTheDocument();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      expect(getEventsPageMock).toHaveBeenLastCalledWith(expect.anything(), 18, 18, 'RECOMMENDED');
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it('retries an organization request without treating a network failure as empty results', async () => {
+    const consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
+    listOrganizationsMock
+      .mockRejectedValueOnce(new Error('Organizations are unavailable'))
+      .mockResolvedValueOnce({
+        organizations: [],
+        pagination: { limit: 100, offset: 0, nextOffset: 0, hasMore: false },
+      });
+    try {
+      render(<DiscoverPage />);
+      expect(await screen.findByRole('alert')).toHaveTextContent('Failed to load organizations');
+      expect(screen.queryByText('No organizations found')).not.toBeInTheDocument();
+      expect(screen.queryByText(/^0 organizations/)).not.toBeInTheDocument();
+      expect(screen.queryByText('No more organizations to load')).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Retry organizations' }));
+
+      expect(await screen.findByText('No organizations found')).toBeInTheDocument();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      expect(listOrganizationsMock).toHaveBeenLastCalledWith(100, 0, expect.anything());
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it('retries a failed organization page at its existing offset and keeps loaded results', async () => {
+    const consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
+    listOrganizationsMock
+      .mockResolvedValueOnce({
+        organizations: [{ $id: 'rose', name: 'Rose City Sports', coordinates: [-122.6765, 45.5231], sports: [], tags: [] }],
+        pagination: { limit: 100, offset: 0, nextOffset: 100, hasMore: true },
+      })
+      .mockRejectedValueOnce(new Error('Next page is unavailable'))
+      .mockResolvedValueOnce({
+        organizations: [{ $id: 'cascade', name: 'Cascade Athletics', coordinates: [-122.6587, 45.5122], sports: [], tags: [] }],
+        pagination: { limit: 100, offset: 100, nextOffset: 101, hasMore: false },
+      });
+    try {
+      render(<DiscoverPage />);
+      expect(await screen.findByText('Rose City Sports')).toBeInTheDocument();
+      await act(async () => {
+        intersectionCallbacks[intersectionCallbacks.length - 1](
+          [{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver,
+        );
+      });
+      expect(await screen.findByRole('alert')).toHaveTextContent('Failed to load organizations');
+      expect(screen.getByText('Rose City Sports')).toBeInTheDocument();
+      expect(screen.queryByText('No more organizations to load')).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Retry organizations' }));
+
+      expect(await screen.findByText('Cascade Athletics')).toBeInTheDocument();
+      expect(screen.getByText('Rose City Sports')).toBeInTheDocument();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      expect(listOrganizationsMock).toHaveBeenLastCalledWith(100, 100, expect.anything());
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it('loads the first organization page with a title-free search hero', async () => {
+    render(<DiscoverPage />);
+
+    const search = screen.getByRole('search', { name: 'Discover search' });
+    expect(within(search).getByRole('textbox', { name: 'Search by name or keyword' })).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'Discover' })).not.toBeInTheDocument();
     expect(await screen.findByTestId('organization-card')).toHaveTextContent('Rose City Sports');
     await waitFor(() => {
       expect(screen.queryByText('Loading organizations...')).not.toBeInTheDocument();
     });
-    expect(container.querySelector('aside')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Division', exact: true })).toBeInTheDocument();
     expect(listOrganizationsMock).toHaveBeenCalledTimes(1);
   });
 
@@ -250,7 +447,8 @@ describe('Discover organization loading', () => {
     ['organizations', 'Tags'],
     ['rentals', 'Time'],
     ['teams', 'Division'],
-  ])('uses the shared filter row on the %s tab', async (tab, filterLabel) => {
+  ])('shows %s filters in the modal only after Search', async (tab, filterLabel) => {
+    const user = userEvent.setup();
     navigationSearchParams = `tab=${tab}`;
     window.history.replaceState({}, '', `/discover?${navigationSearchParams}`);
     if (tab === 'rentals') {
@@ -268,8 +466,23 @@ describe('Discover organization loading', () => {
 
     render(<DiscoverPage />);
 
-    expect(await screen.findByRole('button', { name: filterLabel, exact: true })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'All sports', exact: true })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: filterLabel, exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'All sports', exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Filters/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create event' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Search', exact: true }));
+
+    expect(screen.getByRole('button', { name: /^Edit search:/ })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('textbox', { name: 'Search by name or keyword' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: filterLabel, exact: true })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /^Filters/ }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Filters', exact: true });
+    expect(dialog).toBeVisible();
+    expect(within(dialog).getByRole('button', { name: filterLabel, exact: true })).toBeVisible();
+    await user.click(within(dialog).getByRole('button', { name: 'Done' }));
+    expect(screen.queryByRole('dialog', { name: 'Filters', exact: true })).not.toBeInTheDocument();
   });
 
   it('restores organization filters from the URL and keeps them shareable', async () => {

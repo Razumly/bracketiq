@@ -6,6 +6,7 @@ import { Building2, CalendarDays, CircleDot, MapPin, Users } from 'lucide-react'
 import { formatEnumDisplayLabel } from '@/lib/enumUtils';
 import { normalizeTimeZone } from '@/lib/dateUtils';
 import { resolveEventParticipantCapacity } from '@/lib/eventCapacity';
+import { locationService, type LocationCoordinates } from '@/lib/locationService';
 import { formatAffiliateEventPriceRange, formatEventDivisionPriceRange, getEventImageFallbackUrl, getEventImageUrl, type Event } from '@/types';
 
 type DisplaySchedule = {
@@ -92,7 +93,33 @@ function eventAttendance(event: Event, capacity: number): string {
   return `${event.attendees ?? 0}${capacityLabel} ${participantLabel}`;
 }
 
-export default function OrganizationEventCard({ event, onClick }: { event: Event; onClick: () => void }) {
+function eventDistance(event: Event, userLocation?: LocationCoordinates | null): string | null {
+  if (!userLocation) return null;
+  const eventLng = event.coordinates?.[0];
+  const eventLat = event.coordinates?.[1];
+  if (
+    typeof eventLat !== 'number'
+    || typeof eventLng !== 'number'
+    || !Number.isFinite(eventLat)
+    || !Number.isFinite(eventLng)
+    || (eventLat === 0 && eventLng === 0)
+  ) {
+    return null;
+  }
+
+  const distanceMiles = locationService.kmToMiles(locationService.calculateDistance(
+    userLocation.lat, userLocation.lng, eventLat, eventLng,
+  ));
+  return distanceMiles < 1
+    ? `${(distanceMiles * 5280).toFixed(0)} ft`
+    : `${distanceMiles.toFixed(1)} mi`;
+}
+
+export default function OrganizationEventCard({ event, onClick, userLocation }: {
+  event: Event;
+  onClick: () => void;
+  userLocation?: LocationCoordinates | null;
+}) {
   const [imageIndex, setImageIndex] = useState(0);
   const fallback = getEventImageFallbackUrl({ event, width: 640, height: 280, fit: 'inside' });
   const primaryImage = getEventImageUrl({
@@ -111,6 +138,7 @@ export default function OrganizationEventCard({ event, onClick }: { event: Event
   const sport = typeof event.sport === 'object' ? event.sport.name : event.sport;
   const time = eventTime(event);
   const organizer = eventOrganizer(event);
+  const distance = eventDistance(event, userLocation);
   const registrationLabel = event.affiliateUrl
     ? 'External registration'
     : event.teamSignup
@@ -149,7 +177,10 @@ export default function OrganizationEventCard({ event, onClick }: { event: Event
           </span>
           <span className="org-event-card-fact">
             <MapPin aria-hidden="true" />
-            <span className="org-event-card-fact-copy">{event.location || 'Location to be announced'}</span>
+            <span className="org-event-card-fact-copy">
+              {event.location || 'Location to be announced'}
+              {distance && <span className="org-event-card-time">{distance} away</span>}
+            </span>
           </span>
           {organizer && (
             <span className="org-event-card-fact">
