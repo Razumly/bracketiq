@@ -1882,7 +1882,7 @@ reviewer must make and cite its own current-policy determination.
 - [x] Complete independent Standards and Spec review.
 - [x] Obtain separate authorization for the exact production deployment and workers.
 - [x] Execute one governed Mission exclusion.
-- [ ] Process TPH Academy Austin, then Ultimate Chicago, with independent review.
+- [x] Run the bounded TPH and Ultimate trial; TPH held, Ultimate independently approved.
 
 ### Discoveries and decisions
 
@@ -2184,3 +2184,127 @@ The authorized Mission exclusion is complete. The next separate bounded
 operation is TPH Academy Austin, followed by Ultimate Chicago, with an
 independent reviewer for each resulting package. No broader work is authorized
 by this completion record.
+
+## Authorized TPH and Ultimate trial
+
+The operator authorized one bounded session for TPH Academy Austin, followed by
+Ultimate Chicago. Each source gets one producer claim and one independent
+reviewer claim if a package is committed. Stop on an unexpected pipeline
+failure. Do not admit automatic retries or producer-repair follow-up jobs.
+Publication, automatic scraping, and the wider fleet remain held.
+
+Use the existing deployment-8 services and reviewed source
+`c0364064825c5a5f57e681b86077dfda08ec5902`. No image publication, Gateway
+replacement, or model-service restart is needed. Current live contract checks
+passed. Both queued jobs retain the current catalog hash, valid HTML/Markdown
+manifests, exact source roots, and claim generation zero. The deployed Gateway
+supplies the authoritative CLUB listing kind when each claim is created.
+
+TPH's Gateway job is `0ec7d3d8-eb20-4a51-989c-6bf59ec05974`, with root
+`9c6942b2-d546-489d-b0f6-2d63bcdb36a8`. Ultimate's Gateway job is
+`2be12acf-1995-4ea5-a36c-3011e42aecaf`, with root
+`43c8211c-ff87-453d-9037-d768651d65c0`. Both sources remain private and retain
+LEGACY_SPORT_REPAIR. Mission remains SOURCE_EXCLUDED at generation 2.
+
+Start only affiliate-agent-runner, mapping-producer-1, and supply-reviewer-1.
+Keep admission closed until all required readiness checks pass. Open an
+exact-job, one-claim lease for each authorized invocation. Close it after the
+claim. Keep the other source unclaimed until the current source's outcome is
+recorded. Stop these three services at session completion or pipeline failure.
+
+The baseline captures 286 protected preexisting records. The only preexisting
+queue rows permitted to change are the two named producer jobs and their two
+mapping jobs. Original mapping, organization, candidate, and historical
+evidence rows remain protected. New mapped packages and independent review
+records must use their own audit lineage.
+
+Both model accounts passed current health checks. Admission is closed, active
+claims and retained pointers are zero, and the workspace is empty. The private
+evidence directory is
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v8-tph-ultimate-20260911T153559781Z`.
+
+### TPH producer hold
+
+TPH claim `agw-claim-e76e9306-3b8d-48d5-95e3-8babe66ffc73` ran from
+`2026-09-11T15:38:47.083Z` to `2026-09-11T15:50:15.495Z`. It completed
+CONTRACT_GAP with SPORT_BLACKLISTED and SPORT_NOT_IN_CATALOG. Its terminal
+receipt is `agw-receipt-eb0e0729-3b38-4344-840e-3af76fa4feb0`, and its result
+hash is `9c078635573e982e0a4c2de2be351023c1c449b5540f5e183e253f3be7caf1a4`.
+
+The producer cited gallery descriptions for Dance and Martial Arts. It did not
+validate or commit a package. No reviewer job was created, so the conditional
+independent review did not run. TPH remains PRE_MAPPED at generation 1 with
+LEGACY_SPORT_REPAIR. The source status is REVIEW_REQUIRED.
+
+This is a producer hold, not an independently approved activity inventory.
+Read-only inspection found that the same stored page also has gallery
+references to catalog-supported sports. The actual program scope needs
+evidence review before any catalog addition or new mapping attempt. Do not
+blindly retry the same claim or treat these gallery captions as approval to
+add Martial Arts to the catalog.
+
+### Ultimate package and independent approval
+
+Ultimate producer claim `agw-claim-2c26e4d4-301e-4536-bb41-69d27b6fd380`
+ran from `2026-09-11T15:52:46.150Z` to `2026-09-11T15:54:48.118Z`.
+It completed BOUNDED_REPAIR_SUBMITTED. Validation receipt
+`agw-receipt-3f491bf4-e68f-4eac-b37a-695bc3e9a7b2` and commit receipt
+`agw-receipt-3d388f25-c843-4c5d-ae51-5aca066b1dfa` succeeded.
+The package hash is
+`7dab6c53cb9b4299fcf07e5365bff75365e806b762afeb7bee3c07acf8d02820`.
+
+The package produces one CLUB candidate titled Ultimate Chicago, with canonical
+sport Ultimate Frisbee, first-party organization metadata as its description,
+and the official homepage action URL. The validation output retains a literal
+`&ldquo;` entity. No public rendering was exercised in this session; inspect
+presentation before activation or publication.
+
+The producer corrected one local package-schema rejection and one Gateway
+PACKAGE_NO_CANDIDATES rejection within the same invocation. It then validated
+and committed successfully. No deployment or extra producer claim was needed.
+
+Independent reviewer job `42a92800-d72f-4202-a6fd-5638444e861e` used claim
+`agw-claim-07791fa6-3843-4185-9a7e-53461336acaa`, from
+`2026-09-11T15:55:48.635Z` to `2026-09-11T15:56:47.662Z`.
+Its worker, invocation, and workspace identities differ from the producer.
+It read all four review artifacts and returned APPROVED.
+
+Reviewer effect receipt `agw-receipt-aec283cf-0480-4255-ae4c-9eb2d29dff24`
+and terminal receipt `agw-receipt-84e02769-54d0-45d4-842f-03d0aba090fb`
+succeeded. The result hash is
+`29aefefe2249149dd38d6bdcc7ad3c416015b0270ae03b6f929fde59bb2b8c0f`.
+APPROVE transition `4866f39e-6c60-40e7-aca3-a924dec13a78` records generation 3.
+Mapping `agw-artifact-9342d8d8-d737-4d2c-ba3d-8e3669090e3c` is version 2.
+It has an approval validation timestamp but remains inactive. The source
+points to this new mapping. LEGACY_SPORT_REPAIR and disabled automation remain.
+No activation or producer-repair follow-up job was created.
+
+### Session result and safety
+
+The bounded session is complete: two producer claims and one independent
+reviewer claim. All three completed with zero terminal schema corrections and
+zero invocation failures. TPH is not repaired or independently approved.
+Ultimate is repaired and independently approved, but not activated or published.
+
+Admission is closed. The runner, producer 1, and reviewer 1 are stopped.
+Active claims, unresolved pointers, and queued Gateway jobs are zero. The
+workspace is empty. The Gateway and both model services remain healthy.
+All six container IDs and images are unchanged from session start; no
+deployment or Gateway/model restart occurred. The five dormant services are
+unchanged.
+
+All 286 protected preexisting fingerprints and all 99 original protected
+fingerprints match. Mission's root, source, and exclusion transitions are
+unchanged. Existing mappings, organizations, candidates, and evidence remain
+intact. All three organization public pages and widgets remain disabled.
+Automatic scraping is disabled and the two trial roots have zero Supply Targets.
+
+Private evidence includes both producer outcomes, the Ultimate reviewer outcome,
+the extracted source description, TPH source-scope excerpts, all three monitor
+logs, the bounded rejection diagnostics, and `run/final-safety.json`.
+The monitors exited normally and created no temporary script files.
+
+These trials do not authorize more retries or fleet expansion. The next
+decision is how to resolve or retain TPH's evidence hold, followed by a
+controlled repair batch. Full activation/publication proof remains a separate
+rollout gate.
