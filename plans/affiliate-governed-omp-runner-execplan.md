@@ -2047,3 +2047,16 @@ null. The final gate passed 872 tests in 33 suites. TypeScript, targeted
 ESLint, and all three real pinned-Bun SDK probes passed. The final real Mission
 PREVIEW kept the same eligible, zero-write hash shown above. All 99 protected
 production records still matched their baseline.
+
+### Source delivery
+
+Code commit `575f20151` was fast-forwarded into canonical main.
+The integrated gate passed 872 tests in 33 suites against a fresh isolated
+database with all 219 migrations. The integrated TypeScript check and the
+three pinned-Bun SDK scenarios also passed.
+
+The temporary read-only preview bundle and both exclusion test databases
+were removed. The local Postgres server remains running. No production image
+was published. No production service, claim, source, candidate, or target was
+changed. Mission's actual exclusion and the two supported-source trials still
+require the separately authorized production rollout.
