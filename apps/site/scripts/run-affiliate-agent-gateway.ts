@@ -11,6 +11,11 @@ import {
   AffiliateLegacyRepairAdmissionError,
 } from '../src/server/affiliateImports/affiliateLegacyRepairAdmission';
 import {
+  previewAffiliateSourceExclusionAdmission,
+  applyAffiliateSourceExclusionAdmission,
+  AffiliateSourceExclusionAdmissionError,
+} from '../src/server/affiliateImports/affiliateSourceExclusionAdmission';
+import {
   affiliateAgentContractBundleSchema,
   affiliateAgentDeploymentContractSchema,
   AFFILIATE_AGENT_PROMPT_TEMPLATES,
@@ -675,6 +680,7 @@ export type AffiliateAgentGatewayHttpDependencies = Readonly<{
   legacyRepairAdmission?: (request: LegacyRepairAdmissionRequest) => Promise<unknown>;
   legacyRepairRetry?: (request: LegacyRepairRetryRequest) => Promise<unknown>;
   legacyRepairContinuation: (request: LegacyRepairContinuationRequest) => Promise<unknown>;
+  sourceExclusionAdmission: (request: SourceExclusionAdmissionRequest) => Promise<unknown>;
   reviewerEffectRecovery: (
     request: AffiliateAgentReviewerEffectRecoveryRequest,
   ) => Promise<AffiliateAgentReviewerEffectRecoveryReport>;
@@ -1172,6 +1178,54 @@ const handleReviewerEffectRecoveryRequest = async (
   return true;
 };
 
+const sourceExclusionAdmissionRequestSchema = z.object({
+  mode: z.enum(['PREVIEW', 'APPLY']),
+  gatewayJobId: z.string().trim().min(1).max(200),
+  reason: z.string().trim().min(1).max(1_000).refine(
+    (value) => Buffer.byteLength(value, 'utf8') <= 1_000,
+    'The reason exceeds its byte limit.',
+  ),
+  expectedReportHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+}).strict().superRefine((value, context) => {
+  if (value.mode === 'APPLY' && !value.expectedReportHash) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'Apply requires a reviewed report hash.' });
+  }
+});
+type SourceExclusionAdmissionRequest = z.infer<typeof sourceExclusionAdmissionRequestSchema>;
+
+const handleSourceExclusionAdmissionRequest = async (
+  request: IncomingMessage,
+  httpRequest: AffiliateAgentGatewayHttpRequest,
+  response: ServerResponse,
+  input: AffiliateAgentGatewayHttpDependencies,
+  body: unknown,
+): Promise<boolean> => {
+  if (httpRequest.route !== '/source-exclusion/admission') return false;
+  if (!authorizeOperatorRequest(request, response, input.operatorToken)) return true;
+  const parsed = sourceExclusionAdmissionRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    sendJson(response, 400, { error: 'Invalid source exclusion admission request.' });
+    return true;
+  }
+  if (input.admission.isOpen()) {
+    sendJson(response, 409, { error: {
+      code: 'SOURCE_EXCLUSION_ADMISSION_OPEN',
+      safeMessage: 'Gateway admission must be closed before source exclusion admission.',
+      isRetryable: false,
+    } });
+    return true;
+  }
+  try {
+    sendGatewayResult(response, await input.sourceExclusionAdmission(parsed.data));
+  } catch (error) {
+    if (!(error instanceof AffiliateSourceExclusionAdmissionError)) throw error;
+    sendJson(response, 409, {
+      error: { code: error.code, safeMessage: error.message, isRetryable: false, details: error.details },
+    });
+  }
+  return true;
+};
+
 const legacyRepairAdmissionRequestSchema = z.object({
   mode: z.enum(['PREVIEW', 'APPLY']),
   limit: z.number().int().min(1).max(20).default(1),
@@ -1398,6 +1452,7 @@ const handlePostRequest = async (
   if (await handleLegacyRepairAdmissionRequest(request, httpRequest, response, input, body)) return;
   if (await handleLegacyRepairRetryRequest(request, httpRequest, response, input, body)) return;
   if (await handleLegacyRepairContinuationRequest(request, httpRequest, response, input, body)) return;
+  if (await handleSourceExclusionAdmissionRequest(request, httpRequest, response, input, body)) return;
   await handlePostRoute(request, httpRequest, response, input, body);
 };
 
@@ -1536,6 +1591,7 @@ type AffiliateAgentGatewayRuntime = Readonly<{
   legacyRepairAdmission: (request: LegacyRepairAdmissionRequest) => Promise<unknown>;
   legacyRepairRetry: (request: LegacyRepairRetryRequest) => Promise<unknown>;
   legacyRepairContinuation: (request: LegacyRepairContinuationRequest) => Promise<unknown>;
+  sourceExclusionAdmission: (request: SourceExclusionAdmissionRequest) => Promise<unknown>;
   reviewerEffectRecovery: (
     request: AffiliateAgentReviewerEffectRecoveryRequest,
   ) => Promise<AffiliateAgentReviewerEffectRecoveryReport>;
@@ -1781,6 +1837,28 @@ const createGateway = async (): Promise<AffiliateAgentGatewayRuntime> => {
         ...options,
         expectedReportHash: request.expectedReportHash,
         operatorId: AFFILIATE_AGENT_GATEWAY_OPERATOR_ID,
+      });
+    }),
+    sourceExclusionAdmission: (request) => admission.withClaim(async () => {
+      if (admission.isOpen()) {
+        throw new Error('Close claim admission before source exclusion admission.');
+      }
+      const bundle = await contracts.loadActiveBundle();
+      const options = {
+        prisma,
+        artifactStore,
+        bundle,
+        gatewayJobId: request.gatewayJobId,
+        reason: request.reason,
+        operatorId: AFFILIATE_AGENT_GATEWAY_OPERATOR_ID,
+      };
+      if (request.mode === 'PREVIEW') return previewAffiliateSourceExclusionAdmission(options);
+      if (!request.expectedReportHash) throw new Error('Source exclusion apply requires a reviewed hash.');
+      const active = await loadActiveAffiliateSupplyContract({ db: database, rolloutCohort });
+      assertStartupPreflight(active);
+      return applyAffiliateSourceExclusionAdmission({
+        ...options,
+        expectedReportHash: request.expectedReportHash,
       });
     }),
     reviewerEffectRecovery: (request) => admission.withClaim(async () => {

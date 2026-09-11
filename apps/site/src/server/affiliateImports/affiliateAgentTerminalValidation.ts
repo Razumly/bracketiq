@@ -5,6 +5,8 @@ import {
   type AffiliateAgentClaimEnvelope,
   type AffiliateAgentRole,
   type AffiliateAgentSchemaIssue,
+  type AffiliateAgentLegacySportRepairContext,
+  type AffiliateAgentSportEvidence,
 } from "./agentGatewayContracts";
 import {
   AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_MAX_ISSUES,
@@ -12,6 +14,7 @@ import {
 } from "./affiliateAgentCommandDiagnostics";
 import {
   AffiliateSportVerificationError,
+  assertAffiliateSportExclusionReady,
   verifyAffiliateSportCompletion,
   type AffiliateSportCompletionStoredArtifact,
   type AffiliateSportCitationKind,
@@ -263,17 +266,34 @@ export const checkAffiliateAgentTerminalDraft = async (
     }
   }
   const checked = ["SCHEMA", "CLAIM_IDENTITY"];
-  if (
-    input.claim.subject.type !== "MAPPING_PRODUCER" ||
-    input.claim.subject.repairContext?.kind !== "LEGACY_SPORT_REPAIR" ||
-    result.role !== "MAPPING_PRODUCER" ||
-    result.disposition !== "CONTRACT_GAP"
-  )
+  let context: AffiliateAgentLegacySportRepairContext;
+  let sportEvidence: AffiliateAgentSportEvidence | undefined;
+  const isSourceExclusion = input.claim.subject.type === "SOURCE_EXCLUSION_REVIEW";
+  if (input.claim.subject.type === "SOURCE_EXCLUSION_REVIEW") {
+    if (result.role !== "SUPPLY_REVIEWER"
+      || (result.disposition !== "SOURCE_EXCLUSION_ASSESSED" && result.disposition !== "HUMAN_REVIEW_REQUIRED")) {
+      return draftCheck([{ path: ["disposition"], code: "INVALID_VALUE", message: "Use a source assessment or human review for this claim." }], checked);
+    }
+    if (result.evidenceRefs.length === 0
+      || result.evidenceRefs.some((ref) => !input.claim.evidenceManifest.entries.some((entry) => entry.evidenceRef === ref))) {
+      return draftCheck([{ path: ["evidenceRefs"], code: "INVALID_VALUE", message: "Provide source evidence references from the claim manifest." }], checked);
+    }
+    if (result.disposition === "HUMAN_REVIEW_REQUIRED") return draftCheck([], checked);
+    if (result.payload.supplySourceId !== input.claim.subject.supplySourceId) {
+      return draftCheck([{ path: ["payload", "supplySourceId"], code: "INVALID_VALUE", message: "Use the Supply Source from the claim." }], checked);
+    }
+    if (result.payload.recommendation !== "EXCLUDE") return draftCheck([], checked);
+    context = input.claim.subject.repairContext;
+    sportEvidence = result.payload.sportEvidence;
+  } else if (input.claim.subject.type === "MAPPING_PRODUCER"
+    && input.claim.subject.repairContext?.kind === "LEGACY_SPORT_REPAIR"
+    && result.role === "MAPPING_PRODUCER" && result.disposition === "CONTRACT_GAP") {
+    context = input.claim.subject.repairContext;
+    sportEvidence = result.payload.sportEvidence;
+  } else {
     return draftCheck([], checked);
-
+  }
   checked.push("SPORT_EVIDENCE");
-  const context = input.claim.subject.repairContext;
-  const sportEvidence = result.payload.sportEvidence;
   const invalid = (
     path: (string | number)[],
     message: string,
@@ -285,6 +305,20 @@ export const checkAffiliateAgentTerminalDraft = async (
       "Provide a nonempty sport assessment with claim-owned citations.",
       "MISSING_VALUE",
     );
+  }
+  if (isSourceExclusion) {
+    try {
+      assertAffiliateSportExclusionReady({
+        determinations: sportEvidence.sportDeterminations,
+        reasonCodes: result.reasonCodes,
+      });
+    } catch (error) {
+      if (!(error instanceof AffiliateSportVerificationError)) throw error;
+      return invalid(
+        error.path[0] === "reasonCodes" ? [...error.path] : ["payload", "sportEvidence", ...error.path],
+        error.message,
+      );
+    }
   }
   if (sportEvidence.evidenceRunId !== context.evidenceRunId) {
     return invalid(

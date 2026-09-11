@@ -9,6 +9,7 @@ import {
 import {
   AFFILIATE_AGENT_MAX_TERMINAL_RESULT_CANONICAL_BYTES,
   AFFILIATE_AGENT_ROLE_CONTRACTS,
+  AFFILIATE_AGENT_SOURCE_EXCLUSION_TERMINAL_DISPOSITIONS,
   affiliateAgentClaimEnvelopeSchema,
   affiliateAgentCommandSchema,
   affiliateAgentTerminalResultEnvelopeSchema,
@@ -147,6 +148,9 @@ export const createAffiliateOmpGatewayTools = (input: Readonly<{
   const claim = affiliateAgentClaimEnvelopeSchema.parse(input.claim);
   const authorization = authorizationFor(claim, input.token);
   const roleContract = AFFILIATE_AGENT_ROLE_CONTRACTS[claim.role];
+  const terminalDispositions = claim.subject.type === "SOURCE_EXCLUSION_REVIEW"
+    ? AFFILIATE_AGENT_SOURCE_EXCLUSION_TERMINAL_DISPOSITIONS
+    : roleContract.terminalDispositions;
   const commandSchemas = affiliateAgentCommandSchema.options.filter((schema) => (
     schema.shape.type.value !== "SUBMIT_TERMINAL_RESULT"
     && claim.permittedCommands.includes(schema.shape.type.value)
@@ -332,7 +336,7 @@ export const createAffiliateOmpGatewayTools = (input: Readonly<{
   const submitResult: ToolDefinition = {
     name: "submit_result",
     description: "Submit a terminal result after check_result passes. The driver checks the draft before sending it to the Gateway. A local DRAFT_INVALID response leaves this invocation open and spends no terminal correction. Supply only disposition, reasonCodes, evidenceRefs, summary, and payload. The driver supplies claim identity. Gateway acceptance ends the invocation.",
-    parameters: terminalInputSchema.extend({ disposition: z.enum(roleContract.terminalDispositions) }),
+    parameters: terminalInputSchema.extend({ disposition: z.enum(terminalDispositions) }),
     async execute(value, signal) {
       const fields = terminalInputSchema.parse(value);
       const candidate = {
@@ -396,8 +400,8 @@ export const createAffiliateOmpGatewayTools = (input: Readonly<{
 
   const checkResult: ToolDefinition = {
     name: "check_result",
-    description: "Check a terminal draft locally before submitting it. This checks the terminal schema and, for legacy sport contract gaps, claim-manifest citations and sport rules. It does not submit a result, spend a terminal correction, execute a command, or approve work. It uses the claim snapshot; live authority, catalog freshness, receipts, and lifecycle checks remain with the Gateway.",
-    parameters: terminalInputSchema.extend({ disposition: z.enum(roleContract.terminalDispositions) }),
+    description: "Check a terminal draft locally before submitting it. This checks the terminal schema and, for legacy sport gaps or source exclusions, claim-manifest citations and sport rules. It does not submit a result, spend a terminal correction, execute a command, or approve work. It uses the claim snapshot; live authority, catalog freshness, receipts, and lifecycle checks remain with the Gateway.",
+    parameters: terminalInputSchema.extend({ disposition: z.enum(terminalDispositions) }),
     async execute(value, signal) {
       const fields = terminalInputSchema.parse(value);
       const outcome = await checkAffiliateAgentTerminalDraft({

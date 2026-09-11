@@ -715,15 +715,21 @@ export const AFFILIATE_AGENT_ROLES = [
 ] as const;
 
 export type AffiliateAgentRole = (typeof AFFILIATE_AGENT_ROLES)[number];
-export const AFFILIATE_AGENT_ROLE_CONTRACT_VERSION = 7 as const;
-export const AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION = 7 as const;
+export const AFFILIATE_AGENT_ROLE_CONTRACT_VERSION = 8 as const;
+export const AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION = 8 as const;
 
 export const AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX = "legacy-sport-repair-continuation:";
 export const AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX = "legacy-sport-repair-continuation-review:";
+export const AFFILIATE_AGENT_SOURCE_EXCLUSION_REVIEWER_PREFIX = "source-exclusion-review:";
+export const AFFILIATE_AGENT_SOURCE_EXCLUSION_TERMINAL_DISPOSITIONS = [
+  "HUMAN_REVIEW_REQUIRED",
+  "SOURCE_EXCLUSION_ASSESSED",
+] as const;
 export const isAffiliateAgentSingleClaimJob = (dedupeKey: unknown): boolean => (
   typeof dedupeKey === "string"
   && (dedupeKey.startsWith(AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX)
-    || dedupeKey.startsWith(AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX))
+    || dedupeKey.startsWith(AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX)
+    || dedupeKey.startsWith(AFFILIATE_AGENT_SOURCE_EXCLUSION_REVIEWER_PREFIX))
 );
 
 const AFFILIATE_AGENT_TERMINAL_RESULT_PAYLOAD_SHAPES: Readonly<
@@ -747,7 +753,7 @@ const AFFILIATE_AGENT_TERMINAL_RESULT_PAYLOAD_SHAPES: Readonly<
     '- ACTIVATED: {"committedPackageHash":"<sha256>","baselineHash":"<sha256>","candidateReviewId":"<identifier>"}',
     '- PRODUCER_REPAIR_REQUIRED: {"committedPackageHash":"<sha256>","repairIssues":["<EVIDENCE_MISMATCH|MISSING_REQUIRED_FIELD|VALIDATION_FAILED>"]}',
     '- REGRESSION_ASSESSED: {"supplySourceId":"<identifier>","assessment":"<FAIL|PASS>"}',
-    '- SOURCE_EXCLUSION_ASSESSED: {"supplySourceId":"<identifier>","recommendation":"<EXCLUDE|HUMAN_REVIEW|KEEP>"}',
+    '- SOURCE_EXCLUSION_ASSESSED: {"supplySourceId":"<identifier>","recommendation":"<EXCLUDE|HUMAN_REVIEW|KEEP>","sportEvidence":<required for source-only EXCLUDE; omit when unavailable otherwise>}',
     '- EXACT_TARGET_REJECTED: {"targetId":"<identifier>","targetType":"<EVENT|FACILITY|ORGANIZATION>"}',
     '- HUMAN_REVIEW_REQUIRED: {"caseReason":"<non-empty string>"}; evidenceRefs must be non-empty',
   ],
@@ -764,7 +770,9 @@ const terminalResultShapeForRole = (
   "Allowed reasonCodes: CONTRACT_REQUIREMENT_MISSING | EVIDENCE_VERIFIED | NO_QUALIFIED_ACTION | POLICY_CONFLICT | SCHEMA_VALIDATED | SOURCE_UNSUPPORTED | TARGET_INVALID.",
   ...(role === "MAPPING_PRODUCER"
     ? ["Legacy sport gap reasonCodes also allow SPORT_BLACKLISTED | SPORT_NOT_IN_CATALOG | SPORT_VARIANT_UNRESOLVED. Use the code that matches each unresolved determination."]
-    : []),
+    : role === "SUPPLY_REVIEWER"
+      ? ["SOURCE_EXCLUSION_ASSESSED reasonCodes also allow SPORT_BLACKLISTED | SPORT_NOT_IN_CATALOG | SPORT_VARIANT_UNRESOLVED. Source-only EXCLUDE requires SPORT_BLACKLISTED and all-BLACKLISTED sportEvidence; other reviewer dispositions use only the generic codes above."]
+      : []),
   "Use an empty reasonCodes array when no reason code applies; evidenceRefs are sorted unique identifiers.",
   "All result and payload objects are strict: add no fields beyond this shape.",
   "Run check_result with the same terminal fields before submit_result. Correct DRAFT_INVALID fields in this session. Local checks do not spend terminal corrections or execute commands.",
@@ -821,12 +829,13 @@ const ROLE_PROMPT_INSTRUCTIONS: Readonly<
   ],
   SUPPLY_REVIEWER: [
     "Use the inlined Authority Projection as the complete claim context. Use only read_artifact({evidenceRef}), check_result(...), and submit_result(...) for this read-only role.",
-    "Read the committed package and listed reviewer evidence through read_artifact({evidenceRef}).",
-    "Review the package without editing it or reusing producer context. For legacy sport repair, inspect the supplied catalog, sportEvidence, and original manifest-owned artifacts.",
+    "For a package review, read the committed package and listed reviewer evidence through read_artifact({evidenceRef}).",
+    "Review without editing or reusing the producer's session or workspace. Inspect the supplied catalog and original manifest-owned artifacts. A historical producer result is provenance, not a substitute for your own assessment.",
     ...LEGACY_SPORT_EVIDENCE_INSTRUCTIONS,
     SOURCE_DESCRIPTION_INSTRUCTION,
     "Compare each extracted event or organization description with the original first-party evidence. Require source wording and the correct subject. Reject missing descriptions, discovery narration, unrelated page text, or unsupported claims. Do not rewrite producer copy during review.",
     "Do not approve or activate a package whose sport evidence is unresolved, unsupported, or based on an unauthenticated user decision.",
+    "A SOURCE_EXCLUSION_REVIEW subject has no mapping package or target. Read the original source pages independently. Submit SOURCE_EXCLUSION_ASSESSED with EXCLUDE only when every evidenced activity is blacklisted. Include your own nonempty sportEvidence, all cited evidenceRefs, and SPORT_BLACKLISTED. Keep canonical sport names empty. A historical UNSUPPORTED classification does not override the current blacklist. Use KEEP or HUMAN_REVIEW when the evidence does not support full exclusion. Do not approve, activate, publish, reject targets, or request producer repair for this subject.",
     "Return one evidence-backed terminal disposition through submit_result(...). Use only the listed terminal dispositions. Use human review or producer repair when evidence does not support approval or activation. Do not invent authority.",
   ],
   HUMAN_DIRECTED_EXECUTOR: [
@@ -1556,14 +1565,18 @@ const mappingProducerSubjectSchema = z
   })
   .strict();
 
+const reviewerProducerIdentityShape = {
+  supplySourceId: identifierSchema,
+  producerClaimId: identifierSchema,
+  producerWorkerId: identifierSchema,
+  producerInvocationId: identifierSchema,
+  producerWorkspaceId: identifierSchema,
+} as const;
+
 const supplyReviewerSubjectSchema = z
   .object({
     type: z.literal("SUPPLY_REVIEWER"),
-    supplySourceId: identifierSchema,
-    producerClaimId: identifierSchema,
-    producerWorkerId: identifierSchema,
-    producerInvocationId: identifierSchema,
-    producerWorkspaceId: identifierSchema,
+    ...reviewerProducerIdentityShape,
     committedPackageHash: sha256Schema,
     targetId: identifierSchema,
     targetType: z.enum(["EVENT", "FACILITY", "ORGANIZATION"]),
@@ -1571,6 +1584,27 @@ const supplyReviewerSubjectSchema = z
     repairContext: affiliateAgentLegacySportRepairContextSchema.optional(),
   })
   .strict();
+
+export const affiliateAgentSourceExclusionReviewerSubjectSchema = z
+  .object({
+    type: z.literal("SOURCE_EXCLUSION_REVIEW"),
+    ...reviewerProducerIdentityShape,
+    producerResultHash: sha256Schema,
+    requestHash: sha256Schema,
+    requestedByActorId: identifierSchema,
+    requestReason: z.string().trim().min(1).max(1_000),
+    repairContext: affiliateAgentLegacySportRepairContextSchema,
+  })
+  .strict();
+
+export type AffiliateAgentSourceExclusionReviewerSubject = z.infer<
+  typeof affiliateAgentSourceExclusionReviewerSubjectSchema
+>;
+
+const reviewerClaimSubjectSchema = z.discriminatedUnion("type", [
+  supplyReviewerSubjectSchema,
+  affiliateAgentSourceExclusionReviewerSubjectSchema,
+]);
 
 const humanDirectedExecutorSubjectSchema = z
   .object({
@@ -1587,6 +1621,7 @@ export const affiliateAgentSubjectSchema = z.discriminatedUnion("type", [
   coveragePlannerSubjectSchema,
   mappingProducerSubjectSchema,
   supplyReviewerSubjectSchema,
+  affiliateAgentSourceExclusionReviewerSubjectSchema,
   humanDirectedExecutorSubjectSchema,
 ]);
 
@@ -1644,7 +1679,7 @@ export const affiliateAgentClaimEnvelopeSchema = z
         role: z.literal("SUPPLY_REVIEWER"),
         queue: z.literal("AFFILIATE_REVIEW"),
         lane: z.literal("SUPPLY_REVIEW"),
-        subject: supplyReviewerSubjectSchema,
+        subject: reviewerClaimSubjectSchema,
       })
       .strict(),
     z
@@ -1669,6 +1704,22 @@ export const affiliateAgentClaimEnvelopeSchema = z
     assertClaimEnvelopeSourceRequirements(claim, context);
     assertClaimEnvelopeSubjectSource(claim, context);
     assertSupplyReviewerIdentity(claim, context);
+    if (claim.subject.type === "SOURCE_EXCLUSION_REVIEW") {
+      if (claim.executionBudget !== "SINGLE_CLAIM") {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["executionBudget"],
+          message: "Source exclusion reviews require a single-claim budget.",
+        });
+      }
+      if (claim.workerId === claim.subject.requestedByActorId) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["workerId"],
+          message: "The source reviewer must differ from the requesting operator.",
+        });
+      }
+    }
   });
 
 type AffiliateAgentClaimEnvelopeForAssertions = z.infer<
@@ -2035,7 +2086,7 @@ const terminalReasonCodeValues = [
 
 const terminalReasonCodeSchema = z.enum(terminalReasonCodeValues);
 
-const mappingProducerReasonCodeSchema = z.enum([
+const terminalSportReasonCodeSchema = z.enum([
   ...terminalReasonCodeValues,
   "SPORT_BLACKLISTED",
   "SPORT_NOT_IN_CATALOG",
@@ -2203,7 +2254,7 @@ export const affiliateAgentTerminalResultEnvelopeSchema = z.union([
     "MAPPING_PRODUCER",
     "CONTRACT_GAP",
     mappingProducerContractGapPayloadSchema,
-    sortedUniqueStringsSchema(mappingProducerReasonCodeSchema),
+    sortedUniqueStringsSchema(terminalSportReasonCodeSchema),
   ),
   terminalResultVariant(
     "SUPPLY_REVIEWER",
@@ -2259,8 +2310,10 @@ export const affiliateAgentTerminalResultEnvelopeSchema = z.union([
       .object({
         supplySourceId: identifierSchema,
         recommendation: z.enum(["EXCLUDE", "HUMAN_REVIEW", "KEEP"]),
+        sportEvidence: affiliateAgentSportEvidenceSchema.optional(),
       })
       .strict(),
+    sortedUniqueStringsSchema(terminalSportReasonCodeSchema),
   ),
   terminalResultVariant(
     "SUPPLY_REVIEWER",
@@ -2416,7 +2469,9 @@ export const projectAffiliateAgentPromptAuthority = (
     nonTerminalCommands: parsedClaimEnvelope.permittedCommands.filter(
       (command) => command !== "SUBMIT_TERMINAL_RESULT",
     ),
-    terminalDispositions: parsedRoleContract.terminalDispositions,
+    terminalDispositions: parsedClaimEnvelope.subject.type === "SOURCE_EXCLUSION_REVIEW"
+      ? [...AFFILIATE_AGENT_SOURCE_EXCLUSION_TERMINAL_DISPOSITIONS]
+      : parsedRoleContract.terminalDispositions,
     forbiddenEffects: parsedRoleContract.forbiddenEffects,
   };
 };
@@ -2445,6 +2500,16 @@ export const renderAffiliateAgentPrompt = (
       "Leave unresolved, unsupported, or unauthenticated user-decision sport determinations in a contract gap for human review; never approve, activate, or publish them.",
     ]
     : [];
+  const exclusionInstructions = authorityProjection.subject.type === "SOURCE_EXCLUSION_REVIEW"
+    ? [
+      "",
+      "## Source Exclusion Review",
+      "This is a source-only review, not a mapping-package review. No package or target exists for this claim.",
+      "Identify all source activities from the listed first-party artifacts. Do not copy the old producer classification.",
+      "For EXCLUDE, provide your own all-BLACKLISTED sportEvidence with claim-owned citations and SPORT_BLACKLISTED. The Gateway verifies it before executing EXCLUDE_SOURCE.",
+      "KEEP and HUMAN_REVIEW leave the source held. No package approval, activation, publication, target rejection, or producer repair is permitted.",
+    ]
+    : [];
 
   return [
     "# Affiliate Agent Invocation",
@@ -2457,6 +2522,7 @@ export const renderAffiliateAgentPrompt = (
       (instruction, index) => `${index + 1}. ${instruction}`,
     ),
     ...repairInstructions,
+    ...exclusionInstructions,
     "",
     "## Trusted OMP Tools",
     ...promptTemplate.gatewayProtocol.trustedTools.map(

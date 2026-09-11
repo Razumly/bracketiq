@@ -27,6 +27,7 @@ import type {
 } from "../agentGateway";
 import {
   buildAffiliateSupplyContractManifest,
+  normalizeAffiliateSupplyIdentity,
   type AffiliateSupplyContractPolicy,
 } from "../affiliateSupplyLifecycle";
 import {
@@ -37,12 +38,12 @@ import {
 import {
   createProductionAffiliateAgentGatewayAdapters,
   createProductionAffiliateAgentGatewayDependencies,
+  type AffiliateAgentClaimAdmission,
   type AffiliateAgentCommandAdapters,
   type AffiliateAgentGatewayDependencies,
   type AffiliateAgentLifecycleAuthority,
   type AffiliateAgentProcessEvent,
   type AffiliateAgentProcessSession,
-  type AffiliateAgentSupervisorDependencies,
   type AffiliateAgentTerminalEffectAdapter,
 } from "../agentGatewayAdapters";
 import type { StorageProvider } from "@/lib/storageProvider";
@@ -51,6 +52,11 @@ import {
   type AffiliateAgentSupervisorInput,
 } from "../agentSupervisor";
 import {
+  applyAffiliateSourceExclusionAdmission,
+  previewAffiliateSourceExclusionAdmission,
+} from "../affiliateSourceExclusionAdmission";
+import {
+  createAffiliateAgentClaimAdmission,
   createPrismaAffiliateAgentGateway,
   createPrismaAffiliateAgentInvocationReconciler,
   recoverAffiliateAgentReviewerEffect,
@@ -1549,6 +1555,583 @@ const seedMappingJob = async (label: string): Promise<string> => {
   });
   return id;
 };
+type SourceExclusionGatewayHarness = Readonly<{
+  dependencies: AffiliateAgentGatewayDependencies;
+  gateway: AffiliateAgentGateway;
+  setActiveBundle(value: unknown): void;
+  setNow(value: string): void;
+}>;
+type SourceExclusionWorkflowFixture = Readonly<{
+  label: string;
+  gatewayJobId: string;
+  producerClaimId: string;
+  supplySourceId: string;
+  sourceId: string;
+  mappingId: string;
+  mappingJobId: string;
+  intakeId: string;
+  runId: string;
+  organizationId: string;
+  heldCandidateId: string;
+  pageHtmlArtifactId: string;
+  pageHtmlHash: string;
+  pageUrl: string;
+  currentCatalogHash: string;
+  bundle: RecoveryContractBundle;
+  harness: SourceExclusionGatewayHarness;
+  claimAdmission: AffiliateAgentClaimAdmission;
+}>;
+
+const seedSourceExclusionWorkflow = async (
+  label: string,
+): Promise<SourceExclusionWorkflowFixture> => {
+  const gatewayJobId = `${RUN_PREFIX}-${label}-producer-job`;
+  const producerClaimId = `${RUN_PREFIX}-${label}-producer-claim`;
+  const producerTerminalReceiptId = `${RUN_PREFIX}-${label}-producer-terminal`;
+  const supplySourceId = `${RUN_PREFIX}-${label}-supply-source`;
+  const sourceId = `${RUN_PREFIX}-${label}-source`;
+  const mappingId = `${RUN_PREFIX}-${label}-mapping`;
+  const mappingJobId = `${RUN_PREFIX}-${label}-mapping-job`;
+  const intakeId = `${RUN_PREFIX}-${label}-intake`;
+  const runId = `${RUN_PREFIX}-${label}-run`;
+  const organizationId = `${RUN_PREFIX}-${label}-canonical-club`;
+  const heldCandidateId = `${RUN_PREFIX}-${label}-held-club-candidate`;
+  const pageId = `${RUN_PREFIX}-${label}-page`;
+  const rolloutCohort = `${RUN_PREFIX}-${label}-cohort`;
+  const pageUrl = `https://source.example.test/${label}/events`;
+  const activeManifest = recoverySupplyManifestFor(rolloutCohort);
+  const bundle = recoveryContractBundleFor(activeManifest);
+  const currentCatalog = await loadAffiliateSportsCatalogSnapshot(
+    prisma,
+    INITIAL_TIME.toISOString(),
+  );
+  const historicalCatalog = buildAffiliateSportsCatalogSnapshot(
+    currentCatalog.sports,
+    new Date(INITIAL_TIME.getTime() - 86_400_000).toISOString(),
+  );
+  const repairContext = {
+    kind: "LEGACY_SPORT_REPAIR" as const,
+    intakeId,
+    evidenceRunId: runId,
+    sportsCatalog: historicalCatalog,
+  };
+  const pageArtifacts = [
+    {
+      id: `${RUN_PREFIX}-${label}-html`,
+      kind: "PAGE_HTML" as const,
+      fileId: `${RUN_PREFIX}-${label}-html-file`,
+      mimeType: "text/html",
+      bytes: Buffer.from(
+        `<html><body><h1>Track and Field</h1><p>All events are Track and Field.</p></body></html>`,
+        "utf8",
+      ),
+    },
+    {
+      id: `${RUN_PREFIX}-${label}-markdown`,
+      kind: "PAGE_MARKDOWN" as const,
+      fileId: `${RUN_PREFIX}-${label}-markdown-file`,
+      mimeType: "text/markdown",
+      bytes: Buffer.from("# Track and Field\nAll events are Track and Field.\n", "utf8"),
+    },
+  ].map((artifact) => ({
+    ...artifact,
+    contentHash: createHash("sha256").update(artifact.bytes).digest("hex"),
+    sourceUrl: pageUrl,
+    finalUrl: pageUrl,
+  }));
+  const parentManifest = recoveryEvidenceManifestFor(
+    pageArtifacts.map((artifact) => ({
+      evidenceRef: `${artifact.kind.toLowerCase()}-evidence`,
+      kind: artifact.kind,
+      artifactId: `intake-artifact:${artifact.id}`,
+      sha256: artifact.contentHash,
+      mimeType: artifact.mimeType,
+      byteSize: artifact.bytes.byteLength,
+      retention: "INDEFINITE" as const,
+    })),
+  );
+  const producerSubject = {
+    type: "MAPPING_PRODUCER" as const,
+    supplySourceId,
+    mappingJobId,
+    listingKind: "EVENT" as const,
+    pass: 1,
+    repairContext,
+  };
+  const roleContract = AFFILIATE_AGENT_ROLE_CONTRACTS.MAPPING_PRODUCER;
+  const promptTemplate = AFFILIATE_AGENT_PROMPT_TEMPLATES.MAPPING_PRODUCER;
+  const producerEnvelope = {
+    schemaVersion: 1 as const,
+    queue: "AFFILIATE_MAPPING" as const,
+    lane: "MAPPING_PRODUCTION" as const,
+    jobId: gatewayJobId,
+    claimId: producerClaimId,
+    supplySourceId,
+    claimGeneration: 1,
+    lifecycleGeneration: 7,
+    deploymentContractVersion: bundle.deploymentContract.version,
+    deploymentContractHash: bundle.deploymentContract.hash,
+    supplyContractVersion: bundle.supplyContract.version,
+    supplyContractHash: bundle.supplyContract.hash,
+    roleContractVersion: roleContract.version,
+    roleContractHash: roleContract.hash,
+    promptTemplateVersion: promptTemplate.version,
+    promptTemplateHash: promptTemplate.hash,
+    role: "MAPPING_PRODUCER" as const,
+    executionClass: "PRODUCTION_OMP" as const,
+    workerId: `${RUN_PREFIX}-${label}-producer-worker`,
+    invocationId: `${RUN_PREFIX}-${label}-producer-invocation`,
+    workspaceId: `${RUN_PREFIX}-${label}-producer-workspace`,
+    claimedAt: new Date(INITIAL_TIME.getTime() - 600_000).toISOString(),
+    expiresAt: new Date(INITIAL_TIME.getTime() - 300_000).toISOString(),
+    evidenceManifest: parentManifest,
+    subject: producerSubject,
+    permittedCommands: [...roleContract.permittedCommands],
+  };
+  const producerResult = {
+    schemaVersion: 1 as const,
+    jobId: gatewayJobId,
+    claimId: producerClaimId,
+    claimGeneration: 1,
+    lifecycleGeneration: 7,
+    deploymentContractVersion: producerEnvelope.deploymentContractVersion,
+    deploymentContractHash: producerEnvelope.deploymentContractHash,
+    supplyContractVersion: producerEnvelope.supplyContractVersion,
+    supplyContractHash: producerEnvelope.supplyContractHash,
+    roleContractVersion: producerEnvelope.roleContractVersion,
+    roleContractHash: producerEnvelope.roleContractHash,
+    promptTemplateVersion: producerEnvelope.promptTemplateVersion,
+    promptTemplateHash: producerEnvelope.promptTemplateHash,
+    workerId: producerEnvelope.workerId,
+    invocationId: producerEnvelope.invocationId,
+    role: "MAPPING_PRODUCER" as const,
+    disposition: "CONTRACT_GAP" as const,
+    reasonCodes: ["SPORT_NOT_IN_CATALOG"] as const,
+    evidenceRefs: parentManifest.entries.map(({ evidenceRef }) => evidenceRef),
+    summary: "The historical producer recorded an unsupported Track and Field activity.",
+    payload: {
+      contractArea: "MAPPING_EVIDENCE" as const,
+      requestedChange: "Record the unsupported source activity for bounded review.",
+      sportEvidence: {
+        evidenceRunId: runId,
+        sportsCatalogSha256: historicalCatalog.sha256,
+        sportDeterminations: [{
+          sourceLabels: ["Track and Field"],
+          status: "UNSUPPORTED" as const,
+          resolutionBasis: "SOURCE_EVIDENCE" as const,
+          canonicalSportNames: [],
+          rationale: "The historical source evidence identified Track and Field outside the catalog.",
+          evidence: [{
+            artifactId: `intake-artifact:${pageArtifacts[0]!.id}`,
+            artifactSha256: pageArtifacts[0]!.contentHash,
+            artifactKind: "PAGE_HTML" as const,
+            pageUrl,
+            excerpt: "Track and Field",
+          }],
+        }],
+      },
+    },
+  };
+  const producerResultHash = hashAffiliateAgentValue(producerResult);
+  const terminalResponse = {
+    kind: "TERMINAL_ACCEPTED" as const,
+    receiptId: producerTerminalReceiptId,
+    resultHash: producerResultHash,
+    disposition: producerResult.disposition,
+  };
+  const identity = normalizeAffiliateSupplyIdentity({
+    requestedUrl: pageUrl,
+    resolvedCanonicalUrl: pageUrl,
+    operatorDomain: new URL(pageUrl).hostname,
+  });
+  await prisma.$transaction(async (transaction) => {
+    await transaction.affiliateSupplyContractManifests.create({
+      data: {
+        id: `${RUN_PREFIX}-${label}-contract`,
+        rolloutCohort,
+        version: activeManifest.version,
+        status: "ACTIVE",
+        contractHash: activeManifest.hash,
+        contractJson: activeManifest.supplyContract,
+      },
+    });
+    await transaction.organizations.create({
+      data: {
+        id: organizationId,
+        name: `Canonical ${label} Club`,
+        ownerId: `${RUN_PREFIX}-${label}-owner`,
+        status: "UNLISTED",
+        originType: "AFFILIATE_IMPORTED",
+        ownershipStatus: "UNCLAIMED",
+        publicPageEnabled: false,
+        publicWidgetsEnabled: false,
+      },
+    });
+    await transaction.affiliateSupplySources.create({
+      data: {
+        id: supplySourceId,
+        identityKey: identity.identityKey,
+        canonicalUrl: identity.canonicalUrl,
+        origin: identity.origin,
+        pathKey: identity.pathKey,
+        targetKind: "EVENT",
+        rolloutCohort,
+        intakeId,
+        liveSourceId: sourceId,
+        lifecycleGeneration: 7,
+        activeSupplyContractVersion: activeManifest.supplyContract.version,
+        activeSupplyContractHash: activeManifest.supplyContract.hash,
+        derivedStage: "MAPPED",
+        isAutomationEnabled: false,
+        isExcluded: false,
+        automationHoldReason: "LEGACY_SPORT_REPAIR",
+        metadata: {
+          automationReviewRequired: {
+            hold: true,
+            reason: "LEGACY_SPORT_REPAIR",
+            evidenceRefs: parentManifest.entries.map(({ evidenceRef }) => evidenceRef),
+          },
+        },
+      },
+    });
+    await transaction.affiliateSourceIntakes.create({
+      data: {
+        id: intakeId,
+        name: `Source exclusion ${label}`,
+        sourceKey: `${RUN_PREFIX}-${label}-source-key`,
+        baseUrl: pageUrl,
+        organizationId,
+        status: "READY_FOR_MAPPING",
+        complianceStatus: "UNREVIEWED",
+        targetKindHints: ["EVENT"],
+        affiliateSourceId: sourceId,
+        supplySourceId,
+        lastRunId: runId,
+      },
+    });
+    await transaction.affiliateScrapeSources.create({
+      data: {
+        id: sourceId,
+        name: `Source exclusion ${label}`,
+        sourceKey: `${RUN_PREFIX}-${label}-source-key`,
+        baseUrl: pageUrl,
+        listUrl: pageUrl,
+        organizationId,
+        targetKind: "EVENT",
+        status: "HELD",
+        activeMappingId: mappingId,
+        supplySourceId,
+        lifecycleGeneration: 7,
+        activeSupplyContractVersion: activeManifest.supplyContract.version,
+        activeSupplyContractHash: activeManifest.supplyContract.hash,
+        autoScrapeEnabled: false,
+        metadata: {
+          automationReviewRequired: {
+            hold: true,
+            reason: "LEGACY_SPORT_REPAIR",
+          },
+        },
+      },
+    });
+    await transaction.affiliateScrapeMappings.create({
+      data: {
+        id: mappingId,
+        sourceId,
+        supplySourceId,
+        version: 1,
+        isActive: true,
+        mapping: { kind: "EVENT", listUrl: pageUrl, itemSelector: "article" },
+      },
+    });
+    await transaction.affiliateSourceMappingJobs.create({
+      data: {
+        id: mappingJobId,
+        intakeId,
+        supplySourceId,
+        sourceId,
+        mappingId,
+        status: "REVIEW_REQUIRED",
+        resultSummary: {
+          sportReconciliationHistory: [{
+            status: "UNSUPPORTED",
+            reasonCodes: ["SPORT_NOT_IN_CATALOG"],
+            sourceLabels: ["Track and Field"],
+          }],
+        },
+        finishedAt: INITIAL_TIME,
+      },
+    });
+    await transaction.affiliateSourceIntakePages.create({
+      data: {
+        id: pageId,
+        intakeId,
+        supplySourceId,
+        url: pageUrl,
+        canonicalUrl: pageUrl,
+        urlKey: `${RUN_PREFIX}-${label}-page-key`,
+        role: "LISTING",
+        targetKindHints: ["EVENT"],
+        status: "ACTIVE",
+        discoverySource: "MANUAL",
+      },
+    });
+    await transaction.affiliateSourceIntakeRuns.create({
+      data: {
+        id: runId,
+        intakeId,
+        supplySourceId,
+        requestedPageIds: [pageId],
+        provider: "MANUAL",
+        status: "SUCCEEDED",
+        startedAt: new Date(INITIAL_TIME.getTime() - 120_000),
+        finishedAt: INITIAL_TIME,
+        capturedPageCount: pageArtifacts.length,
+      },
+    });
+    await transaction.affiliateImportCandidates.create({
+      data: {
+        id: heldCandidateId,
+        sourceId,
+        supplySourceId,
+        runId,
+        mappingId,
+        listingKind: "CLUB",
+        status: "HELD",
+        dedupeKey: `${RUN_PREFIX}-${label}-canonical-club`,
+        title: `Canonical ${label} Club`,
+        organizerName: `Canonical ${label} Club`,
+        officialActionUrl: pageUrl,
+        sourceUrl: pageUrl,
+        rawPayload: {
+          fixture: "source-exclusion",
+          canonicalOrganizationId: organizationId,
+        },
+        publishedOrganizationId: organizationId,
+      },
+    });
+    for (const artifact of pageArtifacts) {
+      await transaction.file.create({
+        data: {
+          id: artifact.fileId,
+          originalName: `${artifact.kind.toLowerCase()}.evidence`,
+          mimeType: artifact.mimeType,
+          sizeBytes: artifact.bytes.byteLength,
+          path: `${RUN_PREFIX}/${label}/${artifact.fileId}`,
+        },
+      });
+      await transaction.affiliateSourceIntakeArtifacts.create({
+        data: {
+          id: artifact.id,
+          intakeId,
+          supplySourceId,
+          pageId,
+          runId,
+          kind: artifact.kind,
+          sourceUrl: pageUrl,
+          finalUrl: pageUrl,
+          provider: "MANUAL",
+          httpStatus: 200,
+          contentHash: artifact.contentHash,
+          dedupeKey: `${RUN_PREFIX}-${label}-${artifact.kind.toLowerCase()}`,
+          fileId: artifact.fileId,
+          mimeType: artifact.mimeType,
+          sizeBytes: artifact.bytes.byteLength,
+          isPinned: true,
+        },
+      });
+    }
+    await transaction.affiliateAgentGatewayJobs.create({
+      data: {
+        id: gatewayJobId,
+        dedupeKey: `${RUN_PREFIX}-${label}-producer`,
+        queue: "AFFILIATE_MAPPING",
+        lane: "MAPPING_PRODUCTION",
+        role: "MAPPING_PRODUCER",
+        subjectType: "MAPPING_PRODUCER",
+        subjectId: mappingJobId,
+        subjectJson: producerSubject,
+        evidenceManifestJson: parentManifest,
+        supplySourceId,
+        expectedLifecycleGeneration: 7,
+        status: "COMPLETED",
+        claimGeneration: 1,
+        activeClaimId: null,
+        parentClaimId: null,
+        terminalDisposition: "CONTRACT_GAP",
+        resultHash: producerResultHash,
+        resultJson: producerResult,
+        terminalReceiptId: producerTerminalReceiptId,
+        finishedAt: INITIAL_TIME,
+        eventSequence: 1,
+      },
+    });
+    await transaction.affiliateAgentGatewayClaims.create({
+      data: {
+        id: producerClaimId,
+        jobId: gatewayJobId,
+        claimGeneration: 1,
+        lifecycleGeneration: 7,
+        queue: "AFFILIATE_MAPPING",
+        lane: "MAPPING_PRODUCTION",
+        role: "MAPPING_PRODUCER",
+        workerId: producerEnvelope.workerId,
+        invocationId: producerEnvelope.invocationId,
+        workspaceId: producerEnvelope.workspaceId,
+        workspaceMode: "READ_WRITE",
+        workspaceAttestationHash: hashAffiliateAgentValue({
+          workerId: producerEnvelope.workerId,
+          invocationId: producerEnvelope.invocationId,
+          workspaceId: producerEnvelope.workspaceId,
+        }),
+        status: "COMPLETED",
+        claimRequestId: `${RUN_PREFIX}-${label}-producer-request`,
+        claimRequestHash: hashAffiliateAgentValue({ producerClaimId }),
+        claimedAt: new Date(INITIAL_TIME.getTime() - 600_000),
+        lastHeartbeatAt: new Date(INITIAL_TIME.getTime() - 600_000),
+        leaseExpiresAt: new Date(INITIAL_TIME.getTime() - 300_000),
+        hardDeadlineAt: new Date(INITIAL_TIME.getTime() - 60_000),
+        endedAt: INITIAL_TIME,
+        tokenNonce: `${RUN_PREFIX}-${label}-producer-token`,
+        tokenHash: `${RUN_PREFIX}-${label}-producer-token-hash`,
+        tokenKeyVersion: "database-key-v1",
+        tokenExpiresAt: new Date(INITIAL_TIME.getTime() - 60_000),
+        tokenInvalidatedAt: INITIAL_TIME,
+        deploymentContractVersion: producerEnvelope.deploymentContractVersion,
+        deploymentContractHash: producerEnvelope.deploymentContractHash,
+        roleContractVersion: producerEnvelope.roleContractVersion,
+        roleContractHash: producerEnvelope.roleContractHash,
+        promptTemplateVersion: producerEnvelope.promptTemplateVersion,
+        promptTemplateHash: producerEnvelope.promptTemplateHash,
+        supplyContractVersion: producerEnvelope.supplyContractVersion,
+        supplyContractHash: producerEnvelope.supplyContractHash,
+        claimEnvelopeHash: hashAffiliateAgentValue(producerEnvelope),
+        claimEnvelopeJson: producerEnvelope,
+        evidenceManifestHash: parentManifest.hash,
+        permittedCommandHash: hashAffiliateAgentValue(producerEnvelope.permittedCommands),
+        permittedCommands: [...producerEnvelope.permittedCommands],
+        terminalReceiptId: producerTerminalReceiptId,
+      },
+    });
+    await transaction.affiliateAgentGatewayOperationReceipts.create({
+      data: {
+        id: producerTerminalReceiptId,
+        claimId: producerClaimId,
+        jobId: gatewayJobId,
+        claimGeneration: 1,
+        idempotencyKey: `${RUN_PREFIX}-${label}-producer-terminal`,
+        operationKind: "SUBMIT_RESULT",
+        commandName: "SUBMIT_TERMINAL_RESULT",
+        requestHash: hashAffiliateAgentValue({ producerResult }),
+        status: "SUCCEEDED",
+        responseHash: hashAffiliateAgentValue(terminalResponse),
+        responseJson: terminalResponse,
+        startedAt: new Date(INITIAL_TIME.getTime() - 120_000),
+        completedAt: new Date(INITIAL_TIME.getTime() - 60_000),
+      },
+    });
+    await transaction.affiliateAgentGatewayArtifacts.createMany({
+      data: pageArtifacts.map((artifact) => ({
+        id: `${RUN_PREFIX}-${label}-parent-${artifact.kind.toLowerCase()}`,
+        claimId: producerClaimId,
+        claimGeneration: 1,
+        evidenceRef: `${artifact.kind.toLowerCase()}-evidence`,
+        evidenceKind: artifact.kind,
+        sourceArtifactId: `intake-artifact:${artifact.id}`,
+        fileId: `intake-artifact:${artifact.id}`,
+        contentHash: artifact.contentHash,
+        mimeType: artifact.mimeType,
+        byteSize: artifact.bytes.byteLength,
+        creatingClaimId: producerClaimId,
+        accessMode: "READ_ONLY",
+        retentionClass: "INDEFINITE",
+        isPinned: true,
+      })),
+    });
+    await transaction.affiliateAgentGatewayEvents.create({
+      data: {
+        id: `${RUN_PREFIX}-${label}-producer-created`,
+        eventKey: `${RUN_PREFIX}-${label}-producer-created`,
+        jobId: gatewayJobId,
+        claimId: null,
+        receiptId: null,
+        sequence: 1,
+        eventType: "JOB_CREATED",
+        actorKind: "SYSTEM",
+        actorId: "source-exclusion-workflow",
+        role: "MAPPING_PRODUCER",
+        requestHash: hashAffiliateAgentValue({ gatewayJobId }),
+        payload: {},
+        retentionClass: "INDEFINITE",
+      },
+    });
+  });
+  const artifactBytesByHandle = new Map(
+    pageArtifacts.map((artifact) => [
+      `intake-artifact:${artifact.id}`,
+      artifact,
+    ]),
+  );
+  const claimAdmission = createAffiliateAgentClaimAdmission();
+  const harness = createGatewayHarness(label, {
+    claimAdmission,
+    lifecycle: {
+      kind: "AVAILABLE",
+      currentGeneration: async (id) => (await prisma.affiliateSupplySources.findUniqueOrThrow({ where: { id } })).lifecycleGeneration,
+      resolveRecordedCommand: async () => { throw new Error("Source review must not resolve a human command."); },
+      execute: async () => { throw new Error("Source review must not execute a human command."); },
+      recover: async () => null,
+    },
+    readImmutable: async ({ fileId }) => {
+      if (fileId === `supply-contract:${activeManifest.supplyContract.hash}`) {
+        const { hash: _hash, ...contractPreimage } = activeManifest.supplyContract;
+        const bytes = Buffer.from(
+          canonicalizeAffiliateAgentValue(contractPreimage),
+          "utf8",
+        );
+        return {
+          bytes: new Uint8Array(bytes),
+          mimeType: "application/json",
+          byteSize: bytes.byteLength,
+          sourceUrl: null,
+          finalUrl: null,
+        };
+      }
+      const artifact = artifactBytesByHandle.get(fileId);
+      if (!artifact) throw new Error(`Unknown source exclusion artifact ${fileId}.`);
+      return {
+        bytes: new Uint8Array(artifact.bytes),
+        mimeType: artifact.mimeType,
+        byteSize: artifact.bytes.byteLength,
+        sourceUrl: artifact.sourceUrl,
+        finalUrl: artifact.finalUrl,
+        intakeId,
+        runId,
+      };
+    },
+  });
+  harness.setActiveBundle(bundle);
+  return {
+    label,
+    gatewayJobId,
+    producerClaimId,
+    supplySourceId,
+    sourceId,
+    mappingId,
+    mappingJobId,
+    intakeId,
+    runId,
+    organizationId,
+    heldCandidateId,
+    pageHtmlArtifactId: `intake-artifact:${pageArtifacts[0]!.id}`,
+    pageHtmlHash: pageArtifacts[0]!.contentHash,
+    pageUrl,
+    currentCatalogHash: currentCatalog.sha256,
+    bundle,
+    harness,
+    claimAdmission,
+  };
+};
+
 
 type ProducerClaimIdentity = Readonly<{
   claimId: string;
@@ -2066,12 +2649,114 @@ const humanTerminalResultFor = (
     },
   };
 };
+
+const sourceExclusionTerminalResultFor = (
+  grant: AffiliateAgentClaimGrant,
+  fixture: Pick<
+    SourceExclusionWorkflowFixture,
+    "pageHtmlArtifactId" | "pageHtmlHash" | "pageUrl" | "currentCatalogHash"
+  >,
+) => {
+  const subject = grant.envelope.subject;
+  if (subject.type !== "SOURCE_EXCLUSION_REVIEW") {
+    throw new Error("Expected a source exclusion reviewer claim.");
+  }
+  const pageEntry = grant.envelope.evidenceManifest.entries.find(
+    (entry) => entry.artifactId === fixture.pageHtmlArtifactId,
+  );
+  if (!pageEntry) throw new Error("Expected the source HTML in the reviewer manifest.");
+  return {
+    schemaVersion: 1 as const,
+    jobId: grant.envelope.jobId,
+    claimId: grant.envelope.claimId,
+    claimGeneration: grant.envelope.claimGeneration,
+    lifecycleGeneration: grant.envelope.lifecycleGeneration,
+    deploymentContractVersion: grant.envelope.deploymentContractVersion,
+    deploymentContractHash: grant.envelope.deploymentContractHash,
+    supplyContractVersion: grant.envelope.supplyContractVersion,
+    supplyContractHash: grant.envelope.supplyContractHash,
+    roleContractVersion: grant.envelope.roleContractVersion,
+    roleContractHash: grant.envelope.roleContractHash,
+    promptTemplateVersion: grant.envelope.promptTemplateVersion,
+    promptTemplateHash: grant.envelope.promptTemplateHash,
+    workerId: grant.envelope.workerId,
+    invocationId: grant.envelope.invocationId,
+    role: "SUPPLY_REVIEWER" as const,
+    disposition: "SOURCE_EXCLUSION_ASSESSED" as const,
+    reasonCodes: ["SPORT_BLACKLISTED"] as const,
+    evidenceRefs: [pageEntry.evidenceRef],
+    summary: "Independent review confirmed that every source activity is blacklisted.",
+    payload: {
+      supplySourceId: subject.supplySourceId,
+      recommendation: "EXCLUDE" as const,
+      sportEvidence: {
+        evidenceRunId: subject.repairContext.evidenceRunId,
+        sportsCatalogSha256: fixture.currentCatalogHash,
+        sportDeterminations: [{
+          sourceLabels: ["Track and Field"],
+          status: "BLACKLISTED" as const,
+          resolutionBasis: "SOURCE_EVIDENCE" as const,
+          canonicalSportNames: [],
+          rationale: "The source pages explicitly identify Track and Field.",
+          evidence: [{
+            artifactId: fixture.pageHtmlArtifactId,
+            artifactSha256: fixture.pageHtmlHash,
+            artifactKind: "PAGE_HTML" as const,
+            pageUrl: fixture.pageUrl,
+            excerpt: "Track and Field",
+          }],
+        }],
+      },
+    },
+  };
+};
+
+const admitSourceExclusionForTest = async (label: string) => {
+  const fixture = await seedSourceExclusionWorkflow(label);
+  const options = {
+    prisma, artifactStore: fixture.harness.dependencies.artifacts, bundle: fixture.bundle,
+    gatewayJobId: fixture.gatewayJobId, reason: "Independently review the blacklisted source.",
+    operatorId: `${RUN_PREFIX}-operator`,
+  };
+  const preview = await previewAffiliateSourceExclusionAdmission(options);
+  expect(preview.reasonCodes).toEqual([]);
+  const applied = await applyAffiliateSourceExclusionAdmission({ ...options, expectedReportHash: preview.reportHash });
+  if (!applied.reviewerJobId) throw new Error("The source review job was not created.");
+  const job = await prisma.affiliateAgentGatewayJobs.findUniqueOrThrow({ where: { id: applied.reviewerJobId } });
+  if (!job.nextAttemptAt) throw new Error("The source review job has no admission time.");
+  fixture.harness.setNow(job.nextAttemptAt.toISOString());
+  const request = requestFor(label, "SUPPLY_REVIEWER", job.nextAttemptAt);
+  await fixture.claimAdmission.openBoundedLease({
+    role: "SUPPLY_REVIEWER", workerId: request.workerId, jobId: job.id, leaseSeconds: 1_200,
+  });
+  return { fixture, options, preview, job, request };
+};
+
+const claimSourceExclusionForTest = async (label: string) => {
+  const prepared = await admitSourceExclusionForTest(label);
+  const grant = await claimOrThrow(prepared.fixture.harness.gateway, prepared.request);
+  for (const entry of grant.envelope.evidenceManifest.entries) {
+    await prepared.fixture.harness.gateway.perform({
+      kind: "READ_ARTIFACT", idempotencyKey: `${RUN_PREFIX}-${label}-read-${entry.evidenceRef}`,
+      authorization: authorizationFor(grant), evidenceRef: entry.evidenceRef,
+    });
+  }
+  const operation = {
+    kind: "SUBMIT_RESULT" as const,
+    idempotencyKey: `${RUN_PREFIX}-${label}-terminal`,
+    authorization: authorizationFor(grant),
+    result: sourceExclusionTerminalResultFor(grant, prepared.fixture),
+  };
+  return { ...prepared, grant, operation };
+};
+
 type GatewayHarnessOptions = Readonly<{
   database?: typeof prisma;
   commands?: AffiliateAgentCommandAdapters;
   terminalEffects?: AffiliateAgentTerminalEffectAdapter;
   lifecycle?: AffiliateAgentLifecycleAuthority;
   readImmutable?: AffiliateAgentGatewayDependencies["artifacts"]["readImmutable"];
+  claimAdmission?: AffiliateAgentClaimAdmission;
 }>;
 
 const createGatewayHarness = (
@@ -2169,6 +2854,7 @@ const createGatewayHarness = (
     },
     workspaces: { verify: async () => true },
     contracts: { loadActiveBundle: async () => activeBundle },
+    claimAdmission: options.claimAdmission,
     artifacts,
     commands,
     terminalEffects: options.terminalEffects ?? productionAdapters.terminalEffects,
@@ -2203,12 +2889,24 @@ const claimOrThrow = async (
 
 const cleanupGatewayRows = async (): Promise<void> => {
   const jobs = await prisma.affiliateAgentGatewayJobs.findMany({
-    where: { id: { startsWith: RUN_PREFIX } },
+    where: { OR: [{ id: { startsWith: RUN_PREFIX } }, { supplySourceId: { startsWith: RUN_PREFIX } }] },
     select: { id: true },
   });
   const jobIds = jobs.map(({ id }) => id);
   const supplySourceIds = (
     await prisma.affiliateSupplySources.findMany({
+      where: { id: { startsWith: RUN_PREFIX } },
+      select: { id: true },
+    })
+  ).map(({ id }) => id);
+  const candidateIds = (
+    await prisma.affiliateImportCandidates.findMany({
+      where: { id: { startsWith: RUN_PREFIX } },
+      select: { id: true },
+    })
+  ).map(({ id }) => id);
+  const organizationIds = (
+    await prisma.organizations.findMany({
       where: { id: { startsWith: RUN_PREFIX } },
       select: { id: true },
     })
@@ -2254,15 +2952,51 @@ const cleanupGatewayRows = async (): Promise<void> => {
       select: { id: true },
     })
   ).map(({ id }) => id);
+  const intakeIds = (
+    await prisma.affiliateSourceIntakes.findMany({
+      where: { id: { startsWith: RUN_PREFIX } },
+      select: { id: true },
+    })
+  ).map(({ id }) => id);
+  const runIds = (
+    await prisma.affiliateSourceIntakeRuns.findMany({
+      where: { id: { startsWith: RUN_PREFIX } },
+      select: { id: true },
+    })
+  ).map(({ id }) => id);
+  const pageIds = (
+    await prisma.affiliateSourceIntakePages.findMany({
+      where: { id: { startsWith: RUN_PREFIX } },
+      select: { id: true },
+    })
+  ).map(({ id }) => id);
+  const intakeArtifactIds = (
+    await prisma.affiliateSourceIntakeArtifacts.findMany({
+      where: { id: { startsWith: RUN_PREFIX } },
+      select: { id: true },
+    })
+  ).map(({ id }) => id);
+  const fileIds = (
+    await prisma.file.findMany({
+      where: { id: { startsWith: RUN_PREFIX } },
+      select: { id: true },
+    })
+  ).map(({ id }) => id);
   if (
     jobIds.length === 0
     && supplySourceIds.length === 0
+    && candidateIds.length === 0
+    && organizationIds.length === 0
     && mappingJobIds.length === 0
     && scrapeSourceIds.length === 0
     && scrapeMappingIds.length === 0
     && contractManifestIds.length === 0
     && waveIds.length === 0
     && demandIds.length === 0
+    && runIds.length === 0
+    && pageIds.length === 0
+    && intakeArtifactIds.length === 0
+    && fileIds.length === 0
   ) return;
   const claims = await prisma.affiliateAgentGatewayClaims.findMany({
     where: { jobId: { in: jobIds } },
@@ -2288,6 +3022,31 @@ const cleanupGatewayRows = async (): Promise<void> => {
     await transaction.affiliateAgentGatewayJobs.deleteMany({
       where: { id: { in: jobIds } },
     });
+    if (intakeArtifactIds.length > 0) {
+      await transaction.affiliateSourceIntakeArtifacts.deleteMany({
+        where: { id: { in: intakeArtifactIds } },
+      });
+    }
+    if (runIds.length > 0) {
+      await transaction.affiliateSourceIntakeRuns.deleteMany({
+        where: { id: { in: runIds } },
+      });
+    }
+    if (pageIds.length > 0) {
+      await transaction.affiliateSourceIntakePages.deleteMany({
+        where: { id: { in: pageIds } },
+      });
+    }
+    if (intakeIds.length > 0) {
+      await transaction.affiliateSourceIntakes.deleteMany({
+        where: { id: { in: intakeIds } },
+      });
+    }
+    if (fileIds.length > 0) {
+      await transaction.file.deleteMany({
+        where: { id: { in: fileIds } },
+      });
+    }
     if (supplySourceIds.length > 0) {
       await transaction.affiliateSupplyLifecycleTransitions.deleteMany({
         where: { supplySourceId: { in: supplySourceIds } },
@@ -2318,6 +3077,11 @@ const cleanupGatewayRows = async (): Promise<void> => {
         where: { id: { in: demandIds } },
       });
     }
+    if (candidateIds.length > 0) {
+      await transaction.affiliateImportCandidates.deleteMany({
+        where: { id: { in: candidateIds } },
+      });
+    }
     if (scrapeSourceIds.length > 0) {
       await transaction.affiliateScrapeSources.deleteMany({
         where: { id: { in: scrapeSourceIds } },
@@ -2326,6 +3090,11 @@ const cleanupGatewayRows = async (): Promise<void> => {
     if (supplySourceIds.length > 0) {
       await transaction.affiliateSupplySources.deleteMany({
         where: { id: { in: supplySourceIds } },
+      });
+    }
+    if (organizationIds.length > 0) {
+      await transaction.organizations.deleteMany({
+        where: { id: { in: organizationIds } },
       });
     }
   });
@@ -2377,6 +3146,7 @@ const recoveryDurableStateFor = async (
       where: { id: fixture.mappingJobId },
     }),
     prisma.affiliateAgentGatewayJobs.findUniqueOrThrow({
+
       where: { id: fixture.reviewerJobId },
     }),
     prisma.affiliateAgentGatewayClaims.findUniqueOrThrow({
@@ -2439,6 +3209,345 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
     await cleanupGatewayRows();
     await prisma.$disconnect();
   });
+
+  it("admits an independent source exclusion reviewer and excludes only the held source", async () => {
+    const fixture = await seedSourceExclusionWorkflow("source-exclusion");
+    const reason = "Review Track and Field for exclusion under the current blacklist.";
+    const operatorId = `${RUN_PREFIX}-operator`;
+    const parentState = () => Promise.all([
+      prisma.affiliateAgentGatewayJobs.findUniqueOrThrow({ where: { id: fixture.gatewayJobId } }),
+      prisma.affiliateAgentGatewayClaims.findUniqueOrThrow({ where: { id: fixture.producerClaimId } }),
+      prisma.affiliateAgentGatewayOperationReceipts.findMany({
+        where: { claimId: fixture.producerClaimId }, orderBy: { id: "asc" },
+      }),
+      prisma.affiliateAgentGatewayArtifacts.findMany({
+        where: { claimId: fixture.producerClaimId }, orderBy: { id: "asc" },
+      }),
+      prisma.affiliateSourceIntakeArtifacts.findMany({
+        where: { intakeId: fixture.intakeId, runId: fixture.runId }, orderBy: { id: "asc" },
+      }),
+    ]);
+    const originalParentState = await parentState();
+    const beforeMapping = await prisma.affiliateScrapeMappings.findUniqueOrThrow({
+      where: { id: fixture.mappingId },
+    });
+    const beforeTargetCount = await prisma.affiliateSupplyTargets.count({
+      where: { supplySourceId: fixture.supplySourceId },
+    });
+    const beforeOrganization = await prisma.organizations.findUniqueOrThrow({
+      where: { id: fixture.organizationId },
+    });
+    const beforeCandidate = await prisma.affiliateImportCandidates.findUniqueOrThrow({
+      where: { id: fixture.heldCandidateId },
+    });
+    const beforeChildJobCount = await prisma.affiliateAgentGatewayJobs.count({
+      where: { parentClaimId: fixture.producerClaimId, subjectType: "SOURCE_EXCLUSION_REVIEW" },
+    });
+
+    const preview = await previewAffiliateSourceExclusionAdmission({
+      prisma,
+      artifactStore: fixture.harness.dependencies.artifacts,
+      bundle: fixture.bundle,
+      gatewayJobId: fixture.gatewayJobId,
+      reason,
+      operatorId,
+    });
+    expect(preview.reasonCodes).toEqual([]);
+    expect(preview).toMatchObject({
+      mode: "PREVIEW",
+      eligible: true,
+      gatewayJobId: fixture.gatewayJobId,
+      supplySourceId: fixture.supplySourceId,
+      writeCount: 0,
+      replayed: false,
+    });
+    expect(await prisma.affiliateAgentGatewayJobs.count({
+      where: { parentClaimId: fixture.producerClaimId, subjectType: "SOURCE_EXCLUSION_REVIEW" },
+    })).toBe(beforeChildJobCount);
+
+    const applied = await applyAffiliateSourceExclusionAdmission({
+      prisma,
+      artifactStore: fixture.harness.dependencies.artifacts,
+      bundle: fixture.bundle,
+      gatewayJobId: fixture.gatewayJobId,
+      reason,
+      operatorId,
+      expectedReportHash: preview.reportHash,
+    });
+    expect(applied).toMatchObject({
+      mode: "APPLY",
+      eligible: true,
+      gatewayJobId: fixture.gatewayJobId,
+      supplySourceId: fixture.supplySourceId,
+      replayed: false,
+      reviewerJobId: expect.any(String),
+    });
+    if (!applied.reviewerJobId) throw new Error("Admission did not create a reviewer job.");
+    const queuedReviewer = await prisma.affiliateAgentGatewayJobs.findUniqueOrThrow({
+      where: { id: applied.reviewerJobId },
+    });
+    if (!queuedReviewer.nextAttemptAt) throw new Error("The reviewer has no admission time.");
+    fixture.harness.setNow(queuedReviewer.nextAttemptAt.toISOString());
+
+    const reviewerRequest = requestFor(
+      "source-exclusion",
+      "SUPPLY_REVIEWER",
+      queuedReviewer.nextAttemptAt,
+    );
+    await fixture.claimAdmission.openBoundedLease({
+      role: "SUPPLY_REVIEWER",
+      workerId: reviewerRequest.workerId,
+      jobId: applied.reviewerJobId,
+      leaseSeconds: 1_200,
+    });
+    const grant = await claimOrThrow(fixture.harness.gateway, reviewerRequest);
+    expect(grant.envelope.executionBudget).toBe("SINGLE_CLAIM");
+    expect(grant.envelope.subject.type).toBe("SOURCE_EXCLUSION_REVIEW");
+    expect(await applyAffiliateSourceExclusionAdmission({
+      prisma, artifactStore: fixture.harness.dependencies.artifacts, bundle: fixture.bundle,
+      gatewayJobId: fixture.gatewayJobId, reason, operatorId, expectedReportHash: preview.reportHash,
+    })).toMatchObject({ replayed: true, writeCount: 0, reviewerJobId: applied.reviewerJobId });
+    for (const entry of grant.envelope.evidenceManifest.entries) {
+      await fixture.harness.gateway.perform({
+        kind: "READ_ARTIFACT",
+        idempotencyKey: `${RUN_PREFIX}-source-read-${entry.evidenceRef}`,
+        authorization: authorizationFor(grant),
+        evidenceRef: entry.evidenceRef,
+      });
+    }
+
+    const result = sourceExclusionTerminalResultFor(grant, fixture);
+    const operation = {
+      kind: "SUBMIT_RESULT" as const,
+      idempotencyKey: `${RUN_PREFIX}-source-exclusion-terminal`,
+      authorization: authorizationFor(grant),
+      result,
+    };
+    const invalid: typeof result = JSON.parse(JSON.stringify(result));
+    invalid.payload.sportEvidence.sportDeterminations[0]!.evidence[0]!.excerpt = "A quote absent from the stored source.";
+    expect(await fixture.harness.gateway.perform({
+      ...operation,
+      idempotencyKey: `${RUN_PREFIX}-invalid-source-quote`,
+      result: invalid,
+    })).toMatchObject({ kind: "SCHEMA_CORRECTION_REQUIRED" });
+    expect(await prisma.affiliateAgentGatewayOperationReceipts.count({
+      where: { claimId: grant.envelope.claimId, operationKind: "TERMINAL_EFFECT" },
+    })).toBe(0);
+    const accepted = await fixture.harness.gateway.perform(operation);
+    expect(await fixture.harness.gateway.perform(operation)).toEqual(accepted);
+    expect(accepted).toMatchObject({ kind: "TERMINAL_ACCEPTED", disposition: "SOURCE_EXCLUSION_ASSESSED" });
+    const transitions = await prisma.affiliateSupplyLifecycleTransitions.findMany({
+      where: { supplySourceId: fixture.supplySourceId },
+    });
+    expect(transitions).toEqual([expect.objectContaining({
+      command: "EXCLUDE_SOURCE",
+      actorKind: "SUPPLY_REVIEWER",
+      actorId: grant.envelope.workerId,
+      generation: 8,
+    })]);
+
+    const [root, source, mapping, targetCount, childJob, childArtifacts, organization, candidate] =
+      await Promise.all([
+        prisma.affiliateSupplySources.findUniqueOrThrow({
+          where: { id: fixture.supplySourceId },
+        }),
+        prisma.affiliateScrapeSources.findUniqueOrThrow({
+          where: { id: fixture.sourceId },
+        }),
+        prisma.affiliateScrapeMappings.findUniqueOrThrow({
+          where: { id: fixture.mappingId },
+        }),
+        prisma.affiliateSupplyTargets.count({
+          where: { supplySourceId: fixture.supplySourceId },
+        }),
+        prisma.affiliateAgentGatewayJobs.findUniqueOrThrow({
+          where: { id: applied.reviewerJobId },
+        }),
+        prisma.affiliateAgentGatewayArtifacts.findMany({
+          where: { claimId: grant.envelope.claimId },
+          orderBy: [{ id: "asc" }],
+        }),
+        prisma.organizations.findUniqueOrThrow({
+          where: { id: fixture.organizationId },
+        }),
+        prisma.affiliateImportCandidates.findUniqueOrThrow({
+          where: { id: fixture.heldCandidateId },
+        }),
+      ]);
+    expect(root).toMatchObject({
+      isExcluded: true,
+      isAutomationEnabled: false,
+    });
+    expect(root.excludedAt).not.toBeNull();
+    expect(source).toMatchObject({
+      autoScrapeEnabled: false,
+      status: "EXCLUDED",
+    });
+    expect(mapping).toEqual(beforeMapping);
+    expect(targetCount).toBe(beforeTargetCount);
+    expect(organization).toEqual(beforeOrganization);
+    expect(candidate).toEqual(beforeCandidate);
+    expect(childJob).toMatchObject({
+      status: "COMPLETED",
+      terminalDisposition: "SOURCE_EXCLUSION_ASSESSED",
+    });
+    expect(childArtifacts.map(({ evidenceKind }) => evidenceKind)).toEqual(
+      expect.arrayContaining(["PAGE_HTML", "PAGE_MARKDOWN", "ACTIVE_SUPPLY_CONTRACT"]),
+    );
+    expect(childArtifacts.some(({ evidenceKind }) => (
+      ["COMMITTED_PACKAGE", "DETERMINISTIC_VALIDATION", "DURABLE_EVIDENCE"].includes(evidenceKind)
+    ))).toBe(false);
+
+    const replay = await applyAffiliateSourceExclusionAdmission({
+      prisma,
+      artifactStore: fixture.harness.dependencies.artifacts,
+      bundle: fixture.bundle,
+      gatewayJobId: fixture.gatewayJobId,
+      reason,
+      expectedReportHash: preview.reportHash,
+      operatorId,
+    });
+    expect(replay).toMatchObject({
+      mode: "APPLY",
+      eligible: true,
+      replayed: true,
+      reviewerJobId: applied.reviewerJobId,
+      writeCount: 0,
+    });
+    expect(await parentState()).toEqual(originalParentState);
+  }, 60_000);
+
+  it.each([
+    {
+      name: "incomplete producer receipt",
+      mutate: async (fixture: SourceExclusionWorkflowFixture) => prisma.affiliateAgentGatewayOperationReceipts.updateMany({
+        where: { claimId: fixture.producerClaimId }, data: { responseHash: null },
+      }),
+      reason: "PARENT_TERMINAL_RECEIPT_RESPONSE_HASH_MISMATCH",
+    },
+    {
+      name: "unpinned source evidence",
+      mutate: async (fixture: SourceExclusionWorkflowFixture) => prisma.affiliateSourceIntakeArtifacts.updateMany({
+        where: { intakeId: fixture.intakeId }, data: { isPinned: false },
+      }),
+      reason: "EVIDENCE_NOT_PINNED_PAGE_HTML",
+    },
+    {
+      name: "detached live source",
+      mutate: async (fixture: SourceExclusionWorkflowFixture) => prisma.affiliateScrapeSources.update({
+        where: { id: fixture.sourceId }, data: { supplySourceId: null },
+      }),
+      reason: "ROOT_LINK_DRIFT",
+    },
+    {
+      name: "active mapping without a parent mapping",
+      mutate: async (fixture: SourceExclusionWorkflowFixture) => prisma.$transaction([
+        prisma.affiliateSourceMappingJobs.update({ where: { id: fixture.mappingJobId }, data: { mappingId: null } }),
+        prisma.affiliateImportCandidates.updateMany({ where: { sourceId: fixture.sourceId }, data: { mappingId: null } }),
+        prisma.affiliateScrapeMappings.update({ where: { id: fixture.mappingId }, data: { validatedAt: INITIAL_TIME } }),
+      ]),
+      reason: "ACTIVE_MAPPING_MISMATCH",
+    },
+  ])("refuses admission after $name drift", async ({ mutate, reason }) => {
+    const fixture = await seedSourceExclusionWorkflow(`source-drift-${reason.toLowerCase()}`);
+    const options = {
+      prisma, artifactStore: fixture.harness.dependencies.artifacts, bundle: fixture.bundle,
+      gatewayJobId: fixture.gatewayJobId, reason: "Review the original blacklisted source.", operatorId: `${RUN_PREFIX}-operator`,
+    };
+    const preview = await previewAffiliateSourceExclusionAdmission(options);
+    expect(preview.reasonCodes).toEqual([]);
+    await mutate(fixture);
+    const changed = await previewAffiliateSourceExclusionAdmission(options);
+    expect(changed).toMatchObject({ eligible: false, reasonCodes: expect.arrayContaining([reason]) });
+    await expect(applyAffiliateSourceExclusionAdmission({ ...options, expectedReportHash: preview.reportHash })).rejects.toBeInstanceOf(Error);
+    expect(await prisma.affiliateAgentGatewayJobs.count({
+      where: { parentClaimId: fixture.producerClaimId, subjectType: "SOURCE_EXCLUSION_REVIEW" },
+    })).toBe(0);
+  });
+
+  it("rejects source publication drift after admission without issuing a claim", async () => {
+    const { fixture, job, request } = await admitSourceExclusionForTest("source-public-drift");
+    await prisma.organizations.update({ where: { id: fixture.organizationId }, data: { publicPageEnabled: true } });
+    await expect(fixture.harness.gateway.claim(request)).rejects.toMatchObject({ code: "REVIEW_WORKSPACE_INVALID" });
+    expect(await prisma.affiliateAgentGatewayClaims.count({ where: { jobId: job.id } })).toBe(0);
+    expect(await prisma.affiliateSupplyLifecycleTransitions.count({ where: { supplySourceId: fixture.supplySourceId } })).toBe(0);
+  });
+
+  it.each(["KEEP", "HUMAN_REVIEW"] as const)("records evidenced %s without changing the held source", async (recommendation) => {
+    const { fixture, grant, operation } = await claimSourceExclusionForTest(`source-${recommendation.toLowerCase()}`);
+    const before = await prisma.affiliateScrapeSources.findUniqueOrThrow({ where: { id: fixture.sourceId } });
+    const result = {
+      ...operation.result, reasonCodes: ["EVIDENCE_VERIFIED"] as const,
+      payload: { supplySourceId: fixture.supplySourceId, recommendation },
+    };
+    await expect(fixture.harness.gateway.perform({
+      ...operation, idempotencyKey: `${operation.idempotencyKey}-empty`,
+      result: { ...result, evidenceRefs: [] },
+    })).rejects.toBeInstanceOf(Error);
+    expect(await prisma.affiliateAgentGatewayOperationReceipts.count({
+      where: { claimId: grant.envelope.claimId, operationKind: "TERMINAL_EFFECT" },
+    })).toBe(0);
+    expect(await fixture.harness.gateway.perform({ ...operation, result })).toMatchObject({ kind: "TERMINAL_ACCEPTED" });
+    expect(await prisma.affiliateScrapeSources.findUniqueOrThrow({ where: { id: fixture.sourceId } })).toEqual(before);
+    expect(await prisma.affiliateSupplyLifecycleTransitions.count({ where: { supplySourceId: fixture.supplySourceId } })).toBe(0);
+  });
+
+  it("denies package approval from a source-only claim before any effect", async () => {
+    const { fixture, grant, operation } = await claimSourceExclusionForTest("source-forbidden-approval");
+    await expect(fixture.harness.gateway.perform({
+      ...operation,
+      result: {
+        ...operation.result, disposition: "APPROVED", reasonCodes: ["EVIDENCE_VERIFIED"],
+        payload: { committedPackageHash: "a".repeat(64) },
+      },
+    })).rejects.toBeInstanceOf(Error);
+    expect(await prisma.affiliateAgentGatewayOperationReceipts.count({
+      where: { claimId: grant.envelope.claimId, operationKind: "TERMINAL_EFFECT" },
+    })).toBe(0);
+    expect(await prisma.affiliateSupplyLifecycleTransitions.count({ where: { supplySourceId: fixture.supplySourceId } })).toBe(0);
+  });
+
+  it("recovers an ambiguous committed exclusion without another lifecycle write", async () => {
+    const { fixture, grant, operation } = await claimSourceExclusionForTest("source-unknown-recovery");
+    const effect = fixture.harness.dependencies.terminalEffects!.SOURCE_EXCLUSION_ASSESSED;
+    const execute = effect.execute;
+    const executeSpy = jest.spyOn(effect, "execute").mockImplementation(async (input) => {
+      await execute(input);
+      throw new Error("The exclusion response was lost after commit.");
+    });
+    const recoverSpy = jest.spyOn(effect, "recover").mockRejectedValue(new Error("Recovery transport is unavailable."));
+    try {
+      await expect(fixture.harness.gateway.perform(operation)).rejects.toBeInstanceOf(Error);
+      const pending = await prisma.affiliateAgentGatewayOperationReceipts.findFirstOrThrow({
+        where: { claimId: grant.envelope.claimId, operationKind: "TERMINAL_EFFECT" },
+      });
+      fixture.harness.setNow(new Date(pending.startedAt.getTime() + 120_000).toISOString());
+      await createPrismaAffiliateAgentGateway(fixture.harness.dependencies).reconcile({ limit: 10 });
+    } finally {
+      executeSpy.mockRestore();
+      recoverSpy.mockRestore();
+    }
+    const receipt = await prisma.affiliateAgentGatewayOperationReceipts.findFirstOrThrow({
+      where: { claimId: grant.envelope.claimId, operationKind: "TERMINAL_EFFECT" },
+    });
+    expect(receipt).toMatchObject({ status: "UNKNOWN", safeErrorCode: "PARTIAL_COMMAND_UNRESOLVED" });
+    const transitionsBefore = await prisma.affiliateSupplyLifecycleTransitions.findMany({ where: { supplySourceId: fixture.supplySourceId } });
+    expect(transitionsBefore).toEqual([expect.objectContaining({ command: "EXCLUDE_SOURCE" })]);
+    const recoveryRequest = {
+      mode: "PREVIEW" as const, receiptId: receipt.id, jobId: grant.envelope.jobId,
+      claimId: grant.envelope.claimId, supplySourceId: fixture.supplySourceId,
+      reason: "Complete the recorded exclusion after response loss.",
+    };
+    const preview = await recoverAffiliateAgentReviewerEffect(fixture.harness.dependencies, recoveryRequest, { operatorId: "affiliate-gateway-operator" });
+    expect(preview).toMatchObject({ eligible: true, reasonCodes: expect.arrayContaining(["LIFECYCLE_ALREADY_RECORDED"]) });
+    await recoverAffiliateAgentReviewerEffect(fixture.harness.dependencies, {
+      ...recoveryRequest, mode: "APPLY", expectedReportHash: preview.reportHash,
+    }, { operatorId: "affiliate-gateway-operator" });
+    expect(await prisma.affiliateAgentGatewayJobs.findUniqueOrThrow({ where: { id: grant.envelope.jobId } })).toMatchObject({
+      status: "COMPLETED", activeClaimId: null, terminalDisposition: "SOURCE_EXCLUSION_ASSESSED",
+    });
+    expect(await prisma.affiliateSupplyLifecycleTransitions.findMany({ where: { supplySourceId: fixture.supplySourceId } })).toEqual(transitionsBefore);
+  }, 60_000);
 
   it("previews a held legacy repair without writes and keeps its report stable across time", async () => {
     const fixture = await seedReviewerEffectRecoveryFixture("recovery-preview");

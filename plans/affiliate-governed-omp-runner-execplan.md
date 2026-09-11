@@ -1856,3 +1856,194 @@ Both policy test databases and the temporary Mission smoke files were removed.
 The local Postgres server was not stopped. All 99 protected production records
 still matched the baseline after cleanup. Production removal of the held
 Mission candidate remains incomplete and requires the governed exclusion path.
+
+## Package-free source exclusion handoff
+
+This continuation completes the missing governed handoff for a held source
+whose producer could not create a package because its activities are
+blacklisted. The operator can preview and admit one independent source
+reviewer. A verified exclusion result executes the existing EXCLUDE_SOURCE
+lifecycle command. It does not require a fabricated mapping package, target,
+producer identity, or approval record.
+
+The work starts from `47f6975b23ecf9974e3f4400fa392151f50e1bdf` on
+`workstream/affiliate-exclusion-handoff`. Maintain this section under PLANS.md.
+Mission's root is `a8764a56-2da2-4382-82d1-eee317b05143`. Its completed producer
+job is `bb453a27-f14b-4e0e-8737-bc4ad2cb6a2c`. Its original result calls Track
+and Field UNSUPPORTED. That historical result remains unchanged. The new
+reviewer must make and cite its own current-policy determination.
+
+### Progress
+
+- [x] Read the existing reviewer, operator, and lifecycle interfaces.
+- [x] Confirm that EXCLUDE_SOURCE already permits SUPPLY_REVIEWER authority.
+- [x] Implement package-free reviewer claims and bounded operator admission.
+- [x] Verify preview, admission, exclusion, replay, and denied side effects.
+- [x] Complete independent Standards and Spec review.
+- [ ] Obtain separate authorization for the exact production deployment and workers.
+- [ ] Execute one governed Mission exclusion.
+- [ ] Process TPH Academy Austin, then Ultimate Chicago, with independent review.
+
+### Discoveries and decisions
+
+The existing SUPPLY_REVIEWER subject requires a committed package hash and
+target identity. It cannot represent Mission's real hold without false fields.
+Add a distinct SOURCE_EXCLUSION_REVIEW subject under the same reviewer role.
+Keep the real producer claim, worker, invocation, workspace, result hash, and
+intake/run lineage. Capture a fresh catalog for the new reviewer request.
+Do not change historical package reviewer records or parent catalog data.
+
+EXCLUDE_SOURCE already permits SUPPLY_REVIEWER and HUMAN_DIRECTED_EXECUTOR.
+The latter is mandatory only for EXECUTE_RECORDED_LIFECYCLE_COMMAND. Use the
+existing reviewer terminal-effect interface instead. The reviewer retains
+read-only tools. The trusted Gateway executes the lifecycle command after
+verification. No new agent command or production credential is added.
+
+The old SOURCE_EXCLUSION_ASSESSED effect uses RECONCILE. That path can derive
+an excluded root but does not set excludedAt or disable automatic scraping.
+The new source-only EXCLUDE path must execute EXCLUDE_SOURCE, which records
+the explicit transition and updates those fields. Non-exclusion decisions
+must leave the source held and must not activate, publish, or resume work.
+
+### Implementation and interface
+
+In apps/site/src/server/affiliateImports/agentGatewayContracts.ts, add the
+source-only subject, source-only terminal scope, and a dedicated SINGLE_CLAIM
+dedupe prefix. Advance role and prompt contracts to version 8. The source-only
+subject has no package hash or target fields. The reviewer result carries its
+own sportEvidence. An EXCLUDE recommendation requires nonempty all-BLACKLISTED
+determinations, no canonical sport names, SPORT_BLACKLISTED, and exact
+claim-owned source citations. The current catalog and blacklist remain
+authoritative. Historical UNSUPPORTED findings are evidence context only.
+
+Add apps/site/src/server/affiliateImports/affiliateSourceExclusionAdmission.ts
+with preview and apply functions. Expose them through an operator-only
+POST /v1/affiliate-agent/source-exclusion/admission interface. Its strict body
+contains mode PREVIEW or APPLY, one gatewayJobId, a bounded reason, and an
+expectedReportHash for APPLY. Bind the operator identity inside the Gateway;
+never accept it from the body.
+
+PREVIEW must make no writes. Its deterministic hash binds the exact completed
+producer hold, source and intake identity, root generation, original claim
+and result hashes, pinned page artifacts, current catalog, active contracts,
+and requested reason. The parent may contain a historical UNSUPPORTED label
+that is blacklisted under current policy. It must have no resolved sports.
+The independent review, not that old classification, authorizes exclusion.
+
+APPLY requires closed admission, fresh preflight, no active claims or retained
+claim pointers, and the exact reviewed hash. Re-read the snapshot in a
+Serializable transaction. Create only one parent-linked reviewer job and its
+operator audit event. Preserve every original producer record, source,
+mapping, organization, candidate, and target. Exact replay returns the same
+job with zero writes, including after normal reviewer progress. A changed
+request or altered immutable child identity must fail. Ordinary queue polling
+must not claim the new single-claim prefix; admission needs the exact job ID.
+
+In prismaAgentGateway.ts, admit the new subject only with matching completed
+producer history and original page evidence. Preserve worker, invocation,
+workspace, source, generation, and contract checks. Restrict the source-only
+claim to source assessment or human review. It cannot approve a package,
+activate a source, reject a target, or enqueue producer repair.
+
+In affiliateAgentTerminalValidation.ts and agentGatewayAdapters.ts, verify the
+reviewer's current assessment and citations before an exclusion effect.
+Repeat authoritative checks at the effect transaction. Reuse the existing
+EXCLUDE_SOURCE transaction, idempotency key, receipt, and transition storage.
+No source or target write occurs when verification fails.
+
+### Validation and operational limits
+
+Use a fresh bracketiq_e2e_ database on the existing local Postgres server.
+Apply migrations and confirm migration status before database tests. Exercise
+the actual preview-to-claim-to-terminal workflow against that database.
+Prove one EXCLUDE_SOURCE transition, isExcluded true, excludedAt populated,
+source status EXCLUDED, and automatic scraping false. Prove no package,
+publication, target, or original-history mutation. Test exact replay,
+stale hashes and generations, foreign evidence, mixed sports, forged parent
+identity, and forbidden source-only dispositions.
+
+Run the affected complete Jest suites, TypeScript, targeted ESLint, and the
+pinned Bun SDK smoke after implementation. Run a read-only preview against
+Mission's retained production state. Record review findings and their
+corrections before deployment.
+
+This continuation starts with implementation and verification. It does not
+silently authorize an image publication, production deployment, or worker
+start. Obtain current authorization for the exact runtime scope after the
+source handoff is reviewed. Keep publication, automatic scraping, and the
+wider fleet held. After the authorized Mission exclusion, process TPH and
+Ultimate one at a time with independent review.
+
+### Outcome
+
+The source-only database workflow passed. It produced one EXCLUDE_SOURCE
+transition, populated excludedAt, disabled automatic scraping, preserved the
+mapping, targets, and producer history, and replayed without another write.
+Seven affected suites passed 343 tests. TypeScript and the pinned SDK probe
+also passed. Independent review is in progress.
+
+The real Mission preview ran twice with PostgreSQL
+default_transaction_read_only=on. Both results were eligible with no blockers,
+zero writes, and stable prospective report hash
+`58ca94593c35ba960150307113bf64acef04a03512b1220c2598f8582b8ad849`.
+This is read-only preview evidence, not an APPLY authorization. It uses a
+prospective deployment-8 bundle; obtain a fresh report for the final deployed
+bundle before any mutation.
+
+The first preview correctly exposed three implementation assumptions that did
+not fit the retained records. Retry parents are real history, not malformed
+parents. The claim's pinned capture is not required to be the intake's latest
+supplemental run. A link to an unlisted canonical CLUB organization is not
+public supply. The source checks now validate those facts without rewriting
+the original rows.
+
+No production state changed in this continuation. Deployment and worker
+operations remain dependent on a reviewed release and separate authorization.
+
+### Review record
+
+The fixed review base is `47f6975b23ecf9974e3f4400fa392151f50e1bdf`.
+The first Admission and Execution reviews found these defects. All are accepted.
+The happy-path proof remains valid, but it is not sufficient for release.
+
+| Finding | Correction | State |
+| --- | --- | --- |
+| E1 | Recheck mutable held/publication state before a new claim or first effect. | Fixed, re-reviewed, verified |
+| E2 | Bind source canonical identity and all source/root back-links. | Fixed, re-reviewed, verified |
+| E3 | Require complete hashed producer terminal receipts. | Fixed, re-reviewed, verified |
+| E4 | Bind all producer and ancestor routing, generation, and subject fields. | Fixed, re-reviewed, verified |
+| E5 | Require pinned artifact kind, URL, File, and citation provenance. | Fixed, re-reviewed, verified |
+| E6 | Validate immutable zero-write replay before mutable admission gates. | Fixed, re-reviewed, verified |
+| E7 | Return invalid exclusion evidence as a correction before effect reservation. | Fixed, re-reviewed, verified |
+| E8 | Restore exact-target validation for existing package reviewers. | Fixed, re-reviewed, verified |
+| E9 | Add guarded recovery for ambiguous source-only terminal effects. | Fixed, re-reviewed, verified |
+| E10 | Include sport reason codes in the rendered reviewer completion contract. | Fixed, re-reviewed, verified |
+| E11 | Require evidence for every authoritative source-only outcome. | Fixed, re-reviewed, verified |
+| E12 | Reject a nonnull active mapping when the parent mapping is null. | Fixed, re-reviewed, verified |
+
+The admission fixes also validate malformed row identities and exact audit
+shape. The execution fixes add direct Gateway denial and non-exclusion tests.
+Keep an already committed transition's replay separate from fresh safety and
+catalog validation.
+
+The hardened gate passed 871 tests in 33 suites, including both PostgreSQL
+suites. TypeScript and targeted ESLint passed. The source workflow now
+exercises a rejected quote with no effect receipt, a corrected submission,
+exact APPLY replay while the reviewer is active, private organization and
+candidate preservation, evidence-free and forbidden-disposition denial,
+KEEP/HUMAN held-state outcomes, and guarded UNKNOWN recovery after a committed
+exclusion response is lost. Recovery creates no second lifecycle transition.
+
+The hardened real Mission PREVIEW remained eligible in two enforced
+read-only runs. The new prospective report hash is
+`2b3893b8a92a8724de76990f48555827f84908384de2a8d862c801ad54e4ad3a`.
+Both runs reported zero writes and no blockers. All Admission and Execution
+Standards and Spec re-reviews passed.
+
+The E12 PostgreSQL regression failed before the fix: a validated active mapping
+with null parent/candidate mapping links returned eligible true. The shared
+safety predicate now requires exact source active-mapping equality, including
+null. The final gate passed 872 tests in 33 suites. TypeScript, targeted
+ESLint, and all three real pinned-Bun SDK probes passed. The final real Mission
+PREVIEW kept the same eligible, zero-write hash shown above. All 99 protected
+production records still matched their baseline.

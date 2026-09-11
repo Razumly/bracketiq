@@ -7,6 +7,7 @@ import {
   type AffiliateSupplyContractManifest,
 } from "../affiliateSupplyLifecycle";
 import { AffiliateLegacyRepairAdmissionError } from "../affiliateLegacyRepairAdmission";
+import { AffiliateSourceExclusionAdmissionError } from "../affiliateSourceExclusionAdmission";
 
 import {
   AffiliateAgentGatewayError,
@@ -493,6 +494,12 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
     selectedGatewayJobIds: ["gateway-parent-softball"],
     writeCount: 0,
   }));
+  const sourceExclusionAdmission = jest.fn(async () => ({
+    mode: "PREVIEW",
+    eligible: true,
+    reportHash: "a".repeat(64),
+    writeCount: 0,
+  }));
   const reviewerEffectRecovery = jest.fn(async (
     request: AffiliateAgentReviewerEffectRecoveryRequest,
   ): Promise<AffiliateAgentReviewerEffectRecoveryReport> => ({
@@ -527,6 +534,7 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
       legacyRepairContinuation,
       legacyRepairAdmission,
       legacyRepairRetry,
+      sourceExclusionAdmission,
       replenishment: gateway.replenishment,
       reviewerEffectRecovery,
       gateway,
@@ -872,6 +880,58 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
     expect(await response.json()).toMatchObject({
       error: { code: "CONTINUATION_STATE_DRIFT", isRetryable: false },
     });
+  });
+
+  it("denies source exclusion admission without operator authority or a closed request shape", async () => {
+    const preview = { mode: "PREVIEW", gatewayJobId: "producer-gap-1", reason: "Review the blacklisted source." };
+    let response = await request("/source-exclusion/admission", WORKER_ROLE_CREDENTIAL, "POST", preview);
+    expect(response.status).toBe(401);
+    response = await request("/source-exclusion/admission", OPERATOR_TOKEN, "POST", {
+      ...preview,
+      operatorId: "forged-actor",
+    });
+    expect(response.status).toBe(400);
+    response = await request("/source-exclusion/admission", OPERATOR_TOKEN, "POST", {
+      ...preview,
+      mode: "APPLY",
+    });
+    expect(response.status).toBe(400);
+    expect(sourceExclusionAdmission).not.toHaveBeenCalled();
+  });
+
+  it("holds source exclusion admission while claims are open and returns typed report drift", async () => {
+    readinessValue = true;
+    const opened = await request("/admission/open", OPERATOR_TOKEN, "POST", {
+      role: "SUPPLY_REVIEWER",
+      workerId: "source-reviewer-1",
+      roleCredential: WORKER_ROLE_CREDENTIAL,
+      leaseSeconds: 300,
+    });
+    expect(opened.status).toBe(200);
+    const body = {
+      mode: "APPLY",
+      gatewayJobId: "producer-gap-1",
+      reason: "Review the blacklisted source.",
+      expectedReportHash: "a".repeat(64),
+    };
+    let response = await request("/source-exclusion/admission", OPERATOR_TOKEN, "POST", body);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: { code: "SOURCE_EXCLUSION_ADMISSION_OPEN", isRetryable: false },
+    });
+    expect(sourceExclusionAdmission).not.toHaveBeenCalled();
+
+    await request("/admission/close", OPERATOR_TOKEN, "POST", {});
+    sourceExclusionAdmission.mockRejectedValueOnce(new AffiliateSourceExclusionAdmissionError(
+      "SOURCE_EXCLUSION_REPORT_DRIFT",
+      "The reviewed source state changed.",
+    ));
+    response = await request("/source-exclusion/admission", OPERATOR_TOKEN, "POST", body);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: { code: "SOURCE_EXCLUSION_REPORT_DRIFT", isRetryable: false },
+    });
+    expect(admission.isOpen()).toBe(false);
   });
 
 

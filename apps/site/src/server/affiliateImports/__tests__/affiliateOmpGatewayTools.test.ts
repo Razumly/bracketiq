@@ -129,6 +129,56 @@ const claimFor = (role: "MAPPING_PRODUCER" | "SUPPLY_REVIEWER"): AffiliateAgentC
   };
 };
 
+const sourceExclusionFixture = () => {
+  const evidence = legacyRepairFixture("<p>Track and Field events for young athletes.</p>");
+  const base = claimFor("SUPPLY_REVIEWER");
+  if (base.role !== "SUPPLY_REVIEWER" || base.subject.type !== "SUPPLY_REVIEWER"
+    || evidence.claim.subject.type !== "MAPPING_PRODUCER" || !evidence.claim.subject.repairContext) {
+    throw new Error("Expected source-review fixture context.");
+  }
+  const claim: AffiliateAgentClaimEnvelope = {
+    ...base,
+    executionBudget: "SINGLE_CLAIM",
+    evidenceManifest: evidence.claim.evidenceManifest,
+    subject: {
+      type: "SOURCE_EXCLUSION_REVIEW",
+      supplySourceId: base.subject.supplySourceId,
+      producerClaimId: base.subject.producerClaimId,
+      producerWorkerId: base.subject.producerWorkerId,
+      producerInvocationId: base.subject.producerInvocationId,
+      producerWorkspaceId: base.subject.producerWorkspaceId,
+      producerResultHash: "d".repeat(64),
+      requestHash: "e".repeat(64),
+      requestedByActorId: "affiliate-gateway-operator",
+      requestReason: "Review the blacklisted source.",
+      repairContext: evidence.claim.subject.repairContext,
+    },
+  };
+  const determination = evidence.draft.payload.sportEvidence.sportDeterminations[0];
+  const draft = {
+    disposition: "SOURCE_EXCLUSION_ASSESSED",
+    reasonCodes: ["SPORT_BLACKLISTED"],
+    evidenceRefs: ["evidence-1"],
+    summary: "The source describes only blacklisted Track and Field.",
+    payload: {
+      supplySourceId: claim.supplySourceId,
+      recommendation: "EXCLUDE",
+      sportEvidence: {
+        ...evidence.draft.payload.sportEvidence,
+        sportDeterminations: [{
+          ...determination,
+          sourceLabels: ["Track and Field"],
+          status: "BLACKLISTED",
+          canonicalSportNames: [],
+          rationale: "The first-party page identifies the blacklisted activity.",
+          evidence: [{ ...determination.evidence[0], excerpt: "Track and Field events for young athletes." }],
+        }],
+      },
+    },
+  };
+  return { claim, artifact: evidence.artifact, draft };
+};
+
 const terminalFields = {
   disposition: "SOURCE_INCOMPATIBLE",
   reasonCodes: ["SOURCE_UNSUPPORTED"],
@@ -169,6 +219,51 @@ it.each(["check_result", "submit_result"])("redacts top-level %s draft errors", 
   expect(JSON.stringify(response)).not.toContain(privateValue);
   expect(perform).not.toHaveBeenCalled();
   expect(onTerminal).not.toHaveBeenCalled();
+  expect(tools.isClosed).toBe(false);
+});
+
+it("checks a fresh source-only assessment before one terminal exclusion submission", async () => {
+  const fixture = sourceExclusionFixture();
+  const perform = jest.fn(async (operation: AffiliateAgentClaimOperation) => {
+    if (operation.kind === "READ_ARTIFACT") return fixture.artifact;
+    if (operation.kind === "SUBMIT_RESULT") return { ...accepted(operation), disposition: "SOURCE_EXCLUSION_ASSESSED" as const };
+    throw new Error("Source review must not execute a command.");
+  });
+  const onTerminal = jest.fn();
+  const tools = createAffiliateOmpGatewayTools({ claim: fixture.claim, token: "private-claim-token", gateway: { perform }, onTerminal });
+  fixture.draft.payload.sportEvidence.sportDeterminations[0].status = "UNSUPPORTED";
+  expect(textValue(await tools.execute("check_result", fixture.draft))).toMatchObject({
+    kind: "DRAFT_INVALID",
+    issues: [{ path: ["payload", "sportEvidence", "sportDeterminations", 0, "status"] }],
+  });
+  expect(perform).not.toHaveBeenCalled();
+  fixture.draft.payload.sportEvidence.sportDeterminations[0].status = "BLACKLISTED";
+  expect(textValue(await tools.execute("check_result", fixture.draft))).toMatchObject({
+    kind: "DRAFT_VALID", authoritative: false,
+  });
+  expect(onTerminal).not.toHaveBeenCalled();
+  expect(textValue(await tools.execute("submit_result", fixture.draft))).toMatchObject({ kind: "TERMINAL_ACCEPTED" });
+  expect(perform.mock.calls.map(([operation]) => operation.kind)).toEqual(["READ_ARTIFACT", "SUBMIT_RESULT"]);
+  expect(onTerminal).toHaveBeenCalledTimes(1);
+});
+
+it("denies source-only package approval and mixed-sport exclusion before Gateway effects", async () => {
+  const fixture = sourceExclusionFixture();
+  const perform = jest.fn();
+  const tools = createAffiliateOmpGatewayTools({ claim: fixture.claim, token: "private-claim-token", gateway: { perform }, onTerminal: jest.fn() });
+  expect(textValue(await tools.execute("check_result", {
+    ...fixture.draft,
+    disposition: "APPROVED",
+    reasonCodes: ["EVIDENCE_VERIFIED"],
+    payload: { committedPackageHash: "c".repeat(64) },
+  }))).toMatchObject({ kind: "DRAFT_INVALID", issues: [{ path: ["disposition"] }] });
+  const determination = fixture.draft.payload.sportEvidence.sportDeterminations[0];
+  determination.sourceLabels = ["Soccer", "Track and Field"];
+  expect(textValue(await tools.execute("submit_result", fixture.draft))).toMatchObject({
+    kind: "DRAFT_INVALID",
+    issues: [{ path: ["payload", "sportEvidence", "sportDeterminations", 0, "sourceLabels"] }],
+  });
+  expect(perform).not.toHaveBeenCalled();
   expect(tools.isClosed).toBe(false);
 });
 

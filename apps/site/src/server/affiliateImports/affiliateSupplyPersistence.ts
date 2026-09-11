@@ -2278,12 +2278,14 @@ const affiliateSnapshotCurrentProducerProof = (input: Readonly<{
     const reviewerEnvelopeResult = affiliateAgentClaimEnvelopeSchema.safeParse(
       reviewerClaim.claimEnvelopeJson,
     );
-    if (!reviewerEnvelopeResult.success || reviewerEnvelopeResult.data.role !== 'SUPPLY_REVIEWER') {
+    if (!reviewerEnvelopeResult.success || reviewerEnvelopeResult.data.role !== 'SUPPLY_REVIEWER'
+      || reviewerEnvelopeResult.data.subject.type !== 'SUPPLY_REVIEWER') {
       return [];
     }
     const reviewerEnvelope = reviewerEnvelopeResult.data;
     const reviewerJob = gatewayJobs.find((candidate) => candidate.id === reviewerClaim.jobId);
     const reviewerSubject = reviewerEnvelope.subject;
+    if (reviewerSubject.type !== 'SUPPLY_REVIEWER') return [];
     const reviewerJobSubject = recordValue(reviewerJob?.subjectJson);
     if (
       !reviewerJob

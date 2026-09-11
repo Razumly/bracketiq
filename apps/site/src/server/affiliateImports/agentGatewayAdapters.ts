@@ -71,7 +71,12 @@ import {
 import { isAffiliateSportBlacklisted } from "./affiliateSportMapping";
 import { loadAffiliateSportsCatalogSnapshot } from "./affiliateSportsCatalog";
 import {
+  assertAffiliateSourceExclusionClaimBinding,
+  assertAffiliateSourceExclusionExecutionReady,
+} from "./affiliateSourceExclusionAdmission";
+import {
   AffiliateSportVerificationError,
+  assertAffiliateSportExclusionReady,
   sortUniqueAffiliateSportNames,
   verifyAffiliateSportCompletion,
   type AffiliateSportCitation,
@@ -1401,6 +1406,66 @@ export const verifyAffiliateAgentLegacySportRepair = async (
     }
     throw legacySportRepairEvidenceError();
   }
+};
+
+export const verifyAffiliateAgentSourceExclusionAssessment = async (input: Readonly<{
+  prisma: Pick<PrismaClient, "sports">;
+  artifacts: AffiliateAgentArtifactStore;
+  claim: AffiliateAgentClaimEnvelope;
+  result: AffiliateAgentReviewerTerminalResultFor<"SOURCE_EXCLUSION_ASSESSED">;
+}>): Promise<VerifiedAffiliateSportCompletion> => {
+  const invalid = (path: (string | number)[], message: string): never => {
+    throw new AffiliateAgentSportEvidenceError(
+      [{ path, code: "INVALID_VALUE", message }],
+      "Source exclusion evidence could not be verified.",
+    );
+  };
+  if (input.claim.role !== "SUPPLY_REVIEWER" || input.claim.subject.type !== "SOURCE_EXCLUSION_REVIEW") {
+    return invalid(["sportEvidence"], "Source exclusion requires a source-only reviewer claim.");
+  }
+  if (input.result.payload.supplySourceId !== input.claim.subject.supplySourceId) {
+    return invalid(["supplySourceId"], "Use the Supply Source from the claim.");
+  }
+  if (input.result.payload.recommendation !== "EXCLUDE") {
+    return invalid(["recommendation"], "Exclusion verification requires an EXCLUDE recommendation.");
+  }
+  const parsed = affiliateAgentSportEvidenceSchema.safeParse(input.result.payload.sportEvidence);
+  if (!parsed.success) {
+    return invalid(["sportEvidence"], "Provide a current sport assessment with claim-owned citations.");
+  }
+  const sportEvidence = parsed.data;
+  try {
+    assertAffiliateSportExclusionReady({
+      determinations: sportEvidence.sportDeterminations,
+      reasonCodes: input.result.reasonCodes,
+    });
+  } catch (error) {
+    if (!(error instanceof AffiliateSportVerificationError)) throw error;
+    return invalid(
+      error.path[0] === "reasonCodes" ? [...error.path] : ["sportEvidence", ...error.path],
+      error.message,
+    );
+  }
+  if (input.result.evidenceRefs.some((ref) => !input.claim.evidenceManifest.entries.some((entry) => entry.evidenceRef === ref))) {
+    return invalid(["evidenceRefs"], "Use only evidence references from the claim manifest.");
+  }
+  for (const determination of sportEvidence.sportDeterminations) {
+    for (const citation of determination.evidence) {
+      const entry = input.claim.evidenceManifest.entries.find((artifact) => artifact.artifactId === citation.artifactId);
+      if (!entry || !input.result.evidenceRefs.includes(entry.evidenceRef)) {
+        return invalid(["evidenceRefs"], "Include the manifest evidenceRef for every cited artifact.");
+      }
+    }
+  }
+  return verifyAffiliateAgentLegacySportRepair({
+    prisma: input.prisma,
+    artifacts: input.artifacts,
+    claim: input.claim,
+    sportEvidence,
+    resultKind: "HUMAN_REVIEW_REQUIRED",
+    reasonCodes: input.result.reasonCodes,
+    observedSportNames: [],
+  });
 };
 
 const productionEvidence = async (
@@ -3133,6 +3198,10 @@ const productionLifecycleEffect = (
   const payload = productionRecord(result.payload);
   const isLegacyRepair = effectInput.claim.subject.type === "SUPPLY_REVIEWER"
     && effectInput.claim.subject.repairContext?.kind === "LEGACY_SPORT_REPAIR";
+  const isSourceExclusion = effectInput.claim.subject.type === "SOURCE_EXCLUSION_REVIEW";
+  if (isSourceExclusion && command !== "EXCLUDE_SOURCE") {
+    throw packageValidationError("A source-only reviewer cannot execute a package or target lifecycle command.");
+  }
   if (command === "ACTIVATE" && isLegacyRepair) {
     throw legacySportRepairEvidenceError("Legacy sport repair cannot activate or publish.");
   }
@@ -3172,6 +3241,31 @@ const productionLifecycleEffect = (
   if (command === "APPROVE" && isLegacyRepair) {
     return input.prisma.$transaction(async (transaction) => {
       await assertLegacySportRepairApprovalFresh(input, effectInput, result, transaction);
+      return execute(transaction);
+    }, { isolationLevel: "Serializable", maxWait: 10_000, timeout: 120_000 });
+  }
+  if (isSourceExclusion) {
+    if (result.disposition !== "SOURCE_EXCLUSION_ASSESSED" || result.payload.recommendation !== "EXCLUDE") {
+      throw packageValidationError("EXCLUDE_SOURCE requires a source exclusion assessment.");
+    }
+    return input.prisma.$transaction(async (transaction) => {
+      const prior = await transaction.affiliateSupplyLifecycleTransitions.findUnique({
+        where: { idempotencyKey: effectInput.receiptId },
+      });
+      if (!prior) {
+        const job = await transaction.affiliateAgentGatewayJobs.findUnique({
+          where: { id: effectInput.claim.jobId },
+        });
+        if (!job) throw packageValidationError("The source exclusion job was not found.");
+        await assertAffiliateSourceExclusionClaimBinding({ prisma: transaction, job, claim: effectInput.claim });
+        await assertAffiliateSourceExclusionExecutionReady({ prisma: transaction, job, claim: effectInput.claim });
+        await verifyAffiliateAgentSourceExclusionAssessment({
+          prisma: transaction,
+          artifacts: input.artifacts,
+          claim: effectInput.claim,
+          result,
+        });
+      }
       return execute(transaction);
     }, { isolationLevel: "Serializable", maxWait: 10_000, timeout: 120_000 });
   }
@@ -3428,6 +3522,51 @@ const productionProducerRepairEffect = (
   };
 };
 
+const recordSourceExclusionAssessment = (
+  effectInput: AffiliateAgentTerminalEffectAdapterInput,
+): Readonly<Record<string, unknown>> => ({
+  receiptId: effectInput.receiptId,
+  lifecycleGeneration: effectInput.claim.lifecycleGeneration,
+  recommendation: effectInput.result.disposition === "SOURCE_EXCLUSION_ASSESSED"
+    ? effectInput.result.payload.recommendation
+    : "HUMAN_REVIEW",
+  exclusionApplied: false,
+});
+
+const productionSourceExclusionEffect = (input: ProductionAdapterInput) => {
+  const historicalPackageAssessment = productionLifecycleEffect(input, "RECONCILE", (payload) => {
+    const recommendation = productionString(payload.recommendation)?.toUpperCase();
+    if (!["EXCLUDE", "KEEP", "HUMAN_REVIEW"].includes(recommendation ?? "")) {
+      throw new Error("Source exclusion effect requires EXCLUDE, KEEP, or HUMAN_REVIEW.");
+    }
+    return {
+      reviewerOutcome: recommendation === "EXCLUDE"
+        ? "SOURCE_EXCLUSION_EXCLUDE"
+        : recommendation === "KEEP" ? "SOURCE_EXCLUSION_KEEP" : "SOURCE_EXCLUSION_HUMAN_REVIEW",
+      supplySourceId: productionString(payload.supplySourceId),
+      recommendation,
+      caseReason: productionString(payload.caseReason),
+    };
+  });
+  const exclude = productionLifecycleEffect(input, "EXCLUDE_SOURCE", (payload, effect) => {
+    if (effect.claim.subject.type !== "SOURCE_EXCLUSION_REVIEW") {
+      throw packageValidationError("Source exclusion requires a source-only reviewer claim.");
+    }
+    return {
+      reviewerOutcome: "SOURCE_EXCLUSION_EXCLUDE",
+      exclusionRequestHash: effect.claim.subject.requestHash,
+      producerResultHash: effect.claim.subject.producerResultHash,
+      reviewerResultHash: hashAffiliateAgentValue(effect.result),
+      sportEvidence: payload.sportEvidence,
+    };
+  });
+  return async (effect: AffiliateAgentTerminalEffectAdapterInput<"SOURCE_EXCLUSION_ASSESSED">) => {
+    if (effect.claim.subject.type !== "SOURCE_EXCLUSION_REVIEW") return historicalPackageAssessment(effect);
+    if (effect.result.payload.recommendation !== "EXCLUDE") return recordSourceExclusionAssessment(effect);
+    return exclude(effect);
+  };
+};
+
 const productionTerminalEffects = (
   input: ProductionAdapterInput,
 ): AffiliateAgentTerminalEffectAdapter => {
@@ -3462,34 +3601,18 @@ const productionTerminalEffects = (
         };
       },
     )),
-    SOURCE_EXCLUSION_ASSESSED: handler(productionLifecycleEffect(
-      input,
-      "RECONCILE",
-      (payload) => {
-        const recommendation = productionString(payload.recommendation)?.toUpperCase();
-        if (!["EXCLUDE", "KEEP", "HUMAN_REVIEW"].includes(recommendation ?? "")) {
-          throw new Error("Source exclusion effect requires EXCLUDE, KEEP, or HUMAN_REVIEW.");
-        }
-        return {
-          reviewerOutcome: recommendation === "EXCLUDE"
-            ? "SOURCE_EXCLUSION_EXCLUDE"
-            : recommendation === "KEEP"
-              ? "SOURCE_EXCLUSION_KEEP"
-              : "SOURCE_EXCLUSION_HUMAN_REVIEW",
-          supplySourceId: productionString(payload.supplySourceId),
-          recommendation,
-          caseReason: productionString(payload.caseReason),
-        };
-      },
-    )),
+    SOURCE_EXCLUSION_ASSESSED: handler(productionSourceExclusionEffect(input)),
     EXACT_TARGET_REJECTED: handler(productionLifecycleEffect(input, "REJECT_TARGET", (payload) => ({
       targetId: productionString(payload.targetId),
       targetType: productionString(payload.targetType),
     }))),
-    HUMAN_REVIEW_REQUIRED: handler(productionLifecycleEffect(input, "RECONCILE", (payload) => ({
-      reviewerOutcome: "HUMAN_REVIEW_REQUIRED",
-      caseReason: productionString(payload.caseReason),
-    }))),
+    HUMAN_REVIEW_REQUIRED: handler(async (effect) => {
+      if (effect.claim.subject.type === "SOURCE_EXCLUSION_REVIEW") return recordSourceExclusionAssessment(effect);
+      return productionLifecycleEffect(input, "RECONCILE", (payload) => ({
+        reviewerOutcome: "HUMAN_REVIEW_REQUIRED",
+        caseReason: productionString(payload.caseReason),
+      }))(effect);
+    }),
   } as AffiliateAgentTerminalEffectAdapter;
 };
 

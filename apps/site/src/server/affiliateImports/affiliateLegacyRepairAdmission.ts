@@ -38,6 +38,7 @@ import {
   ensureAffiliateSupplySource,
   loadActiveAffiliateSupplyContract,
 } from './affiliateSupplyPersistence';
+import { hasPublicAffiliateCandidate } from './affiliateSourcePublicationSafety';
 
 export const AFFILIATE_LEGACY_REPAIR_ADMISSION_MAX_LIMIT = 20;
 export const AFFILIATE_LEGACY_REPAIR_ADMISSION_DEFAULT_LIMIT = 1;
@@ -1280,20 +1281,7 @@ const publicationReasonCodes = (
     || Boolean(mapping && candidate.mappingId === mapping.id)
     || Boolean(root && candidate.supplySourceId === root.id)
   ));
-  if (candidates.some((candidate) => {
-    if (candidate.publishedEventId || candidate.publishedTeamId || candidate.publishedFacilityId) return true;
-    if (candidate.publishedOrganizationId) {
-      const organization = snapshot.organizations.find((row) => row.id === candidate.publishedOrganizationId);
-      // A promoted CLUB draft can still be private. Check its actual public surfaces.
-      return candidate.listingKind !== 'CLUB'
-        || candidate.publishedOrganizationId !== source.organizationId
-        || !organization
-        || normalizedUpper(organization.status) !== 'UNLISTED'
-        || organization.publicPageEnabled
-        || organization.publicWidgetsEnabled;
-    }
-    return normalizedUpper(candidate.status) === 'PUBLISHED';
-  })) {
+  if (candidates.some((candidate) => hasPublicAffiliateCandidate(candidate, source.organizationId, snapshot.organizations))) {
     reasons.push('PUBLISHED_AFFILIATE_CANDIDATE');
   }
   if (root && snapshot.targets.some((target) => (

@@ -136,11 +136,54 @@ retry must name the latest completed child, not reuse its ancestor.
 This route does not open a worker lease or start a service.
 
 
+## Bounded blacklisted-source exclusion
+
+Use `POST /v1/affiliate-agent/source-exclusion/admission` with the existing
+operator token inside the Gateway network. The strict request names one
+completed producer hold:
+
+    {"mode":"PREVIEW","gatewayJobId":"<completed producer Gateway job ID>","reason":"<operator exclusion-review reason>"}
+
+PREVIEW makes no writes. Review `eligible`, `reasonCodes`, `reportHash`,
+`proposedReviewerSubject`, `proposedReviewerManifest`, and the exact source and
+generation. The parent must have no resolved sports and only source labels on
+the current blacklist. Its old UNSUPPORTED classification remains immutable;
+the new independent reviewer must make its own current-policy assessment.
+Valid retry ancestry and pinned historical capture runs are supported. A
+canonical CLUB draft linked to an unlisted organization is not public supply.
+
+After separate approval, send the same ID and reason with `"mode":"APPLY"` and
+`"expectedReportHash":"<reviewed SHA-256>"`. Do not send an operator identity.
+Both preview and apply use the authenticated service actor
+`affiliate-gateway-operator`. APPLY requires closed admission, fresh preflight,
+no active claims or retained claim pointers, and an unchanged reviewed report.
+It creates only a source-review job and its immutable operator audit.
+
+Admit only the returned `reviewerJobId` through an exact-job bounded reviewer
+lease. The SOURCE_EXCLUSION_REVIEW subject has no package hash or target
+identity. It uses a SINGLE_CLAIM budget and is excluded from ordinary polling.
+The reviewer can read evidence and check or submit a result. It cannot approve
+a package, activate, publish, reject targets, or request producer repair.
+
+The reviewer must supply fresh all-BLACKLISTED sportEvidence, SOURCE_EVIDENCE,
+empty canonical sport names, SPORT_BLACKLISTED, and every cited manifest ref
+for EXCLUDE. The Gateway verifies catalog, source ownership, bytes, and
+citations before executing EXCLUDE_SOURCE in one lifecycle transaction.
+Verify isExcluded, excludedAt, source status EXCLUDED, automatic scraping
+disabled, and one exact EXCLUDE_SOURCE transition. KEEP and HUMAN_REVIEW
+record the review without changing live source or target state.
+
+Exact APPLY replay returns the same reviewer job and zero writes after normal
+reviewer progress. It does not reset a failed claim. Original producer
+history, source evidence, mappings, organizations, candidates, and public
+targets remain intact. This interface does not start a worker or authorize a
+deployment, fleet expansion, publication, or automatic scraping.
+
 ## Current OMP runtime
 
 Use `@oh-my-pi/pi-coding-agent@18.1.13` with the pinned Bun runtime in the
 governed Dockerfile. The production execution class is `PRODUCTION_OMP`.
-Current source role and prompt contracts use version 3. Deploy matching
+Current source role and prompt contracts use version 8. Deploy matching
 Gateway, supervisor, and runner code together with newly compiled contracts
 and fresh preflight evidence. Old reports do not authorize this correction.
 

@@ -9,6 +9,7 @@ import { buildAffiliateSportsCatalogSnapshot } from "../affiliateSportsCatalog";
 import {
   AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX,
   AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX,
+  AFFILIATE_AGENT_SOURCE_EXCLUSION_REVIEWER_PREFIX,
   AFFILIATE_AGENT_MAX_MANIFEST_ENTRIES,
   AFFILIATE_AGENT_MAX_SET_ITEMS,
   AFFILIATE_AGENT_ROLE_CONTRACTS,
@@ -335,6 +336,28 @@ const claimRoleFields = {
     },
   },
 } as const;
+const sourceExclusionReviewSubjectFixture = {
+  type: "SOURCE_EXCLUSION_REVIEW" as const,
+  supplySourceId: "supply-source-1",
+  producerClaimId: "producer-claim-1",
+  producerWorkerId: "producer-worker-1",
+  producerInvocationId: "producer-invocation-1",
+  producerWorkspaceId: "producer-workspace-1",
+  producerResultHash: "d".repeat(64),
+  requestHash: "e".repeat(64),
+  requestedByActorId: "operator-1",
+  requestReason: "Track and Field is not supported by the current catalog.",
+  repairContext: {
+    kind: "LEGACY_SPORT_REPAIR" as const,
+    intakeId: "legacy-intake",
+    evidenceRunId: "legacy-evidence-run",
+    sportsCatalog: buildAffiliateSportsCatalogSnapshot(
+      [{ id: "sport-track-field", name: "Track and Field" }],
+      "2026-08-20T18:00:00.000Z",
+    ),
+  },
+};
+
 
 const claimFixtureForRole = (role: keyof typeof claimRoleFields) => {
   const contract = AFFILIATE_AGENT_ROLE_CONTRACTS[role];
@@ -1120,7 +1143,28 @@ describe("affiliate Agent Gateway contracts", () => {
       }).success,
     ).toBe(false);
   });
+  it("accepts a source-only reviewer subject and narrows its prompt authority", () => {
+    const claim = affiliateAgentClaimEnvelopeSchema.parse({
+      ...claimFixtureForRole("SUPPLY_REVIEWER"),
+      executionBudget: "SINGLE_CLAIM",
+      subject: sourceExclusionReviewSubjectFixture,
+    });
+    const authority = renderAffiliateAgentPrompt(
+      AFFILIATE_AGENT_ROLE_CONTRACTS.SUPPLY_REVIEWER,
+      claim,
+    ).split("## Authority Projection\n")[1]?.split("\n\n## Role Instructions")[0];
+
+    expect(JSON.parse(authority ?? "")).toMatchObject({
+      role: "SUPPLY_REVIEWER",
+      subject: sourceExclusionReviewSubjectFixture,
+      terminalDispositions: [
+        "HUMAN_REVIEW_REQUIRED",
+        "SOURCE_EXCLUSION_ASSESSED",
+      ],
+    });
+  });
   it("renders one explicit authority projection with the complete evidence manifest", () => {
+
     const roleContract = AFFILIATE_AGENT_ROLE_CONTRACTS.COVERAGE_PLANNER;
     const claim = affiliateAgentClaimEnvelopeSchema.parse(
       claimFixtureForRole("COVERAGE_PLANNER"),
@@ -3116,6 +3160,31 @@ describe("Prisma affiliate Agent Gateway", () => {
       claimGeneration: 0,
     });
   });
+  it("keeps an unscoped source exclusion review out of ordinary queue polling", async () => {
+    const harness = createGatewayClaimHarness();
+    const job = harness.state.jobs[0]!;
+    Object.assign(job, {
+      dedupeKey: `${AFFILIATE_AGENT_SOURCE_EXCLUSION_REVIEWER_PREFIX}unscoped`,
+      queue: "AFFILIATE_REVIEW",
+      lane: "SUPPLY_REVIEW",
+      role: "SUPPLY_REVIEWER",
+      subjectType: "SOURCE_EXCLUSION_REVIEW",
+      subjectId: sourceExclusionReviewSubjectFixture.supplySourceId,
+      subjectJson: sourceExclusionReviewSubjectFixture,
+      supplySourceId: sourceExclusionReviewSubjectFixture.supplySourceId,
+      parentClaimId: sourceExclusionReviewSubjectFixture.producerClaimId,
+    });
+
+    await expect(
+      harness.gateway.claim(standaloneReviewerRequest()),
+    ).resolves.toBeNull();
+    expect(job).toMatchObject({
+      status: "QUEUED",
+      activeClaimId: null,
+      claimGeneration: 0,
+    });
+  });
+
   it("records a healthy worker heartbeat through the production claim boundary", async () => {
     const { gateway, request, state } = createGatewayClaimHarness();
 

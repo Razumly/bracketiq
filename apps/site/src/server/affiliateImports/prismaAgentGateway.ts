@@ -57,11 +57,18 @@ import type {
 import {
   AffiliateAgentSportEvidenceError,
   verifyAffiliateAgentLegacySportRepair,
+  verifyAffiliateAgentSourceExclusionAssessment,
 } from "./agentGatewayAdapters";
 import { terminalResultSchemaCorrectionIssues } from "./affiliateAgentTerminalValidation";
 import {
+  AffiliateSourceExclusionAdmissionError,
+  assertAffiliateSourceExclusionClaimBinding,
+  assertAffiliateSourceExclusionExecutionReady,
+} from "./affiliateSourceExclusionAdmission";
+import {
   AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX,
   AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX,
+  AFFILIATE_AGENT_SOURCE_EXCLUSION_REVIEWER_PREFIX,
   isAffiliateAgentSingleClaimJob,
   AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION,
   AFFILIATE_AGENT_ROLE_CONTRACT_VERSION,
@@ -1349,6 +1356,7 @@ const subjectPrimaryId = (subject: ParsedQueuedSubject): string => {
     case "MAPPING_PRODUCER":
       return subject.mappingJobId;
     case "SUPPLY_REVIEWER":
+    case "SOURCE_EXCLUSION_REVIEW":
       return subject.supplySourceId;
     case "HUMAN_DIRECTED_EXECUTOR":
       return subject.caseId;
@@ -1379,10 +1387,17 @@ const parseQueuedSubject = (
           job.subjectJson,
         )
       : current;
+  const roleSubjectMatches = parsed.success && (
+    parsed.data.type === role
+    || (
+      role === "SUPPLY_REVIEWER"
+      && parsed.data.type === "SOURCE_EXCLUSION_REVIEW"
+    )
+  );
   if (
     !parsed.success ||
-    parsed.data.type !== role ||
-    job.role !== parsed.data.type ||
+    !roleSubjectMatches ||
+    job.role !== role ||
     job.subjectType !== parsed.data.type ||
     job.subjectId !== subjectPrimaryId(parsed.data)
   ) {
@@ -1393,6 +1408,7 @@ const parseQueuedSubject = (
   }
   return parsed.data;
 };
+
 
 const SOURCE_KIND_MISMATCH_SAFE_MESSAGE =
   "The declarative package listing kind does not match the source target kind.";
@@ -1600,6 +1616,7 @@ const findClaimableJob = async (
           NOT: [
             { dedupeKey: { startsWith: AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX } },
             { dedupeKey: { startsWith: AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX } },
+            { dedupeKey: { startsWith: AFFILIATE_AGENT_SOURCE_EXCLUSION_REVIEWER_PREFIX } },
           ],
         }
         : { id: admissionJobId }),
@@ -1757,6 +1774,79 @@ const isProducerClaimValid = (
     producerPackageHash(producerResult) === subject.committedPackageHash,
   ].every(Boolean);
 };
+type SourceExclusionReviewerSubject = Extract<
+  AffiliateAgentSubject,
+  { type: "SOURCE_EXCLUSION_REVIEW" }
+>;
+
+const isSourceExclusionProducerClaimValid = (
+  context: ProducerReviewContext,
+  subject: SourceExclusionReviewerSubject,
+  job: AffiliateAgentGatewayJobs,
+): boolean => {
+  const {
+    producerClaim,
+    producerJob,
+    producerEnvelope,
+    producerResult,
+  } = context;
+  const producerSubject =
+    producerEnvelope?.subject.type === "MAPPING_PRODUCER"
+      ? producerEnvelope.subject
+      : null;
+  return [
+    isProducerClaimStateValid(producerClaim, producerJob),
+    producerEnvelope !== null,
+    producerResult !== null,
+    producerEnvelope !== null
+      && hashAffiliateAgentValue(producerEnvelope) === producerClaim?.claimEnvelopeHash,
+    producerSubject?.supplySourceId === subject.supplySourceId,
+    producerSubject?.repairContext?.kind === subject.repairContext.kind,
+    producerSubject?.repairContext?.intakeId === subject.repairContext.intakeId,
+    producerSubject?.repairContext?.evidenceRunId === subject.repairContext.evidenceRunId,
+    job.parentClaimId === subject.producerClaimId,
+    producerClaim?.workerId === subject.producerWorkerId,
+    producerClaim?.invocationId === subject.producerInvocationId,
+    producerClaim?.workspaceId === subject.producerWorkspaceId,
+    isProducerResultIdentityMatch(producerResult, producerClaim, producerJob),
+    producerResult?.role === "MAPPING_PRODUCER",
+    producerResult?.disposition === "CONTRACT_GAP",
+    producerJob?.resultHash === subject.producerResultHash,
+    producerResult !== null
+      && hashAffiliateAgentValue(producerResult) === subject.producerResultHash,
+  ].every(Boolean);
+};
+const assertSourceExclusionClaimBinding = async (
+  input: Parameters<typeof assertAffiliateSourceExclusionClaimBinding>[0],
+): Promise<void> => {
+  try {
+    await assertAffiliateSourceExclusionClaimBinding(input);
+  } catch (error) {
+    if (error instanceof AffiliateSourceExclusionAdmissionError) {
+      throw gatewayError(
+        "REVIEW_WORKSPACE_INVALID",
+        "The source exclusion reviewer claim binding is invalid.",
+      );
+    }
+    throw error;
+  }
+};
+const assertSourceExclusionExecutionReady = async (
+  input: Parameters<typeof assertAffiliateSourceExclusionExecutionReady>[0],
+): Promise<void> => {
+  try {
+    await assertAffiliateSourceExclusionExecutionReady(input);
+  } catch (error) {
+    if (error instanceof AffiliateSourceExclusionAdmissionError) {
+      throw gatewayError(
+        "REVIEW_WORKSPACE_INVALID",
+        "The source exclusion reviewer scope is no longer eligible.",
+      );
+    }
+    throw error;
+  }
+};
+
 
 const assertReviewerProducerAdmission = async (
   transaction: Prisma.TransactionClient,
@@ -1764,7 +1854,10 @@ const assertReviewerProducerAdmission = async (
   subject: AffiliateAgentSubject,
   input: AffiliateAgentClaimRequest,
 ): Promise<void> => {
-  if (subject.type !== "SUPPLY_REVIEWER") {
+  if (
+    subject.type !== "SUPPLY_REVIEWER"
+    && subject.type !== "SOURCE_EXCLUSION_REVIEW"
+  ) {
     throw gatewayError(
       "REVIEW_WORKSPACE_INVALID",
       "The reviewer subject is invalid.",
@@ -1774,15 +1867,18 @@ const assertReviewerProducerAdmission = async (
     transaction,
     subject.producerClaimId,
   );
-  if (!isProducerClaimValid(context, subject, job)) {
+  const producerClaimIsValid = subject.type === "SOURCE_EXCLUSION_REVIEW"
+    ? isSourceExclusionProducerClaimValid(context, subject, job)
+    : isProducerClaimValid(context, subject, job);
+  if (!producerClaimIsValid) {
     throw gatewayError(
       "REVIEW_WORKSPACE_INVALID",
       "The reviewer claim must reference one completed matching producer claim.",
     );
   }
   if (
-    subject.producerWorkerId === input.workerId ||
-    subject.producerInvocationId === input.invocationId
+    subject.producerWorkerId === input.workerId
+    || subject.producerInvocationId === input.invocationId
   ) {
     throw gatewayError(
       "PRODUCER_REVIEWER_IDENTITY_REUSED",
@@ -2444,6 +2540,18 @@ const persistClaim = async (
     claimId,
     timing,
   );
+  if (envelope.subject.type === "SOURCE_EXCLUSION_REVIEW") {
+    await assertSourceExclusionClaimBinding({
+      prisma: transaction,
+      job,
+      claim: envelope,
+    });
+    await assertSourceExclusionExecutionReady({
+      prisma: transaction,
+      job,
+      claim: envelope,
+    });
+  }
   const tokenScope = tokenScopeForEnvelope(envelope);
   const claimed = await transaction.affiliateAgentGatewayJobs.updateMany({
     where: {
@@ -7974,6 +8082,7 @@ const validateReviewerCommittedPackage = (
   if (
     result.role === "SUPPLY_REVIEWER" &&
     authorized.envelope.role === "SUPPLY_REVIEWER" &&
+    authorized.envelope.subject.type === "SUPPLY_REVIEWER" &&
     "committedPackageHash" in result.payload &&
     result.payload.committedPackageHash !==
       authorized.envelope.subject.committedPackageHash
@@ -8025,6 +8134,28 @@ const validateNestedTerminalEvidence = (
     );
   }
 };
+const validateSourceExclusionTerminalScope = (
+  authorized: AuthorizedClaim,
+  result: AffiliateAgentTerminalResultEnvelope,
+): void => {
+  if (authorized.envelope.subject.type !== "SOURCE_EXCLUSION_REVIEW") return;
+  if (
+    result.disposition !== "SOURCE_EXCLUSION_ASSESSED"
+    && result.disposition !== "HUMAN_REVIEW_REQUIRED"
+  ) {
+    throw gatewayError(
+      "TERMINAL_DISPOSITION_NOT_PERMITTED",
+      "A source exclusion review permits only source assessment or human review.",
+    );
+  }
+  if (result.evidenceRefs.length === 0) {
+    throw gatewayError(
+      "EVIDENCE_REFERENCE_NOT_PERMITTED",
+      "Source exclusion reviewer results require claim-owned evidence.",
+    );
+  }
+};
+
 
 const validateTerminalResultScope = (
   authorized: AuthorizedClaim,
@@ -8034,6 +8165,7 @@ const validateTerminalResultScope = (
   validateTerminalResultDeploymentContract(authorized, result);
   validateTerminalResultSupplyContract(authorized, result);
   validateTerminalResultRoleContract(authorized, result);
+  validateSourceExclusionTerminalScope(authorized, result);
   validateReviewerExactTarget(authorized, result);
   validateTerminalResultDisposition(authorized, result);
   validateReviewerCommittedPackage(authorized, result);
@@ -8618,6 +8750,13 @@ const reserveReviewerTerminalEffectTransaction = async (
       ? undefined
       : { postEffectCompletionReceiptId },
   );
+  if (authorized.envelope.subject.type === "SOURCE_EXCLUSION_REVIEW") {
+    await assertSourceExclusionClaimBinding({
+      prisma: transaction,
+      job: authorized.job,
+      claim: authorized.envelope,
+    });
+  }
   validateTerminalResultScope(authorized, result);
   await assertClaimEvidenceRefs(
     transaction,
@@ -8635,7 +8774,13 @@ const reserveReviewerTerminalEffectTransaction = async (
     terminalRequestHash,
   );
   if (replay) return replay;
-  await assertNoPendingClaimEffects(transaction, authorized.claim.id);
+  if (authorized.envelope.subject.type === "SOURCE_EXCLUSION_REVIEW") {
+    await assertSourceExclusionExecutionReady({
+      prisma: transaction,
+      job: authorized.job,
+      claim: authorized.envelope,
+    });
+  }
   const now = dependencies.clock.now();
   assertReviewerTerminalEffectTiming(authorized, now);
   return persistReviewerTerminalEffectReservation(
@@ -9719,6 +9864,10 @@ type TerminalResultPreparationOutcome =
   | Readonly<{
       kind: "REPLAY";
       result: AffiliateAgentSubmitResultOutcome;
+    }>
+  | Readonly<{
+      kind: "CORRECTION";
+      result: AffiliateAgentSubmitResultOutcome;
     }>;
 
 const replayTerminalResultReceipt = async (
@@ -9938,6 +10087,26 @@ const verifyLegacySportRepairTerminal = async (
     ...(observedSportNames === undefined ? {} : { observedSportNames }),
   });
 };
+const verifySourceExclusionTerminal = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  database: Pick<PrismaClient, "sports">,
+  authorized: AuthorizedClaim,
+  result: AffiliateAgentTerminalResultEnvelope,
+): Promise<void> => {
+  if (
+    authorized.envelope.subject.type !== "SOURCE_EXCLUSION_REVIEW"
+    || result.role !== "SUPPLY_REVIEWER"
+    || result.disposition !== "SOURCE_EXCLUSION_ASSESSED"
+    || result.payload.recommendation !== "EXCLUDE"
+  ) return;
+  await verifyAffiliateAgentSourceExclusionAssessment({
+    prisma: database,
+    artifacts: dependencies.artifacts,
+    claim: authorized.envelope,
+    result,
+  });
+};
+
 
 const isTerminalResultEvidenceCorrection = (
   error: unknown,
@@ -9987,17 +10156,17 @@ const prepareTerminalResult = async (
   const parsedResult = parsedResultBeforeTransaction.success
     ? parsedResultBeforeTransaction.data
     : null;
-  let postEffectCompletionReceiptId =
+  const reviewerTerminalEffectReceiptIdBeforeRetention =
     await resolveTerminalResultPostEffectReceiptId(
       dependencies,
       input,
       parsedResult,
     );
-  postEffectCompletionReceiptId =
+  let postEffectCompletionReceiptId =
     await retainPostEffectReceiptUnlessClaimIsActive(
       dependencies,
       input.authorization.claimId,
-      postEffectCompletionReceiptId,
+      reviewerTerminalEffectReceiptIdBeforeRetention,
     );
   const authorizationOptions =
     postEffectCompletionReceiptId === undefined
@@ -10021,7 +10190,13 @@ const prepareTerminalResult = async (
   if (recoveredReplay) {
     return { kind: "REPLAY", result: recoveredReplay };
   }
-  if (parsedResult) {
+  const sourceExclusionEffectAlreadySucceeded =
+    reviewerTerminalEffectReceiptIdBeforeRetention !== undefined
+    && initialAuthorization.envelope.subject.type === "SOURCE_EXCLUSION_REVIEW"
+    && parsedResult?.role === "SUPPLY_REVIEWER"
+    && parsedResult?.disposition === "SOURCE_EXCLUSION_ASSESSED"
+    && parsedResult?.payload.recommendation === "EXCLUDE";
+  if (parsedResult && !sourceExclusionEffectAlreadySucceeded) {
     try {
       await verifyLegacySportRepairTerminal(
         dependencies,
@@ -10029,7 +10204,31 @@ const prepareTerminalResult = async (
         initialAuthorization,
         parsedResult,
       );
+      await verifySourceExclusionTerminal(
+        dependencies,
+        dependencies.prisma,
+        initialAuthorization,
+        parsedResult,
+      );
     } catch (error) {
+      if (
+        isTerminalResultEvidenceCorrection(error)
+        && initialAuthorization.envelope.subject.type === "SOURCE_EXCLUSION_REVIEW"
+        && parsedResult.role === "SUPPLY_REVIEWER"
+        && parsedResult.disposition === "SOURCE_EXCLUSION_ASSESSED"
+        && parsedResult.payload.recommendation === "EXCLUDE"
+      ) {
+        return {
+          kind: "CORRECTION",
+          result: await persistSourceExclusionTerminalCorrection(
+            dependencies,
+            input,
+            requestHash,
+            authorizationOptions,
+            terminalResultEvidenceCorrectionIssues(error),
+          ),
+        };
+      }
       if (!isTerminalResultEvidenceCorrection(error)) throw error;
     }
   }
@@ -10597,6 +10796,41 @@ const handleInvalidTerminalResult = async (
     correctionIssues,
   );
 };
+const persistSourceExclusionTerminalCorrection = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "SUBMIT_RESULT" }>,
+  requestHash: string,
+  authorizationOptions: ClaimAuthorizationOptions | undefined,
+  correctionIssues: AffiliateAgentSchemaCorrectionResult["issues"],
+): Promise<AffiliateAgentSubmitResultOutcome> =>
+  runSerializableEffectTransaction(
+    dependencies,
+    async (transaction) => {
+      const now = dependencies.clock.now();
+      const authorized = await authorizeClaimOperation(
+        dependencies,
+        input.authorization,
+        now,
+        transaction,
+        authorizationOptions,
+      );
+      await assertNoPendingClaimEffects(transaction, authorized.claim.id);
+      return handleInvalidTerminalResult(
+        transaction,
+        dependencies,
+        authorized,
+        input,
+        requestHash,
+        now,
+        correctionIssues,
+      );
+    },
+    {
+      code: "INTERNAL_ERROR",
+      safeMessage: "The source exclusion terminal result correction could not be recorded.",
+    },
+  );
+
 
 const assertTerminalCompletionTiming = (
   authorized: AuthorizedClaim,
@@ -13093,6 +13327,15 @@ const executePreparedTerminalResultTransaction = (
         );
       }
       validateTerminalResultScope(authorized, parsedResult.data);
+      const sourceExclusionEffectAlreadySucceededInTransaction =
+        authorized.envelope.subject.type === "SOURCE_EXCLUSION_REVIEW"
+        && parsedResult.data.role === "SUPPLY_REVIEWER"
+        && parsedResult.data.disposition === "SOURCE_EXCLUSION_ASSESSED"
+        && parsedResult.data.payload.recommendation === "EXCLUDE"
+        && preparation.reviewerTerminalEffectReceiptId !== undefined
+        && (await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
+          where: { id: preparation.reviewerTerminalEffectReceiptId },
+        }))?.status === "SUCCEEDED";
       try {
         await verifyLegacySportRepairTerminal(
           dependencies,
@@ -13100,6 +13343,21 @@ const executePreparedTerminalResultTransaction = (
           authorized,
           parsedResult.data,
         );
+        if (!sourceExclusionEffectAlreadySucceededInTransaction) {
+          await verifySourceExclusionTerminal(
+            dependencies,
+            transaction,
+            authorized,
+            parsedResult.data,
+          );
+        }
+        if (authorized.envelope.subject.type === "SOURCE_EXCLUSION_REVIEW") {
+          await assertSourceExclusionClaimBinding({
+            prisma: transaction,
+            job: authorized.job,
+            claim: authorized.envelope,
+          });
+        }
       } catch (error) {
         if (!isTerminalResultEvidenceCorrection(error)) throw error;
         return handleInvalidTerminalResult(
@@ -13243,7 +13501,9 @@ const performTerminalResult = async (
 ): Promise<AffiliateAgentSubmitResultOutcome> => {
   assertIdentifier(input.idempotencyKey, "Operation idempotency key");
   const preparation = await prepareTerminalResult(dependencies, input);
-  if (preparation.kind === "REPLAY") return preparation.result;
+  if (preparation.kind === "REPLAY" || preparation.kind === "CORRECTION") {
+    return preparation.result;
+  }
   return executePreparedTerminalResult(dependencies, preparation);
 };
 
@@ -15172,8 +15432,14 @@ type ReviewerEffectRecoveryRows = Readonly<{
   activeBundle: AffiliateAgentContractBundle | null;
   currentCatalogHash: string | null;
   priorApprovalTransition: ReviewerEffectRecoveryTransition | null;
+  sourceExclusionTransition: ReviewerEffectRecoveryTransition | null;
+  sourceExclusionBindingValid: boolean;
+  sourceExclusionExecutionReady: boolean;
+  sourceExclusionEvidenceValid: boolean;
   otherActiveClaimIds: readonly string[];
   approvedAdapterAvailable: boolean;
+  sourceExclusionAdapterAvailable: boolean;
+  reviewerHumanAdapterAvailable: boolean;
 }>;
 
 type ReviewerEffectRecoveryEvaluation = Readonly<{
@@ -15295,6 +15561,73 @@ const recoveryTransitionFor = (
     && claim.lifecycleGeneration !== null
     && value.generation === claim.lifecycleGeneration + 1
     && request.reviewerWorkerId === claim.workerId
+  );
+};
+const sourceExclusionTransitionFor = (
+  value: ReviewerEffectRecoveryTransition | null,
+  receiptId: string,
+  claim: AffiliateAgentGatewayClaims | null,
+  result: AffiliateAgentReviewerTerminalResult | null,
+  sourceRead: AffiliateSupplySourceReadAssessment | null,
+): boolean => {
+  const subject = claim
+    ? parseRecoveryEnvelope(claim)?.subject
+    : null;
+  if (
+    !value
+    || !claim
+    || !result
+    || !sourceRead
+    || !subject
+    || subject.type !== "SOURCE_EXCLUSION_REVIEW"
+    || result.disposition !== "SOURCE_EXCLUSION_ASSESSED"
+    || result.payload.recommendation !== "EXCLUDE"
+  ) {
+    return false;
+  }
+  const request = isGatewayRecord(value.requestJson)
+    ? value.requestJson
+    : null;
+  const transitionResult = isGatewayRecord(value.resultJson)
+    ? value.resultJson
+    : null;
+  return (
+    value.supplySourceId === sourceRead.snapshot.supplySourceId
+    && value.commandRef === receiptId
+    && value.idempotencyKey === receiptId
+    && value.command === "EXCLUDE_SOURCE"
+    && value.toStage === "SOURCE_EXCLUDED"
+    && claim.lifecycleGeneration !== null
+    && value.generation === claim.lifecycleGeneration + 1
+    && value.actorKind === "SUPPLY_REVIEWER"
+    && value.actorId === claim.workerId
+    && value.executingAgentId === result.invocationId
+    && value.contractVersion === result.supplyContractVersion
+    && value.contractHash === result.supplyContractHash
+    && value.requestHash === recoveryTransitionRequestHash(value)
+    && value.resultHash === hashAffiliateAgentValue(value.resultJson)
+    && transitionResult?.supplySourceId === sourceRead.snapshot.supplySourceId
+    && transitionResult?.lifecycleGeneration === value.generation
+    && transitionResult?.stage === "SOURCE_EXCLUDED"
+    && transitionResult?.outcome === "SOURCE_EXCLUDED"
+    && request !== null
+    && request.commandRef === receiptId
+    && request.sourceId === sourceRead.rootId
+    && request.reviewerClaimId === claim.id
+    && request.reviewerClaimGeneration === result.claimGeneration
+    && request.reviewerInvocationId === result.invocationId
+    && request.reviewerSupplySourceId === sourceRead.snapshot.supplySourceId
+    && request.reviewerWorkerId === claim.workerId
+    && request.reviewerOutcome === "SOURCE_EXCLUSION_EXCLUDE"
+    && request.exclusionRequestHash === subject.requestHash
+    && request.producerResultHash === subject.producerResultHash
+    && request.reviewerResultHash === hashAffiliateAgentValue(result)
+    && request.evidenceRefs !== undefined
+    && hashAffiliateAgentValue(request.evidenceRefs)
+      === hashAffiliateAgentValue(result.evidenceRefs)
+    && request.sportEvidence !== undefined
+    && hashAffiliateAgentValue(request.sportEvidence)
+      === hashAffiliateAgentValue(result.payload.sportEvidence)
   );
 };
 const recoveryCommittedPackageHash = (
@@ -15646,6 +15979,16 @@ const recoveryFingerprint = (
       toStage: rows.priorApprovalTransition.toStage,
     }
     : null,
+  sourceExclusionSafety: {
+    transitionId: rows.sourceExclusionTransition?.id ?? null,
+    transitionRequestHash: rows.sourceExclusionTransition?.requestHash ?? null,
+    transitionResultHash: rows.sourceExclusionTransition?.resultHash ?? null,
+    bindingValid: rows.sourceExclusionBindingValid,
+    executionReady: rows.sourceExclusionExecutionReady,
+    evidenceValid: rows.sourceExclusionEvidenceValid,
+    adapterAvailable: rows.sourceExclusionAdapterAvailable,
+    humanAdapterAvailable: rows.reviewerHumanAdapterAvailable,
+  },
   otherActiveClaimIds: [...rows.otherActiveClaimIds].sort(),
 });
 
@@ -15696,6 +16039,7 @@ const loadReviewerEffectRecoveryRows = async (
       : null;
   const producerContext =
     envelope?.subject.type === "SUPPLY_REVIEWER"
+      || envelope?.subject.type === "SOURCE_EXCLUSION_REVIEW"
       ? await loadProducerReviewContext(
         transaction,
         envelope.subject.producerClaimId,
@@ -15738,6 +16082,76 @@ const loadReviewerEffectRecoveryRows = async (
   const priorApprovalTransition = parseRecoveryTransition(
     priorApprovalTransitionRaw as ReviewerEffectRecoveryTransition | null,
   );
+  const sourceExclusionClaim =
+    envelope?.subject.type === "SOURCE_EXCLUSION_REVIEW"
+      ? envelope
+      : null;
+  const sourceExclusionTransition = sourceExclusionClaim
+    ? priorApprovalTransition
+    : null;
+  const sourceExclusionTransitionAlreadyRecorded = sourceExclusionClaim !== null
+    && sourceExclusionTransitionFor(
+      sourceExclusionTransition,
+      request.receiptId,
+      claim,
+      reviewerResult,
+      sourceRead,
+    );
+  let sourceExclusionBindingValid = sourceExclusionClaim === null;
+  if (sourceExclusionClaim && job) {
+    try {
+      await assertAffiliateSourceExclusionClaimBinding({
+        prisma: transaction,
+        job,
+        claim: sourceExclusionClaim,
+      });
+      sourceExclusionBindingValid = true;
+    } catch (error) {
+      if (!(error instanceof AffiliateSourceExclusionAdmissionError)) throw error;
+    }
+  }
+  let sourceExclusionExecutionReady = sourceExclusionClaim === null;
+  if (
+    sourceExclusionClaim
+    && sourceExclusionBindingValid
+    && !sourceExclusionTransitionAlreadyRecorded
+    && job
+  ) {
+    try {
+      await assertAffiliateSourceExclusionExecutionReady({
+        prisma: transaction,
+        job,
+        claim: sourceExclusionClaim,
+      });
+      sourceExclusionExecutionReady = true;
+    } catch (error) {
+      if (!(error instanceof AffiliateSourceExclusionAdmissionError)) throw error;
+    }
+  }
+  let sourceExclusionEvidenceValid = !(
+    sourceExclusionClaim
+    && reviewerResult?.disposition === "SOURCE_EXCLUSION_ASSESSED"
+    && reviewerResult.payload.recommendation === "EXCLUDE"
+  );
+  if (
+    sourceExclusionClaim
+    && sourceExclusionBindingValid
+    && !sourceExclusionTransitionAlreadyRecorded
+    && reviewerResult?.disposition === "SOURCE_EXCLUSION_ASSESSED"
+    && reviewerResult.payload.recommendation === "EXCLUDE"
+  ) {
+    try {
+      await verifyAffiliateAgentSourceExclusionAssessment({
+        prisma: transaction,
+        artifacts: dependencies.artifacts,
+        claim: sourceExclusionClaim,
+        result: reviewerResult,
+      });
+      sourceExclusionEvidenceValid = true;
+    } catch {
+      sourceExclusionEvidenceValid = false;
+    }
+  }
   const sourceJobs = await transaction.affiliateAgentGatewayJobs.findMany({
     where: { supplySourceId: request.supplySourceId },
     select: { id: true, status: true, activeClaimId: true },
@@ -15776,14 +16190,273 @@ const loadReviewerEffectRecoveryRows = async (
     activeBundle,
     currentCatalogHash,
     priorApprovalTransition,
+    sourceExclusionTransition,
+    sourceExclusionBindingValid,
+    sourceExclusionExecutionReady,
+    sourceExclusionEvidenceValid,
     otherActiveClaimIds: [
       ...otherActiveClaimIds,
       ...activeSourceJobIds.map((id) => `job:${id}`),
     ],
     approvedAdapterAvailable: Boolean(
+
       dependencies.terminalEffects?.APPROVED
       && typeof dependencies.terminalEffects.APPROVED.recover === "function",
     ),
+    sourceExclusionAdapterAvailable: Boolean(
+      dependencies.terminalEffects?.SOURCE_EXCLUSION_ASSESSED
+      && typeof dependencies.terminalEffects.SOURCE_EXCLUSION_ASSESSED.recover === "function",
+    ),
+    reviewerHumanAdapterAvailable: Boolean(
+      dependencies.terminalEffects?.HUMAN_REVIEW_REQUIRED
+      && typeof dependencies.terminalEffects.HUMAN_REVIEW_REQUIRED.recover === "function",
+    ),
+};
+};
+const evaluateSourceExclusionEffectRecovery = (
+  request: AffiliateAgentReviewerEffectRecoveryRequest,
+  rows: ReviewerEffectRecoveryRows,
+): ReviewerEffectRecoveryEvaluation => {
+  const reasonCodes: string[] = [];
+  const {
+    receipt,
+    claim,
+    job,
+    envelope,
+    effectState,
+    reviewerResult,
+  } = rows;
+  const source = rows.sourceRead?.snapshot.source ?? null;
+  const sourceSubject = envelope?.subject.type === "SOURCE_EXCLUSION_REVIEW"
+    ? envelope.subject
+    : null;
+  const transitionAlreadyRecorded = sourceExclusionTransitionFor(
+    rows.sourceExclusionTransition,
+    request.receiptId,
+    claim,
+    reviewerResult,
+    rows.sourceRead,
+  );
+  const sourceAssessmentResult = (
+    reviewerResult?.disposition === "SOURCE_EXCLUSION_ASSESSED"
+      ? reviewerResult
+      : null
+  );
+  const isSourceAssessment = sourceAssessmentResult !== null;
+  const isSourceExclusion = sourceAssessmentResult?.payload.recommendation === "EXCLUDE";
+  const sourceIdentityValid = Boolean(
+    rows.sourceRead
+    && source
+    && rows.sourceRead.rootId === request.supplySourceId
+    && rows.sourceRead.snapshot.supplySourceId === request.supplySourceId
+    && rows.sourceRead.rootLiveSourceId === source.id
+    && rows.sourceRead.persistedLiveSource?.id === source.id
+    && rows.sourceRead.persistedLiveSource.supplySourceId === request.supplySourceId,
+  );
+  const producerProofValid = (
+    sourceSubject !== null
+    && job !== null
+    && rows.producerContext !== null
+    && isSourceExclusionProducerClaimValid(
+      rows.producerContext,
+      sourceSubject,
+      job,
+    )
+  );
+  if (
+    !receipt
+    || receipt.claimId !== request.claimId
+    || receipt.jobId !== request.jobId
+    || receipt.claimGeneration !== claim?.claimGeneration
+  ) {
+    reasonCodes.push("RECEIPT_IDENTITY_MISMATCH");
+  }
+  if (
+    !claim
+    || claim.id !== request.claimId
+    || claim.jobId !== request.jobId
+    || !envelope
+    || envelope.claimId !== request.claimId
+    || envelope.jobId !== request.jobId
+    || envelope.supplySourceId !== request.supplySourceId
+    || envelope.role !== "SUPPLY_REVIEWER"
+    || envelope.subject.type !== "SOURCE_EXCLUSION_REVIEW"
+    || claim.role !== "SUPPLY_REVIEWER"
+    || claim.status !== "RECONCILIATION_REQUIRED"
+    || claim.tokenInvalidatedAt === null
+  ) {
+    reasonCodes.push("CLAIM_NOT_QUARANTINED");
+  }
+  if (
+    !job
+    || job.id !== request.jobId
+    || job.supplySourceId !== request.supplySourceId
+    || job.role !== "SUPPLY_REVIEWER"
+    || job.subjectType !== "SOURCE_EXCLUSION_REVIEW"
+    || job.status !== "RECONCILIATION_REQUIRED"
+    || job.activeClaimId !== request.claimId
+    || job.claimGeneration !== claim?.claimGeneration
+  ) {
+    reasonCodes.push("JOB_NOT_QUARANTINED");
+  }
+  if (
+    !receipt
+    || receipt.status !== "UNKNOWN"
+    || receipt.safeErrorCode !== "PARTIAL_COMMAND_UNRESOLVED"
+    || receipt.responseHash !== null
+  ) {
+    reasonCodes.push("RECEIPT_NOT_UNKNOWN_PARTIAL");
+  }
+  if (
+    !receipt
+    || receipt.operationKind !== AFFILIATE_AGENT_TERMINAL_EFFECT_OPERATION
+    || receipt.commandName !== AFFILIATE_AGENT_TERMINAL_EFFECT_COMMAND
+    || receipt.idempotencyKey !== reviewerTerminalEffectIdempotencyKey()
+  ) {
+    reasonCodes.push("NOT_REVIEWER_TERMINAL_EFFECT");
+  }
+  if (!envelope || !claim || hashAffiliateAgentValue(envelope) !== claim.claimEnvelopeHash) {
+    reasonCodes.push("CLAIM_ENVELOPE_INVALID");
+  }
+  if (
+    !effectState
+    || effectState.kind !== "PENDING"
+    || !reviewerResult
+    || !isRecoverySha256(effectState.terminalRequestHash)
+    || effectState.terminalIdempotencyKey.trim().length === 0
+  ) {
+    reasonCodes.push("RETAINED_RESULT_INVALID");
+  }
+  if (
+    !receipt
+    || !claim
+    || !reviewerResult
+    || receipt.requestHash !== reviewerTerminalEffectRequestHash(claim, reviewerResult)
+  ) {
+    reasonCodes.push("EFFECT_REQUEST_HASH_INVALID");
+  }
+  if (
+    !claim
+    || !envelope
+    || !job
+    || !matchesReviewerClaimEnvelopeIdentity(claim, envelope, job)
+    || !reviewerResult
+    || reviewerResult.role !== "SUPPLY_REVIEWER"
+    || reviewerResult.jobId !== claim.jobId
+    || reviewerResult.claimId !== claim.id
+    || reviewerResult.claimGeneration !== claim.claimGeneration
+    || reviewerResult.lifecycleGeneration !== claim.lifecycleGeneration
+    || reviewerResult.workerId !== claim.workerId
+    || reviewerResult.invocationId !== claim.invocationId
+    || reviewerResult.deploymentContractVersion !== claim.deploymentContractVersion
+    || reviewerResult.deploymentContractHash !== claim.deploymentContractHash
+    || reviewerResult.roleContractVersion !== claim.roleContractVersion
+    || reviewerResult.roleContractHash !== claim.roleContractHash
+    || reviewerResult.promptTemplateVersion !== claim.promptTemplateVersion
+    || reviewerResult.promptTemplateHash !== claim.promptTemplateHash
+    || reviewerResult.supplyContractVersion !== claim.supplyContractVersion
+    || reviewerResult.supplyContractHash !== claim.supplyContractHash
+    || (
+      reviewerResult.disposition !== "SOURCE_EXCLUSION_ASSESSED"
+      && reviewerResult.disposition !== "HUMAN_REVIEW_REQUIRED"
+    )
+  ) {
+    reasonCodes.push("REVIEWER_RESULT_IDENTITY_INVALID");
+  }
+  if (
+    !envelope
+    || !reviewerResult
+    || !reviewerResultTargetsEnvelope(envelope, reviewerResult)
+  ) {
+    reasonCodes.push("EVIDENCE_REFERENCE_INVALID");
+  }
+  if (
+    !sourceSubject
+    || !sourceIdentityValid
+    || !rows.sourceExclusionBindingValid
+  ) {
+    reasonCodes.push("SOURCE_EVIDENCE_STALE");
+  }
+  if (
+    !producerProofValid
+    || !claim
+    || claim.lifecycleGeneration === null
+    || claim.lifecycleGeneration === undefined
+  ) {
+    reasonCodes.push("PRODUCER_PROOF_INVALID");
+  }
+  if (sourceAssessmentResult && sourceAssessmentResult.evidenceRefs.length === 0) {
+    reasonCodes.push("EVIDENCE_REFERENCE_INVALID");
+  }
+  if (isSourceExclusion && !transitionAlreadyRecorded) {
+    if (!rows.sourceExclusionExecutionReady) {
+      reasonCodes.push("SOURCE_EVIDENCE_STALE");
+    }
+    if (!rows.sourceExclusionEvidenceValid) {
+      reasonCodes.push("EVIDENCE_REFERENCE_INVALID");
+    }
+    if (!rows.currentCatalogHash) {
+      reasonCodes.push("SPORTS_CATALOG_STALE");
+    }
+  } else if (!isSourceExclusion && !rows.sourceExclusionExecutionReady) {
+    reasonCodes.push("SOURCE_EVIDENCE_STALE");
+  }
+  if (
+    !transitionAlreadyRecorded
+    && (
+      !rows.activeBundle
+      || !claim
+      || rows.activeBundle.supplyContract.version !== claim.supplyContractVersion
+      || rows.activeBundle.supplyContract.hash !== claim.supplyContractHash
+      || !rows.sourceRead
+      || rows.sourceRead.contract.version !== claim.supplyContractVersion
+      || rows.sourceRead.contract.hash !== claim.supplyContractHash
+    )
+  ) {
+    reasonCodes.push("SUPPLY_CONTRACT_STALE");
+  }
+  if (
+    rows.priorApprovalTransition
+    && !transitionAlreadyRecorded
+  ) {
+    reasonCodes.push("AMBIGUOUS_PRIOR_EFFECT");
+  }
+  if (rows.otherActiveClaimIds.length > 0) {
+    reasonCodes.push("OTHER_ACTIVE_CLAIM");
+  }
+  if (!transitionAlreadyRecorded && !rows.activeBundle) {
+    reasonCodes.push("ACTIVE_CONTRACT_UNAVAILABLE");
+  }
+  if (
+    reviewerResult?.disposition === "SOURCE_EXCLUSION_ASSESSED"
+    && !rows.sourceExclusionAdapterAvailable
+  ) {
+    reasonCodes.push("SOURCE_EXCLUSION_ADAPTER_UNAVAILABLE");
+  }
+  if (
+    reviewerResult?.disposition === "HUMAN_REVIEW_REQUIRED"
+    && !rows.reviewerHumanAdapterAvailable
+  ) {
+    reasonCodes.push("HUMAN_REVIEW_ADAPTER_UNAVAILABLE");
+  }
+  const uniqueReasonCodes = Array.from(new Set(reasonCodes)).sort();
+  const eligible = uniqueReasonCodes.length === 0;
+  const finalReasonCodes = eligible
+    ? transitionAlreadyRecorded
+      ? ["ELIGIBLE", "LIFECYCLE_ALREADY_RECORDED"]
+      : ["ELIGIBLE"]
+    : uniqueReasonCodes;
+  return {
+    eligible,
+    reasonCodes: finalReasonCodes,
+    reportHash: reviewerEffectRecoveryReportHash(
+      request,
+      rows,
+      eligible,
+      finalReasonCodes,
+      transitionAlreadyRecorded,
+    ),
+    transitionAlreadyRecorded,
   };
 };
 
@@ -15791,6 +16464,9 @@ const evaluateReviewerEffectRecovery = (
   request: AffiliateAgentReviewerEffectRecoveryRequest,
   rows: ReviewerEffectRecoveryRows,
 ): ReviewerEffectRecoveryEvaluation => {
+  if (rows.envelope?.subject.type === "SOURCE_EXCLUSION_REVIEW") {
+    return evaluateSourceExclusionEffectRecovery(request, rows);
+  }
   const reasonCodes: string[] = [];
   const { receipt, claim, job, envelope, effectState, reviewerResult } = rows;
   const source = rows.sourceRead?.snapshot.source ?? null;
@@ -17183,22 +17859,37 @@ export const recoverAffiliateAgentReviewerEffect = async (
       request.receiptId,
     );
   }
-  if (approvedResult.disposition !== "APPROVED") {
+  const isSourceExclusionRecovery =
+    reviewerEnvelope.subject.type === "SOURCE_EXCLUSION_REVIEW";
+  if (
+    (!isSourceExclusionRecovery && approvedResult.disposition !== "APPROVED")
+    || (
+      isSourceExclusionRecovery
+      && approvedResult.disposition !== "SOURCE_EXCLUSION_ASSESSED"
+      && approvedResult.disposition !== "HUMAN_REVIEW_REQUIRED"
+    )
+  ) {
     throw recoveryError(
       "REVIEWER_EFFECT_RECOVERY_STALE",
-      "The retained reviewer result is not an approval.",
+      "The retained reviewer result is not permitted for this claim.",
       request.receiptId,
     );
   }
   const terminalEffects = dependencies.terminalEffects;
+  const recoveryHandler =
+    approvedResult.disposition === "APPROVED"
+      ? terminalEffects?.APPROVED
+      : approvedResult.disposition === "SOURCE_EXCLUSION_ASSESSED"
+        ? terminalEffects?.SOURCE_EXCLUSION_ASSESSED
+        : terminalEffects?.HUMAN_REVIEW_REQUIRED;
   if (
     !terminalEffects
-    || !terminalEffects.APPROVED
-    || typeof terminalEffects.APPROVED.recover !== "function"
+    || !recoveryHandler
+    || typeof recoveryHandler.recover !== "function"
   ) {
     throw recoveryError(
       "REVIEWER_EFFECT_RECOVERY_NOT_ELIGIBLE",
-      "The approved reviewer effect adapter is unavailable.",
+      "The retained reviewer effect adapter is unavailable.",
       request.receiptId,
     );
   }

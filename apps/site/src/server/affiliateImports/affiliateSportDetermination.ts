@@ -624,6 +624,33 @@ export const assertAffiliateSportCompletionReady = ({
   }
 };
 
+export const assertAffiliateSportExclusionReady = (input: {
+  determinations: readonly AffiliateSportDetermination[];
+  reasonCodes: readonly string[];
+}): void => {
+  if (input.determinations.length === 0) {
+    throw new AffiliateSportVerificationError(['sportDeterminations'], 'Source exclusion requires a nonempty sport assessment.');
+  }
+  if (!input.reasonCodes.includes('SPORT_BLACKLISTED')) {
+    throw new AffiliateSportVerificationError(['reasonCodes'], 'Source exclusion requires SPORT_BLACKLISTED.');
+  }
+  for (let index = 0; index < input.determinations.length; index += 1) {
+    const determination = input.determinations[index];
+    if (determination.status !== 'BLACKLISTED') {
+      throw new AffiliateSportVerificationError(['sportDeterminations', index, 'status'], 'Source exclusion requires every determination to be BLACKLISTED.');
+    }
+    if (determination.resolutionBasis !== 'SOURCE_EVIDENCE') {
+      throw new AffiliateSportVerificationError(['sportDeterminations', index, 'resolutionBasis'], 'Source exclusion requires first-party source evidence.');
+    }
+    if (determination.canonicalSportNames.length !== 0) {
+      throw new AffiliateSportVerificationError(['sportDeterminations', index, 'canonicalSportNames'], 'Source exclusion cannot contain executable sport names.');
+    }
+    if (determination.sourceLabels.length === 0 || determination.sourceLabels.some((label) => !isAffiliateSportBlacklisted(label))) {
+      throw new AffiliateSportVerificationError(['sportDeterminations', index, 'sourceLabels'], 'Source exclusion requires every source label to be blacklisted.');
+    }
+  }
+};
+
 export const isAffiliateSportCompletionReady = (
   input: Parameters<typeof assertAffiliateSportCompletionReady>[0],
 ): boolean => {
