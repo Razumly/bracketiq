@@ -382,11 +382,18 @@ const gatewayReasonCodeFor = (
     case "The current sports catalog differs from the claim catalog.":
       return "SPORT_CATALOG_MISMATCH";
     case "Extracted sports do not match the resolved sport evidence.":
-    case "A CONSTANT sportName field is not supported by sportEvidence.":
+    case "A CONSTANT sportName or sportNames field is not supported by sportEvidence.":
+    case "Retained sport determinations cannot include an activity excluded by the source sport scope.":
+    case "Source sport scope does not authorize a canonical sport selection. Retained sports require SOURCE_EVIDENCE.":
+    case "Executable sport names cannot include an activity excluded by the source sport scope.":
       return "SPORT_OUTPUT_MISMATCH";
     case "Legacy sport repair sport evidence could not be verified.":
     case "sportEvidence is permitted only for legacy sport repairs.":
-    case "CONSTANT sportName fields are permitted only for legacy sport repairs.":
+    case "CONSTANT sportName or sportNames fields are permitted only for legacy sport repairs.":
+    case "The package source sport scope hash does not match the repair context.":
+    case "sourceSportScopeHash is not permitted without a source sport scope.":
+    case "The committed mapping package source sport scope changed after producer commit.":
+    case "The committed mapping package has an unexpected source sport scope.":
       return "SPORT_EVIDENCE_INVALID";
     default:
       return "UNKNOWN";

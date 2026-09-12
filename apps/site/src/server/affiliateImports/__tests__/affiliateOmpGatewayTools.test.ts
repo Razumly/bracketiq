@@ -9,6 +9,7 @@ import {
   canonicalizeAffiliateAgentValue,
   hashAffiliateAgentValue,
   type AffiliateAgentClaimEnvelope,
+  type AffiliateAgentSourceSportScope,
 } from "../agentGatewayContracts";
 import { createAffiliateOmpGatewayTools, type AffiliateOmpToolResult } from "../affiliateOmpGatewayTools";
 import { buildAffiliateSportsCatalogSnapshot } from "../affiliateSportsCatalog";
@@ -246,6 +247,50 @@ it("checks a fresh source-only assessment before one terminal exclusion submissi
   expect(perform.mock.calls.map(([operation]) => operation.kind)).toEqual(["READ_ARTIFACT", "SUBMIT_RESULT"]);
   expect(onTerminal).toHaveBeenCalledTimes(1);
 });
+it("rejects a reintroduced excluded activity before terminal Gateway effects", async () => {
+  const fixture = legacyRepairFixture();
+  if (fixture.claim.subject.type !== "MAPPING_PRODUCER" || !fixture.claim.subject.repairContext) {
+    throw new Error("Expected a legacy sport repair claim.");
+  }
+  const scopePreimage = {
+    schemaVersion: 1 as const,
+    supplySourceId: "supply-1",
+    intakeId: "intake-1",
+    evidenceRunId: "run-1",
+    parentGatewayJobId: "parent-gateway-job-1",
+    parentResultHash: "a".repeat(64),
+    excludedSourceLabels: ["Dance"],
+    operatorId: "operator-1",
+    reason: "Retain verified sports and omit the approved source-only activity.",
+  };
+  const sourceSportScope: AffiliateAgentSourceSportScope = {
+    ...scopePreimage,
+    hash: hashAffiliateAgentValue(scopePreimage),
+  };
+  fixture.claim.subject.repairContext = {
+    ...fixture.claim.subject.repairContext,
+    sourceSportScope,
+  };
+  fixture.draft.payload.sportEvidence.sportDeterminations[0].sourceLabels = ["Dance"];
+  fixture.draft.payload.sportEvidence.sportDeterminations[0].canonicalSportNames = ["Grass Soccer"];
+  const perform = jest.fn();
+  const tools = createAffiliateOmpGatewayTools({
+    claim: fixture.claim,
+    token: "private-claim-token",
+    gateway: { perform },
+    onTerminal: jest.fn(),
+  });
+
+  expect(textValue(await tools.execute("check_result", fixture.draft))).toMatchObject({
+    kind: "DRAFT_INVALID",
+    issues: [{
+      path: ["payload", "sportEvidence", "sportDeterminations", 0, "sourceLabels"],
+    }],
+  });
+  expect(perform).not.toHaveBeenCalled();
+  expect(tools.isClosed).toBe(false);
+});
+
 
 it("denies source-only package approval and mixed-sport exclusion before Gateway effects", async () => {
   const fixture = sourceExclusionFixture();

@@ -5,6 +5,7 @@ import {
 } from "./affiliateSportsCatalog";
 import {
   affiliateSportDeterminationsSchema,
+  normalizeAffiliateSportLabel,
   type AffiliateSportDetermination,
 } from "./affiliateSportDetermination";
 import { BLACKLISTED_AFFILIATE_SPORT_NAMES } from "./affiliateSportMapping";
@@ -715,8 +716,8 @@ export const AFFILIATE_AGENT_ROLES = [
 ] as const;
 
 export type AffiliateAgentRole = (typeof AFFILIATE_AGENT_ROLES)[number];
-export const AFFILIATE_AGENT_ROLE_CONTRACT_VERSION = 8 as const;
-export const AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION = 8 as const;
+export const AFFILIATE_AGENT_ROLE_CONTRACT_VERSION = 9 as const;
+export const AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION = 9 as const;
 
 export const AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX = "legacy-sport-repair-continuation:";
 export const AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX = "legacy-sport-repair-continuation-review:";
@@ -784,12 +785,12 @@ const terminalResultShapeForRole = (
 
 
 const LEGACY_SPORT_EVIDENCE_INSTRUCTIONS = [
-  "For legacy sport repair, use only the injected sportsCatalog and claim-owned first-party artifacts. Read the complete relevant Markdown and any further HTML or image pages needed before declaring evidence missing. A source label need not literally equal a canonical variant name: resolve the variant when cited text explicitly establishes its surface or format and ties that setting to the activity. " +
-    "Indoor, gym, or hard-court volleyball supports Indoor Volleyball; sand or beach volleyball supports Beach Volleyball; explicitly grass or outdoor-field volleyball supports Grass Volleyball. An explicit indoor facility with hardwood volleyball courts, together with a statement that the source's volleyball happens there, supports Indoor Volleyball. Cite both the venue description and the activity-to-venue link. A venue name, city, URL, or existing database sport value alone is not proof.",
+  "For legacy sport repair, use only the injected sportsCatalog and claim-owned first-party artifacts. Read complete relevant Markdown plus needed HTML/image pages before declaring evidence missing. A source label need not equal a canonical variant: cited text must establish the activity's surface or format and tie it to that activity. Indoor/gym/hard-court volleyball supports Indoor Volleyball; sand/beach volleyball supports Beach Volleyball; explicit grass/outdoor-field volleyball supports Grass Volleyball. An indoor hardwood facility supports Indoor Volleyball only when the source ties its volleyball to that facility. Cite venue description and activity-to-venue link; venue name, city, URL, or database value alone is not proof. Read the source's program and About text before incidental gallery text; verify activity-to-source and activity-to-surface links. An approved scope removes only its named activities; it does not establish unsupported facts about remaining sports.",
   "Explicit outdoor grass/field soccer supports Grass Soccer; indoor/arena/boarded-field soccer supports Indoor Soccer; futsal rules or a futsal court supports Futsal; sand/beach soccer supports Beach Soccer. Only generic Soccer or Volleyball without usable surface evidence remains VARIANT_UNRESOLVED. An evidenced sport absent from the exact catalog is UNSUPPORTED only when it is not blacklisted. Do not invent a variant, generic alias, or user decision. " +
     `The affiliate blacklist is: ${BLACKLISTED_AFFILIATE_SPORT_NAMES.join(", ")}. Use BLACKLISTED with SPORT_BLACKLISTED for these activities. Keep canonicalSportNames empty. Exclude them from executable sports. Never request a catalog addition or substitute another sport. Put supported and blacklisted activities in separate determinations.`,
   'sportEvidence has {"evidenceRunId":"<claim repairContext.evidenceRunId>","sportsCatalogSha256":"<claim catalog sha256>","sportDeterminations":[{"sourceLabels":["<exact source label>"],"status":"<RESOLVED|VARIANT_UNRESOLVED|UNSUPPORTED|BLACKLISTED>","resolutionBasis":"SOURCE_EVIDENCE","canonicalSportNames":["<exact catalog name; empty unless RESOLVED>"],"rationale":"<evidence-backed explanation>","evidence":[{"artifactId":"<manifest artifactId>","artifactSha256":"<manifest sha256>","artifactKind":"<PAGE_HTML|PAGE_MARKDOWN|PAGE_SCREENSHOT>","pageUrl":"<artifact finalUrl or sourceUrl>","excerpt":"<exact supporting source excerpt>"}]}]}.',
   "Keep sourceLabels and canonicalSportNames sorted and unique. Order citations by artifactId, artifactSha256, artifactKind, pageUrl, and excerpt. Use read_artifact with view CITATION_TEXT to inspect the verifier's text and manifest citation metadata. Copy the exact supporting excerpt. If citation parsing reaches its limit, use another listed artifact such as Markdown; do not raise limits or request an unapproved capture. Include every cited artifact's evidenceRef in package or terminal evidenceRefs. Never invent a citation, use another run, or claim USER_DECISION without an authenticated decision.",
+  "For a scoped repair, omit excludedSourceLabels from retained sport determinations and executable fields. Keep retained sports SOURCE_EVIDENCE-backed with exact catalog names and required variant evidence; never use USER_DECISION. Preserve sourceSportScope unchanged, including its hash, and set candidatePackage.sourceSportScopeHash to that hash; omit the package hash when unscoped. Scope changes this source's selection only; it does not change the global blacklist or authorize catalog additions/substitutions.",
 ] as const;
 
 const SOURCE_DESCRIPTION_INSTRUCTION =
@@ -813,18 +814,17 @@ const ROLE_PROMPT_INSTRUCTIONS: Readonly<
     "Do not invent facts.",
   ],
   MAPPING_PRODUCER: [
-    "Use the inlined Authority Projection as the complete claim context. Use only the trusted OMP tools listed in the gateway protocol. Read listed evidence refs through read_artifact({evidenceRef}).",
+    "Use the inlined Authority Projection as the complete claim context. Use only the trusted OMP tools listed in the gateway protocol. Read listed evidence refs through read_artifact({evidenceRef}). Use execute_command({command}) only with a non-terminal command listed in the Authority Projection.",
     "listUrlRef is the evidenceRef of the listed PAGE_HTML artifact used for CSS extraction, not a raw URL and not its artifactId. Use PAGE_MARKDOWN for reading and sport citations, not as CSS listing input. The Gateway resolves the HTML artifact's stored finalUrl or sourceUrl. Existing stored HTML needs no capture profile. If the claim has no HTML artifact, report that specific evidence gap.",
     "Extract officialActionUrl from an evidenced link with an ATTRIBUTE selector and ABSOLUTE_URL transform. An outbound registration link in stored evidence does not require a new capture just to preserve that link.",
     "Build only the closed declarative package shape defined by the mapping contract. Keep live mappings and provider access behind the Gateway. Never submit executable code.",
     SOURCE_DESCRIPTION_INSTRUCTION,
     "Map a description field for every EVENT and CLUB package. Select relevant source prose from the claim-owned PAGE_HTML. Use TEXT or a source text ATTRIBUTE with NONE or TRIM; do not create a CONSTANT description. Select prose without navigation or repeated headings. If no suitable source prose is available, report the description evidence gap instead of inventing copy or using schedule/status notes.",
     "Validate the package before you commit it. Commit only the validated package receipt. Set declarative package listingKind to the claim subject listingKind. The Gateway rejects packages whose listing kind differs from the persisted source target kind.",
+    'For every legacy sport repair validation, put sportEvidence inside candidatePackage. Extract the exact resolved sport union. For one sport, use {"field":"sportName","mode":"CONSTANT","value":"<exact catalog name>"}. For multiple sports, use {"field":"sportNames","mode":"CONSTANT","values":["<sorted unique exact catalog names>"]}. An evidence-backed selector may emit the same exact names. Never include both sportName and sportNames. A sport citation alone does not create an extracted sport field. Include every sport citation\'s manifest evidenceRef in package evidenceRefs.',
     ...LEGACY_SPORT_EVIDENCE_INSTRUCTIONS,
-    "For every legacy sport repair validation, put sportEvidence inside candidatePackage. Extract the exact resolved sport union: use a CONSTANT sportName field when the source label needs canonical normalization, or an evidence-backed selector that emits the exact catalog name. A sport citation alone does not create an extracted sport field. Include every sport citation's manifest evidenceRef in package evidenceRefs.",
     "Every legacy sport repair CONTRACT_GAP must include payload.sportEvidence and all cited evidenceRefs, even when reasonCodes are generic. A sport-related gap must use the matching SPORT_ reason codes. A non-sport gap may carry verified RESOLVED sports and explain the separate obstacle.",
     "Use the Gateway message to correct the package. If CSS extraction requires PAGE_HTML, select the claim-owned HTML listing. If extracted sports do not match the resolved evidence, fix the sport field. Neither error means the stored citation is unavailable. After either input error, change the rejected input before revalidating.",
-    "Use execute_command({command}) only with a non-terminal command listed in the Authority Projection.",
     "Return one evidence-backed terminal disposition through submit_result(...). Use only the listed terminal dispositions.",
   ],
   SUPPLY_REVIEWER: [
@@ -1493,6 +1493,36 @@ export const affiliateAgentEvidenceManifestSchema = z
 export type AffiliateAgentEvidenceManifest = z.infer<
   typeof affiliateAgentEvidenceManifestSchema
 >;
+export const affiliateAgentSourceSportScopeLabelsSchema = sortedUniqueStringsSchema(
+  z.string().trim().min(1).max(160),
+  1,
+).superRefine((labels, context) => {
+  if (new Set(labels.map(normalizeAffiliateSportLabel)).size !== labels.length) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Excluded source labels must be unique without regard to case.",
+    });
+  }
+});
+
+export const affiliateAgentSourceSportScopeSchema = z.object({
+  schemaVersion: z.literal(1),
+  supplySourceId: identifierSchema,
+  intakeId: identifierSchema,
+  evidenceRunId: identifierSchema,
+  parentGatewayJobId: identifierSchema,
+  parentResultHash: sha256Schema,
+  excludedSourceLabels: affiliateAgentSourceSportScopeLabelsSchema,
+  operatorId: identifierSchema,
+  reason: z.string().trim().min(1).max(1_000).refine(
+    (value) => Buffer.byteLength(value, "utf8") <= 1_000,
+    "Scope reason must not exceed 1,000 UTF-8 bytes.",
+  ),
+  hash: sha256Schema,
+}).strict().superRefine(assertSelfHash);
+export type AffiliateAgentSourceSportScope = z.infer<
+  typeof affiliateAgentSourceSportScopeSchema
+>;
 
 export const affiliateAgentLegacySportRepairContextSchema = z
   .object({
@@ -1500,8 +1530,22 @@ export const affiliateAgentLegacySportRepairContextSchema = z
     intakeId: identifierSchema,
     evidenceRunId: identifierSchema,
     sportsCatalog: affiliateSportsCatalogSnapshotSchema,
+    sourceSportScope: affiliateAgentSourceSportScopeSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((repairContext, context) => {
+    const scope = repairContext.sourceSportScope;
+    if (!scope) return;
+    for (const key of ["intakeId", "evidenceRunId"] as const) {
+      if (scope[key] !== repairContext[key]) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Source sport scope must match the repair evidence identity.",
+          path: ["sourceSportScope", key],
+        });
+      }
+    }
+  });
 
 export type AffiliateAgentLegacySportRepairContext = z.infer<
   typeof affiliateAgentLegacySportRepairContextSchema
@@ -1593,7 +1637,10 @@ export const affiliateAgentSourceExclusionReviewerSubjectSchema = z
     requestHash: sha256Schema,
     requestedByActorId: identifierSchema,
     requestReason: z.string().trim().min(1).max(1_000),
-    repairContext: affiliateAgentLegacySportRepairContextSchema,
+    repairContext: affiliateAgentLegacySportRepairContextSchema.refine(
+      (repairContext) => !repairContext.sourceSportScope,
+      "A partial source sport scope does not authorize whole-source exclusion.",
+    ),
   })
   .strict();
 
@@ -1785,6 +1832,16 @@ const assertClaimEnvelopeSubjectSource = (
       path: ["supplySourceId"],
     });
   }
+  if (claim.role === "MAPPING_PRODUCER" || claim.role === "SUPPLY_REVIEWER") {
+    const scope = claim.subject.repairContext?.sourceSportScope;
+    if (scope && scope.supplySourceId !== claim.subject.supplySourceId) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Source sport scope must match the claim Supply Source.",
+        path: ["subject", "repairContext", "sourceSportScope", "supplySourceId"],
+      });
+    }
+  }
 };
 
 const assertSupplyReviewerIdentity = (
@@ -1897,6 +1954,7 @@ const affiliateAgentDeclarativePackageFieldNames = [
   "officialActionUrl",
   "sourceUrl",
   "sportName",
+  "sportNames",
   "startsAt",
   "tags",
   "title",
@@ -1954,9 +2012,18 @@ const affiliateAgentDeclarativePackageConstantSportFieldSchema = z
   })
   .strict();
 
+const affiliateAgentDeclarativePackageConstantSportsFieldSchema = z
+  .object({
+    field: z.literal("sportNames"),
+    mode: z.literal("CONSTANT"),
+    values: sortedUniqueStringsSchema(z.string().trim().min(1).max(160), 1),
+  })
+  .strict();
+
 const affiliateAgentDeclarativePackageFieldSchema = z.union([
   affiliateAgentDeclarativePackageSelectorFieldSchema,
   affiliateAgentDeclarativePackageConstantSportFieldSchema,
+  affiliateAgentDeclarativePackageConstantSportsFieldSchema,
 ]);
 
 export const affiliateAgentDeclarativePackageSchema = z
@@ -1971,9 +2038,17 @@ export const affiliateAgentDeclarativePackageSchema = z
       .max(MAX_DECLARATIVE_PACKAGE_FIELDS)
       .superRefine((fields, context) => {
         assertSortedUniqueObjects(fields, context, (field) => field.field);
+        if (fields.some((field) => field.field === "sportName")
+          && fields.some((field) => field.field === "sportNames")) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "A package must use sportName or sportNames, not both.",
+          });
+        }
       }),
     evidenceRefs: sortedUniqueStringsSchema(identifierSchema),
     sportEvidence: affiliateAgentSportEvidenceSchema.optional(),
+    sourceSportScopeHash: sha256Schema.optional(),
   })
   .strict()
   .superRefine((candidatePackage, context) => {
@@ -2496,7 +2571,7 @@ export const renderAffiliateAgentPrompt = (
       "## Legacy Sport Repair",
       "Inspect the supplied repairContext sports catalog and original manifest-owned artifacts before making a sport claim.",
       "Do not guess a sport surface or forge a citation. Bind sportEvidence to the exact intakeId, evidenceRunId, catalog hash, artifact bytes, and source URLs.",
-      "Use CONSTANT only on the sportName package field and only for the exact evidence-supported canonical sport union.",
+      "Use sportName for one retained canonical sport or sportNames for multiple retained canonical sports; any CONSTANT values or selector output must equal the exact evidence-supported canonical sport union.",
       "Leave unresolved, unsupported, or unauthenticated user-decision sport determinations in a contract gap for human review; never approve, activate, or publish them.",
     ]
     : [];

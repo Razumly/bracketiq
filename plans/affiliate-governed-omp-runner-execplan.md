@@ -2336,3 +2336,227 @@ These are recorded content decisions only. No catalog, mapping, source,
 candidate, publication, queue, or runtime state changed. Ultimate remains
 independently approved and unpublished. Another claim or activation requires
 the separately authorized governed operation.
+
+## Source-specific sport scope repair
+
+The user directed that TPH retain its valid sports while omitting Dance and
+Martial Arts. Ultimate's content is approved and is not part of this repair.
+This work starts from `6e23ff11e896e05e3b1e8e64c3c0594d75ae3856` on
+`workstream/affiliate-sport-scope`. Maintain this section under PLANS.md.
+
+The goal is a governed producer claim that can apply the recorded source
+scope and create one multi-sport CLUB package. A source scope selects which
+activities belong in this mapping. It is not a catalog addition, a global
+blacklist change, or a human selection of a canonical sport variant.
+
+### Progress
+
+- [x] Identify the missing claim scope and plural sport package field.
+- [x] Carry the authenticated source scope through the existing retry audit.
+- [x] Validate the retained sport union and reject excluded activities.
+- [x] Prove a multi-sport TPH package against the retained source evidence.
+- [x] Complete independent Standards and Spec review.
+- [ ] Integrate the verified source change on main.
+- [x] Identify the next bounded activation/publication operation.
+
+### Design decisions
+
+Extend the existing operator-only legacy repair retry interface. Do not add a
+second queue writer or a new source-exclusion system. PREVIEW/APPLY can carry
+an optional sorted excludedSourceLabels list for one exact completed producer
+hold. The operator identity comes from the authenticated Gateway, not request
+JSON. Each added label must cover a whole unresolved, unsupported, or
+blacklisted determination in that exact parent result. Retain prior exclusions
+with their original authority. Explicit and inherited scopes require one parent.
+
+Build a self-hashed sourceSportScope containing source root, intake, evidence
+run, parent Gateway job, parent result hash, excluded labels, operator actor,
+and reason. Place it in the new producer repairContext and the existing retry
+audit. Bind it in report hashing, replay, claim admission, reviewer lineage,
+validation, and committed mapping metadata. Do not rewrite the old producer
+result or its citations.
+
+A newly approved scope is a meaningful changed input. It can authorize an
+otherwise eligible bounded retry without another code deployment once the
+new interface is deployed. An unchanged scope cannot bypass the existing
+same-deployment retry guard. The pass cap, one-child dedupe rule, closed
+admission, active-claim checks, fresh preflight, and publication holds remain.
+
+The producer omits excluded activities from the retained sport determinations
+and executable fields. The scope record preserves the exclusions and their
+parent evidence. It must not reinterpret an excluded activity as another
+canonical sport. Retained names still require SOURCE_EVIDENCE and exact
+catalog values. Soccer and Volleyball variants still need explicit source
+surface evidence. Prioritize program/About text over incidental gallery text.
+
+Add a sportNames selector field and a closed CONSTANT sportNames field with
+a sorted unique values array to the governed package schema. Keep the
+existing sportName field for single-sport packages. A package cannot contain
+both fields. Reuse the importer's existing pipe-delimited literal conversion
+and candidate sportNames handling. Require every emitted name to equal the
+verified retained sport union. No mobile HTTP contract changes are needed.
+
+The package includes sourceSportScopeHash when its claim has a scope. Reject
+an absent or different hash, or a scope hash supplied for an unscoped claim.
+The model can acknowledge the scope but cannot invent or change it.
+Advance the role and prompt contracts to version 9 for these changes.
+
+### Implementation and verification
+
+The affected modules are agentGatewayContracts.ts, affiliateSportDetermination.ts,
+affiliateLegacyRepairAdmission.ts, prismaAgentGateway.ts,
+agentGatewayAdapters.ts, affiliateAgentTerminalValidation.ts, and the
+operator HTTP interface in scripts/run-affiliate-agent-gateway.ts.
+The server modules are under `apps/site/src/server/affiliateImports/`.
+The same change updates `service.ts` and `affiliateAgentCommandDiagnostics.ts`.
+Use their existing schemas, evidence verifier, retry audit, and transaction
+patterns. Preserve current and historical unscoped records without defaults
+that would change their hashes.
+
+Verify forged or changed scopes, excluded sport reintroduction, same-deployment
+unchanged input, exact replay, and two retained canonical sports through real
+package validation and extraction. Run the affected complete Jest suites,
+TypeScript, targeted lint, and the pinned SDK probe after the implementation.
+Run a read-only TPH retry PREVIEW and a retained-evidence extraction smoke.
+No production claim, image publication, service restart, activation, or
+publication is authorized by this source implementation.
+
+### Outcome
+
+Source implementation and independent review are complete. Integration is
+next. No production state changed. TPH's existing hold and Ultimate's approved
+package were not modified. The next operational gate is the reviewed release
+and one bounded TPH producer/reviewer run. Full fleet expansion still requires
+one complete lifecycle proof inside the active Supply Contract.
+
+### Source and activation findings
+
+The retained TPH Markdown lists sand volleyball courts, regulation NHL ice
+rinks, pickleball courts, and a baseball training center. Its campus image
+text explicitly describes indoor soccer with a TPH player. The source smoke
+therefore uses Baseball, Beach Volleyball, Hockey, Indoor Soccer, and Pickleball.
+It does not substitute Indoor Volleyball or infer Grass Soccer from an
+unassigned outdoor turf field. An independent producer and reviewer must
+still assess the complete stored source.
+
+The current production Supply Contract is version 1 with hash
+`c808492a7d60741b508978987441a0a31f59602a5e5321789d9865823f6098cf`.
+Its three target rows are EVENT supply in `portland-vancouver` for Beach
+Soccer, Grass Soccer, and Indoor Soccer. It has no CLUB target or CLUB
+freshness window. TPH Austin and Ultimate Chicago are repair examples, not
+the current target cohort.
+
+The legacy repair reviewer deliberately stops after approval.
+`enqueueProductionApprovalActivation` is not called for a legacy repair,
+and its ACTIVATE command is rejected. Approval also preserves
+`LEGACY_SPORT_REPAIR` in the source metadata. A full-loop proof must use
+an approved in-contract source with a valid activation handoff, or first
+receive a separate reviewed Supply Contract change and an exact authorized
+hold-release/activation handoff. An approved package alone is not permission
+to enable scraping or publish it.
+
+### Independent review and verification record
+
+Review base: `6e23ff11e896e05e3b1e8e64c3c0594d75ae3856`.
+`ScopePackageStandards`, `ScopePackageSpec`, `ScopeAdmissionStandards`, and
+`ScopeAdmissionSpec` returned PASS. All accepted correction findings reached
+fixed, re-reviewed, and verified status.
+
+The prompt corrections preserve the original evidence shape, exact citation
+rules, validation receipt, and listing-kind rules within the existing row and
+character limits. The rendered appendix now supports plural sport fields.
+No prompt limit was raised.
+
+The admission corrections bind each scope introduction to its exact parent
+result, operator, reason, complete new-label selection, and source identity.
+Inherited scopes keep their exact original record. Retry and continuation
+edges retain deployment, disposition, pass, batch, and dedupe rules. The
+lineage ends at the verified unscoped pass-one admission. Historical unscoped
+v1 and v2 reports remain supported without changing their hashes. Immutable
+parent claims detect removed scopes and bind reviewer repair identity,
+context, package, and evidence. Ordinary parentless unscoped claims still work.
+
+The package corrections reject excluded activities after Unicode, whitespace,
+and case normalization. Errors identify editable package fields. Validation
+and commit preserve the exact retained union and scope hash. The CLUB importer
+keeps the full persisted sport array. EVENT, TEAM, and RENTAL multiplicity rules
+remain unchanged. Tests no longer pin copied metadata, read counts, or exact
+diagnostic sentences.
+
+The real TPH preview found one additional compatibility defect. The queued
+role-8 job has no listingKind, while its immutable claim has CLUB. The retry
+reader now accepts that documented enrichment. A supplied queued kind must
+match the immutable claim, and the claim kind must match the current source.
+The regression and real preview passed without changing production rows.
+
+The final complete affected batch passed 540 tests across 14 suites. This
+includes the 52 admission tests, 124 Gateway tests, and 50 adapter tests; those
+counts are not added again. The same complete batch passed with
+`--detectOpenHandles` and reported no retained handle. Expected simulated
+failure logs remain visible in the tests.
+
+Site TypeScript and targeted ESLint on all 16 changed TypeScript files passed.
+The pinned OMP 18.1.13/Bun 1.3.14 SDK probe passed execute_command, check_result,
+and submit_result schema checks with no provider call. Database-backed
+integration suites were not run.
+
+Run these checks from `apps/site`:
+
+    npm exec jest -- --runInBand --detectOpenHandles \
+      src/server/affiliateImports/__tests__/affiliateLegacyRepairAdmission.test.ts \
+      src/server/affiliateImports/__tests__/agentGateway.test.ts \
+      src/server/affiliateImports/__tests__/runAffiliateAgentGateway.test.ts \
+      src/server/affiliateImports/__tests__/agentGatewayAdapters.test.ts \
+      src/server/affiliateImports/__tests__/affiliateOmpGatewayTools.test.ts \
+      src/server/affiliateImports/__tests__/affiliateSportDetermination.test.ts \
+      src/server/affiliateImports/__tests__/service.test.ts \
+      src/server/affiliateImports/__tests__/affiliateOperationalAlerts.test.ts \
+      src/server/affiliateImports/__tests__/affiliateSourceExclusionAdmission.test.ts \
+      src/server/affiliateImports/__tests__/affiliateAgentRunnerBoundary.test.ts \
+      src/server/affiliateImports/__tests__/affiliateAgentRunnerProtocol.test.ts \
+      src/server/affiliateImports/__tests__/agentSupervisor.test.ts \
+      src/server/affiliateImports/__tests__/agentDeployment.test.ts \
+      src/server/affiliateImports/__tests__/affiliateFleetReadiness.test.ts
+    npm exec tsc -- --noEmit --pretty false
+    npm exec --yes --package=bun@1.3.14 -- bun scripts/test-affiliate-omp-agent-sdk-schema.ts
+
+Two real TPH PREVIEW runs used verified PostgreSQL read-only sessions and the
+same retained HTML/Markdown. Both selected pass 2 for parent Gateway job
+`0ec7d3d8-eb20-4a51-989c-6bf59ec05974`, with no hold reason and zero writes.
+The proposed deployment is version 9 with hash
+`1cacbcf4e73edc12475ab4f57d7ebf196b4d102aaebe4f3d8ae490605adfbab8`.
+It is a proposal, not an active deployment.
+
+Both preview hashes were
+`24fa919b16a20176742ca98c88ac90c6afa99b93a107325ba0f6ac8c95561e8e`.
+Both source-scope hashes were
+`1732c9b999626c3af1b367d1419f106ea532ff65a8479b542648817b814a854c`.
+The real production validation adapter accepted Baseball, Beach Volleyball,
+Hockey, Indoor Soccer, and Pickleball while omitting Dance and Martial Arts.
+The probe stopped at the first database mutation. Both validation artifact
+hashes were
+`d1b1b8d108e11e36d3ace137d77e9a40259eefbb2aa0a0b20199ddfc13e6fc37`.
+Each run used 12 read-only batches and 21 read operations. Database writes,
+storage writes, and provider calls were all zero. No claim or APPLY ran.
+
+The disposable probe was corrected to use proposedWrites rather than row.write,
+restore the observed catalog timestamp from the report row, and follow the
+existing nullable selector-attribute schema. Those were harness corrections,
+not production contract changes.
+
+Accepted boundary: operator retry after a reviewer-created producer repair
+ends in a new CONTRACT_GAP remains outside the existing retry admission
+contract. This change does not add that parent kind. It does preserve scope
+for reviewer-created producer claims that the existing workflow supports.
+
+Accepted replay decision: an omitted exclusion list and an explicitly
+identical normalized list are equivalent only when the parent already carries
+that scope. Both preserve its exact record. Neither creates a new selection
+or changes authority. A first introduction still requires its explicit list.
+Changed labels, scope data, current operator, or current reason remain drift.
+No request-presence flag is needed.
+
+Revision note: this section records the source-scope repair, the complete
+multi-sport CLUB path, independent review, and read-only production evidence.
+Image publication, deployment, new claims, activation, and publication still
+require separate current authorization.

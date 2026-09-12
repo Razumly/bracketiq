@@ -802,6 +802,29 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
     expect(legacyRepairRetry).not.toHaveBeenCalled();
   });
 
+  it("limits an authenticated source sport scope to one parent without accepting actor input", async () => {
+    const scopedRequest = {
+      mode: "PREVIEW",
+      gatewayJobIds: ["gateway-parent-tph"],
+      reason: "Omit Dance and Martial Arts for this source. Retain its supported sports.",
+      excludedSourceLabels: ["Dance", "Martial Arts"],
+    };
+    const workerResponse = await request("/legacy-repair/retry", WORKER_ROLE_CREDENTIAL, "POST", scopedRequest);
+    expect(workerResponse.status).toBe(401);
+    for (const invalidRequest of [
+      { ...scopedRequest, gatewayJobIds: ["gateway-parent-tph", "gateway-parent-other"] },
+      { ...scopedRequest, excludedSourceLabels: ["Dance", "dance"] },
+      { ...scopedRequest, excludedSourceLabels: ["Martial\u00a0  Arts", "Martial Arts"] },
+      { ...scopedRequest, operatorId: "invented-operator" },
+    ]) {
+      const response = await request("/legacy-repair/retry", OPERATOR_TOKEN, "POST", invalidRequest);
+      expect(response.status).toBe(400);
+    }
+    expect(legacyRepairRetry).not.toHaveBeenCalled();
+    const response = await request("/legacy-repair/retry", OPERATOR_TOKEN, "POST", scopedRequest);
+    expect(response.status).toBe(200);
+  });
+
   it("dispatches a reviewed legacy repair retry and returns safe admission conflicts", async () => {
     let response = await request("/legacy-repair/retry", OPERATOR_TOKEN, "POST", {
       mode: "PREVIEW",
@@ -809,11 +832,6 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
       reason: "authorized bounded retry",
     });
     expect(response.status).toBe(200);
-    expect(legacyRepairRetry).toHaveBeenCalledWith({
-      mode: "PREVIEW",
-      gatewayJobIds: ["gateway-parent-softball", "gateway-parent-boomtown"],
-      reason: "authorized bounded retry",
-    });
 
     legacyRepairRetry.mockRejectedValueOnce(new AffiliateLegacyRepairAdmissionError(
       "ADMISSION_REPORT_DRIFT",

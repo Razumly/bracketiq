@@ -10,6 +10,8 @@ import {
   affiliateSportDeterminationSchema,
   affiliateSportDeterminationSha256,
   assertAffiliateHumanSportResolutionMatchesDeterminations,
+  assertAffiliateSourceSportScopeRetained,
+  normalizeAffiliateSportLabel,
   assertAffiliateSportCompletionReady,
   assertAffiliateSportDeterminationReasonStatusConsistency,
   isAffiliateSportCompletionReady,
@@ -76,6 +78,35 @@ describe('affiliate sport determinations', () => {
       resolutionBasis: 'USER_DECISION',
       resolvedFromDeterminationSha256: HASH_A,
     })).toThrow(/unresolved/i);
+  });
+
+  it('normalizes sport labels across Unicode forms, whitespace, and case', () => {
+    expect(normalizeAffiliateSportLabel(' ＭＡＲＴＩＡＬ\u00a0 \t ＡＲＴＳ ')).toBe('martial arts');
+    expect(normalizeAffiliateSportLabel('Martial Arts Academy')).toBe('martial arts academy');
+  });
+
+  it('applies normalized source scope labels to determinations and executable names', () => {
+    const excludedDetermination = {
+      ...resolved,
+      sourceLabels: ['Martial\u00a0  Arts'],
+      canonicalSportNames: ['Grass Soccer'],
+    };
+    expect(() => assertAffiliateSourceSportScopeRetained({
+      excludedSourceLabels: ['Martial Arts'],
+      determinations: [excludedDetermination],
+    })).toThrow();
+    expect(() => assertAffiliateSourceSportScopeRetained({
+      excludedSourceLabels: ['Martial Arts'],
+      determinations: [],
+      observedSportNames: [' MARTIAL\u00a0 ARTS '],
+    })).toThrow();
+    expect(() => assertAffiliateSourceSportScopeRetained({
+      excludedSourceLabels: ['Martial Arts'],
+      determinations: [{
+        ...resolved,
+        sourceLabels: ['Martial Arts Academy'],
+      }],
+    })).not.toThrow();
   });
 
   it('rejects blacklisted source labels at current completion boundaries without rewriting history', () => {

@@ -148,11 +148,24 @@ substitution map:
 | an exact blacklisted activity | `BLACKLISTED`; omit from executable sports and preserve evidence |
 
 Multiple explicitly evidenced surfaces may produce multiple resolved names.
-Unresolved, unsupported, and all-blacklisted determinations stop package and
-candidate creation and use governed human review. A blacklisted activity
+Unresolved, unsupported, and all-blacklisted retained determinations stop
+package and candidate creation and use governed human review. A blacklisted activity
 remains excluded even when the live catalog contains that name. Schema-v1
 results are parse-only history and cannot satisfy a new review-ready
 completion or approval.
+
+When the claim has `repairContext.sourceSportScope`, use that authenticated
+selection for this source. Keep its record unchanged. Omit its excluded labels
+from retained determinations and executable fields. The selection does not add
+a catalog entry, change the global blacklist, or resolve a canonical variant.
+Retained sports still require `SOURCE_EVIDENCE`. Read the program and About
+text before using incidental gallery text.
+
+For governed packages, set `sourceSportScopeHash` to the claim scope hash when
+a scope exists. Use a `sportName` field for one canonical sport. Use a
+`sportNames` field for several. A CONSTANT `sportNames` field has a sorted
+unique `values` array. Map the complete verified retained union. Do not include
+both sport fields. The Gateway checks the scope and sport union again at commit.
 
 Never invent dates, prices, addresses, divisions, tags, organization facts, or logos. Image tools may crop, resize, remove transparency from, or normalize an official stored asset. They must not create a new brand mark. When no reliable official mark exists, set the logo disposition to manual review and record the completed evidence search. The independent reviewer may accept that absence; the producer does not approve or publish the organization.
 

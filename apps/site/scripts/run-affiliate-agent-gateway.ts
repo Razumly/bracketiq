@@ -18,6 +18,7 @@ import {
 import {
   affiliateAgentContractBundleSchema,
   affiliateAgentDeploymentContractSchema,
+  affiliateAgentSourceSportScopeLabelsSchema,
   AFFILIATE_AGENT_PROMPT_TEMPLATES,
   AFFILIATE_AGENT_ROLE_CONTRACTS,
   AFFILIATE_AGENT_ROLES,
@@ -1249,12 +1250,20 @@ const legacyRepairRetryRequestSchema = z.object({
     'reason must not exceed 1,000 UTF-8 bytes.',
   ),
   expectedReportHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  excludedSourceLabels: affiliateAgentSourceSportScopeLabelsSchema.optional(),
 }).strict().superRefine((value, context) => {
   if (new Set(value.gatewayJobIds).size !== value.gatewayJobIds.length) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['gatewayJobIds'],
       message: 'gatewayJobIds must be unique.',
+    });
+  }
+  if (value.excludedSourceLabels && value.gatewayJobIds.length !== 1) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['gatewayJobIds'],
+      message: 'A source sport scope requires one exact parent Gateway job.',
     });
   }
   if (value.mode === 'APPLY' && !value.expectedReportHash) {
@@ -1798,6 +1807,8 @@ const createGateway = async (): Promise<AffiliateAgentGatewayRuntime> => {
         gatewayJobIds: request.gatewayJobIds,
         reason: request.reason,
         artifactStore,
+        excludedSourceLabels: request.excludedSourceLabels,
+        operatorId: 'affiliate-gateway-operator',
       };
       if (request.mode === 'PREVIEW') {
         return previewAffiliateLegacyRepairRetry(options);
@@ -1810,7 +1821,6 @@ const createGateway = async (): Promise<AffiliateAgentGatewayRuntime> => {
       return applyAffiliateLegacyRepairRetry({
         ...options,
         expectedReportHash: request.expectedReportHash,
-        operatorId: 'affiliate-gateway-operator',
       });
     }),
     legacyRepairContinuation: (request) => admission.withClaim(async () => {

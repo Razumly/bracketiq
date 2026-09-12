@@ -102,7 +102,7 @@ Capture effective database permissions. Fixed booleans in an inventory are not
 denial evidence. If group roles were absent when migrations ran, provision the
 roles and apply the migration's conditional grants before the canary.
 
-### Linked retries after a runtime correction
+### Linked retries after a correction or source-scope decision
 
 Use `POST /v1/affiliate-agent/legacy-repair/retry` with the same operator
 authentication. The request is explicit:
@@ -116,7 +116,8 @@ reason with `"mode":"APPLY"` and its `expectedReportHash`.
 Only completed legacy producer `CONTRACT_GAP` parents are eligible. The
 parent claim, result hash, receipt, mapping/source/intake identity, capture
 run, pinned artifacts, root generation, and safety state must agree.
-Both the deployment contract version and hash must differ from the parent's.
+Both the deployment contract version and hash must differ from the parent's,
+unless the authenticated request adds a verified source-specific exclusion.
 The current Supply Contract version and hash must still match the parent.
 The new mapping pass is the parent's pass plus one, with a maximum of three.
 Historical results are not revalidated under newer sport-result semantics.
@@ -134,6 +135,48 @@ reason cannot create another sibling. An exact apply replay returns the same
 child IDs in `appliedGatewayJobIds` with `writeCount: 0`. A later authorized
 retry must name the latest completed child, not reuse its ancestor.
 This route does not open a worker lease or start a service.
+
+For a source-specific selection, include `excludedSourceLabels` in PREVIEW and
+APPLY. An explicit or inherited source scope requires exactly one parent. For example:
+
+    {"mode":"PREVIEW","gatewayJobIds":["<completed parent Gateway job ID>"],"reason":"<recorded source-scope decision>","excludedSourceLabels":["Dance","Martial Arts"]}
+
+Use sorted, unique labels. The Gateway compares labels after Unicode,
+whitespace, and case normalization. Each added label must cover a whole
+non-RESOLVED parent determination. Retain all existing exclusions.
+The request cannot exclude an arbitrary or resolved sport, split a determination, weaken an
+existing scope, or name an operator identity. The Gateway uses its authenticated
+`affiliate-gateway-operator` actor. Different wording or a different hash with
+the same excluded labels does not authorize a same-deployment retry.
+
+The report, retry audit, and child repairContext bind a self-hashed
+`sourceSportScope` to the source root, intake, capture run, exact parent result,
+operator, reason, and excluded labels. Exact replay requires the same scope.
+The next claim must match that audit. A later retry preserves the original
+scope authority. The historical producer result remains unchanged.
+
+For an inherited scope, omitting `excludedSourceLabels` and supplying its
+identical normalized list are equivalent. Both preserve the exact original
+scope. A first introduction still requires its explicit list. Changed labels,
+scope data, current operator, or current reason are replay drift.
+
+A historical queued subject may omit `listingKind`. A modern immutable claim
+must supply it. Any supplied queued kind must match the claim, and the claim
+kind must match the current source. Do not rewrite historical queued rows to
+add a kind.
+
+For scoped packages, `sourceSportScopeHash` must equal the claim's scope hash.
+Only the retained activities enter sport determinations and executable fields.
+Their exact canonical variants still require first-party evidence. A scope is
+not a catalog addition, global blacklist change, canonical sport selection, or
+whole-source exclusion authority.
+
+Use `sportName` for one canonical sport. For several, use
+`{"field":"sportNames","mode":"CONSTANT","values":["Baseball","Hockey"]}` or a
+selector with the same exact emitted names. Keep values sorted and unique.
+Do not include both sport fields. Validation and commit require the complete
+verified retained union. Approval still leaves the source unpublished and
+under the existing automation hold.
 
 
 ## Bounded blacklisted-source exclusion
@@ -183,7 +226,7 @@ deployment, fleet expansion, publication, or automatic scraping.
 
 Use `@oh-my-pi/pi-coding-agent@18.1.13` with the pinned Bun runtime in the
 governed Dockerfile. The production execution class is `PRODUCTION_OMP`.
-Current source role and prompt contracts use version 8. Deploy matching
+Current source role and prompt contracts use version 9. Deploy matching
 Gateway, supervisor, and runner code together with newly compiled contracts
 and fresh preflight evidence. Old reports do not authorize this correction.
 

@@ -73,6 +73,9 @@ export type AffiliateHumanSportResolution = {
 };
 
 const compareStrings = compareAffiliateCatalogCodeUnits;
+export const normalizeAffiliateSportLabel = (value: string): string =>
+  value.normalize('NFKC').replace(/\s+/gu, ' ').trim().toLowerCase();
+
 
 const sortedUnique = (values: readonly string[]): string[] => [...values].sort(compareStrings)
   .filter((value, index, all) => index === 0 || value !== all[index - 1]);
@@ -490,6 +493,42 @@ export class AffiliateSportVerificationError extends Error {
     this.name = 'AffiliateSportVerificationError';
   }
 }
+
+export const assertAffiliateSourceSportScopeRetained = ({
+  excludedSourceLabels,
+  determinations,
+  observedSportNames = [],
+}: {
+  excludedSourceLabels: readonly string[];
+  determinations: readonly AffiliateSportDetermination[];
+  observedSportNames?: readonly string[];
+}): void => {
+  const excludedLabels = new Set(excludedSourceLabels.map(normalizeAffiliateSportLabel));
+  const isExcluded = (label: string) => excludedLabels.has(normalizeAffiliateSportLabel(label));
+  for (let index = 0; index < determinations.length; index += 1) {
+    const determination = determinations[index];
+    for (const key of ['sourceLabels', 'canonicalSportNames'] as const) {
+      if (determination[key].some(isExcluded)) {
+        throw new AffiliateSportVerificationError(
+          ['sportDeterminations', index, key],
+          'Retained sport determinations cannot include an activity excluded by the source sport scope.',
+        );
+      }
+    }
+    if (determination.resolutionBasis !== 'SOURCE_EVIDENCE') {
+      throw new AffiliateSportVerificationError(
+          ['sportDeterminations', index, 'resolutionBasis'],
+          'Source sport scope does not authorize a canonical sport selection. Retained sports require SOURCE_EVIDENCE.',
+      );
+    }
+  }
+  if (observedSportNames.some(isExcluded)) {
+    throw new AffiliateSportVerificationError(
+      ['observedSportNames'],
+      'Executable sport names cannot include an activity excluded by the source sport scope.',
+    );
+  }
+};
 
 export const assertAffiliateSportDeterminationReasonStatusConsistency = ({
   determinations,

@@ -10,6 +10,7 @@ import {
   canonicalizeAffiliateAgentValue,
   hashAffiliateAgentValue,
   type AffiliateAgentClaimEnvelope,
+  type AffiliateAgentSourceSportScope,
   type AffiliateAgentSportEvidence,
 } from "../agentGatewayContracts";
 import { buildAffiliateSportsCatalogSnapshot } from "../affiliateSportsCatalog";
@@ -529,6 +530,190 @@ const legacySportRepairFixture = (artifactKind: "PAGE_HTML" | "PAGE_MARKDOWN" = 
     },
   };
 };
+const multiSportRepairEvidenceFixture = () => {
+  const bytes = Buffer.from(
+    "<p>Outdoor grass soccer registration and indoor volleyball registration.</p>",
+    "utf8",
+  );
+  const artifactSha256 = createHash("sha256").update(bytes).digest("hex");
+  const mimeType = "text/html";
+  const catalog = buildAffiliateSportsCatalogSnapshot(
+    [
+      { id: "sport-grass", name: "Grass Soccer" },
+      { id: "sport-indoor", name: "Indoor Volleyball" },
+    ],
+    "2026-09-06T00:00:00.000Z",
+  );
+  const scopePreimage = {
+    schemaVersion: 1 as const,
+    supplySourceId: "supply-source-package",
+    intakeId: "intake-1",
+    evidenceRunId: "evidence-run-1",
+    parentGatewayJobId: "parent-gateway-job-1",
+    parentResultHash: "a".repeat(64),
+    excludedSourceLabels: ["Dance", "Martial Arts"],
+    operatorId: "operator-1",
+    reason: "Retain verified catalog sports and omit the approved source-only activities.",
+  };
+  const sourceSportScope: AffiliateAgentSourceSportScope = {
+    ...scopePreimage,
+    hash: hashAffiliateAgentValue(scopePreimage),
+  };
+  const sportEvidence: AffiliateAgentSportEvidence = {
+    evidenceRunId: "evidence-run-1",
+    sportsCatalogSha256: catalog.sha256,
+    sportDeterminations: [
+      {
+        sourceLabels: ["Soccer"],
+        status: "RESOLVED",
+        resolutionBasis: "SOURCE_EVIDENCE",
+        canonicalSportNames: ["Grass Soccer"],
+        rationale: "The source identifies outdoor grass soccer.",
+        evidence: [{
+          artifactId: "sport-artifact-1",
+          artifactSha256,
+          artifactKind: "PAGE_HTML",
+          pageUrl: "https://source.example/events",
+          excerpt: "Outdoor grass soccer",
+        }],
+      },
+      {
+        sourceLabels: ["Volleyball"],
+        status: "RESOLVED",
+        resolutionBasis: "SOURCE_EVIDENCE",
+        canonicalSportNames: ["Indoor Volleyball"],
+        rationale: "The source identifies indoor volleyball.",
+        evidence: [{
+          artifactId: "sport-artifact-1",
+          artifactSha256,
+          artifactKind: "PAGE_HTML",
+          pageUrl: "https://source.example/events",
+          excerpt: "indoor volleyball",
+        }],
+      },
+    ],
+  };
+  const manifestPreimage = {
+    schemaVersion: 1 as const,
+    entries: [{
+      evidenceRef: "sport-evidence-1",
+      kind: "PAGE_HTML" as const,
+      artifactId: "sport-artifact-1",
+      sha256: artifactSha256,
+      mimeType,
+      byteSize: bytes.byteLength,
+      retention: "INDEFINITE" as const,
+    }],
+  };
+  const claim = {
+    role: "MAPPING_PRODUCER" as const,
+    subject: {
+      type: "MAPPING_PRODUCER" as const,
+      supplySourceId: "supply-source-package",
+      mappingJobId: "mapping-job-package",
+      pass: 1,
+      repairContext: {
+        kind: "LEGACY_SPORT_REPAIR" as const,
+        intakeId: "intake-1",
+        evidenceRunId: sportEvidence.evidenceRunId,
+        sportsCatalog: catalog,
+        sourceSportScope,
+      },
+    },
+    evidenceManifest: {
+      ...manifestPreimage,
+      hash: hashAffiliateAgentValue(manifestPreimage),
+    },
+  } as unknown as AffiliateAgentClaimEnvelope;
+  const artifacts = {
+    readImmutable: jest.fn(async () => ({
+      bytes,
+      mimeType,
+      byteSize: bytes.byteLength,
+      sourceUrl: "https://source.example/events",
+      finalUrl: "https://source.example/events",
+      runId: "evidence-run-1",
+      intakeId: "intake-1",
+    })),
+  };
+  const prisma = {
+    sports: { findMany: jest.fn(async () => catalog.sports) },
+  } as unknown as Pick<PrismaClient, "sports">;
+  return { catalog, claim, sportEvidence, sourceSportScope, artifacts, prisma };
+};
+const scopedPackageAdapterFixtureFor = (
+  options: Readonly<{
+    sportField?: "CONSTANT" | "SELECTOR";
+    selectorValue?: string;
+  }> = {},
+) => {
+  const selectorSportValue = options.selectorValue ?? "Grass Soccer|Indoor Volleyball";
+  const listHtml = options.sportField === "SELECTOR"
+    ? `<article class="event"><h2 class="title">Multi-sport session</h2><p class="description">Outdoor grass soccer and indoor volleyball for all skill levels.</p><span class="sport">${selectorSportValue}</span><a class="link" href="/register">Register</a></article>`
+    : '<article class="event"><h2 class="title">Multi-sport session</h2><p class="description">Outdoor grass soccer and indoor volleyball for all skill levels.</p><a class="link" href="/register">Register</a></article>';
+  const fixture = packageAdapterFixtureFor({
+    sourceUrl: "https://source.example/events",
+    finalUrl: "https://source.example/events",
+  }, "PAGE_HTML", { html: listHtml });
+  const evidence = multiSportRepairEvidenceFixture();
+  const readOriginal = fixture.artifacts.readImmutable.getMockImplementation()!;
+  fixture.artifacts.readImmutable.mockImplementation(async (input) => (
+    input.fileId === "sport-artifact-1"
+      ? evidence.artifacts.readImmutable()
+      : readOriginal(input)
+  ));
+  const manifest = {
+    schemaVersion: 1 as const,
+    entries: [
+      ...fixture.claim.evidenceManifest.entries,
+      ...evidence.claim.evidenceManifest.entries,
+    ].sort((left, right) => left.evidenceRef.localeCompare(right.evidenceRef)),
+  };
+  const claim = {
+    ...fixture.claim,
+    subject: {
+      ...fixture.claim.subject,
+      repairContext: evidence.claim.subject.repairContext,
+    },
+    evidenceManifest: {
+      ...manifest,
+      hash: hashAffiliateAgentValue(manifest),
+    },
+  } as AffiliateAgentClaimEnvelope;
+  const sportField = options.sportField === "SELECTOR"
+    ? {
+      field: "sportNames" as const,
+      selector: ".sport",
+      mode: "TEXT" as const,
+      attribute: null,
+      transform: "TRIM" as const,
+    }
+    : {
+      field: "sportNames" as const,
+      mode: "CONSTANT" as const,
+      values: ["Grass Soccer", "Indoor Volleyball"],
+    };
+  const candidatePackage = {
+    ...fixture.candidatePackage,
+    fields: [
+      ...fixture.candidatePackage.fields,
+      sportField,
+    ].sort((left, right) => left.field.localeCompare(right.field)),
+    evidenceRefs: ["list-evidence", "sport-evidence-1"],
+    sportEvidence: evidence.sportEvidence,
+    sourceSportScopeHash: evidence.sourceSportScope.hash,
+  };
+  return {
+    fixture,
+    evidence,
+    claim,
+    candidatePackage,
+    transaction: {
+      ...fixture.transaction,
+      sports: evidence.prisma.sports,
+    },
+  };
+};
 const legacyApprovalFixture = () => {
   const evidence = legacySportRepairFixture();
   const repairContext = (
@@ -778,6 +963,20 @@ describe("legacy sport repair evidence verifier", () => {
       expectedSportNames: ["Grass Soccer"],
       observedSportNames: ["Grass Soccer"],
     }));
+  });
+  it("rejects an excluded activity from the extracted retained union", async () => {
+    const fixture = multiSportRepairEvidenceFixture();
+
+    await expect(verifyAffiliateAgentLegacySportRepair({
+      ...fixture,
+      resultKind: "REVIEW_REQUIRED",
+      observedSportNames: ["Grass Soccer", "Indoor Volleyball", "Martial Arts"],
+    })).rejects.toMatchObject({
+      code: "EVIDENCE_REFERENCE_NOT_PERMITTED",
+      issues: [{
+        path: ["sportEvidence", "observedSportNames"],
+      }],
+    });
   });
 
   it("distinguishes a missing extracted sport from a rejected citation", async () => {
@@ -1221,8 +1420,29 @@ describe("production Affiliate Agent activation effect", () => {
           subjectJson: expect.objectContaining({ repairContext }),
         }),
       }));
+      const producerContextWithCatalogDrift = {
+        ...repairContext,
+        sportsCatalog: buildAffiliateSportsCatalogSnapshot(
+          [{ id: "sport-indoor", name: "Indoor Soccer" }],
+          "2026-08-20T18:00:00.000Z",
+        ),
+      };
+      const driftedProducerEnvelope = {
+        ...producerEnvelope,
+        subject: {
+          ...producerEnvelope.subject,
+          repairContext: producerContextWithCatalogDrift,
+        },
+      };
+      producerClaimRow.claimEnvelopeJson = driftedProducerEnvelope;
+      producerClaimRow.claimEnvelopeHash = hashAffiliateAgentValue(driftedProducerEnvelope);
+      await expect(adapters.terminalEffects.PRODUCER_REPAIR_REQUIRED.execute({
+        receiptId: "repair-receipt-catalog-drift",
+        claim,
+        result,
+      })).rejects.toThrow("producer repair context");
+      expect(lifecycleCommand).toHaveBeenCalledTimes(2);
     }
-    expect(supplySourceFindUnique).toHaveBeenCalledTimes(1);
   });
   it("persists approval evidence and queues a lineage-bound activation job", async () => {
     const lifecycleCommand = jest
@@ -1651,6 +1871,248 @@ describe("production Affiliate Agent package evidence", () => {
     expect(fixture.mappingJobUpdate).not.toHaveBeenCalled();
     expect(fixture.transaction.affiliateAgentGatewayArtifacts.createMany).not.toHaveBeenCalled();
   });
+  it("validates and commits a plural retained source-scope package", async () => {
+    const {
+      fixture,
+      evidence,
+      claim,
+      candidatePackage,
+      transaction,
+    } = scopedPackageAdapterFixtureFor();
+    const validationAdapter = fixture.adapters.commands.transactional.VALIDATE_DECLARATIVE_PACKAGE;
+    const commitAdapter = fixture.adapters.commands.transactional.COMMIT_DECLARATIVE_PACKAGE;
+    if (!validationAdapter || !commitAdapter) {
+      throw new Error("Expected the production package adapters.");
+    }
+    const lifecycleCommand = jest
+      .spyOn(affiliateSupplyPersistence, "executeAffiliateSupplyLifecycleCommand")
+      .mockResolvedValue({
+        assessment: {},
+        transition: { generation: 8 },
+        isReplayed: false,
+      } as unknown as AffiliateSupplyLifecycleCommandResult);
+    const validationReceiptId = "plural-validation";
+    const packageHash = hashAffiliateAgentValue(candidatePackage);
+
+    await expect(validationAdapter.execute({
+      transaction: transaction as unknown as Prisma.TransactionClient,
+      claim,
+      receiptId: validationReceiptId,
+      command: {
+        type: "VALIDATE_DECLARATIVE_PACKAGE",
+        data: {
+          candidatePackage,
+          evidenceManifestHash: claim.evidenceManifest.hash,
+        },
+      },
+    })).resolves.toEqual({
+      isValid: true,
+      validatedPackageHash: packageHash,
+    });
+
+    await expect(commitAdapter.execute({
+      transaction: transaction as unknown as Prisma.TransactionClient,
+      claim,
+      receiptId: "plural-commit",
+      command: {
+        type: "COMMIT_DECLARATIVE_PACKAGE",
+        data: {
+          validationReceiptId,
+          validatedPackageHash: packageHash,
+        },
+      },
+    })).resolves.toEqual({ packageHash });
+    expect(lifecycleCommand).toHaveBeenCalledWith(expect.objectContaining({
+      command: "RECORD_MAPPING",
+      request: expect.objectContaining({
+        validationOutput: expect.objectContaining({
+          sourceSportScopeHash: evidence.sourceSportScope.hash,
+        }),
+      }),
+    }));
+    const mappingCreateCall = fixture.transaction.affiliateScrapeMappings.create.mock.calls[0]?.[0] as {
+      data?: {
+        mapping?: {
+          fields?: Record<string, unknown>;
+          metadata?: Record<string, unknown>;
+        };
+      };
+    } | undefined;
+    const committedMapping = mappingCreateCall?.data?.mapping;
+    expect(committedMapping).toEqual(expect.objectContaining({
+      fields: expect.objectContaining({
+        sportNames: expect.objectContaining({
+          mode: "literal",
+          value: "Grass Soccer|Indoor Volleyball",
+        }),
+      }),
+      metadata: expect.objectContaining({
+        sourceSportScopeHash: evidence.sourceSportScope.hash,
+        sourceSportScope: evidence.sourceSportScope,
+      }),
+    }));
+  });
+  it.each([
+    ["missing", undefined],
+    ["different", "b".repeat(64)],
+  ] as const)("rejects a %s source-scope package hash", async (_label, sourceSportScopeHash) => {
+    const {
+      fixture,
+      claim,
+      candidatePackage,
+      transaction,
+    } = scopedPackageAdapterFixtureFor();
+    const packageWithoutScope = { ...candidatePackage };
+    delete packageWithoutScope.sourceSportScopeHash;
+    const submittedPackage = sourceSportScopeHash === undefined
+      ? packageWithoutScope
+      : { ...candidatePackage, sourceSportScopeHash };
+    const adapter = fixture.adapters.commands.transactional.VALIDATE_DECLARATIVE_PACKAGE!;
+
+    await expect(adapter.execute({
+      transaction: transaction as unknown as Prisma.TransactionClient,
+      claim,
+      receiptId: "scope-hash-validation",
+      command: {
+        type: "VALIDATE_DECLARATIVE_PACKAGE",
+        data: {
+          candidatePackage: submittedPackage,
+          evidenceManifestHash: claim.evidenceManifest.hash,
+        },
+      },
+    })).rejects.toMatchObject({
+      code: "COMMAND_SCHEMA_INVALID",
+      safeMessage: "The package source sport scope hash does not match the repair context.",
+    });
+    expect(fixture.mappingJobUpdate).not.toHaveBeenCalled();
+  });
+  it("rejects a plural package that omits one retained sport", async () => {
+    const {
+      fixture,
+      claim,
+      candidatePackage,
+      transaction,
+    } = scopedPackageAdapterFixtureFor();
+    const packageWithMissingSport = {
+      ...candidatePackage,
+      fields: candidatePackage.fields.map((field) => field.field === "sportNames"
+        ? { ...field, values: ["Grass Soccer"] as const }
+        : field),
+    };
+    const adapter = fixture.adapters.commands.transactional.VALIDATE_DECLARATIVE_PACKAGE!;
+
+    await expect(adapter.execute({
+      transaction: transaction as unknown as Prisma.TransactionClient,
+      claim,
+      receiptId: "missing-retained-sport-validation",
+      command: {
+        type: "VALIDATE_DECLARATIVE_PACKAGE",
+        data: {
+          candidatePackage: packageWithMissingSport,
+          evidenceManifestHash: claim.evidenceManifest.hash,
+        },
+      },
+    })).rejects.toMatchObject({
+      code: "EVIDENCE_REFERENCE_NOT_PERMITTED",
+    });
+  });
+  it("validates a selector that emits the complete plural sport union", async () => {
+    const {
+      fixture,
+      claim,
+      candidatePackage,
+      transaction,
+    } = scopedPackageAdapterFixtureFor({ sportField: "SELECTOR" });
+    const adapter = fixture.adapters.commands.transactional.VALIDATE_DECLARATIVE_PACKAGE!;
+    const packageHash = hashAffiliateAgentValue(candidatePackage);
+
+    await expect(adapter.execute({
+      transaction: transaction as unknown as Prisma.TransactionClient,
+      claim,
+      receiptId: "selector-sports-validation",
+      command: {
+        type: "VALIDATE_DECLARATIVE_PACKAGE",
+        data: {
+          candidatePackage,
+          evidenceManifestHash: claim.evidenceManifest.hash,
+        },
+      },
+    })).resolves.toEqual({
+      isValid: true,
+      validatedPackageHash: packageHash,
+    });
+    expect(fixture.mappingJob.resultSummary).toEqual(expect.objectContaining({
+      gatewayCandidatePackage: expect.objectContaining({
+        validationOutput: expect.objectContaining({
+          candidates: [expect.objectContaining({
+            sportNames: ["Grass Soccer", "Indoor Volleyball"],
+          })],
+        }),
+      }),
+    }));
+  });
+
+  it("reports excluded extracted sports at the editable package fields path", async () => {
+    const {
+      fixture,
+      claim,
+      candidatePackage,
+      transaction,
+    } = scopedPackageAdapterFixtureFor({
+      sportField: "SELECTOR",
+      selectorValue: "Grass Soccer|Indoor Volleyball|Martial Arts",
+    });
+    const adapter = fixture.adapters.commands.transactional.VALIDATE_DECLARATIVE_PACKAGE!;
+
+    await expect(adapter.execute({
+      transaction: transaction as unknown as Prisma.TransactionClient,
+      claim,
+      receiptId: "excluded-selector-sport-validation",
+      command: {
+        type: "VALIDATE_DECLARATIVE_PACKAGE",
+        data: {
+          candidatePackage,
+          evidenceManifestHash: claim.evidenceManifest.hash,
+        },
+      },
+    })).rejects.toMatchObject({
+      code: "EVIDENCE_REFERENCE_NOT_PERMITTED",
+      issues: [{
+        path: ["candidatePackage", "fields"],
+      }],
+    });
+    expect(fixture.mappingJobUpdate).not.toHaveBeenCalled();
+  });
+  it("rejects an unverified constant sport from the retained package", async () => {
+    const {
+      fixture,
+      claim,
+      candidatePackage,
+      transaction,
+    } = scopedPackageAdapterFixtureFor();
+    const packageWithUnverifiedSport = {
+      ...candidatePackage,
+      fields: candidatePackage.fields.map((field) => field.field === "sportNames"
+        ? { ...field, values: ["Grass Soccer", "Indoor Volleyball", "Unverified Sport"] as const }
+        : field),
+    };
+    const adapter = fixture.adapters.commands.transactional.VALIDATE_DECLARATIVE_PACKAGE!;
+
+    await expect(adapter.execute({
+      transaction: transaction as unknown as Prisma.TransactionClient,
+      claim,
+      receiptId: "unverified-sport-validation",
+      command: {
+        type: "VALIDATE_DECLARATIVE_PACKAGE",
+        data: {
+          candidatePackage: packageWithUnverifiedSport,
+          evidenceManifestHash: claim.evidenceManifest.hash,
+        },
+      },
+    })).rejects.toMatchObject({
+      code: "COMMAND_SCHEMA_INVALID",
+    });
+  });
 
   it("rejects Markdown CSS listing evidence before writing validation artifacts", async () => {
     const fixture = packageAdapterFixtureFor({
@@ -1673,6 +2135,31 @@ describe("production Affiliate Agent package evidence", () => {
     });
     expect(fixture.transaction.affiliateAgentGatewayArtifacts.createMany).not.toHaveBeenCalled();
     expect(fixture.mappingJobUpdate).not.toHaveBeenCalled();
+  });
+  it("rejects a source scope hash on an unscoped package", async () => {
+    const fixture = packageAdapterFixtureFor({
+      sourceUrl: "https://source.example/events",
+      finalUrl: "https://source.example/events",
+    });
+    const adapter = fixture.adapters.commands.transactional.VALIDATE_DECLARATIVE_PACKAGE!;
+
+    await expect(adapter.execute({
+      transaction: fixture.transaction as unknown as Prisma.TransactionClient,
+      claim: fixture.claim,
+      receiptId: "unexpected-scope-validation",
+      command: {
+        type: "VALIDATE_DECLARATIVE_PACKAGE",
+        data: {
+          candidatePackage: {
+            ...fixture.candidatePackage,
+            sourceSportScopeHash: "a".repeat(64),
+          },
+          evidenceManifestHash: fixture.claim.evidenceManifest.hash,
+        },
+      },
+    })).rejects.toMatchObject({
+      code: "COMMAND_SCHEMA_INVALID",
+    });
   });
 
   it("returns safe selector feedback without exposing rejected selector text", async () => {

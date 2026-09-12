@@ -17,6 +17,7 @@ import {
   applyAffiliateLegacyRepairAdmission,
   applyAffiliateLegacyRepairRetry,
   applyAffiliateLegacyRepairContinuation,
+  assertAffiliateLegacyRepairScopeClaimBinding,
   calculateAffiliateLegacyRepairAdmissionReportHash,
   calculateAffiliateLegacyRepairRetryReportHash,
   calculateAffiliateLegacyRepairContinuationReportHash,
@@ -634,8 +635,14 @@ const retryFixture = () => {
     affiliateSupplyTargets: { findMany: jest.fn(async () => []) },
     affiliateApprovalJobs: { findMany: jest.fn(async () => []) },
     affiliateAgentGatewayJobs: gatewayJobDelegate,
-    affiliateAgentGatewayClaims: { findMany: jest.fn(async () => gatewayClaims) },
-    affiliateAgentGatewayOperationReceipts: { findMany: jest.fn(async () => gatewayReceipts) },
+    affiliateAgentGatewayClaims: {
+      findMany: jest.fn(async () => gatewayClaims),
+      findUnique: jest.fn(async ({ where }: { where: Record<string, unknown> }) => findByWhere(gatewayClaims, where)),
+    },
+    affiliateAgentGatewayOperationReceipts: {
+      findMany: jest.fn(async () => gatewayReceipts),
+      findUnique: jest.fn(async ({ where }: { where: Record<string, unknown> }) => findByWhere(gatewayReceipts, where)),
+    },
     affiliateSupplyContractManifests: {
       findFirst: jest.fn(async () => ({
         id: 'active-manifest',
@@ -1325,6 +1332,79 @@ describe('legacy repair admission with real contract validators', () => {
     })).rejects.toMatchObject({ code: 'RETRY_STATE_DRIFT' });
   });
 
+  it('accepts a modern parent claim kind when its queued subject omits the enriched kind', async () => {
+    const state = await retryFixtureWithAdmission();
+    const parent = state.gatewayJobs.find((candidate) => candidate.id === 'gateway-parent-softball');
+    const claim = state.gatewayClaims.find((candidate) => candidate.id === 'claim-parent-softball');
+    if (!parent || !claim) throw new Error('Softball parent records were not created.');
+    const parentSubject = parent.subjectJson as Record<string, unknown>;
+    const parentContext = parentSubject.repairContext as Record<string, unknown>;
+    const parentManifest = parent.evidenceManifestJson as Record<string, unknown>;
+    const parentEntries = Array.isArray(parentManifest.entries)
+      ? parentManifest.entries.map((entry) => entry as Record<string, unknown>)
+      : [];
+    const citationEntry = parentEntries.find((entry) => entry.kind === 'PAGE_MARKDOWN');
+    if (!citationEntry) throw new Error('Softball parent evidence manifest is empty.');
+    const parentResult = parent.resultJson as Record<string, unknown>;
+    const parentPayload = parentResult.payload as Record<string, unknown>;
+    const citation = {
+      artifactId: String(citationEntry.artifactId),
+      artifactSha256: String(citationEntry.sha256),
+      artifactKind: String(citationEntry.kind),
+      pageUrl: 'https://softball.example.test',
+      excerpt: 'Grass Soccer',
+    };
+    parentPayload.sportEvidence = {
+      evidenceRunId: parentContext.evidenceRunId,
+      sportsCatalogSha256: (parentContext.sportsCatalog as Record<string, unknown>).sha256,
+      sportDeterminations: [
+        {
+          sourceLabels: ['Dance'],
+          status: 'BLACKLISTED',
+          resolutionBasis: 'SOURCE_EVIDENCE',
+          canonicalSportNames: [],
+          rationale: 'The source activity is on the affiliate Dance blacklist.',
+          evidence: [{ ...citation }],
+        },
+        {
+          sourceLabels: ['Grass Soccer'],
+          status: 'RESOLVED',
+          resolutionBasis: 'SOURCE_EVIDENCE',
+          canonicalSportNames: ['Grass Soccer'],
+          rationale: 'The retained source evidence identifies Grass Soccer.',
+          evidence: [citation],
+        },
+      ],
+    };
+    parentResult.reasonCodes = ['SPORT_BLACKLISTED'];
+    parent.resultHash = hashAffiliateAgentValue(parentResult);
+    const parentReceipt = state.gatewayReceipts.find((candidate) => candidate.jobId === parent.id);
+    if (!parentReceipt) throw new Error('Softball parent receipt was not created.');
+    const parentResponse = parentReceipt.responseJson as Record<string, unknown>;
+    parentResponse.resultHash = parent.resultHash;
+    parentReceipt.responseHash = hashAffiliateAgentValue(parentResponse);
+    const claimEnvelope = claim.claimEnvelopeJson as Record<string, unknown>;
+    claimEnvelope.subject = {
+      ...(claimEnvelope.subject as Record<string, unknown>),
+      listingKind: 'CLUB',
+    };
+    claimEnvelope.roleContractVersion = 8;
+    claim.roleContractVersion = 8;
+    claimEnvelope.promptTemplateVersion = 8;
+    claim.promptTemplateVersion = 8;
+    parentResult.roleContractVersion = 8;
+    parentResult.promptTemplateVersion = 8;
+    claim.claimEnvelopeHash = hashAffiliateAgentValue(claimEnvelope);
+    parent.resultHash = hashAffiliateAgentValue(parentResult);
+    parentResponse.resultHash = parent.resultHash;
+    parentReceipt.responseHash = hashAffiliateAgentValue(parentResponse);
+    expect(parentSubject.listingKind).toBeUndefined();
+    const report = await previewAffiliateLegacyRepairRetry({
+      ...state.input,
+      gatewayJobIds: [parent.id],
+    });
+    expect(report.selectedGatewayJobIds).toEqual([parent.id]);
+  });
   it('rejects a same-version changed-hash deployment before retry writes', async () => {
     const state = await retryFixtureWithAdmission();
     const parentClaim = state.gatewayClaims.find((claim) => claim.id === 'claim-parent-softball');
@@ -2071,4 +2151,791 @@ describe('legacy repair admission with real contract validators', () => {
 
 
 
+  it('requires one parent Gateway job for a source sport scope', async () => {
+    const state = await retryFixtureWithAdmission();
+    await expect(previewAffiliateLegacyRepairRetry({
+      ...state.input,
+      excludedSourceLabels: ['Dance'],
+      operatorId: 'tph-operator',
+    })).rejects.toMatchObject({ code: 'SOURCE_SCOPE_PARENT_COUNT_INVALID' });
+  });
+
+  it('binds a new source sport scope to verified non-resolved evidence and the retry report', async () => {
+    const state = await retryFixtureWithAdmission();
+    const initialPreview = await previewAffiliateLegacyRepairRetry(state.input);
+    await applyAffiliateLegacyRepairRetry({
+      ...state.input,
+      operatorId: 'affiliate-gateway-operator',
+      expectedReportHash: initialPreview.reportHash,
+    });
+    const parentId = completeRetryChild(state, 'softball');
+    const parent = state.gatewayJobs.find((candidate) => candidate.id === parentId);
+    if (!parent) throw new Error('Pass-two retry parent was not created.');
+    const parentResult = parent.resultJson as Record<string, unknown>;
+    const parentPayload = parentResult.payload as Record<string, unknown>;
+    const sportEvidence = parentPayload.sportEvidence as Record<string, unknown>;
+    const determinations = sportEvidence.sportDeterminations as Record<string, unknown>[];
+    const resolved = determinations[0];
+    if (!resolved) throw new Error('The retry fixture has no resolved sport determination.');
+    const evidence = resolved.evidence as Record<string, unknown>[];
+    const blacklisted = {
+      ...resolved,
+      sourceLabels: ['Dance'],
+      status: 'BLACKLISTED',
+      resolutionBasis: 'SOURCE_EVIDENCE',
+      canonicalSportNames: [],
+      rationale: 'The source activity is on the affiliate Dance blacklist.',
+      evidence: evidence.map((citation) => ({ ...citation })),
+    };
+    const unsupported = {
+      ...resolved,
+      sourceLabels: ['Martial Arts'],
+      status: 'UNSUPPORTED',
+      resolutionBasis: 'SOURCE_EVIDENCE',
+      canonicalSportNames: [],
+      rationale: 'The source activity is outside the retained catalog.',
+      evidence: evidence.map((citation) => ({ ...citation })),
+    };
+    determinations.splice(0, determinations.length, blacklisted, resolved, unsupported);
+    const reasonCodes = parentResult.reasonCodes as string[];
+    reasonCodes.splice(0, reasonCodes.length, 'SPORT_BLACKLISTED', 'SPORT_NOT_IN_CATALOG');
+    parent.resultHash = hashAffiliateAgentValue(parentResult);
+    const parentReceipt = state.gatewayReceipts.find((candidate) => candidate.jobId === parentId);
+    if (!parentReceipt) throw new Error('Pass-two retry receipt was not created.');
+    const receiptResponse = parentReceipt.responseJson as Record<string, unknown>;
+    receiptResponse.resultHash = parent.resultHash;
+    parentReceipt.responseHash = hashAffiliateAgentValue(receiptResponse);
+    const historicalRetryMappingJob = state.mappingJobs.find(
+      (candidate) => candidate.id === 'mapping-retry-softball',
+    );
+    const historicalRetryHistory = (
+      historicalRetryMappingJob?.resultSummary as Record<string, unknown>
+    ).legacyRepairRetryHistory as Record<string, unknown>[];
+    const historicalRetryAudit = historicalRetryHistory.find((candidate) => (
+      candidate.parentGatewayJobId === 'gateway-parent-softball'
+      && candidate.childGatewayJobId === parentId
+    ));
+    if (!historicalRetryAudit) throw new Error('Historical retry audit was not created.');
+    delete historicalRetryAudit.currentDeploymentContractVersion;
+    delete historicalRetryAudit.currentDeploymentContractHash;
+
+    const unscopedPreview = await previewAffiliateLegacyRepairRetry({
+      ...state.input,
+      gatewayJobIds: [parentId],
+    });
+    const scopedInput = {
+      ...state.input,
+      gatewayJobIds: [parentId],
+      reason: 'authorize the TPH source sport scope',
+      excludedSourceLabels: ['Dance', 'Martial Arts'],
+      operatorId: 'tph-operator',
+    };
+    const scopedPreview = await previewAffiliateLegacyRepairRetry(scopedInput);
+    const scopedRow = scopedPreview.rows[0];
+    expect(scopedPreview.reportHash).not.toBe(unscopedPreview.reportHash);
+    expect(scopedPreview.selectedGatewayJobIds).toEqual([parentId]);
+    expect(scopedRow?.sourceSportScope).toMatchObject({
+      supplySourceId: parent.supplySourceId,
+      parentGatewayJobId: parentId,
+      parentResultHash: parent.resultHash,
+      excludedSourceLabels: ['Dance', 'Martial Arts'],
+      operatorId: 'tph-operator',
+      reason: scopedInput.reason,
+    });
+    const scope = scopedRow?.sourceSportScope;
+    if (!scope) throw new Error('The scoped retry row did not include source scope.');
+    const { hash: scopeHash, ...scopePreimage } = scope;
+    expect(scopeHash).toBe(hashAffiliateAgentValue(scopePreimage));
+
+    const applied = await applyAffiliateLegacyRepairRetry({
+      ...scopedInput,
+      expectedReportHash: scopedPreview.reportHash,
+    });
+    expect(applied.appliedGatewayJobIds).toHaveLength(1);
+    const child = state.gatewayJobs.find((candidate) => (
+      candidate.id === applied.appliedGatewayJobIds[0]
+    ));
+    expect((child?.subjectJson as Record<string, unknown>).repairContext).toMatchObject({
+      sourceSportScope: scope,
+    });
+    const mappingJob = state.mappingJobs.find((candidate) => candidate.id === 'mapping-retry-softball');
+    const summary = mappingJob?.resultSummary as Record<string, unknown>;
+    const history = summary.legacyRepairRetryHistory as Record<string, unknown>[];
+    const audit = history.find((entry) => entry.childGatewayJobId === child?.id);
+    expect(audit?.sourceSportScope).toEqual(scope);
+    expect((audit?.repairContext as Record<string, unknown>).sourceSportScope).toEqual(scope);
+    if (!child) throw new Error('Scoped retry child was not created.');
+    const completedChildId = completeRetryChild(
+      state,
+      'softball',
+      'claim-retry-softball',
+      'claim-scoped-retry-softball',
+      'receipt-scoped-retry-softball',
+    );
+    expect(completedChildId).toBe(child.id);
+    const childClaim = state.gatewayClaims.find((candidate) => candidate.jobId === child.id);
+    if (!childClaim) throw new Error('Scoped retry child claim was not created.');
+    const claimEnvelope = childClaim.claimEnvelopeJson;
+    const childClaimIndex = state.gatewayClaims.indexOf(childClaim);
+    const childReceiptIndex = state.gatewayReceipts.findIndex((candidate) => candidate.jobId === child.id);
+    state.gatewayClaims.splice(childClaimIndex, 1);
+    if (childReceiptIndex >= 0) state.gatewayReceipts.splice(childReceiptIndex, 1);
+    Object.assign(child, {
+      status: 'QUEUED',
+      activeClaimId: null,
+      claimGeneration: 0,
+      terminalDisposition: null,
+      resultHash: null,
+      resultJson: null,
+      terminalReceiptId: null,
+      finishedAt: null,
+    });
+    await expect(assertAffiliateLegacyRepairScopeClaimBinding({
+      prisma: state.input.prisma,
+      job: child,
+      claim: claimEnvelope,
+    })).resolves.toBeUndefined();
+    const committedParentResult = parent.resultJson as Record<string, unknown>;
+    committedParentResult.disposition = 'PACKAGE_COMMITTED';
+    parent.terminalDisposition = 'PACKAGE_COMMITTED';
+    parent.resultHash = hashAffiliateAgentValue(committedParentResult);
+    const committedParentReceipt = state.gatewayReceipts.find(
+      (candidate) => candidate.jobId === parent.id,
+    );
+    if (!committedParentReceipt) throw new Error('Scoped retry parent receipt was not created.');
+    const committedParentResponse = committedParentReceipt.responseJson as Record<string, unknown>;
+    committedParentResponse.resultHash = parent.resultHash;
+    committedParentResponse.disposition = 'PACKAGE_COMMITTED';
+    committedParentReceipt.responseHash = hashAffiliateAgentValue(committedParentResponse);
+    await expect(assertAffiliateLegacyRepairScopeClaimBinding({
+      prisma: state.input.prisma,
+      job: child,
+      claim: claimEnvelope,
+    })).rejects.toThrow('ancestry is not immutable');
+  });
+  it('inherits an existing source sport scope across a retry with a new audit actor and reason', async () => {
+    const state = await retryFixtureWithAdmission();
+    const initialParent = state.gatewayJobs.find((candidate) => candidate.id === 'gateway-parent-softball');
+    if (!initialParent) throw new Error('Initial softball parent was not created.');
+    const initialResult = initialParent.resultJson as Record<string, unknown>;
+    const initialPayload = initialResult.payload as Record<string, unknown>;
+    const initialSubject = initialParent.subjectJson as Record<string, unknown>;
+    const initialContext = initialSubject.repairContext as Record<string, unknown>;
+    const initialManifest = initialParent.evidenceManifestJson as Record<string, unknown>;
+    const initialEntries = Array.isArray(initialManifest.entries)
+      ? initialManifest.entries.map((entry) => entry as Record<string, unknown>)
+      : [];
+    const initialCitationEntry = initialEntries.find((entry) => entry.kind === 'PAGE_MARKDOWN');
+    if (!initialCitationEntry) throw new Error('Initial softball evidence manifest is empty.');
+    const resolved = {
+      sourceLabels: ['Grass Soccer'],
+      status: 'RESOLVED' as const,
+      resolutionBasis: 'SOURCE_EVIDENCE' as const,
+      canonicalSportNames: ['Grass Soccer'],
+      rationale: 'The retained source evidence identifies Grass Soccer.',
+      evidence: [{
+        artifactId: String(initialCitationEntry.artifactId),
+        artifactSha256: String(initialCitationEntry.sha256),
+        artifactKind: String(initialCitationEntry.kind) as 'PAGE_HTML' | 'PAGE_MARKDOWN',
+        pageUrl: 'https://softball.example.test',
+        excerpt: 'Grass Soccer',
+      }],
+    };
+    const initialEvidence = {
+      evidenceRunId: String(initialContext.evidenceRunId),
+      sportsCatalogSha256: String((initialContext.sportsCatalog as Record<string, unknown>).sha256),
+      sportDeterminations: [
+        {
+          ...resolved,
+          sourceLabels: ['Dance'],
+          status: 'BLACKLISTED' as const,
+          canonicalSportNames: [],
+          rationale: 'The source activity is on the affiliate Dance blacklist.',
+          evidence: resolved.evidence.map((citation) => ({ ...citation })),
+        },
+        resolved,
+      ],
+    };
+    initialPayload.sportEvidence = initialEvidence;
+    (initialResult.reasonCodes as string[]).splice(
+      0,
+      (initialResult.reasonCodes as string[]).length,
+      'SPORT_BLACKLISTED',
+    );
+    initialParent.resultHash = hashAffiliateAgentValue(initialResult);
+    const initialReceipt = state.gatewayReceipts.find((candidate) => candidate.jobId === initialParent.id);
+    if (!initialReceipt) throw new Error('Initial softball receipt was not created.');
+    const initialResponse = initialReceipt.responseJson as Record<string, unknown>;
+    initialResponse.resultHash = initialParent.resultHash;
+    initialReceipt.responseHash = hashAffiliateAgentValue(initialResponse);
+
+    const firstScopeInput = {
+      ...state.input,
+      gatewayJobIds: [initialParent.id],
+      reason: 'Authorize the original source sport scope.',
+      excludedSourceLabels: ['Dance'],
+      operatorId: 'original-scope-operator',
+    };
+    const firstPreview = await previewAffiliateLegacyRepairRetry(firstScopeInput);
+    await applyAffiliateLegacyRepairRetry({
+      ...firstScopeInput,
+      expectedReportHash: firstPreview.reportHash,
+    });
+    const firstChildId = completeRetryChild(
+      state,
+      'softball',
+      undefined,
+      'claim-original-scope-retry-softball',
+      'receipt-original-scope-retry-softball',
+    );
+    const firstChild = state.gatewayJobs.find((candidate) => candidate.id === firstChildId);
+    if (!firstChild) throw new Error('Original scoped retry child was not created.');
+    const firstChildSubject = firstChild.subjectJson as Record<string, unknown>;
+    const firstChildContext = firstChildSubject.repairContext as Record<string, unknown>;
+    const originalScope = firstChildContext.sourceSportScope;
+    if (!originalScope) throw new Error('Original source sport scope was not retained.');
+
+    const inheritedInput = {
+      ...state.input,
+      gatewayJobIds: [firstChildId],
+      reason: 'Retry the inherited source scope with a different current reason.',
+      excludedSourceLabels: ['Dance'],
+      operatorId: 'different-current-operator',
+    };
+    const inheritedPreview = await previewAffiliateLegacyRepairRetry(inheritedInput);
+    expect(inheritedPreview.selectedGatewayJobIds).toEqual([firstChildId]);
+    expect(inheritedPreview.rows[0]?.sourceSportScope).toEqual(originalScope);
+    await applyAffiliateLegacyRepairRetry({
+      ...inheritedInput,
+      expectedReportHash: inheritedPreview.reportHash,
+    });
+    const inheritedChildId = completeRetryChild(
+      state,
+      'softball',
+      'claim-original-scope-retry-softball',
+      'claim-inherited-scope-retry-softball',
+      'receipt-inherited-scope-retry-softball',
+    );
+    const inheritedChild = state.gatewayJobs.find((candidate) => candidate.id === inheritedChildId);
+    if (!inheritedChild) throw new Error('Inherited scoped retry child was not created.');
+    const inheritedSubject = inheritedChild.subjectJson as Record<string, unknown>;
+    expect((inheritedSubject.repairContext as Record<string, unknown>).sourceSportScope)
+      .toEqual(originalScope);
+    const mappingJob = state.mappingJobs.find((candidate) => candidate.id === 'mapping-retry-softball');
+    const history = (mappingJob?.resultSummary as Record<string, unknown>)
+      .legacyRepairRetryHistory as Record<string, unknown>[];
+    const inheritedAudit = history.find((entry) => entry.childGatewayJobId === inheritedChildId);
+    expect(inheritedAudit).toMatchObject({
+      operatorId: inheritedInput.operatorId,
+      reason: inheritedInput.reason,
+      sourceSportScope: originalScope,
+    });
+
+    const inheritedClaim = state.gatewayClaims.find((candidate) => candidate.jobId === inheritedChildId);
+    if (!inheritedClaim) throw new Error('Inherited scoped retry claim was not created.');
+    const inheritedClaimEnvelope = inheritedClaim.claimEnvelopeJson;
+    const inheritedClaimIndex = state.gatewayClaims.indexOf(inheritedClaim);
+    const inheritedReceiptIndex = state.gatewayReceipts.findIndex(
+      (candidate) => candidate.jobId === inheritedChildId,
+    );
+    state.gatewayClaims.splice(inheritedClaimIndex, 1);
+    if (inheritedReceiptIndex >= 0) state.gatewayReceipts.splice(inheritedReceiptIndex, 1);
+    Object.assign(inheritedChild, {
+      status: 'QUEUED',
+      activeClaimId: null,
+      claimGeneration: 0,
+      terminalDisposition: null,
+      resultHash: null,
+      resultJson: null,
+      terminalReceiptId: null,
+      finishedAt: null,
+    });
+    await expect(assertAffiliateLegacyRepairScopeClaimBinding({
+      prisma: state.input.prisma,
+      job: inheritedChild,
+      claim: inheritedClaimEnvelope,
+    })).resolves.toBeUndefined();
+    const producerClaim = state.gatewayClaims.find((candidate) => candidate.jobId === firstChildId);
+    const producerReceipt = state.gatewayReceipts.find((candidate) => candidate.jobId === firstChildId);
+    if (!producerClaim || !producerReceipt) throw new Error('Scoped producer records were not created.');
+    const packageHash = 'a'.repeat(64);
+    const producerResult = firstChild.resultJson as Record<string, unknown>;
+    producerResult.disposition = 'PACKAGE_COMMITTED';
+    producerResult.reasonCodes = [];
+    producerResult.payload = {
+      packageHash,
+      commitReceiptId: 'scoped-reviewer-package-commit',
+    };
+    producerResult.summary = 'The scoped producer committed the package for reviewer repair.';
+    firstChild.terminalDisposition = 'PACKAGE_COMMITTED';
+    firstChild.resultHash = hashAffiliateAgentValue(producerResult);
+    const producerResponse = producerReceipt.responseJson as Record<string, unknown>;
+    producerResponse.resultHash = firstChild.resultHash;
+    producerResponse.disposition = 'PACKAGE_COMMITTED';
+    producerReceipt.responseHash = hashAffiliateAgentValue(producerResponse);
+    const deploymentContract = state.input.bundle.deploymentContract;
+    const reviewerRole = AFFILIATE_AGENT_ROLE_CONTRACTS.SUPPLY_REVIEWER;
+    const reviewerPrompt = AFFILIATE_AGENT_PROMPT_TEMPLATES.SUPPLY_REVIEWER;
+    const producerManifest = firstChild.evidenceManifestJson;
+    const producerManifestRecord = producerManifest as Record<string, unknown>;
+    const reviewerJobId = 'gateway-scoped-reviewer-softball';
+    const reviewerClaimId = 'claim-scoped-reviewer-softball';
+    const reviewerReceiptId = 'receipt-scoped-reviewer-softball';
+    const reviewerSubject = {
+      type: 'SUPPLY_REVIEWER' as const,
+      supplySourceId: firstChild.supplySourceId,
+      producerClaimId: producerClaim.id,
+      producerWorkerId: producerClaim.workerId,
+      producerInvocationId: producerClaim.invocationId,
+      producerWorkspaceId: producerClaim.workspaceId,
+      committedPackageHash: packageHash,
+      targetId: 'scoped-reviewer-target',
+      targetType: 'EVENT' as const,
+      reviewPass: 1,
+      repairContext: firstChildContext,
+    };
+    const reviewerEnvelope = {
+      schemaVersion: 1 as const,
+      role: 'SUPPLY_REVIEWER' as const,
+      queue: 'AFFILIATE_REVIEW' as const,
+      lane: 'SUPPLY_REVIEW' as const,
+      jobId: reviewerJobId,
+      claimId: reviewerClaimId,
+      supplySourceId: firstChild.supplySourceId,
+      claimGeneration: 1,
+      lifecycleGeneration: producerClaim.lifecycleGeneration,
+      deploymentContractVersion: deploymentContract.version,
+      deploymentContractHash: deploymentContract.hash,
+      supplyContractVersion: manifest.supplyContract.version,
+      supplyContractHash: manifest.supplyContract.hash,
+      roleContractVersion: reviewerRole.version,
+      roleContractHash: reviewerRole.hash,
+      promptTemplateVersion: reviewerPrompt.version,
+      promptTemplateHash: reviewerPrompt.hash,
+      executionClass: 'PRODUCTION_OMP' as const,
+      workerId: 'scoped-reviewer-worker',
+      invocationId: 'scoped-reviewer-invocation',
+      workspaceId: 'scoped-reviewer-workspace',
+      claimedAt: '2026-08-20T00:10:00.000Z',
+      expiresAt: '2026-08-20T00:30:00.000Z',
+      evidenceManifest: producerManifest,
+      permittedCommands: reviewerRole.permittedCommands,
+      subject: reviewerSubject,
+    };
+    const reviewerResult = {
+      schemaVersion: 1 as const,
+      jobId: reviewerJobId,
+      claimId: reviewerClaimId,
+      claimGeneration: 1,
+      lifecycleGeneration: producerClaim.lifecycleGeneration,
+      deploymentContractVersion: deploymentContract.version,
+      deploymentContractHash: deploymentContract.hash,
+      supplyContractVersion: manifest.supplyContract.version,
+      supplyContractHash: manifest.supplyContract.hash,
+      roleContractVersion: reviewerRole.version,
+      roleContractHash: reviewerRole.hash,
+      promptTemplateVersion: reviewerPrompt.version,
+      promptTemplateHash: reviewerPrompt.hash,
+      workerId: reviewerEnvelope.workerId,
+      invocationId: reviewerEnvelope.invocationId,
+      role: 'SUPPLY_REVIEWER' as const,
+      disposition: 'PRODUCER_REPAIR_REQUIRED' as const,
+      reasonCodes: ['EVIDENCE_VERIFIED'] as const,
+      evidenceRefs: (
+        Array.isArray(producerManifestRecord.entries)
+          ? producerManifestRecord.entries
+          : []
+      ).map((entry) => String((entry as Record<string, unknown>).evidenceRef)),
+      summary: 'The reviewer requested a scoped producer repair.',
+      payload: {
+        committedPackageHash: packageHash,
+        repairIssues: ['VALIDATION_FAILED'] as const,
+      },
+    };
+    const reviewerAccepted = {
+      kind: 'TERMINAL_ACCEPTED' as const,
+      receiptId: reviewerReceiptId,
+      resultHash: hashAffiliateAgentValue(reviewerResult),
+      disposition: reviewerResult.disposition,
+      completedAt: '2026-08-20T00:11:00.000Z',
+    };
+    const reviewerJob = {
+      id: reviewerJobId,
+      dedupeKey: `mapping-review:${reviewerClaimId}`,
+      queue: 'AFFILIATE_REVIEW',
+      lane: 'SUPPLY_REVIEW',
+      role: 'SUPPLY_REVIEWER',
+      subjectType: 'SUPPLY_REVIEWER',
+      subjectId: firstChild.supplySourceId,
+      parentClaimId: producerClaim.id,
+      subjectJson: reviewerSubject,
+      evidenceManifestJson: producerManifest,
+      supplySourceId: firstChild.supplySourceId,
+      expectedLifecycleGeneration: producerClaim.lifecycleGeneration,
+      status: 'COMPLETED',
+      activeClaimId: null,
+      claimGeneration: 1,
+      terminalDisposition: reviewerResult.disposition,
+      resultHash: hashAffiliateAgentValue(reviewerResult),
+      resultJson: reviewerResult,
+      terminalReceiptId: reviewerReceiptId,
+      finishedAt: new Date('2026-08-20T00:11:00Z'),
+    };
+    const reviewerClaim = {
+      id: reviewerClaimId,
+      jobId: reviewerJobId,
+      parentClaimId: producerClaim.id,
+      claimGeneration: 1,
+      lifecycleGeneration: producerClaim.lifecycleGeneration,
+      queue: 'AFFILIATE_REVIEW',
+      lane: 'SUPPLY_REVIEW',
+      role: 'SUPPLY_REVIEWER',
+      workerId: reviewerEnvelope.workerId,
+      invocationId: reviewerEnvelope.invocationId,
+      workspaceId: reviewerEnvelope.workspaceId,
+      status: 'COMPLETED',
+      deploymentContractVersion: deploymentContract.version,
+      deploymentContractHash: deploymentContract.hash,
+      roleContractVersion: reviewerRole.version,
+      roleContractHash: reviewerRole.hash,
+      promptTemplateVersion: reviewerPrompt.version,
+      promptTemplateHash: reviewerPrompt.hash,
+      supplyContractVersion: manifest.supplyContract.version,
+      supplyContractHash: manifest.supplyContract.hash,
+      claimEnvelopeHash: hashAffiliateAgentValue(reviewerEnvelope),
+      claimEnvelopeJson: reviewerEnvelope,
+      evidenceManifestHash: producerManifestRecord.hash,
+      terminalReceiptId: reviewerReceiptId,
+    };
+    const reviewerReceipt = {
+      id: reviewerReceiptId,
+      claimId: reviewerClaimId,
+      jobId: reviewerJobId,
+      claimGeneration: 1,
+      idempotencyKey: 'submit-scoped-reviewer-softball',
+      operationKind: 'SUBMIT_RESULT',
+      commandName: null,
+      requestHash: 'c'.repeat(64),
+      status: 'SUCCEEDED',
+      responseHash: hashAffiliateAgentValue(reviewerAccepted),
+      responseJson: reviewerAccepted,
+      safeErrorCode: null,
+      completedAt: new Date('2026-08-20T00:11:00Z'),
+    };
+    const targetJobId = 'gateway-scoped-reviewer-repair-softball';
+    const targetClaimId = 'claim-scoped-reviewer-repair-softball';
+    const targetSubject = {
+      type: 'MAPPING_PRODUCER' as const,
+      supplySourceId: firstChild.supplySourceId,
+      mappingJobId: firstChildSubject.mappingJobId,
+      listingKind: 'CLUB' as const,
+      pass: 2,
+      repairContext: firstChildContext,
+    };
+    const targetEnvelope = {
+      schemaVersion: 1 as const,
+      role: 'MAPPING_PRODUCER' as const,
+      queue: 'AFFILIATE_MAPPING' as const,
+      lane: 'MAPPING_PRODUCTION' as const,
+      jobId: targetJobId,
+      claimId: targetClaimId,
+      supplySourceId: firstChild.supplySourceId,
+      claimGeneration: 1,
+      lifecycleGeneration: reviewerClaim.lifecycleGeneration,
+      deploymentContractVersion: deploymentContract.version,
+      deploymentContractHash: deploymentContract.hash,
+      supplyContractVersion: manifest.supplyContract.version,
+      supplyContractHash: manifest.supplyContract.hash,
+      roleContractVersion: AFFILIATE_AGENT_ROLE_CONTRACTS.MAPPING_PRODUCER.version,
+      roleContractHash: AFFILIATE_AGENT_ROLE_CONTRACTS.MAPPING_PRODUCER.hash,
+      promptTemplateVersion: AFFILIATE_AGENT_PROMPT_TEMPLATES.MAPPING_PRODUCER.version,
+      promptTemplateHash: AFFILIATE_AGENT_PROMPT_TEMPLATES.MAPPING_PRODUCER.hash,
+      executionClass: 'PRODUCTION_OMP' as const,
+      workerId: 'scoped-reviewer-repair-worker',
+      invocationId: 'scoped-reviewer-repair-invocation',
+      workspaceId: 'scoped-reviewer-repair-workspace',
+      claimedAt: '2026-08-20T00:12:00.000Z',
+      expiresAt: '2026-08-20T00:30:00.000Z',
+      evidenceManifest: producerManifest,
+      permittedCommands: AFFILIATE_AGENT_ROLE_CONTRACTS.MAPPING_PRODUCER.permittedCommands,
+      subject: targetSubject,
+    };
+    const targetJob = {
+      id: targetJobId,
+      dedupeKey: `mapping-repair:${producerClaim.id}:${packageHash}:2`,
+      queue: 'AFFILIATE_MAPPING',
+      lane: 'MAPPING_PRODUCTION',
+      role: 'MAPPING_PRODUCER',
+      subjectType: 'MAPPING_PRODUCER',
+      subjectId: firstChildSubject.mappingJobId,
+      parentClaimId: reviewerClaimId,
+      subjectJson: targetSubject,
+      evidenceManifestJson: producerManifest,
+      supplySourceId: firstChild.supplySourceId,
+      expectedLifecycleGeneration: reviewerClaim.lifecycleGeneration,
+      status: 'QUEUED',
+      activeClaimId: null,
+      claimGeneration: 0,
+      terminalDisposition: null,
+      resultHash: null,
+      resultJson: null,
+      terminalReceiptId: null,
+      finishedAt: null,
+    };
+    state.gatewayJobs.push(reviewerJob, targetJob);
+    state.gatewayClaims.push(reviewerClaim);
+    state.gatewayReceipts.push(reviewerReceipt);
+    await expect(assertAffiliateLegacyRepairScopeClaimBinding({
+      prisma: state.input.prisma,
+      job: targetJob,
+      claim: targetEnvelope,
+    })).resolves.toBeUndefined();
+  });
+  it('validates an expanded source scope through each audited predecessor transition', async () => {
+    const state = await retryFixtureWithAdmission();
+    const initialParent = state.gatewayJobs.find((candidate) => candidate.id === 'gateway-parent-softball');
+    if (!initialParent) throw new Error('Initial softball parent was not created.');
+    const initialResult = initialParent.resultJson as Record<string, unknown>;
+    const initialPayload = initialResult.payload as Record<string, unknown>;
+    const initialSubject = initialParent.subjectJson as Record<string, unknown>;
+    const initialContext = initialSubject.repairContext as Record<string, unknown>;
+    const initialManifest = initialParent.evidenceManifestJson as Record<string, unknown>;
+    const initialEntries = Array.isArray(initialManifest.entries)
+      ? initialManifest.entries.map((entry) => entry as Record<string, unknown>)
+      : [];
+    const initialCitationEntry = initialEntries.find((entry) => entry.kind === 'PAGE_MARKDOWN');
+    if (!initialCitationEntry) throw new Error('Initial softball evidence manifest is empty.');
+    const initialResolved = {
+      sourceLabels: ['Grass Soccer'],
+      status: 'RESOLVED' as const,
+      resolutionBasis: 'SOURCE_EVIDENCE' as const,
+      canonicalSportNames: ['Grass Soccer'],
+      rationale: 'The retained source evidence identifies Grass Soccer.',
+      evidence: [{
+        artifactId: String(initialCitationEntry.artifactId),
+        artifactSha256: String(initialCitationEntry.sha256),
+        artifactKind: String(initialCitationEntry.kind) as 'PAGE_HTML' | 'PAGE_MARKDOWN',
+        pageUrl: 'https://softball.example.test',
+        excerpt: 'Grass Soccer',
+      }],
+    };
+    const initialEvidence = {
+      evidenceRunId: String(initialContext.evidenceRunId),
+      sportsCatalogSha256: String((initialContext.sportsCatalog as Record<string, unknown>).sha256),
+      sportDeterminations: [initialResolved],
+    };
+    initialPayload.sportEvidence = initialEvidence;
+    const initialDeterminations = initialEvidence.sportDeterminations as Record<string, unknown>[];
+    const initialCitations = initialResolved.evidence as Record<string, unknown>[];
+    initialDeterminations.splice(0, initialDeterminations.length,
+      {
+        ...initialResolved,
+        sourceLabels: ['Dance'],
+        status: 'BLACKLISTED',
+        resolutionBasis: 'SOURCE_EVIDENCE',
+        canonicalSportNames: [],
+        rationale: 'The source activity is on the affiliate Dance blacklist.',
+        evidence: initialCitations.map((citation) => ({ ...citation })),
+      },
+      initialResolved,
+    );
+    (initialResult.reasonCodes as string[]).splice(0, (initialResult.reasonCodes as string[]).length, 'SPORT_BLACKLISTED');
+    initialParent.resultHash = hashAffiliateAgentValue(initialResult);
+    const initialReceipt = state.gatewayReceipts.find((candidate) => candidate.jobId === initialParent.id);
+    if (!initialReceipt) throw new Error('Initial softball receipt was not created.');
+    const initialResponse = initialReceipt.responseJson as Record<string, unknown>;
+    initialResponse.resultHash = initialParent.resultHash;
+    initialReceipt.responseHash = hashAffiliateAgentValue(initialResponse);
+
+    const firstScopeInput = {
+      ...state.input,
+      gatewayJobIds: [initialParent.id],
+      reason: 'Authorize the first source scope transition.',
+      excludedSourceLabels: ['Dance'],
+      operatorId: 'tph-operator',
+    };
+    const firstPreview = await previewAffiliateLegacyRepairRetry(firstScopeInput);
+    await applyAffiliateLegacyRepairRetry({
+      ...firstScopeInput,
+      expectedReportHash: firstPreview.reportHash,
+    });
+    const firstChildId = completeRetryChild(state, 'softball');
+    const firstChild = state.gatewayJobs.find((candidate) => candidate.id === firstChildId);
+    if (!firstChild) throw new Error('First scoped retry child was not created.');
+    const firstResult = firstChild.resultJson as Record<string, unknown>;
+    const firstPayload = firstResult.payload as Record<string, unknown>;
+    const firstEvidence = firstPayload.sportEvidence as Record<string, unknown>;
+    const firstDeterminations = firstEvidence.sportDeterminations as Record<string, unknown>[];
+    const firstResolved = firstDeterminations[0];
+    if (!firstResolved) throw new Error('First scoped sport determination was not created.');
+    const firstCitations = firstResolved.evidence as Record<string, unknown>[];
+    firstDeterminations.push({
+      ...firstResolved,
+      sourceLabels: ['Martial Arts'],
+      status: 'UNSUPPORTED',
+      resolutionBasis: 'SOURCE_EVIDENCE',
+      canonicalSportNames: [],
+      rationale: 'The source activity is outside the retained catalog.',
+      evidence: firstCitations.map((citation) => ({ ...citation })),
+    });
+    (firstResult.reasonCodes as string[]).splice(
+      0,
+      (firstResult.reasonCodes as string[]).length,
+      'SPORT_NOT_IN_CATALOG',
+    );
+    firstChild.resultHash = hashAffiliateAgentValue(firstResult);
+    const firstReceipt = state.gatewayReceipts.find((candidate) => candidate.jobId === firstChild.id);
+    if (!firstReceipt) throw new Error('First scoped retry receipt was not created.');
+    const firstResponse = firstReceipt.responseJson as Record<string, unknown>;
+    firstResponse.resultHash = firstChild.resultHash;
+    firstReceipt.responseHash = hashAffiliateAgentValue(firstResponse);
+
+    const expandedScopeInput = {
+      ...state.input,
+      gatewayJobIds: [firstChildId],
+      reason: 'Authorize the expanded source scope transition.',
+      excludedSourceLabels: ['Dance', 'Martial Arts'],
+      operatorId: 'tph-operator',
+    };
+    const expandedPreview = await previewAffiliateLegacyRepairRetry(expandedScopeInput);
+    expect(expandedPreview.selectedGatewayJobIds).toEqual([firstChildId]);
+    const expandedScope = expandedPreview.rows[0]?.sourceSportScope;
+    if (!expandedScope) throw new Error('Expanded source scope was not created.');
+    await applyAffiliateLegacyRepairRetry({
+      ...expandedScopeInput,
+      expectedReportHash: expandedPreview.reportHash,
+    });
+    const expandedChildId = completeRetryChild(
+      state,
+      'softball',
+      'claim-retry-softball',
+      'claim-expanded-retry-softball',
+      'receipt-expanded-retry-softball',
+    );
+    const expandedChild = state.gatewayJobs.find((candidate) => candidate.id === expandedChildId);
+    const expandedClaim = state.gatewayClaims.find((candidate) => candidate.jobId === expandedChildId);
+    if (!expandedChild || !expandedClaim) throw new Error('Expanded retry child claim was not created.');
+    const expandedClaimEnvelope = expandedClaim.claimEnvelopeJson;
+    const expandedClaimIndex = state.gatewayClaims.indexOf(expandedClaim);
+    const expandedReceiptIndex = state.gatewayReceipts.findIndex(
+      (candidate) => candidate.jobId === expandedChildId,
+    );
+    state.gatewayClaims.splice(expandedClaimIndex, 1);
+    if (expandedReceiptIndex >= 0) state.gatewayReceipts.splice(expandedReceiptIndex, 1);
+    Object.assign(expandedChild, {
+      status: 'QUEUED',
+      activeClaimId: null,
+      claimGeneration: 0,
+      terminalDisposition: null,
+      resultHash: null,
+      resultJson: null,
+      terminalReceiptId: null,
+      finishedAt: null,
+    });
+    await expect(assertAffiliateLegacyRepairScopeClaimBinding({
+      prisma: state.input.prisma,
+      job: expandedChild,
+      claim: expandedClaimEnvelope,
+    })).resolves.toBeUndefined();
+    const fabricatedRootClaim = state.gatewayClaims.find(
+      (candidate) => candidate.jobId === initialParent.id,
+    );
+    if (!fabricatedRootClaim) throw new Error('Original root claim was not retained.');
+    const fabricatedRootClaimEnvelope = fabricatedRootClaim.claimEnvelopeJson as Record<string, unknown>;
+    const fabricatedRootSubject = fabricatedRootClaimEnvelope.subject as Record<string, unknown>;
+    const originalRootPass = initialSubject.pass;
+    const originalClaimRootPass = fabricatedRootSubject.pass;
+    initialSubject.pass = 2;
+    fabricatedRootSubject.pass = 2;
+    fabricatedRootClaim.claimEnvelopeHash = hashAffiliateAgentValue(fabricatedRootClaimEnvelope);
+    await expect(assertAffiliateLegacyRepairScopeClaimBinding({
+      prisma: state.input.prisma,
+      job: expandedChild,
+      claim: expandedClaimEnvelope,
+    })).rejects.toThrow('original pass-one admission');
+    initialSubject.pass = originalRootPass;
+    fabricatedRootSubject.pass = originalClaimRootPass;
+    fabricatedRootClaim.claimEnvelopeHash = hashAffiliateAgentValue(fabricatedRootClaimEnvelope);
+    const expandedMappingJob = state.mappingJobs.find((candidate) => candidate.id === 'mapping-retry-softball');
+    if (!expandedMappingJob) throw new Error('Expanded retry mapping job was not created.');
+    const expandedSummary = expandedMappingJob.resultSummary as Record<string, unknown>;
+    const expandedHistory = expandedSummary.legacyRepairRetryHistory as Record<string, unknown>[];
+    const expandedAudit = expandedHistory.find((candidate) => candidate.childGatewayJobId === expandedChildId);
+    if (!expandedAudit) throw new Error('Expanded retry audit was not created.');
+    const expandedReport = expandedAudit.reportSnapshot as Record<string, unknown>;
+    const expandedOriginalReportHash = String(expandedReport.reportHash);
+    const expandedRows = expandedReport.rows as Record<string, unknown>[];
+    const expandedWrites = expandedReport.proposedWrites as Record<string, unknown>[];
+    const expandedRequested = expandedReport.requestedGatewayJobIds as string[];
+    const expandedSelected = expandedReport.selectedGatewayJobIds as string[];
+    const expandedApplied = expandedReport.appliedGatewayJobIds as string[];
+    const expandedCounts = expandedReport.counts as Record<string, unknown>;
+    const extraParentId = 'coerced-inherited-scope-parent';
+    const extraChildId = 'coerced-inherited-scope-child';
+    expandedReport.requestedGatewayJobIds = [...expandedRequested, extraParentId];
+    expandedReport.selectedGatewayJobIds = [...expandedSelected, extraParentId];
+    expandedReport.appliedGatewayJobIds = [...expandedApplied, extraChildId];
+    expandedReport.rows = [
+      ...expandedRows,
+      { ...expandedRows[0], gatewayJobId: extraParentId, childGatewayJobId: extraChildId },
+    ];
+    expandedReport.proposedWrites = [
+      ...expandedWrites,
+      { ...expandedWrites[0], gatewayJobId: extraParentId },
+    ];
+    expandedReport.counts = {
+      ...expandedCounts,
+      total: 2,
+      eligible: 2,
+      held: 0,
+      selected: 2,
+      alreadyRetried: 0,
+    };
+    expandedReport.writeCount = 2;
+    expandedReport.reportHash = calculateAffiliateLegacyRepairRetryReportHash(
+      expandedReport as Parameters<typeof calculateAffiliateLegacyRepairRetryReportHash>[0],
+    );
+    expandedReport.reviewedReportHash = expandedReport.reportHash;
+    expandedAudit.reportHash = expandedReport.reportHash;
+    await expect(assertAffiliateLegacyRepairScopeClaimBinding({
+      prisma: state.input.prisma,
+      job: expandedChild,
+      claim: expandedClaimEnvelope,
+    })).rejects.toThrow('source-scope report');
+    expandedReport.requestedGatewayJobIds = expandedRequested;
+    expandedReport.selectedGatewayJobIds = expandedSelected;
+    expandedReport.appliedGatewayJobIds = expandedApplied;
+    expandedReport.rows = expandedRows;
+    expandedReport.proposedWrites = expandedWrites;
+    expandedReport.counts = expandedCounts;
+    expandedReport.writeCount = expandedWrites.length;
+    expandedReport.reportHash = expandedOriginalReportHash;
+    expandedReport.reviewedReportHash = expandedOriginalReportHash;
+    expandedAudit.reportHash = expandedOriginalReportHash;
+    const firstClaim = state.gatewayClaims.find((candidate) => candidate.jobId === firstChild.id);
+    if (!firstClaim) throw new Error('First scoped retry claim was not retained.');
+    const firstClaimEnvelope = firstClaim.claimEnvelopeJson as Record<string, unknown>;
+    const firstClaimSubject = firstClaimEnvelope.subject as Record<string, unknown>;
+    const firstClaimContext = firstClaimSubject.repairContext as Record<string, unknown>;
+    const firstScope = firstClaimContext.sourceSportScope as Record<string, unknown>;
+    const { hash: _firstScopeHash, ...forgedScopePreimage } = firstScope;
+    const forgedScope = {
+      ...forgedScopePreimage,
+      operatorId: 'forged-operator',
+      hash: hashAffiliateAgentValue({
+        ...forgedScopePreimage,
+        operatorId: 'forged-operator',
+      }),
+    };
+    const firstJobSubject = firstChild.subjectJson as Record<string, unknown>;
+    const firstJobContext = firstJobSubject.repairContext as Record<string, unknown>;
+    firstJobContext.sourceSportScope = forgedScope;
+    firstClaimContext.sourceSportScope = forgedScope;
+    firstClaim.claimEnvelopeHash = hashAffiliateAgentValue(firstClaimEnvelope);
+    await expect(assertAffiliateLegacyRepairScopeClaimBinding({
+      prisma: state.input.prisma,
+      job: expandedChild,
+      claim: expandedClaimEnvelope,
+    })).rejects.toThrow('producer edge');
+  });
 });

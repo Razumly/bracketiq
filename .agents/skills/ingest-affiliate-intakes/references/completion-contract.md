@@ -40,7 +40,7 @@ application code outside the source package.
 
 Inspect at least five candidates when five exist, plus every produced kind. Check title, official URL, schedule/date display, sport, tags, divisions, price, venue, address, city, and coordinates or geocoding inputs.
 
-Every candidate `sportName` and every source-organization sport must equal a
+Every candidate `sportName` or `sportNames` entry and every source-organization sport must equal a
 name in the claim's injected `sportsCatalog` snapshot and be covered by the
 resolved union of v2 `sportDeterminations`. The catalog snapshot is persisted
 by the shared claim/export/context service before evidence inspection. Do not
@@ -70,6 +70,10 @@ Every determination requires exact source labels, rationale, and at least one
 artifact-owned citation. A blacklisted activity remains excluded even if it is
 in the injected catalog. Multiple explicitly evidenced surfaces may resolve
 to multiple names.
+
+For governed source-scope repairs, follow the `sourceSportScope` and plural
+sport-field rules in the main skill. The package scope hash and complete
+retained sport union must match the claim at validation and commit.
 
 Resolve organization location separately from event location. A missing street
 address is not an organization defect when first-party content, stored intake

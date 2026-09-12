@@ -1522,10 +1522,15 @@ const candidateSportNames = (candidate: AffiliateCandidateRecord): string[] => {
   const extracted = rawExtractedCandidateFields(candidate);
   const rawPayload = recordValue(candidate?.rawPayload);
   const normalizedImport = recordValue(rawPayload.normalizedImport);
+  const persistedSportNames = Array.isArray(rawPayload.sportNames)
+    ? rawPayload.sportNames
+    : Array.isArray(normalizedImport.sportNames)
+      ? normalizedImport.sportNames
+      : extracted.sportNames;
   const names = normalizeAffiliateSportNames(
-    candidate?.sportNames ??
-      extracted.sportNames ??
-      normalizedImport.sportNames,
+    Array.isArray(candidate?.sportNames)
+      ? candidate.sportNames
+      : persistedSportNames,
   );
   const primary =
     nullableString(candidate?.sportName) ?? nullableString(extracted.sportName);
@@ -5420,7 +5425,9 @@ const affiliateCandidateInvalidSportMapping = (
   return (
     sportNames.length === 0 ||
     sportIds.some((sportId) => !sportId) ||
-    (sportNames.length > 1 && !isMultiSportEventType(inferredEventType))
+    (candidate.listingKind !== "CLUB" &&
+      sportNames.length > 1 &&
+      !isMultiSportEventType(inferredEventType))
   );
 };
 

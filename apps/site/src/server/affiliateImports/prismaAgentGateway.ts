@@ -66,6 +66,10 @@ import {
   assertAffiliateSourceExclusionExecutionReady,
 } from "./affiliateSourceExclusionAdmission";
 import {
+  AffiliateLegacyRepairAdmissionError,
+  assertAffiliateLegacyRepairScopeClaimBinding,
+} from "./affiliateLegacyRepairAdmission";
+import {
   AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX,
   AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX,
   AFFILIATE_AGENT_SOURCE_EXCLUSION_REVIEWER_PREFIX,
@@ -2540,6 +2544,23 @@ const persistClaim = async (
     claimId,
     timing,
   );
+  if (envelope.subject.type === "MAPPING_PRODUCER") {
+    try {
+      await assertAffiliateLegacyRepairScopeClaimBinding({
+        prisma: transaction,
+        job,
+        claim: envelope,
+      });
+    } catch (error) {
+      if (error instanceof AffiliateLegacyRepairAdmissionError) {
+        throw gatewayError(
+          "REVIEW_WORKSPACE_INVALID",
+          "The scoped legacy repair claim binding is invalid.",
+        );
+      }
+      throw error;
+    }
+  }
   if (envelope.subject.type === "SOURCE_EXCLUSION_REVIEW") {
     await assertSourceExclusionClaimBinding({
       prisma: transaction,

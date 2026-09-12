@@ -274,6 +274,13 @@ one-to-one coverage of any authenticated human resolution. Live execution is
 reachable only inside validated approval completion; the removed standalone
 apply command, operator id, or claimed approval row is not authority.
 
+For a governed claim with `repairContext.sourceSportScope`, verify the exact
+scope hash in the committed package. Independently verify all retained sports
+against the original first-party evidence. Reject reintroduced excluded
+activities, unsupported variants, or an incomplete retained sport union.
+Keep the authenticated scope unchanged. It is source selection, not a catalog
+change, canonical sport decision, or authority to exclude the whole source.
+
 The reconciliation command is dry-run-first, count/hash guarded, bounded,
 same-job and idempotent. It never infers a sport or writes candidates. Before
 any reconciliation apply or queue restart, stop and preflight all ten

@@ -2,14 +2,19 @@ import { createId } from '@/lib/id';
 import { Prisma, type PrismaClient } from '@/generated/prisma/client';
 import {
   affiliateAgentContractBundleSchema,
+  affiliateAgentClaimEnvelopeSchema,
   affiliateAgentHistoricalMappingProducerSubjectSchema,
   affiliateAgentTerminalResultEnvelopeSchema,
   affiliateAgentEvidenceManifestSchema,
   affiliateAgentSportEvidenceSchema,
+  affiliateAgentSourceSportScopeLabelsSchema,
+  affiliateAgentSourceSportScopeSchema,
   affiliateAgentSubjectSchema,
   affiliateAgentQueuedMappingProducerSubjectSchema,
   parseAffiliateAgentProducerClaimEnvelopeForHistoricalRead,
   type AffiliateAgentProducerClaimEnvelopeForHistoricalRead,
+  type AffiliateAgentSourceSportScope,
+  type AffiliateAgentSportEvidence,
   type AffiliateAgentTerminalResultEnvelope,
   type AffiliateAgentContractBundle,
   type AffiliateAgentHistoricalMappingProducerSubject,
@@ -30,6 +35,7 @@ import {
   type AffiliateSupplyIdentity,
 } from './affiliateSupplyLifecycle';
 import {
+  normalizeAffiliateSportLabel,
   verifyAffiliateSportCompletion,
   type AffiliateSportCompletionStoredArtifact,
 } from './affiliateSportDetermination';
@@ -199,6 +205,7 @@ export type AffiliateLegacyRepairRetryWrite = Readonly<{
   manifestHash: string;
   manifest: Readonly<Record<string, unknown>>;
   artifactIds: readonly string[];
+  sourceSportScope?: AffiliateAgentSourceSportScope;
   gatewayDedupeKey: string;
   writes: readonly string[];
 }>;
@@ -224,6 +231,7 @@ export type AffiliateLegacyRepairRetryRow = Readonly<{
   sportsCatalogCapturedAt: string | null;
   stateFingerprint: string;
   artifacts: readonly AffiliateLegacyRepairAdmissionArtifact[];
+  sourceSportScope?: AffiliateAgentSourceSportScope;
   gatewayDedupeKey: string | null;
   childGatewayJobId: string | null;
   eligible: boolean;
@@ -273,7 +281,6 @@ export type AffiliateLegacyRepairRetryReport = Readonly<{
 export type AffiliateLegacyRepairRetryPreview = AffiliateLegacyRepairRetryReport & {
   mode: 'PREVIEW';
 };
-
 export type AffiliateLegacyRepairRetryApplyReport = AffiliateLegacyRepairRetryReport & {
   mode: 'APPLY';
 };
@@ -282,6 +289,8 @@ export type PreviewAffiliateLegacyRepairRetryInput = Readonly<{
   bundle: AffiliateAgentContractBundle;
   gatewayJobIds: readonly string[];
   reason: string;
+  excludedSourceLabels?: readonly string[];
+  operatorId?: string;
   artifactStore?: AffiliateAgentArtifactStore;
 }>;
 
@@ -290,6 +299,7 @@ export type ApplyAffiliateLegacyRepairRetryInput = Readonly<{
   bundle: AffiliateAgentContractBundle;
   gatewayJobIds: readonly string[];
   reason: string;
+  excludedSourceLabels?: readonly string[];
   expectedReportHash: string;
   operatorId: string;
   artifactStore?: AffiliateAgentArtifactStore;
@@ -329,6 +339,7 @@ export type AffiliateLegacyRepairContinuationWrite = Readonly<{
   repairContext: Readonly<Record<string, unknown>>;
   manifestHash: string;
   manifest: Readonly<Record<string, unknown>>;
+  sourceSportScope?: AffiliateAgentSourceSportScope;
   artifactIds: readonly string[];
   producerDedupeKey: string;
   reviewerDedupePrefix: string;
@@ -356,6 +367,7 @@ export type AffiliateLegacyRepairContinuationRow = Readonly<{
   sportsCatalogCapturedAt: string | null;
   stateFingerprint: string;
   artifacts: readonly AffiliateLegacyRepairAdmissionArtifact[];
+  sourceSportScope?: AffiliateAgentSourceSportScope;
   producerDedupeKey: string | null;
   reviewerDedupePrefix: string;
   childGatewayJobId: string | null;
@@ -1460,6 +1472,7 @@ const productionAdmissionEvidenceMatches = (input: Readonly<{
   artifacts: readonly ArtifactRow[];
   ancestor: RetryParentParts;
   manifest: Record<string, unknown>;
+  expectedRootLifecycleGeneration?: number;
 }>): boolean => {
   const entry = input.entry;
   const report = recordValue(entry.reportSnapshot);
@@ -1530,7 +1543,9 @@ const productionAdmissionEvidenceMatches = (input: Readonly<{
       Object.fromEntries(Object.entries(selectedRow).filter(([key]) => key !== 'outcome')),
     )
     && entry.rootId === input.root.id
-    && entry.rootLifecycleGeneration === input.root.lifecycleGeneration
+    && entry.rootLifecycleGeneration === (
+      input.expectedRootLifecycleGeneration ?? input.root.lifecycleGeneration
+    )
     && entry.sourceId === input.source.id
     && entry.mappingId === (input.mapping?.id ?? null)
     && entry.evidenceRunId === input.run.id
@@ -1697,6 +1712,9 @@ const stableRepairContext = (value: unknown): unknown => {
       sha256: catalog.sha256,
       sports: catalog.sports,
     },
+    ...(context.sourceSportScope === undefined
+      ? {}
+      : { sourceSportScope: context.sourceSportScope }),
   };
 };
 
@@ -1725,17 +1743,16 @@ const sameRetryLineageContext = (left: unknown, right: unknown): boolean => {
     },
   );
 };
-const retryHistoricalSportEvidenceValid = async (
+const retryHistoricalSportEvidenceFor = async (
   parent: RetryParentParts,
   artifactStore?: AffiliateAgentArtifactStore,
-): Promise<boolean> => {
-  if (parent.claim.roleContractVersion < 3) return true;
+): Promise<AffiliateAgentSportEvidence | null> => {
   const sportEvidence = affiliateAgentSportEvidenceSchema.safeParse(
     recordValue(parent.result.payload).sportEvidence,
   );
-  if (!sportEvidence.success || sportEvidence.data.sportDeterminations.length === 0 || !artifactStore) return false;
+  if (!sportEvidence.success || sportEvidence.data.sportDeterminations.length === 0 || !artifactStore) return null;
   const manifest = affiliateAgentEvidenceManifestSchema.safeParse(parent.gatewayJob.evidenceManifestJson);
-  if (!manifest.success) return false;
+  if (!manifest.success) return null;
   const evidenceRefs = new Set(parent.result.evidenceRefs);
   const artifacts: AffiliateSportCompletionStoredArtifact[] = [];
   const loaded = new Set<string>();
@@ -1747,7 +1764,7 @@ const retryHistoricalSportEvidenceValid = async (
           candidate.artifactId === citation.artifactId
           && candidate.kind === citation.artifactKind
         ));
-        if (!entry || !evidenceRefs.has(entry.evidenceRef)) return false;
+        if (!entry || !evidenceRefs.has(entry.evidenceRef)) return null;
         if (loaded.has(key)) continue;
         loaded.add(key);
         const artifact = await artifactStore.readImmutable({
@@ -1805,10 +1822,18 @@ const retryHistoricalSportEvidenceValid = async (
         ))).sort()
         : undefined,
     });
-    return true;
+    return sportEvidence.data;
   } catch {
-    return false;
+    return null;
   }
+};
+
+const retryHistoricalSportEvidenceValid = async (
+  parent: RetryParentParts,
+  artifactStore?: AffiliateAgentArtifactStore,
+): Promise<boolean> => {
+  if (parent.claim.roleContractVersion < 3) return true;
+  return await retryHistoricalSportEvidenceFor(parent, artifactStore) !== null;
 };
 
 
@@ -2928,6 +2953,51 @@ type RetryParentParts = Readonly<{
   subject: LegacyRetryProducerSubject;
   result: AffiliateAgentTerminalResultEnvelope;
 }>;
+type RetryScopeRequest = Readonly<{
+  excludedSourceLabels?: readonly string[];
+  operatorId?: string;
+}>;
+
+type RetryScopeDecision = Readonly<{
+  sourceSportScope?: AffiliateAgentSourceSportScope;
+  hasNewExclusions: boolean;
+  reasonCodes: readonly string[];
+  verifiedParentSportEvidence?: AffiliateAgentSportEvidence | null;
+}>;
+
+const retryExcludedSourceLabels = (
+  value: readonly string[] | undefined,
+): readonly string[] | undefined => {
+  if (value === undefined) return undefined;
+  const parsed = affiliateAgentSourceSportScopeLabelsSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new AffiliateLegacyRepairAdmissionError(
+      'SOURCE_SCOPE_LABELS_INVALID',
+      'excludedSourceLabels must be a sorted, unique, nonempty source activity label set.',
+    );
+  }
+  return parsed.data;
+};
+
+const retryScopeRequestFor = (
+  gatewayJobIds: readonly string[],
+  excludedSourceLabels: readonly string[] | undefined,
+  operatorId: string | undefined,
+): RetryScopeRequest => {
+  if (excludedSourceLabels !== undefined && gatewayJobIds.length !== 1) {
+    throw new AffiliateLegacyRepairAdmissionError(
+      'SOURCE_SCOPE_PARENT_COUNT_INVALID',
+      'A source sport scope must name exactly one parent Gateway job.',
+    );
+  }
+  return {
+    ...(excludedSourceLabels === undefined ? {} : { excludedSourceLabels }),
+    ...(operatorId ? { operatorId } : {}),
+  };
+};
+const retryScopeOperatorId = (value: unknown): string | undefined => (
+  value === undefined ? undefined : stringValue(value) ?? undefined
+);
 
 const retryReason = (value: unknown): string => {
   if (typeof value !== 'string') {
@@ -3180,6 +3250,65 @@ const continuationAuditForParent = (
 ): JsonRecord[] => continuationAuditEntries(mappingJob.resultSummary)
   .filter((entry) => stringValue(entry.parentGatewayJobId) === gatewayJobId);
 
+const retryJobHasPersistedSourceSportScope = (
+  snapshot: RetrySnapshot,
+  gatewayJobId: string,
+): boolean => {
+  const gatewayJob = snapshot.gatewayJobs.find((candidate) => candidate.id === gatewayJobId);
+  if (!gatewayJob) return false;
+  const subject = recordValue(gatewayJob.subjectJson);
+  if (recordValue(subject.repairContext).sourceSportScope !== undefined) {
+    return true;
+  }
+  const scopedClaim = snapshot.gatewayClaims.find((claim) => (
+    claim.jobId === gatewayJobId && claim.claimEnvelopeJson !== undefined
+  ));
+  if (scopedClaim) {
+    const parsedClaim = affiliateAgentClaimEnvelopeSchema.safeParse(scopedClaim.claimEnvelopeJson);
+    if (
+      parsedClaim.success
+      && parsedClaim.data.subject.type === 'MAPPING_PRODUCER'
+      && parsedClaim.data.subject.repairContext?.sourceSportScope !== undefined
+    ) {
+      return true;
+    }
+  }
+  const mappingJobId = stringValue(subject.mappingJobId);
+  const mappingJob = mappingJobId
+    ? snapshot.admission.jobs.find((candidate) => candidate.id === mappingJobId)
+    : null;
+  if (!mappingJob) return false;
+  return [
+    ...retryAuditEntries(mappingJob.resultSummary),
+    ...continuationAuditEntries(mappingJob.resultSummary),
+  ].some((audit) => (
+    (audit.parentGatewayJobId === gatewayJobId || audit.childGatewayJobId === gatewayJobId)
+    && (
+      audit.sourceSportScope !== undefined
+      || recordValue(audit.repairContext).sourceSportScope !== undefined
+    )
+  ));
+};
+
+const assertRetryScopeParentCount = (
+  snapshot: RetrySnapshot,
+  gatewayJobIds: readonly string[],
+  scopeRequest: RetryScopeRequest,
+): void => {
+  if (
+    gatewayJobIds.length > 1
+    && (
+      scopeRequest.excludedSourceLabels !== undefined
+      || gatewayJobIds.some((gatewayJobId) => retryJobHasPersistedSourceSportScope(snapshot, gatewayJobId))
+    )
+  ) {
+    throw new AffiliateLegacyRepairAdmissionError(
+      'SOURCE_SCOPE_PARENT_COUNT_INVALID',
+      'A source sport scope must name exactly one parent Gateway job.',
+    );
+  }
+};
+
 type RetryParentPartsOptions = Readonly<{
   allowPass3?: boolean;
 }>;
@@ -3223,6 +3352,7 @@ const readContinuationSnapshot = async (
 
 type RetryEvaluationOptions = Readonly<{
   mode?: 'RETRY' | 'CONTINUATION';
+  scopeRequest?: RetryScopeRequest;
 }>;
 
 const retryParentPartsFor = (
@@ -3331,9 +3461,11 @@ const retryParentPartsFor = (
         envelope.roleContractVersion >= 4
         && (
           !subject
-          || subject.listingKind === undefined
           || envelope.subject.listingKind === undefined
-          || envelope.subject.listingKind !== subject.listingKind
+          || (
+            subject.listingKind !== undefined
+            && envelope.subject.listingKind !== subject.listingKind
+          )
         )
       ) reasons.push('PARENT_CLAIM_SUBJECT_INVALID');
     }
@@ -3425,6 +3557,199 @@ const retryParentPartsFor = (
     reasonCodes: [],
   };
 };
+const retryScopeAuthorityValid = (
+  snapshot: RetrySnapshot,
+  parent: RetryParentParts,
+): boolean => {
+  const scope = parent.subject.repairContext.sourceSportScope;
+  if (!scope) return true;
+  const parsedScope = affiliateAgentSourceSportScopeSchema.safeParse(scope);
+  if (
+    !parsedScope.success
+    || parsedScope.data.supplySourceId !== parent.subject.supplySourceId
+    || parsedScope.data.intakeId !== parent.subject.repairContext.intakeId
+    || parsedScope.data.evidenceRunId !== parent.subject.repairContext.evidenceRunId
+  ) return false;
+  const authorityJob = snapshot.gatewayJobs.find(
+    (candidate) => candidate.id === parsedScope.data.parentGatewayJobId,
+  );
+  if (
+    !authorityJob
+    || authorityJob.id === parent.gatewayJob.id
+    || authorityJob.supplySourceId !== parsedScope.data.supplySourceId
+    || !retryAncestorGatewayJobIds(snapshot, parent).has(authorityJob.id)
+  ) return false;
+  const authority = retryParentPartsFor(snapshot, authorityJob.id, { allowPass3: true }).parts;
+  if (
+    !authority
+    || authority.gatewayJob.id !== parsedScope.data.parentGatewayJobId
+    || authority.gatewayJob.resultHash !== parsedScope.data.parentResultHash
+    || authority.subject.supplySourceId !== parsedScope.data.supplySourceId
+    || authority.subject.repairContext.intakeId !== parsedScope.data.intakeId
+    || authority.subject.repairContext.evidenceRunId !== parsedScope.data.evidenceRunId
+  ) return false;
+  const mappingJob = snapshot.admission.jobs.find(
+    (candidate) => candidate.id === parent.subject.mappingJobId,
+  );
+  const intake = mappingJob
+    ? snapshot.admission.intakes.find((candidate) => candidate.id === mappingJob.intakeId)
+    : null;
+  if (!mappingJob || !intake) return false;
+  const audits = retryAuditForParent(mappingJob, authority.gatewayJob.id).filter((audit) => (
+    audit.kind === 'LEGACY_SPORT_REPAIR_RETRY'
+    && sameAdmissionValue(audit.sourceSportScope ?? null, parsedScope.data)
+    && sameAdmissionValue(
+      recordValue(audit.repairContext).sourceSportScope ?? null,
+      parsedScope.data,
+    )
+  ));
+  if (audits.length !== 1) return false;
+  const childId = stringValue(audits[0]?.childGatewayJobId);
+  const child = childId
+    ? snapshot.gatewayJobs.find((candidate) => candidate.id === childId) ?? null
+    : null;
+  return child !== null
+    && childId !== null
+    && retryAuditMatchesEdge(
+      snapshot,
+      mappingJob,
+      intake,
+      authority,
+      child,
+      authority.subject.pass + 1,
+    );
+};
+
+const retrySourceSportScopeFor = async (
+  snapshot: RetrySnapshot,
+  parent: RetryParentParts,
+  requestedReason: string,
+  request: RetryScopeRequest,
+  artifactStore?: AffiliateAgentArtifactStore,
+): Promise<RetryScopeDecision> => {
+  const inheritedScope = parent.subject.repairContext.sourceSportScope;
+  const reasons: string[] = [];
+  if (inheritedScope && !retryScopeAuthorityValid(snapshot, parent)) {
+    reasons.push('SOURCE_SCOPE_AUTHORITY_INVALID');
+  }
+  let verifiedParentSportEvidence: AffiliateAgentSportEvidence | null | undefined;
+  if (inheritedScope) {
+    verifiedParentSportEvidence = await retryHistoricalSportEvidenceFor(parent, artifactStore);
+  }
+  const requestedLabels = request.excludedSourceLabels;
+  if (requestedLabels === undefined) {
+    return {
+      ...(inheritedScope ? { sourceSportScope: inheritedScope } : {}),
+      hasNewExclusions: false,
+      reasonCodes: reasons,
+      verifiedParentSportEvidence,
+    };
+  }
+  const inheritedLabelsByKey = new Map(
+    (inheritedScope?.excludedSourceLabels ?? []).map((label) => [
+      normalizeAffiliateSportLabel(label),
+      label,
+    ]),
+  );
+  const requestedLabelKeys = new Set(requestedLabels.map(normalizeAffiliateSportLabel));
+  const inheritedKeys = [...inheritedLabelsByKey.keys()];
+  if (inheritedKeys.some((label) => !requestedLabelKeys.has(label))) {
+    reasons.push('SOURCE_SCOPE_WEAKENED');
+  }
+  const newLabels = requestedLabels.filter(
+    (label) => !inheritedLabelsByKey.has(normalizeAffiliateSportLabel(label)),
+  );
+  if (newLabels.length === 0) {
+    return {
+      ...(inheritedScope ? { sourceSportScope: inheritedScope } : {}),
+      hasNewExclusions: false,
+      reasonCodes: reasons,
+      verifiedParentSportEvidence,
+    };
+  }
+  if (verifiedParentSportEvidence === undefined) {
+    verifiedParentSportEvidence = await retryHistoricalSportEvidenceFor(parent, artifactStore);
+  }
+  if (!verifiedParentSportEvidence) {
+    reasons.push('SOURCE_SCOPE_EVIDENCE_INVALID');
+  } else {
+    const effectiveLabelKeys = new Set([
+      ...inheritedKeys,
+      ...requestedLabels.map(normalizeAffiliateSportLabel),
+    ]);
+    const newLabelKeys = new Set(newLabels.map(normalizeAffiliateSportLabel));
+    const coveredNewLabels = new Set<string>();
+    for (const determination of verifiedParentSportEvidence.sportDeterminations) {
+      const determinationLabelKeys = determination.sourceLabels.map(normalizeAffiliateSportLabel);
+      const matchingNewLabels = determinationLabelKeys.filter((label) => newLabelKeys.has(label));
+      if (matchingNewLabels.length === 0) {
+        if (
+          determination.status === 'RESOLVED'
+          && determination.canonicalSportNames.some((name) => newLabelKeys.has(normalizeAffiliateSportLabel(name)))
+        ) {
+          reasons.push('SOURCE_SCOPE_RESOLVED_LABEL');
+        }
+        continue;
+      }
+      if (determination.status === 'RESOLVED') {
+        reasons.push('SOURCE_SCOPE_RESOLVED_LABEL');
+      }
+      if (determination.resolutionBasis !== 'SOURCE_EVIDENCE') {
+        reasons.push('SOURCE_SCOPE_USER_DECISION');
+      }
+      if (determinationLabelKeys.some((label) => !effectiveLabelKeys.has(label))) {
+        reasons.push('SOURCE_SCOPE_DETERMINATION_SPLIT');
+      }
+      matchingNewLabels.forEach((label) => coveredNewLabels.add(label));
+    }
+    if (newLabels.some((label) => !coveredNewLabels.has(normalizeAffiliateSportLabel(label)))) {
+      reasons.push('SOURCE_SCOPE_LABEL_NOT_VERIFIED');
+    }
+  }
+  const operatorId = request.operatorId;
+  if (!operatorId) reasons.push('SOURCE_SCOPE_OPERATOR_REQUIRED');
+  const parentResultHash = normalizeHash(parent.gatewayJob.resultHash);
+  if (!parentResultHash) reasons.push('SOURCE_SCOPE_PARENT_RESULT_HASH_INVALID');
+  const canBuild = reasons.length === 0 && operatorId && parentResultHash;
+  if (!canBuild) {
+    return {
+      ...(inheritedScope ? { sourceSportScope: inheritedScope } : {}),
+      hasNewExclusions: false,
+      reasonCodes: reasons,
+      verifiedParentSportEvidence,
+    };
+  }
+  const labelByKey = new Map<string, string>();
+  for (const label of inheritedScope?.excludedSourceLabels ?? []) {
+    labelByKey.set(normalizeAffiliateSportLabel(label), label);
+  }
+  for (const label of requestedLabels) {
+    labelByKey.set(normalizeAffiliateSportLabel(label), label);
+  }
+  const excludedSourceLabels = [...labelByKey.values()].sort();
+  const preimage = {
+    schemaVersion: 1 as const,
+    supplySourceId: parent.subject.supplySourceId,
+    intakeId: parent.subject.repairContext.intakeId,
+    evidenceRunId: parent.subject.repairContext.evidenceRunId,
+    parentGatewayJobId: parent.gatewayJob.id,
+    parentResultHash,
+    excludedSourceLabels,
+    operatorId,
+    reason: requestedReason,
+  };
+  const sourceSportScope = affiliateAgentSourceSportScopeSchema.parse({
+    ...preimage,
+    hash: hashAffiliateAgentValue(preimage),
+  });
+  return {
+    sourceSportScope,
+    hasNewExclusions: true,
+    reasonCodes: reasons,
+    verifiedParentSportEvidence,
+  };
+};
+
 
 const retryParentLineageValid = (
   snapshot: RetrySnapshot,
@@ -3537,6 +3862,7 @@ const retryDeterministicRow = (
   sportsCatalogSha256: row.sportsCatalogSha256,
   stateFingerprint: row.stateFingerprint,
   artifacts: row.artifacts,
+  ...(row.sourceSportScope ? { sourceSportScope: row.sourceSportScope } : {}),
   gatewayDedupeKey: row.gatewayDedupeKey,
   write: row.write ?? null,
 });
@@ -3640,17 +3966,38 @@ const retryAuditMatchesEdge = (
   const expectedChildDedupeKey = retryDedupeKeyFor(parent.gatewayJob.id);
   const reportRequestedGatewayJobIds = stringArrayValue(report.requestedGatewayJobIds);
   const reportSelectedGatewayJobIds = stringArrayValue(report.selectedGatewayJobIds);
+  const auditScope = recordValue(audit.repairContext).sourceSportScope;
+  const parentScope = parent.subject.repairContext.sourceSportScope;
+  const parentScopeLabels = new Set(
+    parentScope?.excludedSourceLabels.map(normalizeAffiliateSportLabel) ?? [],
+  );
+  const parsedAuditScope = affiliateAgentSourceSportScopeSchema.safeParse(auditScope);
+  const auditScopeLabels = new Set(
+    parsedAuditScope.success
+      ? parsedAuditScope.data.excludedSourceLabels.map(normalizeAffiliateSportLabel)
+      : [],
+  );
+  const meaningfulSourceScopeChange = parsedAuditScope.success
+    && parsedAuditScope.data.supplySourceId === parent.subject.supplySourceId
+    && parsedAuditScope.data.intakeId === parent.subject.repairContext.intakeId
+    && parsedAuditScope.data.evidenceRunId === parent.subject.repairContext.evidenceRunId
+    && parsedAuditScope.data.parentGatewayJobId === parent.gatewayJob.id
+    && normalizeHash(parsedAuditScope.data.parentResultHash) === normalizeHash(parent.gatewayJob.resultHash)
+    && [...auditScopeLabels].some((label) => !parentScopeLabels.has(label));
   const reportAppliedGatewayJobIds = stringArrayValue(report.appliedGatewayJobIds);
   const reportCounts = recordValue(report.counts);
   const reportRowChildIds = reportRows.map((row) => row.childGatewayJobId);
   const reportShapeValid = report.mode === 'APPLY'
     && report.reportHash === reportHash
     && report.reviewedReportHash === reportHash
-    && report.replayed === false
-    && stringValue(report.reason) !== null
+    && (
+      (
+        report.deploymentContractVersion !== parent.claim.deploymentContractVersion
+        && report.deploymentContractHash !== parent.claim.deploymentContractHash
+      )
+      || meaningfulSourceScopeChange
+    )
     && stringValue(report.reason) === stringValue(audit.reason)
-    && report.deploymentContractVersion !== parent.claim.deploymentContractVersion
-    && report.deploymentContractHash !== parent.claim.deploymentContractHash
     && report.contractVersion === parent.claim.supplyContractVersion
     && report.contractHash === parent.claim.supplyContractHash
     && reportRequestedGatewayJobIds !== null
@@ -3713,6 +4060,15 @@ const retryAuditMatchesEdge = (
     && audit.mappingId === reportWrite.mappingId
     && audit.evidenceRunId === parent.subject.repairContext.evidenceRunId
     && sameRepairContext(audit.repairContext, childSubject.repairContext)
+    && sameAdmissionValue(
+      audit.sourceSportScope ?? null,
+      recordValue(audit.repairContext).sourceSportScope ?? null,
+    )
+    && sameAdmissionValue(reportRow.sourceSportScope ?? null, reportWrite.sourceSportScope ?? null)
+    && sameAdmissionValue(
+      reportWrite.sourceSportScope ?? null,
+      recordValue(audit.repairContext).sourceSportScope ?? null,
+    )
     && sameRetryLineageContext(audit.repairContext, parent.subject.repairContext)
     && audit.rootId === parent.subject.supplySourceId
     && audit.rootLifecycleGeneration === parent.claim.lifecycleGeneration
@@ -3803,6 +4159,7 @@ const continuationDeterministicRow = (
   sportsCatalogSha256: row.sportsCatalogSha256,
   stateFingerprint: row.stateFingerprint,
   artifacts: row.artifacts,
+  ...(row.sourceSportScope ? { sourceSportScope: row.sourceSportScope } : {}),
   producerDedupeKey: row.producerDedupeKey,
   reviewerDedupePrefix: row.reviewerDedupePrefix,
   write: row.write ?? null,
@@ -3916,6 +4273,14 @@ const retryAuditedChildMatches = (
     && parsedSubject.supplySourceId === root.id
     && parsedSubject.pass === retryPass
     && sameAdmissionValue(parsedSubject.repairContext, audit.repairContext)
+    && sameAdmissionValue(
+      audit.sourceSportScope ?? null,
+      recordValue(audit.repairContext).sourceSportScope ?? null,
+    )
+    && sameAdmissionValue(
+      reportWrite?.sourceSportScope ?? null,
+      recordValue(audit.repairContext).sourceSportScope ?? null,
+    )
     && sameAdmissionValue(child.evidenceManifestJson, manifest);
 };
 const continuationLimitsValid = (
@@ -4037,6 +4402,11 @@ const continuationAuditedChildMatches = (
     && write.evidenceRunId === parent.subject.repairContext.evidenceRunId
     && write.sportsCatalogSha256 === row.sportsCatalogSha256
     && sameRepairContext(write.repairContext, parent.subject.repairContext)
+    && sameAdmissionValue(row.sourceSportScope ?? null, write.sourceSportScope ?? null)
+    && sameAdmissionValue(
+      write.sourceSportScope ?? null,
+      recordValue(audit.repairContext).sourceSportScope ?? null,
+    )
     && write.manifestHash === manifest.hash
     && parsedManifest.success
     && sameAdmissionValue(
@@ -4076,6 +4446,10 @@ const continuationAuditedChildMatches = (
     && audit.evidenceRunId === parent.subject.repairContext.evidenceRunId
     && sameRepairContext(audit.repairContext, childSubject?.repairContext)
     && sameRepairContext(audit.repairContext, parent.subject.repairContext)
+    && sameAdmissionValue(
+      audit.sourceSportScope ?? null,
+      recordValue(audit.repairContext).sourceSportScope ?? null,
+    )
     && sameAdmissionValue(audit.manifest, manifest)
     && sameAdmissionValue(child.evidenceManifestJson, manifest)
     && child.role === 'MAPPING_PRODUCER'
@@ -4116,8 +4490,28 @@ const retryEvaluateJob = async (
   if (continuation && parent.subject.pass !== 3) {
     reasons.push('CONTINUATION_PARENT_PASS_INVALID');
   }
-  if (!await retryHistoricalSportEvidenceValid(parent, artifactStore)) {
+  const scopeDecision = await retrySourceSportScopeFor(
+    snapshot,
+    parent,
+    requestedReason,
+    options.scopeRequest ?? {},
+    artifactStore,
+  );
+  reasons.push(...scopeDecision.reasonCodes);
+  const historicalSportEvidenceValid = scopeDecision.verifiedParentSportEvidence !== undefined
+    ? scopeDecision.verifiedParentSportEvidence !== null
+    : await retryHistoricalSportEvidenceValid(parent, artifactStore);
+  if (!historicalSportEvidenceValid) {
     reasons.push('PARENT_SPORT_EVIDENCE_INVALID');
+  }
+  if (
+    (
+      parent.claim.deploymentContractVersion === bundle.deploymentContract.version
+      || parent.claim.deploymentContractHash === currentDeploymentContractHash
+    )
+    && !scopeDecision.hasNewExclusions
+  ) {
+    reasons.push('SAME_DEPLOYMENT_RETRY');
   }
   const mappingJob = snapshot.admission.jobs.find((job) => job.id === parent.subject.mappingJobId) ?? null;
   const intake = mappingJob
@@ -4150,10 +4544,6 @@ const retryEvaluateJob = async (
     { allowPass3: continuation },
   )) reasons.push('MALFORMED_PARENT_LINEAGE');
   if (
-    parent.claim.deploymentContractVersion === bundle.deploymentContract.version
-    || parent.claim.deploymentContractHash === currentDeploymentContractHash
-  ) reasons.push('SAME_DEPLOYMENT_RETRY');
-  if (
     parent.claim.supplyContractVersion !== bundle.supplyContract.version
     || parent.claim.supplyContractHash !== bundle.supplyContract.hash
   ) reasons.push('PARENT_SUPPLY_CONTRACT_DRIFT');
@@ -4176,6 +4566,14 @@ const retryEvaluateJob = async (
     if (source) {
       const currentSource = source;
       listingKind = listingKindFor(currentSource.targetKind);
+      const claimListingKind = recordValue(parent.envelope.subject).listingKind;
+      if (
+        !listingKind
+        || parent.claim.roleContractVersion >= 4 && claimListingKind === undefined
+        || claimListingKind !== undefined && claimListingKind !== listingKind
+      ) {
+        reasons.push('PARENT_CLAIM_SUBJECT_INVALID');
+      }
       if (!listingKind) reasons.push('SOURCE_LISTING_KIND_INVALID');
       if (mappingJob.sourceId !== source.id) reasons.push('MAPPING_JOB_SOURCE_IDENTITY_DRIFT');
       const linkedRoot = snapshot.admission.roots.find((candidate) => candidate.id === parent.subject.supplySourceId) ?? null;
@@ -4513,6 +4911,9 @@ const retryEvaluateJob = async (
     intakeId: parent.subject.repairContext.intakeId,
     evidenceRunId: parent.subject.repairContext.evidenceRunId,
     sportsCatalog: currentCatalog,
+    ...(scopeDecision.sourceSportScope
+      ? { sourceSportScope: scopeDecision.sourceSportScope }
+      : {}),
   };
   if (currentCatalog.sports.length === 0 || !HASH_PATTERN.test(currentCatalog.sha256)) {
     reasons.push('CURRENT_SPORTS_CATALOG_INVALID');
@@ -4597,6 +4998,9 @@ const retryEvaluateJob = async (
       artifact.kind as 'PAGE_HTML' | 'PAGE_MARKDOWN',
       mappingJob?.id ?? parent.subject.mappingJobId,
     )).sort((left, right) => left.kind < right.kind ? -1 : left.kind > right.kind ? 1 : 0),
+    ...(scopeDecision.sourceSportScope
+      ? { sourceSportScope: scopeDecision.sourceSportScope }
+      : {}),
     gatewayDedupeKey,
     childGatewayJobId: stringValue(currentAudit?.childGatewayJobId),
   };
@@ -4656,6 +5060,9 @@ const retryEvaluateJob = async (
     manifestHash: String((manifest as Record<string, unknown>).hash),
     manifest,
     artifactIds: artifacts.map((artifact) => `intake-artifact:${artifact.id}`).sort(),
+    ...(scopeDecision.sourceSportScope
+      ? { sourceSportScope: scopeDecision.sourceSportScope }
+      : {}),
     gatewayDedupeKey,
     writes: [
       'AFFILIATE_LEGACY_MAPPING_JOB_QUEUE',
@@ -4728,6 +5135,7 @@ const continuationWriteFor = (
     parentPass: 3,
     continuationPass: 3,
     listingKind: write.listingKind,
+    ...(write.sourceSportScope ? { sourceSportScope: write.sourceSportScope } : {}),
     evidenceRunId: write.evidenceRunId,
     sportsCatalogSha256: write.sportsCatalogSha256,
     currentDeploymentContractHash: write.currentDeploymentContractHash,
@@ -4757,6 +5165,7 @@ const continuationRowFor = (
   parentPass: row.parentPass === null ? null : row.parentPass === 3 ? 3 : null,
   continuationPass: row.retryPass === null ? null : row.retryPass === 3 ? 3 : null,
   parentReceiptId: row.parentReceiptId,
+  ...(row.sourceSportScope ? { sourceSportScope: row.sourceSportScope } : {}),
   parentResultHash: row.parentResultHash,
   parentDeploymentContractHash: row.parentDeploymentContractHash,
   currentDeploymentContractHash: row.currentDeploymentContractHash,
@@ -4900,7 +5309,7 @@ const buildContinuationReport = async (
       reviewerDedupePrefix: AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX,
       reportHash,
       reviewedReportHash: null,
-      writeCount: mode === 'APPLY' && selected ? 1 : 0,
+      writeCount: mode === 'APPLY' ? plans.length : 0,
       appliedGatewayJobIds: [],
       replayed: false,
     },
@@ -4914,14 +5323,23 @@ const buildRetryReport = async (
   requestedReason: string,
   mode: 'PREVIEW' | 'APPLY',
   artifactStore?: AffiliateAgentArtifactStore,
+  scopeRequest: RetryScopeRequest = {},
 ): Promise<{
   report: AffiliateLegacyRepairRetryReport;
   plans: readonly RetryPlan[];
   snapshot: RetrySnapshot;
 }> => {
   const snapshot = await readRetrySnapshot(client, gatewayJobIds);
+  assertRetryScopeParentCount(snapshot, gatewayJobIds, scopeRequest);
   const evaluated = await Promise.all(gatewayJobIds.map((gatewayJobId) => (
-    retryEvaluateJob(snapshot, gatewayJobId, bundle, requestedReason, artifactStore)
+    retryEvaluateJob(
+      snapshot,
+      gatewayJobId,
+      bundle,
+      requestedReason,
+      artifactStore,
+      { scopeRequest },
+    )
   )));
   const rows = evaluated.map(({ row }) => row);
   const allEligible = evaluated.length === gatewayJobIds.length
@@ -5077,6 +5495,8 @@ const applyRetryPlan = async (
     parentReceiptId: plan.parent.receipt.id,
     parentResultHash: plan.parent.gatewayJob.resultHash,
     parentDeploymentContractHash: plan.parent.claim.deploymentContractHash,
+    currentDeploymentContractVersion: reportSnapshot.deploymentContractVersion,
+    currentDeploymentContractHash: reportSnapshot.deploymentContractHash,
     childGatewayJobId,
     childDedupeKey: plan.write.gatewayDedupeKey,
     parentPass: plan.write.parentPass,
@@ -5091,6 +5511,7 @@ const applyRetryPlan = async (
     repairContext: plan.parent.freshRepairContext,
     manifest: plan.parent.manifest,
     artifactIds: [...plan.write.artifactIds],
+    ...(plan.write.sourceSportScope ? { sourceSportScope: plan.write.sourceSportScope } : {}),
   };
   const nextMappingSummary = appendRetryAudit(plan.parent.mappingJob.resultSummary, retryAudit);
   const mappingUpdate = await client.affiliateSourceMappingJobs.updateMany({
@@ -5274,6 +5695,7 @@ const applyContinuationPlan = async (
     manifest: plan.write.manifest,
     manifestHash: plan.write.manifestHash,
     artifactIds: [...plan.write.artifactIds],
+    ...(plan.write.sourceSportScope ? { sourceSportScope: plan.write.sourceSportScope } : {}),
     writes: [...plan.write.writes],
   };
   const nextMappingSummary = appendContinuationAudit(
@@ -5556,16 +5978,17 @@ const retryReplayReport = async (
   reasonText: string,
   expectedReportHash: string,
   operatorId: string,
+  scopeRequest: RetryScopeRequest,
   artifactStore?: AffiliateAgentArtifactStore,
 ): Promise<AffiliateLegacyRepairRetryApplyReport | null> => {
   const audits: JsonRecord[] = [];
+  const scopeDecisions: Array<RetryScopeDecision | null> = [];
   for (const gatewayJobId of gatewayJobIds) {
     const parent = retryParentPartsFor(snapshot, gatewayJobId).parts;
     const mappingJobId = parent?.subject.mappingJobId;
     const mappingJob = mappingJobId
       ? snapshot.admission.jobs.find((job) => job.id === mappingJobId)
       : null;
-    if (parent && !await retryHistoricalSportEvidenceValid(parent, artifactStore)) return null;
     const entries = mappingJob ? retryAuditForParent(mappingJob, gatewayJobId) : [];
     if (entries.length === 0) return null;
     if (entries.length !== 1) {
@@ -5574,8 +5997,33 @@ const retryReplayReport = async (
         'Multiple retry audits exist for one parent Gateway job.',
       );
     }
+    const scopeDecision = parent
+      ? await retrySourceSportScopeFor(snapshot, parent, reasonText, scopeRequest, artifactStore)
+      : null;
+    scopeDecisions.push(scopeDecision);
+    if (
+      parent
+      && (
+        !scopeDecision
+        || scopeDecision.reasonCodes.length > 0
+      )
+    ) return null;
+    if (
+      parent
+      && !(
+        scopeDecision?.verifiedParentSportEvidence !== undefined
+          ? scopeDecision.verifiedParentSportEvidence !== null
+          : await retryHistoricalSportEvidenceValid(parent, artifactStore)
+      )
+    ) return null;
     audits.push(entries[0]);
   }
+  if (audits.some((audit, index) => (
+    !sameAdmissionValue(
+      scopeDecisions[index]?.sourceSportScope ?? null,
+      recordValue(audit.repairContext).sourceSportScope ?? null,
+    )
+  ))) return null;
   const first = audits[0];
   const storedReport = recordValue(first.reportSnapshot);
   const storedRequested = Array.isArray(storedReport.requestedGatewayJobIds)
@@ -5730,11 +6178,1401 @@ const retryReplayReport = async (
   };
 };
 
+export const assertAffiliateLegacyRepairScopeClaimBinding = async (input: Readonly<{
+  prisma: AdmissionClient;
+  job: unknown;
+  claim: unknown;
+}>): Promise<void> => {
+  function reject(message: string): never {
+    throw new AffiliateLegacyRepairAdmissionError(
+      'CLAIM_BINDING_INVALID',
+      message,
+    );
+  }
+  const job = recordValue(input.job);
+  const parsedClaim = affiliateAgentClaimEnvelopeSchema.safeParse(input.claim);
+  if (!parsedClaim.success) reject('The scoped legacy repair claim envelope is invalid.');
+  const envelope = parsedClaim.data;
+  if (envelope.role !== 'MAPPING_PRODUCER' || envelope.subject.type !== 'MAPPING_PRODUCER') {
+    return;
+  }
+  const subject = envelope.subject;
+  const repairContext = subject.repairContext;
+  const dedupeKey = stringValue(job.dedupeKey) ?? '';
+  const legacyRepairLineage = repairContext?.kind === 'LEGACY_SPORT_REPAIR'
+    || dedupeKey.startsWith('legacy-sport-repair-retry:')
+    || dedupeKey.startsWith(AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX)
+    || dedupeKey.startsWith('mapping-repair:');
+  if (!legacyRepairLineage) return;
+  const scope = repairContext?.sourceSportScope;
+  const requiresScopedLineage = scope !== undefined
+    || dedupeKey.startsWith('legacy-sport-repair-retry:')
+    || dedupeKey.startsWith(AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX)
+    || dedupeKey.startsWith('mapping-repair:');
+  if (!requiresScopedLineage) return;
+  const childJobId = stringValue(job.id);
+  const childParentClaimId = stringValue(job.parentClaimId);
+  const queuedChild = affiliateAgentQueuedMappingProducerSubjectSchema.safeParse(job.subjectJson);
+  if (
+    !childJobId
+    || !childParentClaimId
+    || job.role !== 'MAPPING_PRODUCER'
+    || job.subjectType !== 'MAPPING_PRODUCER'
+    || job.queue !== 'AFFILIATE_MAPPING'
+    || job.lane !== 'MAPPING_PRODUCTION'
+    || job.subjectId !== subject.mappingJobId
+    || job.supplySourceId !== subject.supplySourceId
+    || job.parentClaimId !== childParentClaimId
+    || envelope.jobId !== childJobId
+    || envelope.role !== job.role
+    || envelope.queue !== job.queue
+    || envelope.lane !== job.lane
+    || envelope.supplySourceId !== subject.supplySourceId
+    || envelope.lifecycleGeneration !== job.expectedLifecycleGeneration
+    || typeof job.claimGeneration !== 'number'
+    || envelope.claimGeneration !== job.claimGeneration + 1
+    || !queuedChild.success
+    || !sameAdmissionValue(
+      {
+        ...queuedChild.data,
+        ...(subject.listingKind === undefined ? {} : { listingKind: subject.listingKind }),
+      },
+      subject,
+    )
+    || !sameAdmissionValue(job.evidenceManifestJson, envelope.evidenceManifest)
+  ) {
+    reject('The scoped legacy repair claim does not match its Gateway job.');
+  }
+  const mappingJobId = subject.mappingJobId;
+  const mappingJobRaw = await input.prisma.affiliateSourceMappingJobs.findUnique({
+    where: { id: mappingJobId },
+  });
+  const mappingJob = recordValue(mappingJobRaw);
+  const mappingSummary = recordValue(mappingJob.resultSummary);
+  const retryHistory = Array.isArray(mappingSummary.legacyRepairRetryHistory)
+    ? mappingSummary.legacyRepairRetryHistory.map(recordValue)
+    : [];
+  const continuationHistory = Array.isArray(mappingSummary.legacyRepairContinuationHistory)
+    ? mappingSummary.legacyRepairContinuationHistory.map(recordValue)
+    : [];
+  const queuedScope = queuedChild.success
+    ? recordValue(queuedChild.data.repairContext).sourceSportScope
+    : undefined;
+  const childScopeAudit = [...retryHistory, ...continuationHistory].some((audit) => {
+    if (audit.childGatewayJobId !== childJobId) return false;
+    const report = recordValue(audit.reportSnapshot);
+    const reportRows = Array.isArray(report.rows)
+      ? report.rows.map(recordValue)
+      : [];
+    const reportWrites = Array.isArray(report.proposedWrites)
+      ? report.proposedWrites.map(recordValue)
+      : [];
+    const reportHasScope = reportRows.some((row) => row.sourceSportScope !== undefined)
+      || reportWrites.some((write) => write.sourceSportScope !== undefined);
+    return audit.sourceSportScope !== undefined
+      || recordValue(audit.repairContext).sourceSportScope !== undefined
+      || reportHasScope;
+  });
+  const immediateClaimRaw = await input.prisma.affiliateAgentGatewayClaims.findUnique({
+    where: { id: childParentClaimId },
+  });
+  const immediateClaim = recordValue(immediateClaimRaw);
+  const immediateJobId = stringValue(immediateClaim.jobId);
+  const immediateJobRaw = immediateJobId
+    ? await input.prisma.affiliateAgentGatewayJobs.findUnique({
+      where: { id: immediateJobId },
+    })
+    : null;
+  const immediateScope = recordValue(
+    recordValue(immediateJobRaw?.subjectJson).repairContext,
+  ).sourceSportScope;
+  const immediateProducerEnvelope = immediateJobRaw?.role === 'MAPPING_PRODUCER'
+    ? parseAffiliateAgentProducerClaimEnvelopeForHistoricalRead(immediateClaim.claimEnvelopeJson)
+    : null;
+  const immediateReviewerEnvelope = immediateJobRaw?.role === 'SUPPLY_REVIEWER'
+    ? affiliateAgentClaimEnvelopeSchema.safeParse(immediateClaim.claimEnvelopeJson)
+    : null;
+  const immediateClaimEnvelopeData = immediateProducerEnvelope
+    ? recordValue(immediateProducerEnvelope)
+    : immediateReviewerEnvelope?.success
+      ? recordValue(immediateReviewerEnvelope.data)
+      : null;
+  const parsedImmediateClaimContext = immediateClaimEnvelopeData
+    ? recordValue(recordValue(immediateClaimEnvelopeData.subject).repairContext)
+    : undefined;
+  const immediateClaimEnvelopeHash = immediateClaimEnvelopeData
+    ? normalizeHash(hashAffiliateAgentValue(immediateClaimEnvelopeData))
+    : null;
+  const immediateClaimEnvelopeHashMatches = immediateClaimEnvelopeHash !== null
+    && immediateClaimEnvelopeHash === normalizeHash(immediateClaim.claimEnvelopeHash);
+  if (
+    !immediateClaimRaw
+    || !immediateClaimEnvelopeData
+    || !immediateClaimEnvelopeHashMatches
+    || !immediateJobRaw
+  ) {
+    reject('The scoped legacy repair immediate parent claim envelope is not immutable.');
+  }
+  const immediateClaimContext = immediateClaimEnvelopeHashMatches
+    ? parsedImmediateClaimContext
+    : undefined;
+  const immediateClaimScope = immediateClaimContext?.sourceSportScope;
+  if (
+    immediateClaimContext !== undefined
+    && !sameRepairContext(
+      recordValue(immediateJobRaw?.subjectJson).repairContext,
+      immediateClaimContext,
+    )
+  ) {
+    reject('The scoped legacy repair immediate parent context is not immutable.');
+  }
+  if (scope === undefined) {
+    if (
+      queuedScope !== undefined
+      || childScopeAudit
+      || immediateScope !== undefined
+      || immediateClaimScope !== undefined
+    ) {
+      reject('The scoped legacy repair claim dropped its authenticated source scope.');
+    }
+    return;
+  }
+  if (!repairContext) {
+    reject('The scoped legacy repair claim has no legacy repair context.');
+  }
+  const sourceId = stringValue(mappingJob.sourceId);
+  const sourceRaw = sourceId
+    ? await input.prisma.affiliateScrapeSources.findUnique({
+      where: { id: sourceId },
+      select: { id: true, supplySourceId: true, targetKind: true },
+    })
+    : null;
+  const sourceListingKind = listingKindFor(normalizedUpper(sourceRaw?.targetKind));
+  if (
+    !mappingJobRaw
+    || mappingJob.id !== mappingJobId
+    || (
+      repairContext?.intakeId !== undefined
+      && mappingJob.intakeId !== repairContext.intakeId
+    )
+    || mappingJob.supplySourceId !== subject.supplySourceId
+    || !sourceRaw
+    || sourceRaw.id !== sourceId
+    || sourceRaw.supplySourceId !== subject.supplySourceId
+    || !sourceListingKind
+    || subject.listingKind !== sourceListingKind
+  ) {
+    reject('The scoped legacy repair Mapping Job or source is not bound to the claim.');
+  }
+  const parsedScope = affiliateAgentSourceSportScopeSchema.safeParse(scope);
+  if (!parsedScope.success) reject('The scoped legacy repair claim scope is invalid.');
+  const trustedScope = parsedScope.data;
+  if (
+    trustedScope.supplySourceId !== subject.supplySourceId
+    || trustedScope.intakeId !== repairContext.intakeId
+    || trustedScope.evidenceRunId !== repairContext.evidenceRunId
+  ) {
+    reject('The scoped legacy repair claim scope identity is invalid.');
+  }
+  const authorityParentGatewayJobId = trustedScope.parentGatewayJobId;
+  type ScopedClaimNode = Readonly<{
+    claim: JsonRecord;
+    job: JsonRecord;
+    envelope: JsonRecord | null;
+    subject: JsonRecord | null;
+    result: JsonRecord | null;
+    receipt: JsonRecord | null;
+  }>;
+  const sourceScopeTransitionValid = (transition: Readonly<{
+    parentScopeValue: unknown;
+    childScopeValue: unknown;
+    parentResult: JsonRecord | null;
+    parentGatewayJobId: string | null;
+    parentResultHash: string | null;
+    auditOperatorId?: string | null;
+    auditReason?: string | null;
+    deploymentChanged: boolean;
+    requireIntroducingDelta?: boolean;
+  }>): boolean => {
+    const parsedChildScope = affiliateAgentSourceSportScopeSchema.safeParse(
+      transition.childScopeValue,
+    );
+    if (
+      !parsedChildScope.success
+      || parsedChildScope.data.supplySourceId !== trustedScope.supplySourceId
+      || parsedChildScope.data.intakeId !== trustedScope.intakeId
+      || parsedChildScope.data.evidenceRunId !== trustedScope.evidenceRunId
+    ) {
+      return false;
+    }
+    const parsedParentScope = transition.parentScopeValue === undefined
+      ? null
+      : affiliateAgentSourceSportScopeSchema.safeParse(transition.parentScopeValue);
+    if (
+      transition.parentScopeValue !== undefined
+      && (!parsedParentScope || !parsedParentScope.success)
+    ) {
+      return false;
+    }
+    const parentScope = parsedParentScope && parsedParentScope.success
+      ? parsedParentScope.data
+      : null;
+    if (
+      parentScope
+      && (
+        parentScope.supplySourceId !== parsedChildScope.data.supplySourceId
+        || parentScope.intakeId !== parsedChildScope.data.intakeId
+        || parentScope.evidenceRunId !== parsedChildScope.data.evidenceRunId
+      )
+    ) {
+      return false;
+    }
+    const parentLabels = new Set(
+      parentScope?.excludedSourceLabels.map(normalizeAffiliateSportLabel) ?? [],
+    );
+    const childLabels = new Set(
+      parsedChildScope.data.excludedSourceLabels.map(normalizeAffiliateSportLabel),
+    );
+    if ([...parentLabels].some((label) => !childLabels.has(label))) return false;
+    const newLabels = [...childLabels].filter((label) => !parentLabels.has(label));
+    if (newLabels.length === 0) {
+      if (
+        transition.requireIntroducingDelta === true
+        || !transition.deploymentChanged
+        || parentScope === null
+        || !sameAdmissionValue(parentScope, parsedChildScope.data)
+      ) {
+        return false;
+      }
+      return true;
+    }
+    if (
+      parsedChildScope.data.parentGatewayJobId !== transition.parentGatewayJobId
+      || normalizeHash(parsedChildScope.data.parentResultHash)
+        !== normalizeHash(transition.parentResultHash)
+      || (
+        transition.auditOperatorId !== undefined
+        && (
+          stringValue(transition.auditOperatorId) !== parsedChildScope.data.operatorId
+          || stringValue(transition.auditReason) !== parsedChildScope.data.reason
+        )
+      )
+    ) {
+      return false;
+    }
+    const parsedSportEvidence = affiliateAgentSportEvidenceSchema.safeParse(
+      recordValue(transition.parentResult?.payload).sportEvidence,
+    );
+    if (
+      !parsedSportEvidence.success
+      || parsedSportEvidence.data.evidenceRunId !== parsedChildScope.data.evidenceRunId
+    ) {
+      return false;
+    }
+    const effectiveLabels = new Set([...parentLabels, ...childLabels]);
+    const newLabelSet = new Set(newLabels);
+    const coveredLabels = new Set<string>();
+    for (const determination of parsedSportEvidence.data.sportDeterminations) {
+      const determinationLabels = determination.sourceLabels.map(normalizeAffiliateSportLabel);
+      const matchingNewLabels = determinationLabels.filter((label) => newLabelSet.has(label));
+      if (
+        matchingNewLabels.length === 0
+        && determination.status === 'RESOLVED'
+        && determination.canonicalSportNames.some(
+          (name) => newLabelSet.has(normalizeAffiliateSportLabel(name)),
+        )
+      ) {
+        return false;
+      }
+      if (matchingNewLabels.length === 0) continue;
+      if (
+        determination.status === 'RESOLVED'
+        || determination.resolutionBasis !== 'SOURCE_EVIDENCE'
+        || determinationLabels.some((label) => !effectiveLabels.has(label))
+      ) {
+        return false;
+      }
+      matchingNewLabels.forEach((label) => coveredLabels.add(label));
+    }
+    return newLabels.every((label) => coveredLabels.has(label));
+  };
+  const claimCache = new Map<string, JsonRecord | null>();
+  const jobCache = new Map<string, JsonRecord | null>();
+  const receiptCache = new Map<string, JsonRecord | null>();
+  const loadNode = async (claimId: string): Promise<ScopedClaimNode | null> => {
+    const claimRaw = claimCache.has(claimId)
+      ? claimCache.get(claimId)
+      : recordValue(await input.prisma.affiliateAgentGatewayClaims.findUnique({
+        where: { id: claimId },
+      }));
+    claimCache.set(claimId, claimRaw ?? null);
+    if (!claimRaw) return null;
+    const claim = recordValue(claimRaw);
+    const jobId = stringValue(claim.jobId);
+    if (!jobId) return null;
+    const jobRaw = jobCache.has(jobId)
+      ? jobCache.get(jobId)
+      : recordValue(await input.prisma.affiliateAgentGatewayJobs.findUnique({
+        where: { id: jobId },
+      }));
+    jobCache.set(jobId, jobRaw ?? null);
+    if (!jobRaw) return null;
+    const nodeJob = recordValue(jobRaw);
+    const producerEnvelope = nodeJob.role === 'MAPPING_PRODUCER'
+      ? parseAffiliateAgentProducerClaimEnvelopeForHistoricalRead(claim.claimEnvelopeJson)
+      : null;
+    const reviewerEnvelope = nodeJob.role === 'SUPPLY_REVIEWER'
+      ? affiliateAgentClaimEnvelopeSchema.safeParse(claim.claimEnvelopeJson)
+      : null;
+    const nodeEnvelope = producerEnvelope && producerEnvelope.role === 'MAPPING_PRODUCER'
+      ? recordValue(producerEnvelope)
+      : reviewerEnvelope?.success && reviewerEnvelope.data.role === 'SUPPLY_REVIEWER'
+        ? recordValue(reviewerEnvelope.data)
+        : null;
+    const parsedResult = affiliateAgentTerminalResultEnvelopeSchema.safeParse(nodeJob.resultJson);
+    const nodeResult = parsedResult.success ? recordValue(parsedResult.data) : null;
+    const receiptId = stringValue(claim.terminalReceiptId);
+    const receiptRaw = receiptId
+      ? receiptCache.has(receiptId)
+        ? receiptCache.get(receiptId)
+        : recordValue(await input.prisma.affiliateAgentGatewayOperationReceipts.findUnique({
+          where: { id: receiptId },
+        }))
+      : null;
+    if (receiptId) receiptCache.set(receiptId, receiptRaw ?? null);
+    return {
+      claim,
+      job: nodeJob,
+      envelope: nodeEnvelope,
+      subject: nodeEnvelope ? recordValue(nodeEnvelope.subject) : null,
+      result: nodeResult,
+      receipt: receiptRaw ? recordValue(receiptRaw) : null,
+    };
+  };
+  const immediateNode = await loadNode(childParentClaimId);
+  if (!immediateNode) reject('The scoped legacy repair immediate parent lineage is missing.');
+  const lineageNodes: ScopedClaimNode[] = [];
+  const visitedClaimIds = new Set<string>();
+  let node: ScopedClaimNode | null = immediateNode;
+  let originNode: ScopedClaimNode | null = null;
+  for (let depth = 0; node; depth += 1) {
+    const nodeClaimId = stringValue(node.claim.id);
+    if (!nodeClaimId || depth >= 8 || visitedClaimIds.has(nodeClaimId)) {
+      reject('The scoped legacy repair claim ancestry is malformed.');
+    }
+    visitedClaimIds.add(nodeClaimId);
+    const nodeEnvelope = node.envelope;
+    const nodeSubject = node.subject;
+    const nodeResult = node.result;
+    const nodeReceipt = node.receipt;
+    const producerNode = node.job.role === 'MAPPING_PRODUCER';
+    const reviewerNode = node.job.role === 'SUPPLY_REVIEWER';
+    const expectedQueue = producerNode ? 'AFFILIATE_MAPPING' : 'AFFILIATE_REVIEW';
+    const expectedLane = producerNode ? 'MAPPING_PRODUCTION' : 'SUPPLY_REVIEW';
+    let resultHash: string | null = null;
+    let envelopeHash: string | null = null;
+    let receiptResponseHash: string | null = null;
+    try {
+      resultHash = nodeResult ? hashAffiliateAgentValue(nodeResult) : null;
+      envelopeHash = nodeEnvelope ? hashAffiliateAgentValue(nodeEnvelope) : null;
+      receiptResponseHash = nodeReceipt
+        ? hashAffiliateAgentValue(nodeReceipt.responseJson)
+        : null;
+    } catch {
+      resultHash = null;
+      envelopeHash = null;
+      receiptResponseHash = null;
+    }
+    const response = recordValue(nodeReceipt?.responseJson);
+    if (
+      (!producerNode && !reviewerNode)
+      || !nodeEnvelope
+      || !nodeSubject
+      || !nodeResult
+      || !nodeReceipt
+      || node.job.id !== nodeEnvelope.jobId
+      || node.job.id !== nodeResult.jobId
+      || node.claim.id !== nodeEnvelope.claimId
+      || node.claim.id !== nodeResult.claimId
+      || node.job.role !== nodeEnvelope.role
+      || node.job.role !== nodeResult.role
+      || node.job.queue !== expectedQueue
+      || node.job.lane !== expectedLane
+      || node.job.subjectType !== nodeSubject.type
+      || node.claim.role !== node.job.role
+      || node.claim.queue !== node.job.queue
+      || node.claim.lane !== node.job.lane
+      || node.claim.jobId !== node.job.id
+      || (stringValue(node.claim.parentClaimId) ?? null)
+        !== (stringValue(node.job.parentClaimId) ?? null)
+      || node.claim.status !== 'COMPLETED'
+      || node.job.status !== 'COMPLETED'
+      || node.job.activeClaimId !== null
+      || node.job.terminalReceiptId !== node.claim.terminalReceiptId
+      || !stringValue(node.claim.terminalReceiptId)
+      || node.job.terminalDisposition !== nodeResult.disposition
+      || typeof node.claim.claimGeneration !== 'number'
+      || typeof node.job.claimGeneration !== 'number'
+      || node.job.claimGeneration !== node.claim.claimGeneration
+      || nodeEnvelope.claimGeneration !== node.claim.claimGeneration
+      || nodeEnvelope.lifecycleGeneration !== node.claim.lifecycleGeneration
+      || node.job.expectedLifecycleGeneration !== node.claim.lifecycleGeneration
+      || nodeEnvelope.queue !== node.job.queue
+      || nodeEnvelope.lane !== node.job.lane
+      || nodeEnvelope.supplySourceId !== trustedScope.supplySourceId
+      || node.job.supplySourceId !== trustedScope.supplySourceId
+      || nodeEnvelope.workerId !== node.claim.workerId
+      || nodeEnvelope.invocationId !== node.claim.invocationId
+      || nodeEnvelope.workspaceId !== node.claim.workspaceId
+      || recordValue(nodeEnvelope.evidenceManifest).hash !== node.claim.evidenceManifestHash
+      || !sameAdmissionValue(node.job.evidenceManifestJson, nodeEnvelope.evidenceManifest)
+      || normalizeHash(envelopeHash) !== normalizeHash(node.claim.claimEnvelopeHash)
+      || nodeResult.claimGeneration !== node.claim.claimGeneration
+      || nodeResult.lifecycleGeneration !== node.claim.lifecycleGeneration
+      || nodeResult.deploymentContractVersion !== nodeEnvelope.deploymentContractVersion
+      || nodeResult.deploymentContractHash !== nodeEnvelope.deploymentContractHash
+      || nodeResult.supplyContractVersion !== nodeEnvelope.supplyContractVersion
+      || nodeResult.supplyContractHash !== nodeEnvelope.supplyContractHash
+      || nodeResult.roleContractVersion !== nodeEnvelope.roleContractVersion
+      || nodeResult.roleContractHash !== nodeEnvelope.roleContractHash
+      || nodeResult.promptTemplateVersion !== nodeEnvelope.promptTemplateVersion
+      || nodeResult.promptTemplateHash !== nodeEnvelope.promptTemplateHash
+      || nodeResult.workerId !== nodeEnvelope.workerId
+      || nodeResult.invocationId !== nodeEnvelope.invocationId
+      || normalizeHash(resultHash) !== normalizeHash(node.job.resultHash)
+      || nodeReceipt.id !== node.claim.terminalReceiptId
+      || nodeReceipt.jobId !== node.job.id
+      || nodeReceipt.claimId !== node.claim.id
+      || nodeReceipt.claimGeneration !== node.claim.claimGeneration
+      || nodeReceipt.operationKind !== 'SUBMIT_RESULT'
+      || nodeReceipt.status !== 'SUCCEEDED'
+      || !nodeReceipt.completedAt
+      || normalizeHash(receiptResponseHash) !== normalizeHash(nodeReceipt.responseHash)
+      || response.kind !== 'TERMINAL_ACCEPTED'
+      || response.receiptId !== nodeReceipt.id
+      || normalizeHash(response.resultHash) !== normalizeHash(resultHash)
+      || response.disposition !== nodeResult.disposition
+    ) {
+      reject('The scoped legacy repair claim ancestry is not immutable.');
+    }
+    if (producerNode) {
+      const parsedQueued = affiliateAgentQueuedMappingProducerSubjectSchema.safeParse(node.job.subjectJson);
+      const normalizedQueued = parsedQueued.success
+        ? {
+          ...parsedQueued.data,
+          ...(nodeSubject.listingKind === undefined ? {} : { listingKind: nodeSubject.listingKind }),
+        }
+        : null;
+      const nodeContext = recordValue(nodeSubject.repairContext);
+      const nodeScope = nodeContext.sourceSportScope;
+      if (
+        !parsedQueued.success
+        || !sameAdmissionValue(normalizedQueued, nodeSubject)
+        || nodeSubject.type !== 'MAPPING_PRODUCER'
+        || nodeSubject.mappingJobId !== mappingJobId
+        || nodeSubject.supplySourceId !== trustedScope.supplySourceId
+        || node.job.subjectId !== mappingJobId
+        || nodeContext.kind !== 'LEGACY_SPORT_REPAIR'
+        || nodeContext.intakeId !== trustedScope.intakeId
+        || nodeContext.evidenceRunId !== trustedScope.evidenceRunId
+        || nodeSubject.listingKind !== undefined && nodeSubject.listingKind !== sourceListingKind
+      ) {
+        reject('The scoped legacy repair producer ancestry is invalid.');
+      }
+      if (nodeScope !== undefined) {
+        const parsedNodeScope = affiliateAgentSourceSportScopeSchema.safeParse(nodeScope);
+        const nodeScopeLabels = parsedNodeScope.success
+          ? new Set(parsedNodeScope.data.excludedSourceLabels.map(normalizeAffiliateSportLabel))
+          : new Set<string>();
+        const trustedScopeLabels = new Set(
+          trustedScope.excludedSourceLabels.map(normalizeAffiliateSportLabel),
+        );
+        if (
+          !parsedNodeScope.success
+          || parsedNodeScope.data.supplySourceId !== trustedScope.supplySourceId
+          || parsedNodeScope.data.intakeId !== trustedScope.intakeId
+          || parsedNodeScope.data.evidenceRunId !== trustedScope.evidenceRunId
+          || [...nodeScopeLabels].some((label) => !trustedScopeLabels.has(label))
+        ) {
+          reject('The scoped legacy repair producer ancestry changed its source scope.');
+        }
+      }
+    } else {
+      const nodeContext = recordValue(nodeSubject.repairContext);
+      const parsedReviewerScope = affiliateAgentSourceSportScopeSchema.safeParse(
+        nodeContext.sourceSportScope,
+      );
+      const reviewerScopeLabels = parsedReviewerScope.success
+        ? new Set(parsedReviewerScope.data.excludedSourceLabels.map(normalizeAffiliateSportLabel))
+        : new Set<string>();
+      const trustedScopeLabels = new Set(
+        trustedScope.excludedSourceLabels.map(normalizeAffiliateSportLabel),
+      );
+      if (
+        nodeSubject.type !== 'SUPPLY_REVIEWER'
+        || node.job.subjectId !== trustedScope.supplySourceId
+        || nodeSubject.supplySourceId !== trustedScope.supplySourceId
+        || node.job.parentClaimId !== nodeSubject.producerClaimId
+        || nodeContext.kind !== 'LEGACY_SPORT_REPAIR'
+        || nodeContext.intakeId !== trustedScope.intakeId
+        || nodeContext.evidenceRunId !== trustedScope.evidenceRunId
+        || !parsedReviewerScope.success
+        || parsedReviewerScope.data.supplySourceId !== trustedScope.supplySourceId
+        || parsedReviewerScope.data.intakeId !== trustedScope.intakeId
+        || parsedReviewerScope.data.evidenceRunId !== trustedScope.evidenceRunId
+        || [...reviewerScopeLabels].some((label) => !trustedScopeLabels.has(label))
+        || nodeResult.disposition !== 'PRODUCER_REPAIR_REQUIRED'
+      ) {
+        reject('The scoped legacy repair reviewer ancestry is invalid.');
+      }
+      if (
+        typeof nodeSubject.reviewPass !== 'number'
+        || nodeSubject.reviewPass < 1
+        || nodeSubject.reviewPass > 3
+        || !stringValue(nodeSubject.producerClaimId)
+        || !stringValue(nodeSubject.committedPackageHash)
+      ) {
+        reject('The scoped legacy repair reviewer ancestry is invalid.');
+      }
+    }
+    lineageNodes.push(node);
+    if (node.job.id === trustedScope.parentGatewayJobId) {
+      originNode = node;
+    }
+    const ancestorClaimId = stringValue(node.job.parentClaimId);
+    if (!ancestorClaimId) break;
+    node = await loadNode(ancestorClaimId);
+  }
+  if (!originNode || originNode.job.role !== 'MAPPING_PRODUCER' || !originNode.subject || !originNode.result) {
+    reject('The scoped legacy repair source scope has no reachable authority parent.');
+  }
+  const originIndex = lineageNodes.findIndex((candidate) => candidate === originNode);
+  const unscopedProducer = (candidate: ScopedClaimNode): boolean => (
+    candidate.job.role === 'MAPPING_PRODUCER'
+    && recordValue(candidate.subject?.repairContext).sourceSportScope === undefined
+  );
+  if (
+    originIndex < 0
+    || lineageNodes.slice(0, originIndex).some(unscopedProducer)
+    || !lineageNodes.slice(originIndex).some(unscopedProducer)
+  ) {
+    reject('The scoped legacy repair source scope does not trace to an unscoped authority ancestor.');
+  }
+  const originJob = originNode.job;
+  const originClaim = originNode.claim;
+  const originEnvelope = originNode.envelope!;
+  const originSubject = originNode.subject!;
+  const originResult = originNode.result!;
+  const originReceipt = originNode.receipt;
+  if (
+    originJob.terminalDisposition !== 'CONTRACT_GAP'
+    || originResult.disposition !== 'CONTRACT_GAP'
+    || normalizeHash(originJob.resultHash) !== trustedScope.parentResultHash
+    || originSubject.type !== 'MAPPING_PRODUCER'
+  ) {
+    reject('The scoped legacy repair authority parent is not the completed contract gap named by the scope.');
+  }
+  const originJobId = stringValue(originJob.id);
+  const originPass = typeof originSubject.pass === 'number'
+    ? originSubject.pass
+    : null;
+  if (!originJobId || originPass === null) {
+    reject('The scoped legacy repair authority parent identity is invalid.');
+  }
+  const lineageRoot = lineageNodes[lineageNodes.length - 1];
+  const lineageRootSubject = lineageRoot?.subject;
+  const lineageRootClaim = lineageRoot?.claim;
+  if (
+    !lineageRoot
+    || !lineageRootSubject
+    || !lineageRootClaim
+    || lineageRoot.job.role !== 'MAPPING_PRODUCER'
+    || lineageRootSubject.type !== 'MAPPING_PRODUCER'
+    || lineageRootSubject.pass !== 1
+    || lineageRoot.job.parentClaimId !== null
+    || lineageRootClaim.parentClaimId !== null
+  ) {
+    reject('The scoped legacy repair source scope does not terminate at the original pass-one admission.');
+  }
+  if (
+    !gatewayIdentityMatches(
+      lineageRoot.job as unknown as GatewayJobRow,
+      mappingJobId,
+      trustedScope.supplySourceId,
+      typeof lineageRootClaim.lifecycleGeneration === 'number'
+        ? lineageRootClaim.lifecycleGeneration
+        : null,
+      lineageRootSubject.repairContext,
+      lineageRoot.job.evidenceManifestJson,
+      stringValue(lineageRoot.job.dedupeKey),
+      sourceListingKind,
+    )
+  ) {
+    reject('The scoped legacy repair source scope origin admission identity is invalid.');
+  }
+  const originParentScope = recordValue(originSubject.repairContext).sourceSportScope;
+  if (!sourceScopeTransitionValid({
+    parentScopeValue: originParentScope,
+    childScopeValue: trustedScope,
+    parentResult: originResult,
+    parentGatewayJobId: originJobId,
+    parentResultHash: normalizeHash(originJob.resultHash),
+    deploymentChanged: false,
+    requireIntroducingDelta: true,
+  })) {
+    reject('The scoped legacy repair authority result does not support its source-scope transition.');
+  }
+  const producerLineageIds = new Set([
+    childJobId,
+    ...lineageNodes
+      .filter((candidate) => candidate.job.role === 'MAPPING_PRODUCER')
+      .map((candidate) => candidate.job.id),
+  ]);
+  const originAudits = [...retryHistory, ...continuationHistory].filter((audit) => (
+    audit.kind === 'LEGACY_SPORT_REPAIR_RETRY'
+    && audit.parentGatewayJobId === originJob.id
+    && producerLineageIds.has(String(audit.childGatewayJobId ?? ''))
+    && sameAdmissionValue(audit.sourceSportScope ?? null, trustedScope)
+    && sameAdmissionValue(recordValue(audit.repairContext).sourceSportScope ?? null, trustedScope)
+  ));
+  if (originAudits.length !== 1) {
+    reject('The scoped legacy repair claim has no unique source-scope origin audit.');
+  }
+  const originAudit = originAudits[0]!;
+  const originChildId = stringValue(originAudit.childGatewayJobId);
+  const originChildNode = originChildId && originChildId !== childJobId
+    ? lineageNodes.find((candidate) => candidate.job.id === originChildId) ?? null
+    : null;
+  const originChildJob = originChildNode?.job ?? job;
+  const originChildSubject = originChildNode?.subject ?? subject;
+  const originChildContext = recordValue(originChildSubject.repairContext);
+  const originChildDedupeKey = retryDedupeKeyFor(originJobId);
+  if (
+    !originChildId
+    || originChildJob.id !== originChildId
+    || originChildJob.dedupeKey !== originChildDedupeKey
+    || originChildSubject.type !== 'MAPPING_PRODUCER'
+    || originChildSubject.pass !== originPass + 1
+    || originChildContext.kind !== 'LEGACY_SPORT_REPAIR'
+    || originChildContext.intakeId !== trustedScope.intakeId
+    || originChildContext.evidenceRunId !== trustedScope.evidenceRunId
+    || !sameAdmissionValue(originChildContext.sourceSportScope ?? null, trustedScope)
+  ) {
+    reject('The scoped legacy repair source-scope origin child is not bound to its audit.');
+  }
+  const originAuditContext = recordValue(originAudit.repairContext);
+  if (
+    originAudit.reason !== trustedScope.reason
+    || originAudit.operatorId !== trustedScope.operatorId
+    || originAudit.parentGatewayJobId !== originJob.id
+    || originAudit.parentClaimId !== originClaim.id
+    || originAudit.parentMappingJobId !== mappingJobId
+    || originAudit.parentReceiptId !== originClaim.terminalReceiptId
+    || normalizeHash(originAudit.parentResultHash) !== trustedScope.parentResultHash
+    || originAudit.parentDeploymentContractHash !== originClaim.deploymentContractHash
+    || originAudit.rootId !== trustedScope.supplySourceId
+    || originAudit.intakeId !== trustedScope.intakeId
+    || originAudit.evidenceRunId !== trustedScope.evidenceRunId
+    || originAudit.sourceId !== mappingJob.sourceId
+    || originAudit.mappingId !== (mappingJob.mappingId ?? null)
+    || !sameAdmissionValue(originAudit.sourceSportScope ?? null, trustedScope)
+    || !sameAdmissionValue(originAuditContext.sourceSportScope ?? null, trustedScope)
+    || originAuditContext.kind !== 'LEGACY_SPORT_REPAIR'
+    || originAuditContext.intakeId !== trustedScope.intakeId
+    || originAuditContext.evidenceRunId !== trustedScope.evidenceRunId
+    || !originReceipt
+  ) {
+    reject('The scoped legacy repair source-scope origin audit is not immutable.');
+  }
+  const originalAdmissionEvidence = admissionEvidenceForGateway(
+    mappingJob as unknown as MappingJobRow,
+    trustedScope.supplySourceId,
+    lineageRootSubject.repairContext,
+    lineageRoot.job.evidenceManifestJson,
+    stringValue(lineageRoot.job.dedupeKey) ?? '',
+  );
+  const originalAdmissionSelectedRow = recordValue(originalAdmissionEvidence?.selectedRow);
+  const originalAdmissionSelectedWrite = recordValue(originalAdmissionEvidence?.selectedWrite);
+  const originalAdmissionIntakeId = stringValue(
+    originalAdmissionEvidence?.intakeId
+      ?? originalAdmissionSelectedRow.intakeId
+      ?? originalAdmissionSelectedWrite.intakeId,
+  );
+  const originalAdmissionSourceId = stringValue(
+    originalAdmissionEvidence?.sourceId
+      ?? originalAdmissionSelectedRow.sourceId
+      ?? originalAdmissionSelectedWrite.sourceId,
+  );
+  const originalAdmissionMappingId = stringValue(
+    originalAdmissionEvidence?.mappingId
+      ?? originalAdmissionSelectedRow.mappingId
+      ?? originalAdmissionSelectedWrite.mappingId,
+  );
+  const originalAdmissionRunId = stringValue(
+    originalAdmissionEvidence?.evidenceRunId
+      ?? originalAdmissionSelectedRow.evidenceRunId
+      ?? originalAdmissionSelectedWrite.evidenceRunId,
+  );
+  if (
+    !originalAdmissionEvidence
+    || originalAdmissionIntakeId !== originAudit.intakeId
+    || originalAdmissionSourceId !== originAudit.sourceId
+    || originalAdmissionMappingId !== originAudit.mappingId
+    || originalAdmissionRunId !== originAudit.evidenceRunId
+  ) {
+    reject('The scoped legacy repair source scope has no immutable original admission evidence.');
+  }
+  const originalIntakeId = originalAdmissionIntakeId;
+  const originalSourceId = originalAdmissionSourceId;
+  const originalMappingId = originalAdmissionMappingId;
+  const originalRunId = originalAdmissionRunId;
+  const originalArtifactRefs = stringArrayValue(originalAdmissionEvidence.artifactIds);
+  if (
+    !originalIntakeId
+    || !originalSourceId
+    || !originalMappingId
+    || !originalRunId
+    || !originalArtifactRefs
+    || originalArtifactRefs.some((artifactId) => !artifactId.startsWith('intake-artifact:'))
+  ) {
+    reject('The scoped legacy repair source scope original admission identity is incomplete.');
+  }
+  const originalArtifactIds = originalArtifactRefs.map((artifactId) => artifactId.slice('intake-artifact:'.length));
+  const [
+    originalIntakeRows,
+    originalSourceRows,
+    originalMappingRows,
+    originalRunRows,
+    originalArtifactRows,
+    originalRootRows,
+  ] = await Promise.all([
+    input.prisma.affiliateSourceIntakes.findMany({
+      where: { id: { in: [originalIntakeId] } },
+    }),
+    input.prisma.affiliateScrapeSources.findMany({
+      where: { id: { in: [originalSourceId] } },
+    }),
+    input.prisma.affiliateScrapeMappings.findMany({
+      where: { id: { in: [originalMappingId] } },
+    }),
+    input.prisma.affiliateSourceIntakeRuns.findMany({
+      where: { id: { in: [originalRunId] } },
+    }),
+    input.prisma.affiliateSourceIntakeArtifacts.findMany({
+      where: { id: { in: originalArtifactIds } },
+    }),
+    input.prisma.affiliateSupplySources.findMany({
+      where: { id: { in: [trustedScope.supplySourceId] } },
+    }),
+  ]);
+  const originalIntake = (originalIntakeRows as unknown as IntakeRow[]).find(
+    (candidate) => candidate.id === originalIntakeId,
+  );
+  const originalSource = (originalSourceRows as unknown as SourceRow[]).find(
+    (candidate) => candidate.id === originalSourceId,
+  );
+  const originalMapping = (originalMappingRows as unknown as MappingRow[]).find(
+    (candidate) => candidate.id === originalMappingId,
+  );
+  const originalRun = (originalRunRows as unknown as CaptureRunRow[]).find(
+    (candidate) => candidate.id === originalRunId,
+  );
+  const originalArtifacts = (originalArtifactRows as unknown as ArtifactRow[])
+    .filter((candidate) => originalArtifactIds.includes(candidate.id));
+  const originalRoot = (originalRootRows as unknown as SupplyRootRow[]).find(
+    (candidate) => candidate.id === trustedScope.supplySourceId,
+  );
+  if (
+    !originalIntake
+    || !originalSource
+    || !originalMapping
+    || !originalRun
+    || !originalRoot
+    || originalArtifacts.length !== originalArtifactIds.length
+  ) {
+    reject('The scoped legacy repair source scope original admission records are incomplete.');
+  }
+  if (
+    !lineageRoot.receipt
+    || !lineageRoot.envelope
+    || !lineageRoot.subject
+    || !lineageRoot.result
+    || !productionAdmissionEvidenceMatches({
+      entry: originalAdmissionEvidence,
+      mappingJob: mappingJob as unknown as MappingJobRow,
+      intake: originalIntake,
+      source: originalSource,
+      mapping: originalMapping,
+      root: originalRoot,
+      run: originalRun,
+      artifacts: originalArtifacts,
+      ancestor: {
+        gatewayJob: lineageRoot.job as unknown as GatewayJobRow,
+        claim: lineageRoot.claim as unknown as RetryGatewayClaimRow,
+        receipt: lineageRoot.receipt as unknown as RetryGatewayReceiptRow,
+        envelope: lineageRoot.envelope as unknown as AffiliateAgentProducerClaimEnvelopeForHistoricalRead,
+        subject: lineageRoot.subject as unknown as LegacyRetryProducerSubject,
+        result: lineageRoot.result as unknown as AffiliateAgentTerminalResultEnvelope,
+      },
+      manifest: recordValue(lineageRoot.job.evidenceManifestJson),
+      expectedRootLifecycleGeneration: typeof lineageRootClaim.lifecycleGeneration === 'number'
+        ? lineageRootClaim.lifecycleGeneration
+        : undefined,
+    })
+  ) {
+    reject('The scoped legacy repair source scope original admission evidence is invalid.');
+  }
+  const report = recordValue(originAudit.reportSnapshot);
+  const reportCounts = recordValue(report.counts);
+  const reportHash = normalizeHash(report.reportHash);
+  const auditReportHash = normalizeHash(originAudit.reportHash);
+  let recomputedReportHash: string | null = null;
+  try {
+    recomputedReportHash = retryReportHashFor(
+      report as unknown as AffiliateLegacyRepairRetryReport,
+    );
+  } catch {
+    recomputedReportHash = null;
+  }
+  const reportRows = Array.isArray(report.rows) ? report.rows.map(recordValue) : [];
+  const reportWrites = Array.isArray(report.proposedWrites)
+    ? report.proposedWrites.map(recordValue)
+    : [];
+  const reportRow = reportRows.find((row) => row.gatewayJobId === originJob.id);
+  const reportWrite = reportWrites.find((write) => write.gatewayJobId === originJob.id);
+  const requestedGatewayJobIds = stringArrayValue(report.requestedGatewayJobIds);
+  const selectedGatewayJobIds = stringArrayValue(report.selectedGatewayJobIds);
+  const appliedGatewayJobIds = stringArrayValue(report.appliedGatewayJobIds);
+  const reportValid = report.schemaVersion === AFFILIATE_LEGACY_REPAIR_RETRY_SCHEMA_VERSION
+    && report.mode === 'APPLY'
+    && report.reviewedReportHash === reportHash
+    && report.writeCount === 1
+    && reportCounts.total === 1
+    && reportCounts.eligible === 1
+    && reportCounts.held === 0
+    && reportCounts.selected === 1
+    && reportCounts.alreadyRetried === 0
+    && reportRow?.gatewayJobId === originJob.id
+    && reportRow?.parentPass === originPass
+    && reportRow?.eligible === true
+    && reportRow?.alreadyRetried === false
+    && reportRow?.outcome === 'APPLIED'
+    && reportRow?.childGatewayJobId === originChildId
+    && reportWrite?.gatewayJobId === originJob.id
+    && reportWrite?.parentPass === originPass
+    && reportWrite?.gatewayDedupeKey === originChildDedupeKey
+    && originAudit.childDedupeKey === originChildDedupeKey;
+  if (
+    !reportHash
+    || reportHash !== auditReportHash
+    || recomputedReportHash !== reportHash
+    || !reportValid
+    || report.replayed !== false
+    || report.reason !== trustedScope.reason
+    || report.contractVersion !== originEnvelope.supplyContractVersion
+    || report.contractHash !== originEnvelope.supplyContractHash
+    || originAudit.currentDeploymentContractVersion !== report.deploymentContractVersion
+    || originAudit.currentDeploymentContractHash !== report.deploymentContractHash
+    || !requestedGatewayJobIds
+    || !sameAdmissionValue(requestedGatewayJobIds, [originJob.id])
+    || !selectedGatewayJobIds
+    || !sameAdmissionValue(selectedGatewayJobIds, [originJob.id])
+    || !appliedGatewayJobIds
+    || !sameAdmissionValue(appliedGatewayJobIds, [originChildId])
+    || reportRows.length !== 1
+    || reportWrites.length !== 1
+    || !reportRow
+    || !reportWrite
+    || !sameAdmissionValue(reportRow.sourceSportScope ?? null, trustedScope)
+    || !sameAdmissionValue(reportWrite.sourceSportScope ?? null, trustedScope)
+    || !sameRepairContext(reportWrite.repairContext, originAuditContext)
+    || !sameAdmissionValue(reportWrite.manifest, originAudit.manifest)
+    || !sameAdmissionValue(originAudit.manifest, originChildJob.evidenceManifestJson)
+  ) {
+    reject('The scoped legacy repair source-scope report is not bound to its origin audit.');
+  }
+  const edgeAuditMatchesChild = (
+    parentNode: ScopedClaimNode,
+    childJob: JsonRecord,
+    childSubject: JsonRecord,
+  ): boolean => {
+    if (!parentNode.subject || !parentNode.receipt) return false;
+    const parentId = stringValue(parentNode.job.id);
+    const childId = stringValue(childJob.id);
+    const childDedupeKey = stringValue(childJob.dedupeKey);
+    if (!parentId || !childId || !childDedupeKey) return false;
+    const continuation = childDedupeKey.startsWith(AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX);
+    const retry = childDedupeKey.startsWith('legacy-sport-repair-retry:');
+    if (
+      (continuation || retry)
+      && (
+        parentNode.job.terminalDisposition !== 'CONTRACT_GAP'
+        || parentNode.result?.disposition !== 'CONTRACT_GAP'
+      )
+    ) return false;
+    if (!continuation && !retry) return false;
+    const edgeAudits = (continuation ? continuationHistory : retryHistory).filter((audit) => (
+      audit.parentGatewayJobId === parentId
+      && audit.childGatewayJobId === childId
+    ));
+    if (edgeAudits.length !== 1) return false;
+    const audit = edgeAudits[0]!;
+    const report = recordValue(audit.reportSnapshot);
+    const reportRows = Array.isArray(report.rows) ? report.rows.map(recordValue) : [];
+    const reportWrites = Array.isArray(report.proposedWrites)
+      ? report.proposedWrites.map(recordValue)
+      : [];
+    const reportRow = reportRows.find((row) => row.gatewayJobId === parentId);
+    const reportWrite = reportWrites.find((write) => write.gatewayJobId === parentId);
+    const reportHash = normalizeHash(report.reportHash);
+    const auditReportHash = normalizeHash(audit.reportHash);
+    const requestedGatewayJobIds = stringArrayValue(report.requestedGatewayJobIds);
+    const selectedGatewayJobIds = stringArrayValue(report.selectedGatewayJobIds);
+    const appliedGatewayJobIds = stringArrayValue(report.appliedGatewayJobIds);
+    const reportCounts = recordValue(report.counts);
+    let recomputedReportHash: string | null = null;
+    try {
+      recomputedReportHash = continuation
+        ? continuationReportHashFor(
+          report as unknown as AffiliateLegacyRepairContinuationReport,
+        )
+        : retryReportHashFor(report as unknown as AffiliateLegacyRepairRetryReport);
+    } catch {
+      recomputedReportHash = null;
+    }
+    const parentSubject = parentNode.subject;
+    const childContext = recordValue(childSubject.repairContext);
+    const auditContext = recordValue(audit.repairContext);
+    const reportWriteContext = recordValue(reportWrite?.repairContext);
+    const edgeScope = childContext.sourceSportScope;
+    const parentScopeValue = recordValue(parentSubject.repairContext).sourceSportScope;
+    const scopedEdge = edgeScope !== undefined || parentScopeValue !== undefined;
+    const auditDeploymentVersion = audit.currentDeploymentContractVersion;
+    const auditDeploymentHash = normalizeHash(audit.currentDeploymentContractHash);
+    const reportDeploymentVersion = report.deploymentContractVersion;
+    const reportDeploymentHash = normalizeHash(report.deploymentContractHash);
+    const auditDeploymentBindingValid = scopedEdge
+      ? auditDeploymentVersion !== undefined
+        && auditDeploymentHash !== null
+        && auditDeploymentVersion === reportDeploymentVersion
+        && auditDeploymentHash === reportDeploymentHash
+      : (
+        (auditDeploymentVersion === undefined && audit.currentDeploymentContractHash === undefined)
+        || (
+          auditDeploymentVersion !== undefined
+          && audit.currentDeploymentContractHash !== undefined
+          && auditDeploymentVersion === reportDeploymentVersion
+          && auditDeploymentHash === reportDeploymentHash
+        )
+      );
+    const reportRowGatewayJobIds = reportRows.map((row) => row.gatewayJobId);
+    const reportWriteGatewayJobIds = reportWrites.map((write) => write.gatewayJobId);
+    const reportChildGatewayJobIds = reportRows.map((row) => row.childGatewayJobId);
+    const reportBatchSize = requestedGatewayJobIds?.length ?? 0;
+    const reportBatchShapeValid = requestedGatewayJobIds !== null
+      && selectedGatewayJobIds !== null
+      && appliedGatewayJobIds !== null
+      && sameAdmissionValue(requestedGatewayJobIds, selectedGatewayJobIds)
+      && sameAdmissionValue(requestedGatewayJobIds, reportRowGatewayJobIds)
+      && sameAdmissionValue(requestedGatewayJobIds, reportWriteGatewayJobIds)
+      && (!scopedEdge || reportBatchSize === 1)
+      && reportRows.length === reportBatchSize
+      && reportWrites.length === reportBatchSize
+      && reportCounts.total === reportBatchSize
+      && reportCounts.eligible === reportBatchSize
+      && reportCounts.held === 0
+      && reportCounts.selected === reportBatchSize
+      && report.writeCount === reportBatchSize
+      && appliedGatewayJobIds.length === reportBatchSize
+      && sameAdmissionValue(appliedGatewayJobIds, reportChildGatewayJobIds)
+      && reportRows.every((row) => (
+        row.eligible === true
+        && (continuation ? row.alreadyContinued === false : row.alreadyRetried === false)
+        && row.outcome === 'APPLIED'
+        && typeof row.childGatewayJobId === 'string'
+      ))
+      && (continuation
+        ? reportCounts.alreadyContinued === 0
+        : reportCounts.alreadyRetried === 0);
+    const reportShapeValid = report.mode === 'APPLY'
+      && reportHash !== null
+      && reportHash === auditReportHash
+      && recomputedReportHash === reportHash
+      && report.reviewedReportHash === reportHash
+      && report.replayed === false
+      && reportBatchShapeValid
+      && (continuation
+        ? reportWrite?.producerDedupeKey === childDedupeKey
+        : reportWrite?.gatewayDedupeKey === childDedupeKey)
+      && reportRow?.gatewayJobId === parentId
+      && reportRow?.childGatewayJobId === childId
+      && reportWrite?.gatewayJobId === parentId
+      && (continuation
+        ? reportWrite?.producerDedupeKey === childDedupeKey
+        : reportWrite?.gatewayDedupeKey === childDedupeKey)
+      && sameAdmissionValue(reportRow?.sourceSportScope ?? null, edgeScope ?? null)
+      && sameAdmissionValue(reportWrite?.sourceSportScope ?? null, edgeScope ?? null)
+      && sameRepairContext(reportWriteContext, auditContext)
+      && sameAdmissionValue(reportWrite?.manifest, audit.manifest)
+      && sameAdmissionValue(auditContext.sourceSportScope ?? null, edgeScope ?? null)
+      && sameAdmissionValue(audit.sourceSportScope ?? null, edgeScope ?? null)
+      && stringValue(audit.operatorId) !== null
+      && audit.reason === report.reason
+      && report.contractVersion === parentNode.claim.supplyContractVersion
+      && report.contractHash === parentNode.claim.supplyContractHash
+      && auditDeploymentBindingValid
+      && audit.parentGatewayJobId === parentId
+      && audit.parentClaimId === parentNode.claim.id
+      && audit.parentMappingJobId === mappingJobId
+      && audit.parentReceiptId === parentNode.receipt.id
+      && audit.parentResultHash === parentNode.job.resultHash
+      && audit.parentDeploymentContractHash === parentNode.claim.deploymentContractHash
+      && audit.childGatewayJobId === childId
+      && audit.intakeId === mappingJob.intakeId
+      && audit.sourceId === mappingJob.sourceId
+      && audit.mappingId === (mappingJob.mappingId ?? null)
+      && audit.rootId === childSubject.supplySourceId
+      && audit.evidenceRunId === childContext.evidenceRunId
+      && sameRetryLineageContext(auditContext, parentSubject.repairContext)
+      && sameRepairContext(auditContext, childSubject.repairContext)
+      && sameAdmissionValue(audit.manifest, parentNode.job.evidenceManifestJson)
+      && sameAdmissionValue(audit.manifest, childJob.evidenceManifestJson)
+      && childJob.role === 'MAPPING_PRODUCER'
+      && childContext.intakeId === trustedScope.intakeId
+      && childContext.evidenceRunId === trustedScope.evidenceRunId;
+    if (!reportShapeValid) return false;
+    const deploymentChanged = (
+      report.deploymentContractVersion !== parentNode.claim.deploymentContractVersion
+      && report.deploymentContractHash !== parentNode.claim.deploymentContractHash
+    );
+    if (scopedEdge) {
+      if (!sourceScopeTransitionValid({
+        parentScopeValue,
+        childScopeValue: edgeScope,
+        parentResult: parentNode.result,
+        parentGatewayJobId: stringValue(parentNode.job.id),
+        parentResultHash: normalizeHash(parentNode.job.resultHash),
+        auditOperatorId: stringValue(audit.operatorId),
+        auditReason: stringValue(audit.reason),
+        deploymentChanged,
+      })) return false;
+    }
+    if (!scopedEdge && !deploymentChanged) return false;
+    if (continuation) {
+      return audit.operation === 'LEGACY_SPORT_REPAIR_CONTINUATION'
+        && audit.kind === 'LEGACY_SPORT_REPAIR_CONTINUATION'
+        && report.operation === 'LEGACY_SPORT_REPAIR_CONTINUATION'
+        && report.schemaVersion === AFFILIATE_LEGACY_REPAIR_CONTINUATION_SCHEMA_VERSION
+        && audit.schemaVersion === report.schemaVersion
+        && report.gatewayJobId === parentId
+        && parentSubject.pass === 3
+        && childSubject.pass === 3
+        && report.parentPass === 3
+        && report.continuationPass === 3
+        && reportRow?.parentPass === 3
+        && reportRow?.continuationPass === 3
+        && reportWrite?.parentPass === 3
+        && reportWrite?.continuationPass === 3
+        && audit.parentPass === 3
+        && audit.continuationPass === 3
+        && audit.producerDedupeKey === childDedupeKey;
+    }
+    return audit.kind === 'LEGACY_SPORT_REPAIR_RETRY'
+      && (
+        scopedEdge
+          ? report.schemaVersion === AFFILIATE_LEGACY_REPAIR_RETRY_SCHEMA_VERSION
+          : report.schemaVersion === 1
+            || report.schemaVersion === AFFILIATE_LEGACY_REPAIR_RETRY_SCHEMA_VERSION
+      )
+      && audit.schemaVersion === report.schemaVersion
+      && typeof parentSubject.pass === 'number'
+      && typeof childSubject.pass === 'number'
+      && childSubject.pass === parentSubject.pass + 1
+      && reportRow?.parentPass === parentSubject.pass
+      && reportRow?.retryPass === childSubject.pass
+      && reportWrite?.parentPass === parentSubject.pass
+      && reportWrite?.retryPass === childSubject.pass
+      && audit.parentPass === parentSubject.pass
+      && audit.retryPass === childSubject.pass
+      && audit.childDedupeKey === childDedupeKey;
+  };
+  const producerEdges: Array<{
+    parentNode: ScopedClaimNode;
+    childJob: JsonRecord;
+    childSubject: JsonRecord;
+  }> = [
+    {
+      parentNode: immediateNode,
+      childJob: job,
+      childSubject: subject,
+    },
+    ...lineageNodes.flatMap((candidate, index) => {
+      const parentNode = lineageNodes[index + 1];
+      if (
+        candidate.job.role !== 'MAPPING_PRODUCER'
+        || !parentNode
+      ) return [];
+      return [{
+        parentNode,
+        childJob: candidate.job,
+        childSubject: candidate.subject!,
+      }];
+    }),
+  ];
+  for (const edge of producerEdges) {
+    if (
+      edge.parentNode.job.role === 'MAPPING_PRODUCER'
+      && !edgeAuditMatchesChild(edge.parentNode, edge.childJob, edge.childSubject)
+    ) {
+      reject(`The scoped legacy repair producer edge is not bound to its creation audit: ${JSON.stringify({
+        parentId: edge.parentNode.job.id,
+        parentClaimId: edge.parentNode.claim.id,
+        childId: edge.childJob.id,
+        childParentClaimId: edge.childJob.parentClaimId,
+        childDedupeKey: edge.childJob.dedupeKey,
+        parentScope: recordValue(edge.parentNode.subject?.repairContext).sourceSportScope,
+        childScope: recordValue(edge.childSubject.repairContext).sourceSportScope,
+        parentDisposition: edge.parentNode.job.terminalDisposition,
+        resultDisposition: edge.parentNode.result?.disposition,
+      })}`);
+    }
+  }
+  const reviewerProducerIdentityValid = (
+    reviewerNode: ScopedClaimNode,
+    childJob: JsonRecord,
+    reviewerSubject: JsonRecord,
+  ): boolean => {
+    const producerNode = lineageNodes.find((candidate) => (
+      candidate.job.role === 'MAPPING_PRODUCER'
+      && candidate.claim.id === reviewerSubject.producerClaimId
+    ));
+    const producerSubject = producerNode?.subject;
+    const producerClaim = producerNode?.claim;
+    const producerJob = producerNode?.job;
+    const producerResult = producerNode?.result;
+    const producerEnvelope = producerNode?.envelope;
+    const producerResultPayload = recordValue(producerResult?.payload);
+    const committedPackageHash = producerResult
+      && (
+        producerResult.disposition === 'PACKAGE_COMMITTED'
+        || producerResult.disposition === 'BOUNDED_REPAIR_SUBMITTED'
+      )
+      ? stringValue(producerResultPayload.packageHash)
+      : null;
+    return (
+      producerNode !== undefined
+      && producerSubject !== null
+      && producerSubject !== undefined
+      && producerClaim !== undefined
+      && producerJob !== undefined
+      && producerResult !== null
+      && producerResult !== undefined
+      && producerEnvelope !== null
+      && producerEnvelope !== undefined
+      && producerSubject.type === 'MAPPING_PRODUCER'
+      && producerSubject.supplySourceId === reviewerSubject.supplySourceId
+      && sameRepairContext(producerSubject.repairContext, reviewerSubject.repairContext)
+      && reviewerNode.job.parentClaimId === reviewerSubject.producerClaimId
+      && childJob.parentClaimId === reviewerNode.claim.id
+      && producerClaim.status === 'COMPLETED'
+      && producerClaim.role === 'MAPPING_PRODUCER'
+      && producerClaim.terminalReceiptId !== null
+      && producerJob.status === 'COMPLETED'
+      && producerJob.activeClaimId === null
+      && producerJob.terminalReceiptId === producerClaim.terminalReceiptId
+      && normalizeHash(hashAffiliateAgentValue(producerEnvelope))
+        === normalizeHash(producerClaim.claimEnvelopeHash)
+      && producerClaim.workerId === reviewerSubject.producerWorkerId
+      && producerClaim.invocationId === reviewerSubject.producerInvocationId
+      && producerClaim.workspaceId === reviewerSubject.producerWorkspaceId
+      && producerResult.jobId === producerJob.id
+      && producerResult.claimId === producerClaim.id
+      && producerResult.claimGeneration === producerClaim.claimGeneration
+      && producerResult.role === 'MAPPING_PRODUCER'
+      && committedPackageHash === reviewerSubject.committedPackageHash
+    );
+  };
+  const historicalReviewerEdgeValid = (
+    reviewerNode: ScopedClaimNode,
+    childJob: JsonRecord,
+    childSubject: JsonRecord,
+  ): boolean => {
+    const reviewerSubject = reviewerNode.subject;
+    const childDedupeKey = stringValue(childJob.dedupeKey);
+    if (
+      reviewerNode.job.role !== 'SUPPLY_REVIEWER'
+      || !reviewerSubject
+      || !reviewerNode.envelope
+      || childJob.role !== 'MAPPING_PRODUCER'
+      || childSubject.type !== 'MAPPING_PRODUCER'
+      || childSubject.mappingJobId !== mappingJobId
+      || childSubject.supplySourceId !== trustedScope.supplySourceId
+      || !sameRepairContext(childSubject.repairContext, reviewerSubject.repairContext)
+    ) return false;
+    const reviewerRepairPass = Number(reviewerSubject.reviewPass) + 1;
+    if (
+      childSubject.pass !== reviewerRepairPass
+      || childDedupeKey !== [
+        'mapping-repair',
+        reviewerSubject.producerClaimId,
+        reviewerSubject.committedPackageHash,
+        reviewerRepairPass,
+      ].join(':')
+    ) return false;
+    if (!reviewerProducerIdentityValid(reviewerNode, childJob, reviewerSubject)) {
+      return false;
+    }
+    const producerNode = lineageNodes.find((candidate) => (
+      candidate.job.role === 'MAPPING_PRODUCER'
+      && candidate.claim.id === reviewerSubject.producerClaimId
+    ));
+    const producerManifest = producerNode?.envelope
+      ? affiliateAgentEvidenceManifestSchema.safeParse(
+        producerNode.envelope.evidenceManifest,
+      )
+      : null;
+    const reviewerManifest = affiliateAgentEvidenceManifestSchema.safeParse(
+      reviewerNode.envelope.evidenceManifest,
+    );
+    if (
+      !producerManifest
+      || !producerManifest.success
+      || !reviewerManifest.success
+    ) return false;
+    const entriesByRef = new Map<string, JsonRecord>();
+    for (const entry of [
+      ...producerManifest.data.entries,
+      ...reviewerManifest.data.entries,
+    ]) {
+      const prior = entriesByRef.get(entry.evidenceRef);
+      if (prior && !sameAdmissionValue(prior, entry)) return false;
+      entriesByRef.set(entry.evidenceRef, entry);
+    }
+    const preimage = {
+      schemaVersion: 1 as const,
+      entries: [...entriesByRef.values()].sort(
+        (left, right) => String(left.evidenceRef).localeCompare(String(right.evidenceRef)),
+      ),
+    };
+    const expectedManifest = affiliateAgentEvidenceManifestSchema.safeParse({
+      ...preimage,
+      hash: hashAffiliateAgentValue(preimage),
+    });
+    return expectedManifest.success
+      && sameAdmissionValue(childJob.evidenceManifestJson, expectedManifest.data);
+  };
+  for (let index = 0; index + 1 < lineageNodes.length; index += 1) {
+    const childNode = lineageNodes[index]!;
+    const parentNode = lineageNodes[index + 1]!;
+    if (
+      childNode.job.role === 'MAPPING_PRODUCER'
+      && parentNode.job.role === 'SUPPLY_REVIEWER'
+      && !historicalReviewerEdgeValid(parentNode, childNode.job, childNode.subject!)
+    ) {
+      reject('The scoped legacy repair historical reviewer edge is not bound to its creation contract.');
+    }
+  }
+  const immediateParentSubject = immediateNode.subject;
+  if (!immediateParentSubject) {
+    reject('The scoped legacy repair immediate parent subject is missing.');
+  }
+  const immediateParentRole = immediateNode.job.role;
+  const immediateNodeJobId = stringValue(immediateNode.job.id);
+  if (!immediateNodeJobId) {
+    reject('The scoped legacy repair immediate parent identity is invalid.');
+  }
+  const currentDedupeKey = String(job.dedupeKey ?? '');
+  const reviewerRepairPass = Number(immediateParentSubject?.reviewPass) + 1;
+  const currentDedupeValid = immediateParentRole === 'SUPPLY_REVIEWER'
+    ? immediateParentSubject?.type === 'SUPPLY_REVIEWER'
+      && subject.pass === reviewerRepairPass
+      && currentDedupeKey === [
+        'mapping-repair',
+        immediateParentSubject.producerClaimId,
+        immediateParentSubject.committedPackageHash,
+        reviewerRepairPass,
+      ].join(':')
+    : immediateParentRole === 'MAPPING_PRODUCER'
+      ? (
+        currentDedupeKey === retryDedupeKeyFor(immediateNodeJobId)
+        && subject.pass === Number(immediateParentSubject?.pass) + 1
+      ) || (
+        currentDedupeKey === `${AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX}${trustedScope.supplySourceId}`
+        && subject.pass === 3
+      )
+      : false;
+  if (immediateParentRole === 'SUPPLY_REVIEWER') {
+    if (!sameRepairContext(repairContext, immediateParentSubject.repairContext)) {
+      reject('The scoped legacy repair reviewer child context is not immutable.');
+    }
+    if (!reviewerProducerIdentityValid(immediateNode, job, immediateParentSubject)) {
+      reject('The scoped legacy repair reviewer producer identity is not immutable.');
+    }
+    const producerNode = lineageNodes.find((candidate) => (
+      candidate.job.role === 'MAPPING_PRODUCER'
+      && candidate.claim.id === immediateParentSubject?.producerClaimId
+    ));
+    const producerManifest = producerNode?.envelope
+      ? affiliateAgentEvidenceManifestSchema.safeParse(
+        producerNode.envelope.evidenceManifest,
+      )
+      : null;
+    const reviewerManifest = immediateNode.envelope
+      ? affiliateAgentEvidenceManifestSchema.safeParse(
+        immediateNode.envelope.evidenceManifest,
+      )
+      : null;
+    if (
+      !producerManifest
+      || !producerManifest.success
+      || !reviewerManifest
+      || !reviewerManifest.success
+    ) {
+      reject('The scoped legacy repair reviewer evidence manifest is invalid.');
+    }
+    const entriesByRef = new Map<string, JsonRecord>();
+    for (const entry of [
+      ...producerManifest.data.entries,
+      ...reviewerManifest.data.entries,
+    ]) {
+      const prior = entriesByRef.get(entry.evidenceRef);
+      if (prior && !sameAdmissionValue(prior, entry)) {
+        reject('The scoped legacy repair reviewer evidence references conflict.');
+      }
+      entriesByRef.set(entry.evidenceRef, entry);
+    }
+    const preimage = {
+      schemaVersion: 1 as const,
+      entries: [...entriesByRef.values()].sort(
+        (left, right) => String(left.evidenceRef).localeCompare(String(right.evidenceRef)),
+      ),
+    };
+    const expectedManifest = affiliateAgentEvidenceManifestSchema.safeParse({
+      ...preimage,
+      hash: hashAffiliateAgentValue(preimage),
+    });
+    if (
+      !expectedManifest.success
+      || !sameAdmissionValue(job.evidenceManifestJson, expectedManifest.data)
+    ) {
+      reject('The scoped legacy repair reviewer evidence manifest is not derived from its lineage.');
+    }
+  }
+  if (!currentDedupeValid) {
+    reject('The scoped legacy repair child dedupe key is not bound to its immediate parent.');
+  }
+};
 export const previewAffiliateLegacyRepairRetry = async (
   input: PreviewAffiliateLegacyRepairRetryInput,
 ): Promise<AffiliateLegacyRepairRetryPreview> => {
   const bundle = parseBundle(input.bundle);
   const gatewayJobIds = retryGatewayJobIds(input.gatewayJobIds);
+  const excludedSourceLabels = retryExcludedSourceLabels(input.excludedSourceLabels);
+  const scopeRequest = retryScopeRequestFor(
+    gatewayJobIds,
+    excludedSourceLabels,
+    retryScopeOperatorId(input.operatorId),
+  );
   const reasonText = retryReason(input.reason);
   const { report } = await buildRetryReport(
     input.prisma,
@@ -5743,15 +7581,16 @@ export const previewAffiliateLegacyRepairRetry = async (
     reasonText,
     'PREVIEW',
     input.artifactStore,
+    scopeRequest,
   );
   return report as AffiliateLegacyRepairRetryPreview;
 };
-
 export const applyAffiliateLegacyRepairRetry = async (
   input: ApplyAffiliateLegacyRepairRetryInput,
 ): Promise<AffiliateLegacyRepairRetryApplyReport> => {
   const bundle = parseBundle(input.bundle);
   const gatewayJobIds = retryGatewayJobIds(input.gatewayJobIds);
+  const excludedSourceLabels = retryExcludedSourceLabels(input.excludedSourceLabels);
   const reasonText = retryReason(input.reason);
   const operatorId = stringValue(input.operatorId);
   if (!operatorId) {
@@ -5760,6 +7599,11 @@ export const applyAffiliateLegacyRepairRetry = async (
       'operatorId is required for retry apply.',
     );
   }
+  const scopeRequest = retryScopeRequestFor(
+    gatewayJobIds,
+    excludedSourceLabels,
+    operatorId,
+  );
   const expectedReportHash = normalizeHash(input.expectedReportHash);
   if (!expectedReportHash) {
     throw new AffiliateLegacyRepairAdmissionError(
@@ -5770,6 +7614,7 @@ export const applyAffiliateLegacyRepairRetry = async (
   return withSerializableTransaction(input.prisma, async (transaction) => {
     await assertActiveContract(transaction, bundle);
     const retrySnapshot = await readRetrySnapshot(transaction, gatewayJobIds);
+    assertRetryScopeParentCount(retrySnapshot, gatewayJobIds, scopeRequest);
     if (
       retrySnapshot.admission.gatewayClaims.some((claim) => normalizedUpper(claim.status) === 'ACTIVE')
       || retrySnapshot.gatewayClaims.some((claim) => normalizedUpper(claim.status) === 'ACTIVE')
@@ -5778,7 +7623,7 @@ export const applyAffiliateLegacyRepairRetry = async (
     ) {
       throw new AffiliateLegacyRepairAdmissionError(
         'CLAIM_DRIFT',
-        'An active gateway claim exists; legacy repair retry is paused.',
+        'An active gateway claim exists; legacy sport repair retry is paused.',
       );
     }
     const replay = await retryReplayReport(
@@ -5788,6 +7633,7 @@ export const applyAffiliateLegacyRepairRetry = async (
       reasonText,
       expectedReportHash,
       operatorId,
+      scopeRequest,
       input.artifactStore,
     );
     if (replay) return replay;
@@ -5798,6 +7644,7 @@ export const applyAffiliateLegacyRepairRetry = async (
       reasonText,
       'APPLY',
       input.artifactStore,
+      scopeRequest,
     );
     if (current.report.reportHash !== expectedReportHash) {
       throw new AffiliateLegacyRepairAdmissionError(

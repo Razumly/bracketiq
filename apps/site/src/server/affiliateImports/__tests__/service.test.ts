@@ -862,6 +862,114 @@ describe('affiliate import service', () => {
     }));
   });
 
+  it('persists the full sport union for a multi-sport club import', async () => {
+    const sourceOrganization = {
+      id: 'org_source',
+      ownerId: 'owner_1',
+      name: 'Example Source Organization',
+      location: 'Portland, OR',
+      address: '100 Main St, Portland, OR 97201',
+      coordinates: [-122.6765, 45.5231],
+      updatedAt: new Date('2026-08-01T00:00:00.000Z'),
+      description: null,
+      website: 'https://example.com',
+      logoId: null,
+    };
+    prismaMock.affiliateScrapeSources.findUnique.mockResolvedValue({
+      id: 'source_multi_sport_club',
+      name: 'Example Multisport Club',
+      sourceKey: 'example-multisport-club',
+      activeMappingId: 'mapping_multi_sport_club',
+      listUrl: 'https://example.com/clubs',
+      organizationId: 'org_source',
+    });
+    prismaMock.affiliateScrapeMappings.findUnique.mockResolvedValue({
+      id: 'mapping_multi_sport_club',
+      sourceId: 'source_multi_sport_club',
+      mapping: {
+        kind: 'CLUB',
+        listUrl: 'https://example.com/clubs',
+        itemSelector: '.club',
+        fields: {
+          title: { selector: '.title' },
+          officialActionUrl: {
+            selector: 'a.register',
+            mode: 'attribute',
+            attribute: 'href',
+          },
+          sportNames: { selector: '.sports' },
+          city: { selector: '.city' },
+          address: { selector: '.address' },
+        },
+      },
+    });
+    prismaMock.organizations.findUnique
+      .mockResolvedValueOnce(sourceOrganization)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(sourceOrganization);
+    prismaMock.affiliateScrapeRuns.create.mockResolvedValue({
+      id: 'run_multi_sport_club',
+    });
+    prismaMock.affiliateScrapeRuns.update.mockImplementation(async ({ data }) => ({
+      id: 'run_multi_sport_club',
+      ...data,
+    }));
+    prismaMock.affiliateScrapeSources.update.mockResolvedValue({});
+    prismaMock.affiliateImportCandidates.findUnique.mockResolvedValue(null);
+    prismaMock.affiliateImportCandidates.create.mockImplementation(async ({ data }) => ({
+      ...data,
+    }));
+    prismaMock.affiliateImportCandidates.update.mockImplementation(async ({ where, data }) => ({
+      id: where.id,
+      ...data,
+    }));
+    prismaMock.sports.findFirst.mockImplementation(async ({ where }) => (
+      canonicalSportNames.has(where?.name) ? { id: `sport_${where.name}` } : null
+    ));
+
+    const result = await runAffiliateSourceScrape('source_multi_sport_club', {
+      client: {
+        fetchPage: async () => ({
+          url: 'https://example.com/clubs',
+          finalUrl: 'https://example.com/clubs',
+          statusCode: 200,
+          fetchedAt: '2026-08-01T00:00:00.000Z',
+          body: `
+            <div class="club">
+              <span class="title">Example Multisport Club</span>
+              <a class="register" href="/register">Register</a>
+              <span class="sports">Indoor Volleyball | Grass Soccer</span>
+              <span class="city">Portland, OR</span>
+              <span class="address">100 Main St, Portland, OR 97201</span>
+            </div>
+          `,
+        }),
+      },
+    });
+
+    expect(result.candidates).toHaveLength(1);
+    expect(prismaMock.affiliateImportCandidates.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        listingKind: 'CLUB',
+        warnings: [],
+        rawPayload: expect.objectContaining({
+          sportNames: ['Indoor Volleyball', 'Grass Soccer'],
+          normalizedImport: expect.objectContaining({
+            sportNames: ['Indoor Volleyball', 'Grass Soccer'],
+          }),
+        }),
+      }),
+    });
+    expect(prismaMock.organizations.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        sports: ['Indoor Volleyball', 'Grass Soccer'],
+      }),
+      update: expect.objectContaining({
+        sports: ['Indoor Volleyball', 'Grass Soccer'],
+      }),
+    }));
+  });
+
   it('reclassifies a scraped candidate and creates the matching target draft', async () => {
     prismaMock.affiliateImportCandidates.findUnique.mockResolvedValue({
       id: 'candidate_1',

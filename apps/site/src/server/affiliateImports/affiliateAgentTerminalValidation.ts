@@ -14,6 +14,7 @@ import {
 } from "./affiliateAgentCommandDiagnostics";
 import {
   AffiliateSportVerificationError,
+  assertAffiliateSourceSportScopeRetained,
   assertAffiliateSportExclusionReady,
   verifyAffiliateSportCompletion,
   type AffiliateSportCompletionStoredArtifact,
@@ -316,6 +317,20 @@ export const checkAffiliateAgentTerminalDraft = async (
       if (!(error instanceof AffiliateSportVerificationError)) throw error;
       return invalid(
         error.path[0] === "reasonCodes" ? [...error.path] : ["payload", "sportEvidence", ...error.path],
+        error.message,
+      );
+    }
+  }
+  if (context.sourceSportScope) {
+    try {
+      assertAffiliateSourceSportScopeRetained({
+        excludedSourceLabels: context.sourceSportScope.excludedSourceLabels,
+        determinations: sportEvidence.sportDeterminations,
+      });
+    } catch (error) {
+      if (!(error instanceof AffiliateSportVerificationError)) throw error;
+      return invalid(
+        ["payload", "sportEvidence", ...error.path],
         error.message,
       );
     }

@@ -19,6 +19,7 @@ import type {
   AffiliateAgentProducerClaimEnvelopeForHistoricalRead,
   AffiliateAgentRole,
   AffiliateAgentSchemaIssue,
+  AffiliateAgentSourceSportScope,
   AffiliateAgentSportEvidence,
   AffiliateAgentTerminalResultEnvelope,
 } from "./agentGatewayContracts";
@@ -76,6 +77,7 @@ import {
 } from "./affiliateSourceExclusionAdmission";
 import {
   AffiliateSportVerificationError,
+  assertAffiliateSourceSportScopeRetained,
   assertAffiliateSportExclusionReady,
   sortUniqueAffiliateSportNames,
   verifyAffiliateSportCompletion,
@@ -688,6 +690,35 @@ const productionJson = (value: unknown): Prisma.InputJsonValue =>
 const productionString = (value: unknown): string | null => (
   typeof value === "string" && value.trim() ? value.trim() : null
 );
+const productionSourceSportScopeForClaim = (
+  claim: AffiliateAgentClaimEnvelope,
+): AffiliateAgentSourceSportScope | undefined => {
+  if (claim.subject.type !== "MAPPING_PRODUCER"
+    && claim.subject.type !== "SUPPLY_REVIEWER") {
+    return undefined;
+  }
+  return claim.subject.repairContext?.sourceSportScope;
+};
+
+const productionSourceSportScopeMetadataFor = (
+  scope: AffiliateAgentSourceSportScope | undefined,
+): Readonly<Record<string, unknown>> => scope
+  ? { sourceSportScopeHash: scope.hash, sourceSportScope: scope }
+  : {};
+
+const productionSourceSportScopeMetadataMatches = (
+  value: Readonly<Record<string, unknown>>,
+  claim: AffiliateAgentClaimEnvelope,
+): boolean => {
+  const scope = productionSourceSportScopeForClaim(claim);
+  if (!scope) {
+    return value.sourceSportScopeHash === undefined
+      && value.sourceSportScope === undefined;
+  }
+  return value.sourceSportScopeHash === scope.hash
+    && canonicalizeAffiliateAgentValue(value.sourceSportScope)
+      === canonicalizeAffiliateAgentValue(scope);
+};
 const productionStringArray = (value: unknown): string[] => (
   Array.isArray(value)
     ? value.filter(
@@ -1357,6 +1388,24 @@ export const verifyAffiliateAgentLegacySportRepair = async (
     artifacts: [...artifacts.values()],
     observedSportNames,
   };
+  if (context.sourceSportScope) {
+    try {
+      assertAffiliateSourceSportScopeRetained({
+        excludedSourceLabels: context.sourceSportScope.excludedSourceLabels,
+        determinations: sportEvidence.sportDeterminations,
+        observedSportNames: observedSportNames ?? [],
+      });
+    } catch (error) {
+      if (!(error instanceof AffiliateSportVerificationError)) throw error;
+      throw new AffiliateAgentSportEvidenceError([
+        {
+          path: ["sportEvidence", ...error.path],
+          code: "INVALID_VALUE",
+          message: error.message,
+        },
+      ], error.message);
+    }
+  }
   try {
     return await verifyAffiliateSportCompletion(verificationInput);
   } catch (error) {
@@ -1405,6 +1454,26 @@ export const verifyAffiliateAgentLegacySportRepair = async (
       );
     }
     throw legacySportRepairEvidenceError();
+  }
+};
+
+const verifyProductionPackageSportRepair = async (
+  input: AffiliateAgentLegacySportRepairVerificationInput,
+): Promise<VerifiedAffiliateSportCompletion> => {
+  try {
+    return await verifyAffiliateAgentLegacySportRepair(input);
+  } catch (error) {
+    if (!(error instanceof AffiliateAgentSportEvidenceError)) throw error;
+    const issues = error.issues.map((issue) => (
+      issue.path[0] === "sportEvidence"
+        && issue.path[1] === "observedSportNames"
+        ? { ...issue, path: ["candidatePackage", "fields"] }
+        : issue
+    ));
+    if (issues.every((issue, index) => issue === error.issues[index])) {
+      throw error;
+    }
+    throw new AffiliateAgentSportEvidenceError(issues, error.safeMessage);
   }
 };
 
@@ -3140,6 +3209,14 @@ const assertLegacySportRepairApprovalFresh = async (
   );
   const committedPackageHash = productionString(productionRecord(result.payload).committedPackageHash)
     ?? reviewerSubject.committedPackageHash;
+  const reviewerScope = reviewerSubject.repairContext?.sourceSportScope;
+  if (reviewerScope
+    && committedPackage.sourceSportScopeHash !== reviewerScope.hash) {
+    throw legacySportRepairEvidenceError("The committed mapping package source sport scope changed after producer commit.");
+  }
+  if (!reviewerScope && committedPackage.sourceSportScopeHash !== undefined) {
+    throw legacySportRepairEvidenceError("The committed mapping package has an unexpected source sport scope.");
+  }
   if (productionHash(committedPackage) !== committedPackageHash) {
     throw legacySportRepairEvidenceError("The committed mapping package changed after producer commit.");
   }
@@ -3678,13 +3755,21 @@ const assertProductionMappingPackage: (
   }
   const constantSportValues = candidatePackage.fields
     .filter((field) => field.mode === "CONSTANT")
-    .map((field) => field.value);
+    .flatMap((field) => field.field === "sportNames" ? field.values : [field.value]);
   const repairContext = claim.subject.repairContext;
+  const sourceSportScope = repairContext?.sourceSportScope;
+  if (sourceSportScope
+    && candidatePackage.sourceSportScopeHash !== sourceSportScope.hash) {
+    throw packageValidationError("The package source sport scope hash does not match the repair context.");
+  }
+  if (!sourceSportScope && candidatePackage.sourceSportScopeHash !== undefined) {
+    throw packageValidationError("sourceSportScopeHash is not permitted without a source sport scope.");
+  }
   if (!repairContext && candidatePackage.sportEvidence) {
     throw packageValidationError("sportEvidence is permitted only for legacy sport repairs.");
   }
   if (!repairContext && constantSportValues.length > 0) {
-    throw packageValidationError("CONSTANT sportName fields are permitted only for legacy sport repairs.");
+    throw packageValidationError("CONSTANT sportName or sportNames fields are permitted only for legacy sport repairs.");
   }
   if (repairContext) {
     const sportEvidence = candidatePackage.sportEvidence;
@@ -3697,13 +3782,24 @@ const assertProductionMappingPackage: (
     if (sportEvidence.sportsCatalogSha256.toLowerCase() !== repairContext.sportsCatalog.sha256.toLowerCase()) {
       throw packageValidationError("The package sport evidence catalog does not match the repair context.");
     }
+    if (sourceSportScope) {
+      try {
+        assertAffiliateSourceSportScopeRetained({
+          excludedSourceLabels: sourceSportScope.excludedSourceLabels,
+          determinations: sportEvidence.sportDeterminations,
+        });
+      } catch (error) {
+        if (!(error instanceof AffiliateSportVerificationError)) throw error;
+        throw packageValidationError(error.message);
+      }
+    }
     const resolvedNames = new Set(
       sportEvidence.sportDeterminations.flatMap((determination) => (
         determination.status === "RESOLVED" ? determination.canonicalSportNames : []
       )),
     );
     if (constantSportValues.some((sportName) => !resolvedNames.has(sportName))) {
-      throw packageValidationError("A CONSTANT sportName field is not supported by sportEvidence.");
+      throw packageValidationError("A CONSTANT sportName or sportNames field is not supported by sportEvidence.");
     }
     const packageEvidenceRefs = new Set(candidatePackage.evidenceRefs);
     for (const citation of sportEvidence.sportDeterminations.flatMap(
@@ -3834,7 +3930,7 @@ const prepareProductionValidation = async (
     listEvidence,
   );
   const sportVerification = claim.subject.repairContext
-    ? await verifyAffiliateAgentLegacySportRepair({
+    ? await verifyProductionPackageSportRepair({
       prisma: transaction,
       artifacts: input.artifacts,
       claim,
@@ -3851,6 +3947,9 @@ const prepareProductionValidation = async (
       observedSportNames: sportVerification.observedSportNames,
     }
     : undefined;
+  const sourceSportScopeMetadata = productionSourceSportScopeMetadataFor(
+    productionSourceSportScopeForClaim(claim),
+  );
   const validationOutput = {
     schemaVersion: 1,
     isValid: true,
@@ -3868,6 +3967,7 @@ const prepareProductionValidation = async (
     claimGeneration: claim.claimGeneration,
     invocationId: claim.invocationId,
     supplyContractHash: claim.supplyContractHash,
+    ...sourceSportScopeMetadata,
     ...(candidatePackage.sportEvidence
       ? { sportEvidence: candidatePackage.sportEvidence }
       : {}),
@@ -3898,6 +3998,7 @@ const prepareProductionValidation = async (
       roleContractHash: claim.roleContractHash,
       promptTemplateVersion: claim.promptTemplateVersion,
       promptTemplateHash: claim.promptTemplateHash,
+      ...sourceSportScopeMetadata,
       validationOutput,
     },
   };
@@ -4015,6 +4116,7 @@ const isDeterministicValidationBound = (
       Number(output.claimGeneration) === claim.claimGeneration,
       productionString(output.invocationId) === claim.invocationId,
       productionString(output.supplyContractHash) === claim.supplyContractHash,
+      productionSourceSportScopeMetadataMatches(output, claim),
     ].every(Boolean);
   } catch {
     return false;
@@ -4031,6 +4133,7 @@ const isProductionCommitBound = (
   const savedEvidenceRefs = Array.isArray(validationMetadata.evidenceRefs)
     ? validationMetadata.evidenceRefs.filter((value): value is string => typeof value === "string")
     : [];
+  const sourceSportScope = productionSourceSportScopeForClaim(claim);
   return [
     productionString(saved.claimId) === claim.claimId,
     Number(saved.claimGeneration) === claim.claimGeneration,
@@ -4039,6 +4142,10 @@ const isProductionCommitBound = (
     productionString(saved.validationReceiptId) === command.data.validationReceiptId,
     productionString(saved.validatedPackageHash) === command.data.validatedPackageHash,
     productionString(validationMetadata.validationReceiptId) === command.data.validationReceiptId,
+    productionSourceSportScopeMetadataMatches(validationMetadata, claim),
+    sourceSportScope
+      ? productionString(candidatePackage.sourceSportScopeHash) === sourceSportScope.hash
+      : candidatePackage.sourceSportScopeHash === undefined,
     productionString(validationMetadata.validatedPackageHash) === command.data.validatedPackageHash,
     productionString(validationMetadata.evidenceManifestHash) === claim.evidenceManifest.hash,
     productionHash(savedEvidenceRefs) === productionHash(
@@ -4192,12 +4299,15 @@ const productionMappingFields = (
         ? "tagText"
         : String(value.field);
     if (value.mode === "CONSTANT") {
+      const literalValue = value.field === "sportNames"
+        ? Array.isArray(value.values) ? value.values.join("|") : ""
+        : value.value;
       return [
         fieldName,
         {
           selector: ":scope",
           mode: "literal",
-          value: value.value,
+          value: literalValue,
         },
       ];
     }
@@ -4276,7 +4386,7 @@ const buildProductionCommitMapping = async (
     ) {
       throw new Error("The legacy sport repair evidence changed after validation.");
     }
-    const sportVerification = await verifyAffiliateAgentLegacySportRepair({
+    const sportVerification = await verifyProductionPackageSportRepair({
       prisma: transaction,
       artifacts: input.artifacts,
       claim,
@@ -4291,6 +4401,9 @@ const buildProductionCommitMapping = async (
       observedSportNames: sportVerification.observedSportNames,
     };
   }
+  const sourceSportScopeMetadata = productionSourceSportScopeMetadataFor(
+    productionSourceSportScopeForClaim(claim),
+  );
   const validationOutput = {
     ...productionRecord(validationMetadata.validationOutput),
     isValid: true,
@@ -4305,6 +4418,7 @@ const buildProductionCommitMapping = async (
     deploymentContractVersion: claim.deploymentContractVersion,
     deploymentContractHash: claim.deploymentContractHash,
     supplyContractVersion: claim.supplyContractVersion,
+    ...sourceSportScopeMetadata,
     supplyContractHash: claim.supplyContractHash,
     roleContractVersion: claim.roleContractVersion,
     roleContractHash: claim.roleContractHash,
@@ -4324,6 +4438,7 @@ const buildProductionCommitMapping = async (
       metadata: {
         packageHash: command.data.validatedPackageHash,
         evidenceRefs,
+        ...sourceSportScopeMetadata,
         evidenceKinds,
         validationOutput,
       },

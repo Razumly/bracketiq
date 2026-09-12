@@ -2746,6 +2746,104 @@ const configureLegacySportProducerScenario = (
     },
   };
 };
+const seedUnscopedLegacyRepairParent = (harness: GatewayClaimHarness): void => {
+  const targetJob = harness.state.jobs[0]!;
+  const parentJobId = "legacy-repair-parent-job";
+  const parentClaimId = "legacy-repair-parent-claim";
+  const parentReceiptId = "legacy-repair-parent-receipt";
+  const parentEnvelope = {
+    ...claimFixtureForRole("MAPPING_PRODUCER"),
+    jobId: parentJobId,
+    claimId: parentClaimId,
+    subject: {
+      ...claimRoleFields.MAPPING_PRODUCER.subject,
+      listingKind: "EVENT" as const,
+      pass: 1,
+    },
+  };
+  const parentResult = {
+    ...terminalResultFixture(terminalResultCases[8]),
+    jobId: parentJobId,
+    claimId: parentClaimId,
+  };
+  const parentResultHash = hashAffiliateAgentValue(parentResult);
+  const parentResponse = {
+    kind: "TERMINAL_ACCEPTED" as const,
+    receiptId: parentReceiptId,
+    resultHash: parentResultHash,
+    disposition: parentResult.disposition,
+    completedAt: "2026-08-20T18:00:00.000Z",
+  };
+  targetJob.parentClaimId = parentClaimId;
+  harness.setDomainDelegates({
+    affiliateSourceMappingJobs: {
+      findUnique: async ({ where }: { where: { id: string } }) => (
+        where.id === "mapping-job-1"
+          ? {
+              id: "mapping-job-1",
+              sourceId: "legacy-source",
+              intakeId: "legacy-intake",
+              supplySourceId: "supply-source-1",
+              resultSummary: {
+                legacyRepairRetryHistory: [],
+                legacyRepairContinuationHistory: [],
+              },
+            }
+          : null
+      ),
+    },
+  });
+  harness.state.jobs.push({
+    ...targetJob,
+    id: parentJobId,
+    dedupeKey: "legacy-sport-repair-parent",
+    subjectId: "mapping-job-1",
+    subjectJson: parentEnvelope.subject,
+    evidenceManifestJson: parentEnvelope.evidenceManifest,
+    parentClaimId: null,
+    status: "COMPLETED",
+    claimGeneration: 1,
+    activeClaimId: null,
+    terminalDisposition: parentResult.disposition,
+    resultHash: parentResultHash,
+    resultJson: parentResult,
+    terminalReceiptId: parentReceiptId,
+    finishedAt: new Date("2026-08-20T18:00:00.000Z"),
+  });
+  harness.state.claims.push({
+    id: parentClaimId,
+    jobId: parentJobId,
+    parentClaimId: null,
+    claimGeneration: parentEnvelope.claimGeneration,
+    lifecycleGeneration: parentEnvelope.lifecycleGeneration,
+    queue: parentEnvelope.queue,
+    lane: parentEnvelope.lane,
+    role: parentEnvelope.role,
+    workerId: parentEnvelope.workerId,
+    invocationId: parentEnvelope.invocationId,
+    workspaceId: parentEnvelope.workspaceId,
+    status: "COMPLETED",
+    terminalReceiptId: parentReceiptId,
+    claimEnvelopeHash: hashAffiliateAgentValue(parentEnvelope),
+    claimEnvelopeJson: parentEnvelope,
+    evidenceManifestHash: parentEnvelope.evidenceManifest.hash,
+  });
+  harness.state.receipts.push({
+    id: parentReceiptId,
+    claimId: parentClaimId,
+    jobId: parentJobId,
+    claimGeneration: parentEnvelope.claimGeneration,
+    idempotencyKey: "legacy-repair-parent-terminal",
+    operationKind: "SUBMIT_RESULT",
+    requestHash: hashAffiliateAgentValue(parentResult),
+    status: "SUCCEEDED",
+    responseHash: hashAffiliateAgentValue(parentResponse),
+    responseJson: parentResponse,
+    startedAt: new Date("2026-08-20T18:00:00.000Z"),
+    completedAt: new Date("2026-08-20T18:00:00.000Z"),
+    retentionClass: "INDEFINITE",
+  });
+};
 
 const legacySportContractGapResultFor = (
   grant: AffiliateAgentClaimGrant,
@@ -3074,6 +3172,7 @@ describe("Prisma affiliate Agent Gateway", () => {
     const admission = createAffiliateAgentClaimAdmission();
     const harness = createGatewayClaimHarness({ claimAdmission: admission });
     const request = configureLegacySportProducerScenario(harness).request;
+    seedUnscopedLegacyRepairParent(harness);
     const targetJob = harness.state.jobs[0]!;
     const targetJobId = String(targetJob.id);
     targetJob.dedupeKey = `${AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX}scoped-target`;
@@ -6114,6 +6213,74 @@ describe("Prisma affiliate Agent Gateway", () => {
       safeMessage: "The stored artifact source URL is invalid.",
     });
   });
+  it("rejects a scoped legacy repair claim with missing authority before claim creation", async () => {
+    const harness = createGatewayClaimHarness();
+    const fixture = configureLegacySportProducerScenario(harness);
+    const job = harness.state.jobs[0]!;
+    const subject = job.subjectJson as Record<string, unknown>;
+    const repairContext = subject.repairContext as Record<string, unknown>;
+    const scopePreimage = {
+      schemaVersion: 1 as const,
+      supplySourceId: String(subject.supplySourceId),
+      intakeId: String(repairContext.intakeId),
+      evidenceRunId: String(repairContext.evidenceRunId),
+      parentGatewayJobId: "historical-parent",
+      parentResultHash: "a".repeat(64),
+      excludedSourceLabels: ["Dance", "Martial Arts"],
+      operatorId: "affiliate-gateway-operator",
+      reason: "Retain verified sports and omit approved source-only activities.",
+    };
+    repairContext.sourceSportScope = {
+      ...scopePreimage,
+      hash: hashAffiliateAgentValue(scopePreimage),
+    };
+    job.subjectId = String(subject.mappingJobId);
+    job.parentClaimId = "missing-parent-claim";
+    const mappingJob = {
+      id: String(subject.mappingJobId),
+      intakeId: String(repairContext.intakeId),
+      sourceId: "legacy-source",
+      mappingId: "legacy-mapping",
+      supplySourceId: String(subject.supplySourceId),
+      resultSummary: {},
+    };
+    const source = {
+      id: "legacy-source",
+      supplySourceId: String(subject.supplySourceId),
+      targetKind: "EVENT",
+    };
+    harness.setDomainDelegates({
+      affiliateSourceMappingJobs: {
+        findUnique: async ({ where }: { where: { id: string } }) => (
+          where.id === mappingJob.id ? mappingJob : null
+        ),
+      },
+      affiliateScrapeSources: {
+        findUnique: async ({ where }: { where: { id: string } }) => (
+          where.id === source.id ? source : null
+        ),
+      },
+    });
+    await expect(harness.gateway.claim(fixture.request)).rejects.toMatchObject({
+      code: "REVIEW_WORKSPACE_INVALID",
+      safeMessage: "The scoped legacy repair claim binding is invalid.",
+    });
+    expect(harness.state.claims).toHaveLength(0);
+    expect(job.status).toBe("QUEUED");
+  });
+  it("keeps an ordinary unscoped pass-one legacy repair claim parentless", async () => {
+    const harness = createGatewayClaimHarness();
+    const fixture = configureLegacySportProducerScenario(harness);
+    expect(harness.state.jobs[0]?.parentClaimId).toBeNull();
+    await expect(harness.gateway.claim(fixture.request)).resolves.toMatchObject({
+      envelope: {
+        role: "MAPPING_PRODUCER",
+        jobId: "gateway-job-1",
+      },
+    });
+    expect(harness.state.claims).toHaveLength(1);
+  });
+
 
   it("reports the invalid terminal field without exposing its value", async () => {
     const harness = createGatewayClaimHarness();
@@ -7604,6 +7771,7 @@ describe("Prisma affiliate Agent Gateway", () => {
     let request: AffiliateAgentClaimRequest;
     if (role === "MAPPING_PRODUCER") {
       request = configureLegacySportProducerScenario(harness).request;
+      seedUnscopedLegacyRepairParent(harness);
     } else {
       configureStandaloneReviewerScenario(harness);
       request = standaloneReviewerRequest();
