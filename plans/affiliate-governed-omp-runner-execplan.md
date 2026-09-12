@@ -2356,7 +2356,7 @@ blacklist change, or a human selection of a canonical sport variant.
 - [x] Validate the retained sport union and reject excluded activities.
 - [x] Prove a multi-sport TPH package against the retained source evidence.
 - [x] Complete independent Standards and Spec review.
-- [ ] Integrate the verified source change on main.
+- [x] Integrate the verified source change on main.
 - [x] Identify the next bounded activation/publication operation.
 
 ### Design decisions
@@ -2423,11 +2423,12 @@ publication is authorized by this source implementation.
 
 ### Outcome
 
-Source implementation and independent review are complete. Integration is
-next. No production state changed. TPH's existing hold and Ultimate's approved
-package were not modified. The next operational gate is the reviewed release
-and one bounded TPH producer/reviewer run. Full fleet expansion still requires
-one complete lifecycle proof inside the active Supply Contract.
+Source commit `802f8ed3bc28af36c89c569f148da34bff61dc5b` is integrated on main.
+The post-integration 540-test batch and site TypeScript check passed. No
+production state changed. TPH's existing hold and Ultimate's approved package
+were not modified. The next operational gate is the reviewed release and one
+bounded TPH producer/reviewer run. Full fleet expansion still requires one
+complete lifecycle proof inside the active Supply Contract.
 
 ### Source and activation findings
 
@@ -2560,3 +2561,11 @@ Revision note: this section records the source-scope repair, the complete
 multi-sport CLUB path, independent review, and read-only production evidence.
 Image publication, deployment, new claims, activation, and publication still
 require separate current authorization.
+
+Integration and cleanup note: main advanced by fast-forward from the review
+base to `802f8ed3bc28af36c89c569f148da34bff61dc5b`. Post-integration checks used
+the identical isolated worktree revision. The complete 14-suite,
+540-test open-handle check and site TypeScript check passed. The temporary
+TPH probe scripts, exported bytes, and local report copies were removed after
+their evidence hashes were recorded above. No production image was published
+and no runtime was changed.
