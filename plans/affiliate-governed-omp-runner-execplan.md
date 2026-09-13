@@ -2569,3 +2569,218 @@ the identical isolated worktree revision. The complete 14-suite,
 TPH probe scripts, exported bytes, and local report copies were removed after
 their evidence hashes were recorded above. No production image was published
 and no runtime was changed.
+
+## Authorized TPH source-scope trial
+
+The user authorized continuation of the stated next step: the reviewed
+version-9 deployment and one bounded TPH producer/reviewer run. Use source
+`59e8b3bbff8a300254140c75d503249c1f69c76d`. Its exact Site CI run
+`34661715889` passed. Do not publish a different source revision.
+
+Refresh only affiliate-gateway, affiliate-agent-runner, mapping-producer-1,
+supply-reviewer-1, affiliate-model-auth-broker, and affiliate-model-gateway.
+The model services use the shared worker image and require image parity.
+Preserve the broker volume, both account identities, bearer files, security
+profiles, networks, and restart policy no. Keep the five dormant services,
+site, database, mobile, coverage, and replenishment unchanged.
+
+Keep claim admission closed during release preparation and deployment.
+Compile role/prompt 9 into deployment contract 9. Keep the active Supply
+Contract unchanged. Capture fresh preflight evidence before opening a lease.
+Use a new protected workload environment; do not overwrite the canonical or
+previous workload environment files.
+
+The only retry parent is `0ec7d3d8-eb20-4a51-989c-6bf59ec05974`.
+Its mapping job is `bca6ba9f-fdf6-4024-a254-88c052307972`, and its root is
+`9c6942b2-d546-489d-b0f6-2d63bcdb36a8`. Submit the exact source exclusions
+Dance and Martial Arts through the operator-only retry PREVIEW/APPLY route.
+Review two stable previews. Apply only the reviewed report hash. Verify exact
+replay without a second write. Keep the original parent, claim, result,
+receipts, citations, and catalog history unchanged.
+
+Start only the root runner, producer 1, and reviewer 1 for this workload.
+Open one exact-job producer lease. Close admission after the claim. Admit one
+independent reviewer only if that producer commits a package. Do not admit
+automatic retries, producer-repair follow-up jobs, or another source.
+Stop these three services after completion or an unexpected pipeline failure.
+Keep the Gateway and model services healthy for inspection.
+
+This trial does not authorize activation, publication, automatic scraping,
+catalog additions, global blacklist changes, or fleet expansion. Ultimate's
+approved package and Mission's completed exclusion remain unchanged.
+
+### Progress
+
+- [x] Verify reviewed source and exact-commit CI.
+- [x] Verify closed admission, no active claims, and no retained pointers.
+- [x] Verify both model accounts and an empty runner workspace.
+- [x] Publish and verify the exact immutable images.
+- [x] Deploy the six named services with fresh preflight.
+- [x] Admit and run the exact scoped TPH producer and its reviewer.
+- [x] Close admission, stop the workload services, and verify preservation.
+- [x] Record the result and the separate lifecycle gate.
+
+### Baseline and verification
+
+Before any release change, TPH is PRE_MAPPED at generation 1 with
+LEGACY_SPORT_REPAIR. Its mapping job is held for review, and its original
+Gateway parent is completed with CONTRACT_GAP. Ultimate is APPROVED at
+generation 3 with its inactive version-2 mapping and automation hold. Mission
+is SOURCE_EXCLUDED at generation 2. All three organizations are unlisted with
+public pages and widgets disabled. Automatic scraping is disabled.
+
+The Gateway and both model services are healthy on the reviewed version-8
+images. The runner, producer 1, and reviewer 1 are stopped. The five dormant
+container identities and states are captured for exact comparison. Both
+distinct model accounts pass health checks with broker-managed refresh.
+The runner workspace is empty. Active claims and retained claim pointers are
+zero, and GET /admission returns closed.
+
+Preservation checks must retain all preexisting Gateway history, the original
+protected cohort, old mappings, organizations, candidates, and pinned source
+evidence. Only the TPH mapping job, source/root lifecycle state, and new
+governed retry/package/reviewer records may change through the authorized
+Gateway. Record the exact before/after fingerprints and terminal receipts.
+
+### Outcome
+
+The bounded trial is complete. TPH is independently APPROVED at generation 3.
+Its new version-2 mapping remains inactive under LEGACY_SPORT_REPAIR. Admission
+is closed, the workload services are stopped, and no publication or automatic
+scraping was enabled. Ultimate's approval and Mission's exclusion are unchanged.
+
+### Deployment and admitted producer evidence
+
+Publication run `34777437493` passed after the exact production-environment
+approval. The worker image is
+`ghcr.io/razumly/bracketiq-affiliate-governed@sha256:6661cd72a0924cc7fd131540fd0a67ecb432c0b9b6de41d38ed0b912c14da804`.
+The Gateway image is
+`ghcr.io/razumly/bracketiq-affiliate-gateway@sha256:6d18c4d2c41756281def988a865f7c085e690dfd3cc32317bac65430f1468aba`.
+Both local image identities, RepoDigests, and OCI revision labels match the
+reviewed source. The shipped contract exports match role/prompt 9. Producer
+and reviewer containment probes and the three pinned SDK scenarios passed.
+The SDK test script was mounted read-only from the exact reviewed source;
+test scripts are excluded from the production image.
+
+The reviewed source archive SHA-256 is
+`3a8ad3a92cc88a3ce21a861414ee867fb03ca23d493bc47ce0eafdad8767aac1`.
+The exact source export is
+`/home/bracketiq/.cache/affiliate-governed-builds/59e8b3bbff8a300254140c75d503249c1f69c76d/apps/site`.
+Private version-9 helpers are under
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v9-tph-tools-59e8b3bbf`.
+They retain the reviewed v8 checks and change only the version transition and
+output labels. A truncated local helper copy was recovered and checked against
+the complete original SHA-256 before use. Python syntax checks passed.
+
+The new protected workload environment and operational evidence are under
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v9-tph-scope-59e8b3bbf`.
+Preparation changed only the two image references, deployment contract JSON,
+and preflight report field. All other environment values and all nine distinct
+credentials were preserved. The environment mode is 0600. Model volume,
+secret-file mount, and network identities matched before replacement.
+
+The Docker host passed the existing Linux, cgroup-v2, and security checks.
+The six selected containers were recreated without starting dependencies.
+Docker Compose uses `up --no-start --no-deps` for that step; `create` does not
+support `--no-deps`. Both model services were then started and became healthy.
+The five dormant container identities remained unchanged.
+
+Fresh preflight passed at `2026-09-13T19:59:23.603Z` with no blocker or warning.
+Its report hash is
+`6dddd67c28c27a9d26fed6268d84c592381941b9069054c3f104b7f68cfd7ea6`.
+It found 20 stopped legacy processes. The report was installed after 58 seconds.
+The Gateway was recreated with that report and became healthy with admission
+closed. The runner and both selected supervisors then passed readiness.
+Both distinct model account identities and broker-managed refresh remained
+healthy after replacement.
+
+Two deployed PREVIEW requests returned the reviewed hash
+`24fa919b16a20176742ca98c88ac90c6afa99b93a107325ba0f6ac8c95561e8e`.
+APPLY created only producer job `d6a4b4a7-b33f-43ab-ba67-6e1cf8bef6bd`.
+Exact APPLY replay returned that job with zero writes. Its pass is 2, and its
+source-scope hash is
+`1732c9b999626c3af1b367d1419f106ea532ff65a8479b542648817b814a854c`.
+
+One 300-second exact-job lease admitted producer claim
+`agw-claim-82963e2e-5e31-41fd-b69c-09b0bf01780d` at
+`2026-09-13T20:08:55.257Z`. The stored claim carries role/prompt/deployment 9
+and the exact approved exclusions. The monitor closed admission after the claim.
+All 181,683 protected preexisting row fingerprints still matched after deployment
+and claim admission. The original 99-record protected cohort also matched before
+deployment. Final comparison remains required after the producer/reviewer result.
+
+### Producer package and independent approval
+
+The producer completed at `2026-09-13T20:21:28.209Z` with
+BOUNDED_REPAIR_SUBMITTED and zero invocation failures. Its terminal result hash
+is `c8d1a1d9863c3467fbd5d6c03ab2322b96d0232d78f17a803783ea3677d52456`.
+The validation receipt is `agw-receipt-be7d16be-540e-4a60-b68f-3d47059b14e6`.
+The commit receipt is `agw-receipt-11724c76-70e9-4f2a-b32a-17c0d57acf28`.
+The terminal receipt is `agw-receipt-3f70520e-9037-465a-ba9f-2d6d1830d526`.
+
+The committed package hash is
+`159c24ade064f8001fe9c8305a6aed543a4e6b6c5aadfc96c6e00c44ca56c960`.
+It contains one CLUB candidate with Baseball, Beach Volleyball, Hockey,
+Indoor Soccer, and Pickleball. Dance and Martial Arts remain outside the
+retained union. The description selects the site's complete Austin program
+paragraph without discovery narration. The official action link is
+`https://tphacademy.com/austin/#connect`, and the source URL is
+`https://tphacademy.com/austin/`.
+
+The producer created only reviewer job
+`67dba499-7dde-415f-8bd9-aa52dbcb9f45`. One exact-job reviewer lease admitted
+claim `agw-claim-9427904e-889c-48f7-8b94-ef4e63c7f064` at
+`2026-09-13T20:26:26.848Z`. It used a separate reviewer worker, invocation,
+and workspace. The reviewer independently returned APPROVED at
+`2026-09-13T20:27:32.931Z`, with result hash
+`0b37d14f3f092301edd2dd30c5b9119ca2b057328001325505f50b6af0d90354`.
+
+The succeeded reviewer effect receipt is
+`agw-receipt-b10fe774-be72-488a-a140-5f23b7f5d4d3`.
+The terminal receipt is `agw-receipt-1ac04c62-c4fb-4a76-86c5-3132d0ab6e5a`.
+APPROVE transition `44218ce1-dc66-460d-9609-2cc93d02f887` records generation 3.
+The effect explicitly returns activationHeld true and
+holdReason LEGACY_SPORT_REPAIR. No activation or producer-repair job was created.
+
+The new mapping is `agw-artifact-09f2b226-55d3-4e16-ac25-82a85ace410b`,
+version 2, isActive false, with validatedAt
+`2026-09-13T20:27:32.722Z`. The authoritative root is APPROVED with
+AUTOMATION_HOLD. The source row retains its legacy REVIEW_REQUIRED status;
+that status was not rewritten to fabricate activation.
+
+### Final safety and handoff
+
+Exactly two new Gateway jobs and two claims ran: the one admitted producer
+and its one independent reviewer. All 25 operation receipts succeeded.
+Both invocation failure counts are zero. New records consist only of nine
+Gateway artifacts, two claims, 27 Gateway events, two Gateway jobs, 25 receipts,
+one approval, one mapping, and two lifecycle transitions. No source capture
+run, intake, public target, or unrelated record was added by this trial.
+
+All 181,683 protected preexisting row fingerprints match. All 99 original
+protected fingerprints also match. This includes the original TPH parent and
+its evidence/history, old mappings and organizations, Ultimate's approved
+package, and Mission's completed exclusion. TPH has zero Supply Targets.
+All three organizations remain unlisted with public pages and widgets disabled.
+Automatic scraping and root automation remain disabled.
+
+Admission is closed. Active claims, retained claim pointers, and queued
+Gateway jobs are zero. The runner, producer 1, and reviewer 1 are stopped.
+The runner workspace is empty. The Gateway and both model services are healthy
+on the reviewed version-9 images. The five dormant container identities,
+states, images, and restart policies are unchanged. Both distinct model
+accounts remain healthy with their original identities and broker-managed
+refresh. The canonical, v7, and v8 environment file hashes are unchanged.
+
+Private evidence includes run/final-safety.json, delivery-record.json,
+completion-check.json, producer-outcome.json, reviewer-outcome.json, both
+monitor logs, and the exact admission/replay receipts. The source export,
+versioned deployment helpers, and redacted preflight artifacts remain as
+operational evidence. Local temporary helper copies were removed.
+
+The next separate operation is one complete discovery/capture-to-publication
+proof for Portland–Vancouver soccer EVENT supply under the active Supply
+Contract. TPH and Ultimate are approved repair examples, not authority to
+publish outside that cohort or to start the full fleet. Any hold release,
+activation, publication, or broader admission requires current authorization.
+Issue 70 remains open for those operational acceptance gates.
