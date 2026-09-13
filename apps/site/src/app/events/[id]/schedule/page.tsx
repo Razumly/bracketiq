@@ -693,9 +693,6 @@ function EventScheduleContent() {
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [editorDraftEventType, setEditorDraftEventType] = useState<
-    string | null
-  >(null);
   const [editorDraftBootstrapKey, setEditorDraftBootstrapKey] = useState<
     string | null
   >(null);
@@ -1336,7 +1333,6 @@ function EventScheduleContent() {
     if (!savedDraft) {
       return;
     }
-    setEditorDraftEventType(savedDraft.basics.eventType);
   }, [createDraftStorageKey, isCreateMode]);
 
   useEffect(() => {
@@ -3838,17 +3834,7 @@ function EventScheduleContent() {
     [applyParticipantSnapshot, selectedOccurrence],
   );
 
-  const createEventType = (
-    editorDraftEventType ??
-    editorSnapshot?.draft.basics.eventType ??
-    changesEvent?.eventType ??
-    ""
-  )
-    .trim()
-    .toUpperCase();
-  const createButtonLabel = ["LEAGUE", "TOURNAMENT"].includes(createEventType)
-    ? "Create event & build schedule"
-    : "Create event";
+  const createButtonLabel = "Create event";
   const cancelButtonLabel = (() => {
     if (isCreateMode) return "Cancel";
     if (isEditingEvent) return "Cancel Manage";
@@ -5542,7 +5528,6 @@ function EventScheduleContent() {
     (state: { draft: EventEditorDraft }) => {
       const draft = cloneValue(state.draft) as EventEditorDraft;
       editorDraftRef.current = draft;
-      setEditorDraftEventType(draft.basics.eventType);
       if (isCreateMode) {
         if (createDraftStorageKey && typeof window !== "undefined") {
           writeCreateEventDraft(
@@ -5648,15 +5633,8 @@ function EventScheduleContent() {
         throw new Error("The event editor is still loading. Try again.");
       }
       let command: CreateEventEditorCommand | SaveEventEditorCommand;
-      const scheduleType = contractDraft.basics.eventType.trim().toUpperCase();
       const completion = {
-        mode:
-          createCompletionMode ??
-          (["LEAGUE", "TOURNAMENT"].includes(scheduleType)
-            ? contractDraft.schedule.isAutomatedScheduling === false
-              ? "CREATE_ONLY"
-              : "CREATE_AND_BUILD_SCHEDULE"
-            : "CREATE_ONLY"),
+        mode: createCompletionMode ?? "CREATE_ONLY",
       } as const;
       const scheduleTransition =
         effectiveMode === "EDIT" && currentSnapshot
@@ -6107,62 +6085,6 @@ function EventScheduleContent() {
     [],
   );
 
-  const schedulePreview = useCallback(
-    async (
-      draft: EventEditorDraft,
-      completionMode?: "CREATE_ONLY" | "CREATE_AND_BUILD_SCHEDULE",
-    ) => {
-      if (!draft) {
-        return;
-      }
-
-      setPublishing(true);
-      setError(null);
-      setInfoMessage(null);
-      setWarningMessage(null);
-
-      try {
-        const createResult = await saveEditorConfiguration(
-          draft,
-          "CREATE",
-          completionMode,
-        );
-        if (createResult.proposal) {
-          return;
-        }
-        const persistedEvent = createResult.event;
-        const persistedEventId = persistedEvent.$id ?? null;
-        if (!persistedEventId) {
-          throw new Error("Failed to create event.");
-        }
-        if (createDraftStorageKey && typeof window !== "undefined") {
-          clearCreateEventDraft(window.sessionStorage, createDraftStorageKey);
-        }
-        const params = new URLSearchParams(searchParams?.toString() ?? "");
-        params.delete("create");
-        params.delete("preview");
-        params.set("mode", "edit");
-        const builtMatchCount = Array.isArray(persistedEvent.matches)
-          ? persistedEvent.matches.length
-          : 0;
-        if (builtMatchCount > 0) {
-          params.set("tab", "schedule");
-          setActiveTab("schedule");
-        }
-        const query = params.toString();
-        router.replace(
-          `/events/${persistedEventId}/schedule${query ? `?${query}` : ""}`,
-          { scroll: false },
-        );
-      } catch (err) {
-        console.error("Failed to create event:", err);
-        setError(formatActionErrorMessage("Failed to create event.", err));
-      } finally {
-        setPublishing(false);
-      }
-    },
-    [createDraftStorageKey, router, saveEditorConfiguration, searchParams],
-  );
 
   const scheduleRegularEvent = useCallback(
     async (
@@ -7426,10 +7348,6 @@ function EventScheduleContent() {
         editorDraft,
       ) as unknown as Event;
 
-      const normalizedAffiliateUrl =
-        typeof completeCreateDraft.affiliateUrl === "string"
-          ? completeCreateDraft.affiliateUrl.trim()
-          : "";
       const editorDraftToSave: EventEditorDraft = {
         ...editorDraft,
         basics: { ...editorDraft.basics, state: "UNPUBLISHED" },
@@ -7437,13 +7355,6 @@ function EventScheduleContent() {
       const draftToSave = editorDraftToLegacyEvent(
         editorDraftToSave,
       ) as unknown as Event;
-      if (
-        normalizedAffiliateUrl.length === 0 &&
-        completeCreateDraft.eventType !== "EVENT"
-      ) {
-        await schedulePreview(editorDraftToSave);
-        return;
-      }
 
       if (rentalPurchaseTimeSlot) {
         const rentalPriceCents =
@@ -7465,8 +7376,7 @@ function EventScheduleContent() {
         }
       }
 
-      const scheduledEvent = await scheduleRegularEvent(editorDraftToSave);
-      return;
+      await scheduleRegularEvent(editorDraftToSave);
     }
 
     if (!activeEvent) return;
@@ -8331,11 +8241,6 @@ function EventScheduleContent() {
       <>
         <CreateEventScheduleView
           termsModal={contentTermsModal}
-          pendingChangesOpen={isPendingChangesPopoverOpen}
-          pendingSaveChanges={pendingSaveChanges}
-          onPendingChangesOpenChange={setIsPendingChangesPopoverOpen}
-          hasPendingUnsavedChanges={hasPendingUnsavedChanges}
-          onDiscardChanges={handleDiscardChanges}
           publishing={publishing}
           reschedulingMatches={reschedulingMatches}
           cancelling={cancelling}

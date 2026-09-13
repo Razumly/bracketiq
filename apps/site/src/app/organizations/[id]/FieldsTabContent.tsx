@@ -18,7 +18,7 @@ import {
 import type { View } from 'react-big-calendar';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 import 'react-big-calendar/lib/addons/dragAndDrop/styles.css';
-import { addHours, differenceInCalendarDays, endOfDay, endOfMonth, endOfWeek, startOfDay, startOfMonth, startOfWeek } from 'date-fns';
+import { addHours, differenceInCalendarDays, endOfDay, endOfWeek, startOfDay, startOfWeek } from 'date-fns';
 import Loading from '@/components/ui/Loading';
 import type { Facility, Field, Organization, TimeSlot, UserData } from '@/types';
 import { formatPrice } from '@/types';
@@ -41,6 +41,7 @@ import { apiRequest } from '@/lib/apiClient';
 import { canOrganizationUsePaidBilling } from '@/lib/organizationVerification';
 import { buildUniqueColorReferenceList } from '@/lib/calendarColorReferences';
 import FieldCalendarFilter, { type FieldCalendarFilterItem } from '@/components/calendar/FieldCalendarFilter';
+import { getResourceCalendarRange } from '@/components/calendar/resourceCalendarModel';
 import SharedCalendarEvent, { type SharedCalendarEventVariant } from '@/components/calendar/SharedCalendarEvent';
 import CreateRentalSlotModal, { type CreateRentalSlotModalSubmitPayload } from '@/components/ui/CreateRentalSlotModal';
 import { alignDateToWeekday, toValidDate, mondayDayOf, dateWithMinutes, parseCalendarDropRange, buildManagerCalendarDraftWithCalendarRange } from './fieldsTab/facilityCalendarRanges';
@@ -794,6 +795,7 @@ function FieldsTabWorkspace({
   const selectionFieldIds = selection?.fieldIds;
   const managerResourceSelectionHydratedKeyRef = useRef<string | null>(null);
   const [readonlyVisibleFieldIds, setReadonlyVisibleFieldIds] = useState<string[]>([]);
+  const [calendarVisibleFieldIds, setCalendarVisibleFieldIds] = useState<string[]>([]);
   const [calendarView, setCalendarView] = useState<View>('week');
   const [calendarDate, setCalendarDate] = useState<Date>(new Date());
   const [hostOrganizations, setHostOrganizations] = useState<Organization[]>([]);
@@ -921,6 +923,16 @@ function FieldsTabWorkspace({
 
   const fields = useMemo<Field[]>(() => sortFieldsByCreatedAt(org?.fields ?? []), [org?.fields]);
   const allFieldIds = useMemo(() => fields.map((field) => field.$id), [fields]);
+  useEffect(() => {
+    if (!canManage || !allFieldIds.length) {
+      return;
+    }
+    setCalendarVisibleFieldIds((current) => (
+      current.length
+        ? current.filter((fieldId) => allFieldIds.includes(fieldId))
+        : allFieldIds
+    ));
+  }, [allFieldIds, canManage]);
   const managerResourceSelectionStorageKey = useMemo(
     () => (canManage ? buildManagerResourceSelectionStorageKey(org?.$id ?? organizationId) : null),
     [canManage, org?.$id, organizationId],
@@ -1111,7 +1123,7 @@ function FieldsTabWorkspace({
   }, [canManage, publicFacilityFilterOptions, selectedFacilityFilterValue]);
 
   useEffect(() => {
-    if (!canManage) {
+    if (!canManage || calendarView === 'month') {
       return;
     }
     setSelection((prev) => {
@@ -1125,7 +1137,7 @@ function FieldsTabWorkspace({
 
       return { fieldIds: facilityFilteredFieldIds, ...initialManagerSelectionRange(prev) };
     });
-  }, [canManage, facilityFilteredFieldIds]);
+  }, [canManage, calendarView, facilityFilteredFieldIds]);
 
   useEffect(() => {
     if (canManage) {
@@ -1262,8 +1274,17 @@ function FieldsTabWorkspace({
     [fields, readonlyCalendarFieldIds],
   );
   const facilityCalendarFields = useMemo(
-    () => (canManage ? selectedFields : readonlyCalendarFields),
-    [canManage, readonlyCalendarFields, selectedFields],
+    () => {
+      if (!canManage) {
+        return readonlyCalendarFields;
+      }
+      if (calendarView !== 'month') {
+        return fields;
+      }
+      const visibleIds = calendarVisibleFieldIds.length ? calendarVisibleFieldIds : allFieldIds;
+      return fields.filter((field) => visibleIds.includes(field.$id));
+    },
+    [allFieldIds, calendarView, calendarVisibleFieldIds, canManage, fields, readonlyCalendarFields],
   );
   const facilityCalendarFieldsWithPendingRentalUpdates = useMemo(() => {
     const pendingUpdates = Object.values(managerRentalSlotUpdates);
@@ -1389,6 +1410,10 @@ function FieldsTabWorkspace({
     setSelectedFacilityFilterValue(nextValue);
 
     if (canManage) {
+      if (calendarView === 'month') {
+        setCalendarVisibleFieldIds(nextFieldIds);
+        return;
+      }
       setSelection((prev) => {
         if (!nextFieldIds.length) {
           return null;
@@ -1410,15 +1435,18 @@ function FieldsTabWorkspace({
         .filter((fieldId) => nextFieldIds.includes(fieldId));
       return {
         ...selectionItem,
-        scheduledFieldIds: validSelectionFieldIds.length ? validSelectionFieldIds : preferredNextFieldIds,
       };
     }));
   }, [
     canManage,
+    calendarView,
     getFieldIdsForFacilityFilter,
     getPreferredFieldIdsForFacilityFilter,
     setRentalSelections,
   ]);
+  const handleCalendarVisibleFieldIdsChange = useCallback((values: string[]) => {
+    setCalendarVisibleFieldIds(normalizeFieldIds(values));
+  }, []);
   const refreshOrganization = useCallback(async () => {
     if (!organizationId) return;
     try {
@@ -1438,7 +1466,7 @@ function FieldsTabWorkspace({
         case 'day':
           return { start: startOfDay(date), end: endOfDay(date) };
         case 'month':
-          return { start: startOfMonth(date), end: endOfMonth(date) };
+          return getResourceCalendarRange('month', date);
         case 'agenda':
         case 'week':
         default:
@@ -1456,11 +1484,21 @@ function FieldsTabWorkspace({
   const fieldIdsToHydrate = useMemo(
     () => resolveFieldIdsForCalendarHydration({
       canManage,
+      calendarView: calendarView === 'month' ? 'month' : 'week',
+      calendarVisibleFieldIds,
       fields: canManage ? fields : readonlyCalendarFields,
       selectedFieldIds,
       rentalSelections,
     }),
-    [canManage, fields, readonlyCalendarFields, rentalSelections, selectedFieldIds],
+    [
+      calendarView,
+      calendarVisibleFieldIds,
+      canManage,
+      fields,
+      readonlyCalendarFields,
+      rentalSelections,
+      selectedFieldIds,
+    ],
   );
   const fieldEventsRequestKey = useMemo(
     () => (
@@ -1508,10 +1546,14 @@ function FieldsTabWorkspace({
 	      new Map<string, Array<{ fieldId: string; start: Date; end: Date }>>(),
 	    );
 
-	    const draftEvents: SelectionCalendarEntry[] = [];
-	    if (canManage) {
-	      const visibleFieldIdSet = new Set(selectedFieldIds);
-	      managerCalendarDrafts.forEach((draft) => {
+    const draftEvents: SelectionCalendarEntry[] = [];
+    if (canManage) {
+      const visibleFieldIdSet = new Set(
+        calendarView === 'month'
+          ? (calendarVisibleFieldIds.length ? calendarVisibleFieldIds : allFieldIds)
+          : allFieldIds,
+      );
+      managerCalendarDrafts.forEach((draft) => {
         const occurrences = buildManagerCalendarDraftOccurrences(draft, rangeStart, rangeEnd);
         if (!occurrences.length) {
           return;
@@ -1600,14 +1642,16 @@ function FieldsTabWorkspace({
     });
     return draftEvents;
   }, [
+    allFieldIds,
     calendarRange.end,
     calendarRange.start,
+    calendarView,
+    calendarVisibleFieldIds,
     canManage,
     fields,
     managerCalendarDrafts,
     readonlyCalendarFieldIds,
     rentalSelections,
-    selectedFieldIds,
     staffScheduleMembers,
   ]);
 
@@ -3346,13 +3390,11 @@ function FieldsTabWorkspace({
     [facilityCalendarFields],
   );
   const renderFieldCalendar = () => {
-    const canRenderCalendar = canManage ? Boolean(selectedFieldIds.length > 0) : readonlyCalendarFields.length > 0;
+    const canRenderCalendar = calendarResources.length > 0;
     return (
       <FacilityCalendarPanel
         canRenderCalendar={canRenderCalendar}
-        emptyText={
-          canManage ? 'Select at least one resource to view availability.' : 'No resources are available for rentals.'
-        }
+        emptyText="No resources are available for this calendar."
         events={calendarEvents}
         conflictingEventIds={conflictingEventIds}
         resources={calendarResources}
@@ -3500,6 +3542,7 @@ function FieldsTabWorkspace({
       <ManagerFacilityCalendarSidebar
         loading={fieldEventsLoading || orgLoading}
         facilityFilterOptions={facilityFilterOptions}
+        calendarView={calendarView === 'month' ? 'month' : 'week'}
         selectedFacilityFilterValue={selectedFacilityFilterValue}
         onFacilityFilterChange={handleFacilityFilterChange}
         calendarLayerOrder={CALENDAR_LAYER_ORDER}
@@ -3516,6 +3559,7 @@ function FieldsTabWorkspace({
         selectedFieldIds={selectedFieldIds}
         facilityFilteredFieldIds={facilityFilteredFieldIds}
         fieldFilterItems={fieldFilterItems}
+        calendarVisibleFieldIds={calendarVisibleFieldIds}
         fieldColorReferenceList={fieldColorReferenceList}
         createDragMode={managerCreateDragMode}
         onCreatePointerDown={handleManagerCreatePointerDown}
@@ -3529,7 +3573,7 @@ function FieldsTabWorkspace({
         onCreatePointerMove={handleManagerCreatePointerMove}
         onCreatePointerUp={handleManagerCreatePointerUp}
         onCreatePointerCancel={handleManagerCreatePointerCancel}
-        onSelectedFieldIdsChange={handleSelectedFieldIdsChange}
+        onCalendarVisibleFieldIdsChange={handleCalendarVisibleFieldIdsChange}
       >
         <Stack gap="sm" className="min-w-0">
           {renderFieldCalendar()}
@@ -3593,6 +3637,7 @@ function FieldsTabWorkspace({
             data={publicFacilityFilterOptions}
             value={selectedFacilityFilterValue}
             onChange={handleFacilityFilterChange}
+            searchable
             allowDeselect={false}
             size="sm"
           />

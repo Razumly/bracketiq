@@ -171,6 +171,122 @@ describe("repeating Time Slot availability", () => {
       }),
     ).not.toThrow();
   });
+  it("bounds an open recurrence by a finite Event End", () => {
+    expect(() =>
+      assertRepeatingTimeSlotsResolvable({
+        slots: [
+          slot({
+            id: "finite-event-end",
+            endDate: undefined,
+          }),
+        ],
+        eventStart: new Date("2026-02-01T00:00:00.000Z"),
+        eventEnd: new Date("2026-03-02T00:00:00.000Z"),
+      }),
+    ).not.toThrow();
+  });
+  it("rejects finite recurrence occurrences beyond Event End", () => {
+    expect(() =>
+      assertRepeatingTimeSlotsResolvable({
+        slots: [
+          slot({
+            endDate: "2026-03-31",
+            id: "finite-range-beyond-event-end",
+          }),
+        ],
+        eventStart: new Date("2026-02-01T00:00:00.000Z"),
+        eventEnd: new Date("2026-03-02T00:00:00.000Z"),
+      }),
+    ).toThrow(
+      "Schedule Boundary Error: Repeating Time Slot is outside the Event boundary; Time Slots are rejected rather than clipped.",
+    );
+  });
+  it("rejects a configured range with no selected weekday occurrence", () => {
+    expect(() =>
+      assertRepeatingTimeSlotsResolvable({
+        slots: [
+          slot({
+            id: "no-occurrence",
+            daysOfWeek: [0],
+            startDate: "2026-08-18",
+            endDate: "2026-08-19",
+            timeZone: "UTC",
+          }),
+        ],
+        eventStart: new Date("2026-08-18T00:00:00.000Z"),
+      }),
+    ).toThrow(
+      "The selected date range contains no occurrence for the selected weekdays. Choose another date range or weekday.",
+    );
+  });
+
+  it("rejects a finite recurrence range that ends before Event Start", () => {
+    expect(() =>
+      assertRepeatingTimeSlotsResolvable({
+        slots: [
+          slot({
+            id: "range-before-event-start",
+            daysOfWeek: [0],
+            startDate: undefined,
+            endDate: "2026-08-01",
+            timeZone: "UTC",
+          }),
+        ],
+        eventStart: new Date("2026-08-10T00:00:00.000Z"),
+      }),
+    ).toThrow(
+      "The selected date range contains no occurrence for the selected weekdays. Choose another date range or weekday.",
+    );
+  });
+
+  it("rejects repeating occurrences before the Event Start boundary", () => {
+    expect(() =>
+      assertRepeatingTimeSlotsResolvable({
+        slots: [
+          slot({
+            id: "outside-event-start",
+            daysOfWeek: [0],
+            startDate: "2026-08-10",
+            endDate: undefined,
+            timeZone: "UTC",
+          }),
+        ],
+        eventStart: new Date("2026-08-17T00:00:00.000Z"),
+      }),
+    ).toThrow(
+      "Schedule Boundary Error: Repeating Time Slot is outside the Event boundary; Time Slots are rejected rather than clipped.",
+    );
+  });
+  it("checks the first occurrence when startDate has a stored clock", () => {
+    expect(() =>
+      assertRepeatingTimeSlotsResolvable({
+        slots: [
+          slot({
+            id: "stored-clock-before-event-start",
+            daysOfWeek: [0],
+            startDate: "2026-08-17T09:00:00",
+            endDate: "2026-08-17T23:59:00",
+            startTimeMinutes: 7 * 60,
+            endTimeMinutes: 8 * 60,
+            timeZone: "UTC",
+          }),
+        ],
+        eventStart: new Date("2026-08-17T08:00:00.000Z"),
+        eventEnd: new Date("2026-08-18T00:00:00.000Z"),
+      }),
+    ).toThrow(
+      "Schedule Boundary Error: Repeating Time Slot is outside the Event boundary; Time Slots are rejected rather than clipped.",
+    );
+  });
+  it('rejects a repeating slot assigned to an unavailable Resource', () => {
+    expect(() =>
+      assertRepeatingTimeSlotsResolvable({
+        slots: [slot({ scheduledFieldIds: ['resource_2'] })],
+        eventStart: new Date('2026-02-01T00:00:00.000Z'),
+        eligibleResourceIds: ['resource_1'],
+      }),
+    ).toThrow('references unavailable Resource "resource_2"');
+  });
 
   it("reports DST adjustments only through the final generated end", () => {
     const sharedOptions = {

@@ -90,6 +90,7 @@ export const SimpleSetupPricingRegistrationPage = ({
                     control={control}
                     eventType={eventData.eventType}
                     startValue={eventData.start}
+                    eventTimeZone={eventData.timeZone}
                     noFixedEndDateTime={Boolean(eventData.noFixedEndDateTime)}
                     supportsNoFixedEndDateTime={model.presentation.supportsNoFixedEndDateTime}
                     automaticRefundsAvailable={paymentController.automaticRefundsAvailable}

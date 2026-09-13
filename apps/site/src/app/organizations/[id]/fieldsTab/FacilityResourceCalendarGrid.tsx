@@ -27,6 +27,7 @@ import type { CalendarEventData } from './facilityCalendarTypes';
 import CalendarLoadingRows from './CalendarLoadingRows';
 import { calendarResourceRowAtPoint } from './facilityCalendarDropPoint';
 import { facilityCalendarLanes } from './facilityCalendarLanes';
+import FacilityResourceCalendarMonthGrid from './FacilityResourceCalendarMonthGrid';
 
 const LAYOUT_STEP_MINUTES = 30;
 const TIME_LABEL_INTERVAL_MINUTES = 120;
@@ -769,6 +770,24 @@ export default function FacilityResourceCalendarGrid({
         aria-label="Facility calendar timeline. Hold Control and scroll to zoom."
         onKeyDown={handleTimelineKeyDown}
       >
+        {calendarView === 'month' ? (
+          <FacilityResourceCalendarMonthGrid
+            resources={resources}
+            events={events}
+            calendarRangeStart={calendarRangeStart}
+            calendarRangeEnd={calendarRangeEnd}
+            fieldEventsLoading={fieldEventsLoading}
+            eventPropGetter={eventPropGetter}
+            onSelectSlot={onSelectSlot}
+            onSelectEvent={onSelectEvent}
+            onEventDrop={onEventDrop}
+            onEventResize={onEventResize}
+            renderEvent={renderEvent}
+            canMoveEvent={canMoveEvent}
+            canResizeEvent={canResizeEvent}
+            slotPropGetter={slotPropGetter}
+          />
+        ) : (
         <div
           className="facility-resource-calendar__grid"
           role="grid"
@@ -858,6 +877,7 @@ export default function FacilityResourceCalendarGrid({
             )}
           </div>
         </div>
+        )}
       </div>
       {activeInteraction?.moved && activeInteraction.mode === 'move' ? (
         <div

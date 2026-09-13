@@ -133,4 +133,32 @@ describe("FacilityResourceSelector", () => {
       screen.getByRole("checkbox", { name: "home-field" }),
     ).toBeInTheDocument();
   });
+  it("searches resources by resource or facility name", async () => {
+    const user = userEvent.setup();
+    renderWithMantine(
+      <FacilityResourceSelector
+        label="Resources"
+        description="Choose resources"
+        placeholder="No resources"
+        resourceSingular="Court"
+        fields={[
+          makeField("home-field", "home", "org_1", "Home Facility"),
+          makeField("rental-field", "rental", "rental_org", "Rented Facility"),
+        ] as never}
+        value={[]}
+        onChange={jest.fn()}
+        eventOrganizationId="org_1"
+      />,
+    );
+
+    const search = screen.getByRole("textbox", { name: "Search resources or facilities" });
+    await user.type(search, "Rented Facility");
+    expect(screen.getByRole("checkbox", { name: "rental-field" })).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "home-field" })).not.toBeInTheDocument();
+
+    await user.clear(search);
+    await user.type(search, "home-field");
+    expect(screen.getByRole("checkbox", { name: "home-field" })).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "rental-field" })).not.toBeInTheDocument();
+  });
 });

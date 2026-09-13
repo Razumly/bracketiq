@@ -237,7 +237,7 @@ describe("buildFieldCalendarEvents", () => {
     }));
   });
 
-  it("reports invalid repeating event slots as calendar diagnostics", () => {
+  it("includes repeating event slots whose local start is in a DST gap", () => {
     const fields = [
       {
         ...baseField,
@@ -266,20 +266,22 @@ describe("buildFieldCalendarEvents", () => {
     ];
     const diagnostics: Array<{ code: string; message: string }> = [];
 
-    expect(buildFieldCalendarEvents(
+    const entries = buildFieldCalendarEvents(
       fields,
       {
         start: new Date("2026-03-08T00:00:00.000Z"),
         end: new Date("2026-03-09T00:00:00.000Z"),
       },
       diagnostics,
-    )).toEqual([]);
-    expect(diagnostics).toEqual([
+    );
+
+    expect(entries).toEqual([
       expect.objectContaining({
-        code: "REPEATING_TIME_SLOT_TIME_GAP",
-        message: expect.stringContaining("2026-03-08"),
+        start: new Date("2026-03-08T07:30:00.000Z"),
+        end: new Date("2026-03-08T08:00:00.000Z"),
       }),
     ]);
+    expect(diagnostics).toEqual([]);
   });
 
   it("summarizes rentable inventory, utilization, revenue per court-hour, and conflicts by facility", () => {

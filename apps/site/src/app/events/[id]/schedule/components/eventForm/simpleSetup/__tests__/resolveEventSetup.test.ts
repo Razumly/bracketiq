@@ -17,7 +17,6 @@ const input = (overrides: Partial<EventSetupResolverInput> = {}): EventSetupReso
     hasImmutableRentalResources: false,
     organizationFeatures: [],
     choices: {
-        scheduleStyle: 'FIXED_WINDOW',
         paidRegistration: false,
         useRequiredDocuments: false,
         useRegistrationQuestions: false,

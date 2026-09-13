@@ -1050,6 +1050,7 @@ describe("upsertEventFromPayload", () => {
     const client = createMockClient();
     const payload = {
       ...baseEventPayload(),
+      end: "2026-03-05T10:00:00.000Z",
       divisions: ["OPEN"],
       timeSlots: [
         {
@@ -2683,6 +2684,7 @@ describe("upsertEventFromPayload", () => {
     const client = createMockClient();
     const payload = {
       ...baseEventPayload(),
+      end: "2026-03-05T10:00:00.000Z",
       divisions: ["OPEN"],
       fieldIds: ["field_old"],
       fields: [

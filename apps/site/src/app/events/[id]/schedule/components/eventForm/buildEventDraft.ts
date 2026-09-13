@@ -1057,19 +1057,25 @@ export function buildEventDraft(input: BuildEventDraftInput): BuiltEventDraft {
                             serialized.endDate = formatLocalDateTime(normalizedSlotEnd);
                         }
                     } else {
-                        const slotStartDateOverride = normalizeSlotBoundaryOverrideForForm(
-                            slot.startDate ?? null,
-                            activeEditingEvent?.start ?? null,
-                            slotTimeZone,
-                        );
-                        if (slotStartDateOverride) {
-                            serialized.startDate = slotStartDateOverride;
-                        } else if (source.start) {
-                            serialized.startDate = source.start;
+                        if (slot.startDate) {
+                            const slotStartDateOverride = normalizeSlotBoundaryOverrideForForm(
+                                slot.startDate,
+                                null,
+                                slotTimeZone,
+                            );
+                            if (slotStartDateOverride) {
+                                serialized.startDate = slotStartDateOverride;
+                            }
                         }
-                        // Open-ended scheduling should not force recurring slot end bounds.
-                        if (!source.noFixedEndDateTime && source.end) {
-                            serialized.endDate = source.end;
+                        if (slot.endDate) {
+                            const slotEndDateOverride = normalizeSlotBoundaryOverrideForForm(
+                                slot.endDate,
+                                null,
+                                slotTimeZone,
+                            );
+                            if (slotEndDateOverride) {
+                                serialized.endDate = slotEndDateOverride;
+                            }
                         }
                     }
 
@@ -1095,25 +1101,6 @@ export function buildEventDraft(input: BuildEventDraftInput): BuiltEventDraft {
 
             if (slotDocuments.length) {
                 draft.timeSlots = slotDocuments;
-                const explicitSlotWindows = slotDocuments
-                    .filter((slot) => slot.repeating === false)
-                    .map((slot) => ({
-                        start: parseLocalDateTime(slot.startDate ?? null),
-                        end: parseLocalDateTime(slot.endDate ?? null),
-                    }))
-                    .filter((window): window is { start: Date; end: Date } => (
-                        Boolean(window.start && window.end && window.end.getTime() > window.start.getTime())
-                    ));
-                if (explicitSlotWindows.length) {
-                    const earliestStart = explicitSlotWindows.reduce((earliest, window) => (
-                        window.start.getTime() < earliest.getTime() ? window.start : earliest
-                    ), explicitSlotWindows[0].start);
-                    const latestEnd = explicitSlotWindows.reduce((latest, window) => (
-                        window.end.getTime() > latest.getTime() ? window.end : latest
-                    ), explicitSlotWindows[0].end);
-                    draft.start = formatLocalDateTime(earliestStart);
-                    draft.end = formatLocalDateTime(latestEnd);
-                }
                 const slotIds = slotDocuments
                     .map((slot) => (typeof slot.$id === 'string' ? slot.$id : null))
                     .filter((id): id is string => Boolean(id));

@@ -45,6 +45,7 @@ import { stringSetsEqual } from "./shared";
 import { normalizeSlotFieldIds, normalizeWeekdays } from "./slotForm";
 import {
   computeOneTimeSlotBoundsError,
+  computeRepeatingSlotBoundsError,
   computeRepeatingSlotTemporalError,
   computeSlotError,
 } from "./slotValidation";
@@ -968,8 +969,11 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) =>
 
       function validateScheduleConstruction() {
         if (
-          supportsScheduleSlotsForEvent(values.eventType, values.parentEvent) &&
-          values.isAutomatedScheduling !== false
+          supportsScheduleSlotsForEvent(values.eventType, values.parentEvent)
+          && (
+            values.isAutomatedScheduling !== false
+            || values.leagueSlots.length > 0
+          )
         ) {
           function resolveSlotDivisions() {
             const slotDivisionLookup = buildSlotDivisionLookup(
@@ -1251,9 +1255,10 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) =>
             values.start,
             values.timeZone,
           );
-          const resolvedEventEnd = values.noFixedEndDateTime
-            ? null
-            : parseDateTimeInTimeZone(values.end, values.timeZone);
+          const resolvedEventEnd = parseDateTimeInTimeZone(
+            values.end,
+            values.timeZone,
+          );
           values.leagueSlots.forEach((slot, index) => {
             if (!normalizeSlotFieldIds(slot).length) {
               ctx.addIssue({
@@ -1326,6 +1331,23 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) =>
                 ctx.addIssue({
                   code: "custom",
                   message: temporalError,
+                  path: ["leagueSlots", index, "endTimeMinutes"],
+                });
+              }
+              const boundsError = temporalError
+                ? undefined
+                : computeRepeatingSlotBoundsError({
+                    slot: {
+                      ...slot,
+                      startDate: slot.startDate ?? values.start,
+                    },
+                    eventStart: resolvedEventStart,
+                    eventEnd: resolvedEventEnd,
+                  });
+              if (boundsError) {
+                ctx.addIssue({
+                  code: "custom",
+                  message: boundsError,
                   path: ["leagueSlots", index, "endTimeMinutes"],
                 });
               }
