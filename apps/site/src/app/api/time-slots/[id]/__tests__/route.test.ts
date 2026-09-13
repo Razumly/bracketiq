@@ -42,8 +42,8 @@ const request = (slot: Record<string, unknown>) => new NextRequest('http://local
 });
 const event = {
   id: 'event_1',
-  start: new Date('2026-08-10T08:00:00.000Z'),
-  end: new Date('2026-08-10T18:00:00.000Z'),
+  start: new Date('2099-08-10T08:00:00.000Z'),
+  end: new Date('2099-08-10T18:00:00.000Z'),
   noFixedEndDateTime: false,
   timeZone: 'UTC',
   fieldIds: ['resource_1'],
@@ -51,8 +51,8 @@ const event = {
 };
 const target = {
   id: 'slot_target',
-  startDate: new Date('2026-08-10T10:00:00.000Z'),
-  endDate: new Date('2026-08-10T11:00:00.000Z'),
+  startDate: new Date('2099-08-10T10:00:00.000Z'),
+  endDate: new Date('2099-08-10T11:00:00.000Z'),
   startTimeMinutes: 10 * 60,
   endTimeMinutes: 11 * 60,
   timeZone: 'UTC',
@@ -64,8 +64,8 @@ const target = {
 const sibling = {
   ...target,
   id: 'slot_sibling',
-  startDate: new Date('2026-08-10T09:00:00.000Z'),
-  endDate: new Date('2026-08-10T10:00:00.000Z'),
+  startDate: new Date('2099-08-10T09:00:00.000Z'),
+  endDate: new Date('2099-08-10T10:00:00.000Z'),
   startTimeMinutes: 9 * 60,
   endTimeMinutes: 10 * 60,
   divisions: ['division_2'],
@@ -94,8 +94,8 @@ beforeEach(() => {
 describe('PATCH /api/time-slots/[id]', () => {
   it('locks referencing Events and atomically rejects a shared-Resource overlap across disjoint Divisions', async () => {
     const response = await PATCH(request({
-      startDate: '2026-08-10T09:30:00.000Z',
-      endDate: '2026-08-10T10:30:00.000Z',
+      startDate: '2099-08-10T09:30:00.000Z',
+      endDate: '2099-08-10T10:30:00.000Z',
       startTimeMinutes: 9 * 60 + 30,
       endTimeMinutes: 10 * 60 + 30,
     }), params);
@@ -115,8 +115,8 @@ describe('PATCH /api/time-slots/[id]', () => {
     txMock.timeSlots.findMany.mockResolvedValue([target]);
 
     const response = await PATCH(request({
-      startDate: '2026-08-10T18:00:00.000Z',
-      endDate: '2026-08-10T19:00:00.000Z',
+      startDate: '2099-08-10T18:00:00.000Z',
+      endDate: '2099-08-10T19:00:00.000Z',
       startTimeMinutes: 18 * 60,
       endTimeMinutes: 19 * 60,
     }), params);

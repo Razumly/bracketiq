@@ -152,14 +152,17 @@ describe('event form scheduling validation', () => {
     },
   );
 
-  it('accepts a finite Planned End for an intentionally unscheduled League', () => {
-    const result = buildEventFormSchema({
-      allowMissingEventImage: true,
-    }).safeParse({
-      ...buildValues('LEAGUE'),
-      end: '2026-09-01T18:00:00.000Z',
-    });
+  it.each(['LEAGUE', 'TOURNAMENT'] as const)(
+    'accepts a finite Planned End for an intentionally unscheduled %s',
+    (eventType) => {
+      const result = buildEventFormSchema({
+        allowMissingEventImage: true,
+      }).safeParse({
+        ...buildValues(eventType),
+        end: '2026-09-01T18:00:00.000Z',
+      });
 
-    expect(result.success).toBe(true);
-  });
+      expect(result.success).toBe(true);
+    },
+  );
 });

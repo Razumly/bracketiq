@@ -1,4 +1,3 @@
-/** @jest-environment node */
 
 import { resolveFieldIdsForCalendarHydration } from '@/app/organizations/[id]/fieldCalendarHydration';
 import type { Field } from '@/types';
@@ -12,11 +11,23 @@ const field = (id: string): Field => ({
 });
 
 describe('resolveFieldIdsForCalendarHydration', () => {
-  it('uses only selected fields for organization field management', () => {
+  it('uses every accessible field for the manager weekly calendar', () => {
     expect(resolveFieldIdsForCalendarHydration({
       canManage: true,
+      calendarView: 'week',
       fields: [field('field_1'), field('field_2')],
       selectedFieldIds: ['field_2'],
+      rentalSelections: [],
+    })).toEqual(['field_1', 'field_2']);
+  });
+
+  it('uses only visible fields for the manager month calendar', () => {
+    expect(resolveFieldIdsForCalendarHydration({
+      canManage: true,
+      calendarView: 'month',
+      calendarVisibleFieldIds: ['field_2'],
+      fields: [field('field_1'), field('field_2')],
+      selectedFieldIds: ['field_1'],
       rentalSelections: [],
     })).toEqual(['field_2']);
   });

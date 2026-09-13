@@ -338,9 +338,27 @@ export const assertOneTimeTimeSlotWithinEventBounds = (
     : `starting ${eventStart.toISOString()}`;
   throw new TimeSlotValidationError(
     'ONE_TIME_SLOT_OUTSIDE_EVENT_BOUNDS',
-    `One-Time Time Slot "${slot.slotId}" (${formatResolvedInterval(slot)}) is outside the Event boundary ${eventRange}; Time Slots are rejected rather than clipped.`,
+    `Schedule Boundary Error: One-Time Time Slot "${slot.slotId}" (${formatResolvedInterval(slot)}) is outside the Event boundary ${eventRange}; Time Slots are rejected rather than clipped.`,
     { slotIds: [slot.slotId] },
   );
+};
+
+const assertOneTimeSlotResources = (
+  slot: TimeSlotIntervalInput,
+  eligibleResourceIds?: string[],
+): void => {
+  const resourceIds = normalizeResourceIds(slot);
+  const slotId = normalizeSlotId(slot);
+  if (resourceIds.length === 0) {
+    invalidSlot(slotId, 'assign at least one Resource or delete this Time Slot.');
+  }
+  if (eligibleResourceIds) {
+    const eligible = new Set(normalizeIds(eligibleResourceIds));
+    const unavailableResourceId = resourceIds.find((resourceId) => !eligible.has(resourceId));
+    if (unavailableResourceId) {
+      invalidSlot(slotId, `the slot references unavailable Resource "${unavailableResourceId}".`);
+    }
+  }
 };
 
 export const assertValidOneTimeTimeSlots = (options: {
@@ -354,6 +372,7 @@ export const assertValidOneTimeTimeSlots = (options: {
   const resolved: ResolvedOneTimeTimeSlot[] = [];
   for (const slot of options.slots) {
     if (slot.repeating !== false) continue;
+    assertOneTimeSlotResources(slot, options.eligibleResourceIds);
     const interval = resolveOneTimeTimeSlot(slot, options.fallbackTimeZone);
     if (options.eventStart) {
       assertOneTimeTimeSlotWithinEventBounds(interval, options.eventStart, options.eventEnd ?? null);

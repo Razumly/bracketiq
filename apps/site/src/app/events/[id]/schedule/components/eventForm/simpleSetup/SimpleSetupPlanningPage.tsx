@@ -21,7 +21,6 @@ import type {
   EventSetupChoices,
   EventSetupPageId,
 } from "./types";
-import { isScheduleStyleAllowedForEventType } from "./scheduleStyle";
 
 type SimpleSetupPlanningPageProps = {
   pageId: EventSetupPageId;
@@ -59,35 +58,6 @@ type SimpleSetupPlanningPageProps = {
   isImmutableField: (key: keyof Event) => boolean;
 };
 
-const scheduleStyleOptions: Array<{
-  value: EventSetupChoices["scheduleStyle"];
-  label: string;
-  description: string;
-}> = [
-  {
-    value: "FIXED_WINDOW",
-    label: "Fixed event window",
-    description:
-      "Use one non-repeating timeslot that always matches the event start and end.",
-  },
-  {
-    value: "WEEKLY_SLOTS",
-    label: "Weekly repeating timeslots",
-    description:
-      "Use the same selected weekdays and times each week during the event.",
-  },
-  {
-    value: "FIXED_SLOTS",
-    label: "Fixed one-time timeslots",
-    description: "Add individual dates and times that do not repeat.",
-  },
-  {
-    value: "MIXED_SLOTS",
-    label: "Mixed repeating and fixed timeslots",
-    description:
-      "Combine weekly availability with one-time dates or exceptions.",
-  },
-];
 
 export const SimpleSetupPlanningPage = ({
   pageId,
@@ -121,9 +91,6 @@ export const SimpleSetupPlanningPage = ({
   const showScheduleConstructionControls =
     !isAutomatedSchedulingDisablesScheduleConstruction ||
     eventData.isAutomatedScheduling !== false;
-  const availableScheduleStyleOptions = scheduleStyleOptions.filter((option) =>
-    isScheduleStyleAllowedForEventType(eventData.eventType, option.value),
-  );
 
   return (
     <Stack gap={32}>
@@ -406,7 +373,7 @@ export const SimpleSetupPlanningPage = ({
             render={({ field }) => (
               <Checkbox
                 label="Automated Scheduling"
-                description="Build the match schedule from the event setup when you create it."
+                description="Use the event setup when you build the match schedule."
                 checked={Boolean(field.value)}
                 onChange={(event) => {
                   if (isImmutableField("isAutomatedScheduling")) return;
@@ -420,41 +387,6 @@ export const SimpleSetupPlanningPage = ({
               />
             )}
           />
-        ) : null}
-        {showScheduleConstructionControls ? (
-          <Radio.Group
-            label="Schedule style"
-            value={choices.scheduleStyle}
-            onChange={(value) =>
-              onChoicesChange({
-                scheduleStyle: value as EventSetupChoices["scheduleStyle"],
-              })
-            }
-          >
-            <SimpleGrid cols={{ base: 1, md: 2 }} spacing="lg" mt="sm">
-              {availableScheduleStyleOptions.map((option) => (
-                <label
-                  key={option.value}
-                  className="flex cursor-pointer items-start gap-3"
-                >
-                  <Radio
-                    value={option.value}
-                    aria-label={option.label}
-                    disabled={!capabilities.usesInternalSchedule}
-                    mt={2}
-                  />
-                  <div className="min-w-0">
-                    <Text fw={600} size="sm">
-                      {option.label}
-                    </Text>
-                    <Text c="dimmed" mt={2} size="sm">
-                      {option.description}
-                    </Text>
-                  </div>
-                </label>
-              ))}
-            </SimpleGrid>
-          </Radio.Group>
         ) : null}
         {(capabilities.isLeague || capabilities.isTournament) ? (
           <Controller

@@ -52,6 +52,12 @@ type EventDetailsPanelProps = {
     onStartChange: (value: Date) => void;
     onEndChange: (value: Date) => void;
     onNoFixedEndDateTimeChange: (checked: boolean) => void;
+    startTimingSource?: ComponentProps<typeof EventDetailsTimingControls>['startTimingSource'];
+    endTimingSource?: ComponentProps<typeof EventDetailsTimingControls>['endTimingSource'];
+    onResetStartToCalendar?: ComponentProps<typeof EventDetailsTimingControls>['onResetStartToCalendar'];
+    onResetEndToCalendar?: ComponentProps<typeof EventDetailsTimingControls>['onResetEndToCalendar'];
+    scheduleBoundaryError?: ComponentProps<typeof EventDetailsTimingControls>['scheduleBoundaryError'];
+    scheduleBoundaryWarning?: ComponentProps<typeof EventDetailsTimingControls>['scheduleBoundaryWarning'];
     onAutomatedSchedulingChange?: (checked: boolean) => void;
     coordinatesSelected: boolean;
     defaultCoordinates?: [number, number];
@@ -120,6 +126,12 @@ export const EventDetailsPanel = ({
     onStartChange,
     onEndChange,
     onNoFixedEndDateTimeChange,
+    startTimingSource,
+    endTimingSource,
+    onResetStartToCalendar,
+    onResetEndToCalendar,
+    scheduleBoundaryError,
+    scheduleBoundaryWarning,
     onAutomatedSchedulingChange,
     coordinatesSelected,
     defaultCoordinates,
@@ -186,6 +198,7 @@ export const EventDetailsPanel = ({
                 control={control}
                 eventType={eventData.eventType}
                 startValue={eventData.start}
+                eventTimeZone={eventData.timeZone}
                 noFixedEndDateTime={Boolean(eventData.noFixedEndDateTime)}
                 supportsNoFixedEndDateTime={supportsNoFixedEndDateTime}
                 automaticRefundsAvailable={automaticRefundsAvailable}
@@ -200,6 +213,12 @@ export const EventDetailsPanel = ({
                 onEndChange={onEndChange}
                 onNoFixedEndDateTimeChange={onNoFixedEndDateTimeChange}
                 onAutomatedSchedulingChange={onAutomatedSchedulingChange}
+                startTimingSource={startTimingSource}
+                endTimingSource={endTimingSource}
+                onResetStartToCalendar={onResetStartToCalendar}
+                onResetEndToCalendar={onResetEndToCalendar}
+                scheduleBoundaryError={scheduleBoundaryError}
+                scheduleBoundaryWarning={scheduleBoundaryWarning}
                 showScheduleControls={showScheduleTimingControls}
                 showRegistrationControls={showRegistrationTimingControls}
             /> : null}

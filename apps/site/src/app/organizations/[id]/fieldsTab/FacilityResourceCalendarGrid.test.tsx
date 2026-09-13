@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import FacilityResourceCalendarGrid, {
   type FacilityResourceCalendarResource,
@@ -328,5 +328,28 @@ describe('FacilityResourceCalendarGrid', () => {
       start: rentalEvent.start,
       end: new Date(2026, 7, 24, 13, 30),
     }));
+  });
+  it('renders month view as a seven-column day grid', () => {
+    const monthEvent = {
+      ...rentalEvent,
+      start: new Date(2026, 4, 4, 10, 0),
+      end: new Date(2026, 4, 4, 12, 0),
+    };
+    renderGrid({
+      calendarView: 'month',
+      calendarDate: new Date(2026, 4, 10),
+      calendarRangeStart: new Date(2026, 3, 26),
+      calendarRangeEnd: new Date(2026, 5, 6, 23, 59, 59, 999),
+      events: [monthEvent],
+    });
+
+    const grid = screen.getByRole('grid', { name: 'Facility resource month calendar' });
+    expect(within(grid).getAllByRole('gridcell')).toHaveLength(42);
+    expect(screen.getByRole('gridcell', { name: 'Sunday, April 26' })).toBeInTheDocument();
+    expect(screen.getByRole('gridcell', { name: 'Saturday, June 6' })).toBeInTheDocument();
+    expect(
+      within(screen.getByRole('gridcell', { name: 'Monday, May 4' }))
+        .getByRole('button', { name: 'Rental available' }),
+    ).toBeInTheDocument();
   });
 });

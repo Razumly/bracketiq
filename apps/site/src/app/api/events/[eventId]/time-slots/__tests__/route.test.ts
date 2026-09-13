@@ -55,6 +55,9 @@ beforeEach(() => {
     start: new Date('2026-08-10T08:00:00.000Z'),
     end: new Date('2026-08-10T18:00:00.000Z'),
     noFixedEndDateTime: false,
+    eventType: 'LEAGUE',
+    parentEvent: null,
+    automatedScheduling: true,
     timeZone: 'UTC',
     fieldIds: ['resource_1'],
   });
@@ -118,6 +121,92 @@ describe('/api/events/[eventId]/time-slots', () => {
         updatedAt: expect.any(Date),
       },
     }));
+  });
+
+  it('rejects removing the only slot from a standalone Weekly Event', async () => {
+    txMock.events.findUnique.mockResolvedValueOnce({
+      id: 'event_1',
+      hostId: 'host_1',
+      assistantHostIds: [],
+      organizationId: 'org_1',
+      timeSlotIds: ['slot_existing'],
+      start: new Date('2026-08-10T08:00:00.000Z'),
+      end: new Date('2026-08-10T18:00:00.000Z'),
+      noFixedEndDateTime: false,
+      eventType: 'WEEKLY_EVENT',
+      parentEvent: null,
+      automatedScheduling: true,
+      timeZone: 'UTC',
+      fieldIds: ['resource_1'],
+    });
+
+    const response = await PATCH(request({
+      removeTimeSlotIds: ['slot_existing'],
+    }), params);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual(expect.objectContaining({
+      error: 'Event "event_1" requires at least one Time Slot.',
+    }));
+    expect(txMock.events.update).not.toHaveBeenCalled();
+  });
+
+  it('allows an automated-scheduling-off competition to save without a slot', async () => {
+    txMock.events.findUnique.mockResolvedValueOnce({
+      id: 'event_1',
+      hostId: 'host_1',
+      assistantHostIds: [],
+      organizationId: 'org_1',
+      timeSlotIds: ['slot_existing'],
+      start: new Date('2026-08-10T08:00:00.000Z'),
+      end: new Date('2026-08-10T18:00:00.000Z'),
+      noFixedEndDateTime: false,
+      eventType: 'TOURNAMENT',
+      parentEvent: null,
+      automatedScheduling: false,
+      timeZone: 'UTC',
+      fieldIds: ['resource_1'],
+    });
+
+    const response = await PATCH(request({
+      removeTimeSlotIds: ['slot_existing'],
+    }), params);
+
+    expect(response.status).toBe(200);
+    expect(txMock.events.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ timeSlotIds: [] }),
+    }));
+  });
+
+  it('rejects a repeating slot whose finite range ends before Event Start', async () => {
+    txMock.timeSlots.findMany.mockResolvedValueOnce([
+      {
+        id: 'slot_existing',
+        repeating: true,
+        dayOfWeek: 0,
+        daysOfWeek: [0],
+        startDate: null,
+        endDate: new Date('2026-08-01T00:00:00.000Z'),
+        startTimeMinutes: 9 * 60,
+        endTimeMinutes: 10 * 60,
+        timeZone: 'UTC',
+        scheduledFieldId: 'resource_1',
+        scheduledFieldIds: ['resource_1'],
+        divisions: [],
+      },
+    ]);
+    const response = await PATCH(request({
+      addTimeSlotIds: ['slot_existing'],
+      removeTimeSlotIds: ['slot_remove'],
+    }), params);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual(expect.objectContaining({
+      code: 'INVALID_TIME_SLOT',
+      error: 'The selected date range contains no occurrence for the selected weekdays. Choose another date range or weekday.',
+      slotIds: ['slot_existing'],
+    }));
+    expect(txMock.events.update).not.toHaveBeenCalled();
   });
 
   it('rejects a conflicting resulting slot set atomically with conflict evidence', async () => {

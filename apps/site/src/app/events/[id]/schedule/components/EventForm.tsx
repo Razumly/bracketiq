@@ -78,6 +78,7 @@ import {
 import { useEventPaymentController } from "./eventForm/hooks/useEventPaymentController";
 import { useEventResourceController } from "./eventForm/hooks/useEventResourceController";
 import { useEventSlotController } from "./eventForm/hooks/useEventSlotController";
+import { useEventTimingSource, type TimingSetValue } from "./eventForm/hooks/useEventTimingSource";
 import { useEventFormSubmissionController } from "./eventForm/hooks/useEventFormSubmissionController";
 import { useEventFormInvariantSynchronization } from "./eventForm/hooks/useEventFormInvariantSynchronization";
 import { useEventFormReferenceHydration } from "./eventForm/hooks/useEventFormReferenceHydration";
@@ -106,12 +107,6 @@ import { SimpleSetupPlanningPage } from "./eventForm/simpleSetup/SimpleSetupPlan
 import { SimpleSetupFormPage } from "./eventForm/simpleSetup/SimpleSetupFormPage";
 import { SimpleSetupReviewPage } from "./eventForm/simpleSetup/SimpleSetupReviewPage";
 import { buildSimpleSetupReviewModel } from "./eventForm/simpleSetup/reviewModel";
-import {
-  inferEventSetupScheduleStyle,
-  isScheduleStyleAllowedForEventType,
-  normalizeScheduleStyleForEventType,
-  scheduleStyleChangeDiscardsConfiguredSlots,
-} from "./eventForm/simpleSetup/scheduleStyle";
 import type {
   EventSetupChoices,
   EventSetupMode,
@@ -161,9 +156,6 @@ const normalizedOfficialPositionSignature = (
 export const buildDefaultSetupChoices = (
   values?: Partial<EventFormValues>,
 ): EventSetupChoices => {
-  const isExternal = Boolean(
-    values?.isAffiliateEvent || hasAffiliateUrl(values?.affiliateUrl),
-  );
   const hasDivisionPrice =
     Array.isArray(values?.divisionDetails) &&
     values.divisionDetails.some((division) => Number(division.price) > 0);
@@ -178,19 +170,7 @@ export const buildDefaultSetupChoices = (
     (defaultOfficialPositions.length === 0 ||
       configuredOfficialPositions.join("|") !==
         defaultOfficialPositions.join("|"));
-  const inferredScheduleStyle = isExternal
-    ? "FIXED_WINDOW"
-    : inferEventSetupScheduleStyle({
-        eventType: values?.eventType,
-        slots: values?.leagueSlots,
-        eventStart: values?.start,
-        eventEnd: values?.end,
-      });
   return {
-    scheduleStyle: normalizeScheduleStyleForEventType(
-      values?.eventType,
-      inferredScheduleStyle,
-    ),
     paidRegistration: Number(values?.price) > 0 || hasDivisionPrice,
     useRequiredDocuments: Boolean(values?.requiredTemplateIds?.length),
     useRegistrationQuestions: false,
@@ -758,20 +738,6 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
       shouldProvisionFields,
       usesRentalSlots,
     } = resourceController;
-    const simpleFixedWindowFieldIds = useMemo(() => {
-      if (showOrganizationFieldsInEventDetails) {
-        return selectedFieldIds;
-      }
-      if (showLocalFieldCreationControls) {
-        return fields.map((field) => field.$id);
-      }
-      return undefined;
-    }, [
-      fields,
-      selectedFieldIds,
-      showLocalFieldCreationControls,
-      showOrganizationFieldsInEventDetails,
-    ]);
     const slotController = useEventSlotController({
       activeEditingEvent,
       clearErrors,
@@ -781,6 +747,7 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
       eventStart: eventData.start,
       eventSupportsScheduleSlots,
       eventTimeZone: eventData.timeZone,
+      isAutomatedScheduling: eventData.isAutomatedScheduling,
       eventType: eventData.eventType,
       fields,
       getValues,
@@ -794,9 +761,6 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
       rentalLockedSlotsForDraft,
       resolvedOrganizationId,
       resourceLabels,
-      simpleScheduleStyle:
-        setupMode === "SIMPLE" ? simpleSetupChoices.scheduleStyle : undefined,
-      fixedWindowFieldIds: simpleFixedWindowFieldIds,
       setLeagueData,
       setPlayoffData,
       setValue,
@@ -937,6 +901,22 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
       setTournamentData,
       setValue,
       tournamentData,
+    });
+    const timingController = useEventTimingSource({
+      activeEditingEvent,
+      control,
+      eventEnd: eventData.end,
+      eventStart: eventData.start,
+      eventTimeZone: eventData.timeZone,
+      eventSupportsScheduleSlots,
+      eventType: eventData.eventType,
+      isAutomatedScheduling: eventData.isAutomatedScheduling,
+      isCreateMode,
+      isImmutableField,
+      leagueSlots,
+      noFixedEndDateTime: Boolean(eventData.noFixedEndDateTime),
+      onNoFixedEndDateTimeChange: configurationActions.handleNoFixedEndDateTimeChange,
+      setValue: rawSetValue as unknown as TimingSetValue,
     });
 
     const { handleSaveDivisionDetail } = useDivisionCommitController({
@@ -1194,17 +1174,6 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
         invalidateSimpleSetupPages(
           describeEventSetupTransition(setupResolverInput, nextInput).pageIds,
         );
-        if (
-          !isScheduleStyleAllowedForEventType(
-            nextType,
-            simpleSetupChoices.scheduleStyle,
-          )
-        ) {
-          setSimpleSetupChoices((current) => ({
-            ...current,
-            scheduleStyle: "WEEKLY_SLOTS",
-          }));
-        }
         configurationActions.handleEventTypeChange(nextType, applyValue);
       },
       [
@@ -1212,7 +1181,6 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
         confirmSimpleSetupTransition,
         invalidateSimpleSetupPages,
         setupResolverInput,
-        simpleSetupChoices.scheduleStyle,
       ],
     );
 
@@ -1283,21 +1251,6 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
           updates.useDedicatedOfficials === false
             ? { ...updates, useCustomOfficialPositions: false }
             : updates;
-        const nextScheduleStyle = resolvedUpdates.scheduleStyle;
-        if (
-          nextScheduleStyle &&
-          nextScheduleStyle !== simpleSetupChoices.scheduleStyle &&
-          scheduleStyleChangeDiscardsConfiguredSlots(
-            eventData.leagueSlots ?? [],
-            nextScheduleStyle,
-          ) &&
-          typeof window !== "undefined" &&
-          !window.confirm(
-            "Changing the schedule style removes timeslots that do not match the new style. Continue?",
-          )
-        ) {
-          return;
-        }
         const turningOffConfiguredData =
           (resolvedUpdates.paidRegistration === false &&
             (Number(eventData.price) > 0 ||
@@ -1390,12 +1343,6 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
             { shouldDirty: true, shouldValidate: true },
           );
         }
-        if (
-          resolvedUpdates.scheduleStyle === "FIXED_WINDOW" &&
-          !isImmutableField("noFixedEndDateTime")
-        ) {
-          configurationActions.handleNoFixedEndDateTimeChange(false);
-        }
         if (resolvedUpdates.useRequiredDocuments === false) {
           setValue("requiredTemplateIds", [], {
             shouldDirty: true,
@@ -1472,13 +1419,10 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
         }));
       },
       [
-        configurationActions,
         eventData,
-        isImmutableField,
         registrationQuestionDrafts.length,
         setRegistrationQuestionDrafts,
         setValue,
-        simpleSetupChoices.scheduleStyle,
       ],
     );
 
@@ -1600,7 +1544,7 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
       formId,
       handleSaveDivisionDetail,
       hasUnsetTeamCapacityLimits,
-      hideSectionNavigation: isCreateMode,
+      hideSectionNavigation: true,
       isAffiliateEvent,
       isImmutableField,
       leagueError,
@@ -1626,6 +1570,7 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
       sectionsController,
       setValue,
       slotController,
+      timingController,
       slotDivisionKeys,
       staffController,
       templates: {

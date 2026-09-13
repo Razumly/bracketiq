@@ -286,6 +286,7 @@ export const normalizeSlotBoundaryOverrideForForm = (
   slotValue: string | Date | null | undefined,
   eventBoundary: string | Date | null | undefined,
   timeZone: string,
+  preserveExplicitBoundary = false,
 ): string | undefined => {
   const normalizedSlotValue = formatEventDateTimeForForm(
     slotValue ?? null,
@@ -293,6 +294,9 @@ export const normalizeSlotBoundaryOverrideForForm = (
   );
   if (!normalizedSlotValue) {
     return undefined;
+  }
+  if (preserveExplicitBoundary) {
+    return normalizedSlotValue;
   }
 
   const normalizedEventBoundary = formatEventDateTimeForForm(

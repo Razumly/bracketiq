@@ -2,6 +2,8 @@ import type { LeagueSlotForm } from "@/app/discover/components/LeagueFields";
 
 import {
   computeOneTimeSlotBoundsError,
+  computeRepeatingSlotBoundsError,
+  computeRepeatingSlotTemporalError,
   computeSlotError,
 } from "../slotValidation";
 
@@ -101,9 +103,84 @@ describe("One-Time Time Slot editor validation", () => {
       }),
     ).toMatch(/outside the Event boundary.*rejected rather than clipped/);
   });
+  it("reports a repeating slot with no matching weekday", () => {
+    const repeatingSlot = buildSlot({
+      repeating: true,
+      daysOfWeek: [0],
+      dayOfWeek: 0,
+      startDate: "2026-08-18T00:00:00",
+      endDate: "2026-08-19T00:00:00",
+      startTimeMinutes: 9 * 60,
+      endTimeMinutes: 10 * 60,
+    });
 
-  it("surfaces strict repeating resolver errors during conflict validation", () => {
-    const invalidRepeatingSlot = buildSlot({
+    expect(
+      computeRepeatingSlotTemporalError({
+        slot: repeatingSlot,
+        eventStart: new Date("2026-08-18T00:00:00.000Z"),
+        eventEnd: new Date("2026-08-20T00:00:00.000Z"),
+      }),
+    ).toBe(
+      "The selected date range contains no occurrence for the selected weekdays. Choose another date range or weekday.",
+    );
+  });
+
+  it("reports a repeating slot outside an open Event Start boundary", () => {
+    expect(
+      computeRepeatingSlotBoundsError({
+        slot: buildSlot({
+          repeating: true,
+          startDate: "2026-08-10T00:00:00",
+          endDate: undefined,
+        }),
+        eventStart: new Date("2026-08-17T00:00:00.000Z"),
+        eventEnd: null,
+      }),
+    ).toMatch(/Schedule Boundary Error: Repeating Time Slot is outside the Event boundary/);
+  });
+  it("reports an early occurrence before Event Start", () => {
+    expect(
+      computeRepeatingSlotBoundsError({
+        slot: buildSlot({
+          endDate: "2026-08-17T23:59:00",
+          startDate: "2026-08-17T09:00:00",
+          startTimeMinutes: 7 * 60,
+          endTimeMinutes: 8 * 60,
+          repeating: true,
+        }),
+        eventStart: new Date("2026-08-17T08:00:00.000Z"),
+        eventEnd: new Date("2026-08-18T00:00:00.000Z"),
+      }),
+    ).toMatch(/Schedule Boundary Error: Repeating Time Slot is outside the Event boundary/);
+  });
+  it("bounds an open repeating slot by a finite Event End", () => {
+    expect(
+      computeRepeatingSlotBoundsError({
+        slot: buildSlot({
+          repeating: true,
+          endDate: undefined,
+        }),
+        eventStart: new Date("2026-08-17T00:00:00.000Z"),
+        eventEnd: new Date("2026-09-18T00:00:00.000Z"),
+      }),
+    ).toBeUndefined();
+  });
+  it("reports finite repeating occurrences beyond Event End", () => {
+    expect(
+      computeRepeatingSlotBoundsError({
+        slot: buildSlot({
+          endDate: "2026-03-31T00:00:00",
+          repeating: true,
+          startDate: "2026-02-01T00:00:00",
+        }),
+        eventStart: new Date("2026-02-01T00:00:00.000Z"),
+        eventEnd: new Date("2026-03-02T00:00:00.000Z"),
+      }),
+    ).toMatch(/Schedule Boundary Error: Repeating Time Slot is outside the Event boundary/);
+  });
+
+  it("accepts DST gaps during repeating temporal validation", () => {
+    const repeatingSlot = buildSlot({
       key: "slot-dst-gap",
       daysOfWeek: [6],
       startDate: "2026-03-08T05:00:00.000Z",
@@ -113,29 +190,14 @@ describe("One-Time Time Slot editor validation", () => {
       endTimeMinutes: 4 * 60,
       repeating: true,
     });
-    const comparableRepeatingSlot = buildSlot({
-      key: "slot-comparable",
-      daysOfWeek: [6],
-      startDate: "2026-03-08T05:00:00.000Z",
-      endDate: "2026-03-09T04:00:00.000Z",
-      timeZone: "America/New_York",
-      startTimeMinutes: 5 * 60,
-      endTimeMinutes: 6 * 60,
-      repeating: true,
-    });
 
     expect(
-      computeSlotError(
-        [invalidRepeatingSlot, comparableRepeatingSlot],
-        0,
-        "LEAGUE",
-        null,
-        {
-          eventStart: new Date("2026-03-08T00:00:00.000Z"),
-          eventEnd: new Date("2026-03-09T00:00:00.000Z"),
-        },
-      ),
-    ).toMatch(/does not exist on 2026-03-08/);
+      computeRepeatingSlotTemporalError({
+        slot: repeatingSlot,
+        eventStart: new Date("2026-03-08T00:00:00.000Z"),
+        eventEnd: new Date("2026-03-09T00:00:00.000Z"),
+      }),
+    ).toBeUndefined();
   });
 
   it("reports conflicts for open-ended repeating slots that start far apart", () => {

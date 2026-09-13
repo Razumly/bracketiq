@@ -33,12 +33,7 @@ export const SimpleSetupFormPage = ({
         return <SimpleSetupDivisionsPage model={model} />;
     }
     if (pageId === 'schedule-location') {
-        return (
-            <SimpleSetupScheduleLocationPage
-                model={model}
-                scheduleStyle={choices.scheduleStyle}
-            />
-        );
+        return <SimpleSetupScheduleLocationPage model={model} />;
     }
     if (pageId === 'pricing-registration') {
         return (

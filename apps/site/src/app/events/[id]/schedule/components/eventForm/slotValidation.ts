@@ -1,4 +1,5 @@
 import type { Event } from "@/types";
+import { zonedTimeToUtcDate } from "@/lib/dateUtils";
 import type { LeagueSlotForm } from "@/app/discover/components/LeagueFields";
 import {
   assertOneTimeTimeSlotFutureEnd,
@@ -11,6 +12,7 @@ import {
 } from "@/lib/timeSlotAvailability";
 import {
   enumerateRepeatingTimeSlotOccurrences,
+  getRepeatingTimeSlotLocalDate,
   repeatingTimeSlotOccurrencesOverlap,
   RepeatingTimeSlotValidationError,
   resolveRepeatingTimeSlotValidationWindow,
@@ -41,22 +43,17 @@ type SlotValidationContext = {
   eventStart?: Date | null;
   eventEnd?: Date | null;
 };
-const parseCalendarDate = (value: unknown): Date | null => {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value.trim());
-  if (!match) {
-    return null;
-  }
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const parsed = new Date(Date.UTC(year, month - 1, day));
-  return parsed.getUTCFullYear() === year &&
-    parsed.getUTCMonth() === month - 1 &&
-    parsed.getUTCDate() === day
-    ? parsed
+const localDateStartInTimeZone = (
+  value: unknown,
+  timeZone: string | null | undefined,
+): Date | null => {
+  const normalizedTimeZone =
+    typeof timeZone === "string" && timeZone.trim().length > 0
+      ? timeZone
+      : "UTC";
+  const localDate = getRepeatingTimeSlotLocalDate(value, normalizedTimeZone);
+  return localDate
+    ? zonedTimeToUtcDate(`${localDate}T00:00:00`, normalizedTimeZone)
     : null;
 };
 
@@ -75,7 +72,7 @@ const resolveConflictWindow = (
 
   const eventStart =
     context.eventStart ??
-    parseCalendarDate(slot.startDate) ??
+    localDateStartInTimeZone(slot.startDate, slot.timeZone) ??
     new Date(Date.UTC(1970, 0, 1));
   return resolveRepeatingTimeSlotValidationWindow({
     slot,
@@ -298,42 +295,73 @@ export const computeSlotError = (
   }
   return computeRepeatingConflictError();
 };
-
-export const computeRepeatingSlotTemporalError = (options: {
+type RepeatingSlotTemporalOptions = {
   slot: LeagueSlotForm;
   eventStart: Date | null;
   eventEnd: Date | null;
-}): string | undefined => {
-  if (
-    options.slot.repeating === false ||
-    !options.eventStart ||
-    normalizeWeekdays(options.slot).length === 0 ||
-    typeof options.slot.startTimeMinutes !== "number" ||
-    typeof options.slot.endTimeMinutes !== "number"
-  ) {
+};
+type ResolvedRepeatingSlotTemporalOptions = Omit<
+  RepeatingSlotTemporalOptions,
+  "eventStart"
+> & {
+  eventStart: Date;
+};
+
+const resolveRepeatingSlotTemporalError = (
+  options: ResolvedRepeatingSlotTemporalOptions,
+): string | undefined => {
+  const validationWindow = resolveRepeatingTimeSlotValidationWindow({
+    slot: options.slot,
+    eventStart:
+      localDateStartInTimeZone(
+        options.slot.startDate,
+        options.slot.timeZone,
+      ) ?? options.eventStart,
+    eventEnd: options.eventEnd,
+  });
+  if (!validationWindow) {
+    return undefined;
+  }
+  const occurrences = enumerateRepeatingTimeSlotOccurrences({
+    slot: options.slot,
+    windowStart: validationWindow.start,
+    windowEnd: validationWindow.end,
+  });
+  return occurrences.length === 0
+    ? "The selected date range contains no occurrence for the selected weekdays. Choose another date range or weekday."
+    : undefined;
+};
+
+export const computeRepeatingSlotTemporalError = (
+  options: RepeatingSlotTemporalOptions,
+): string | undefined => {
+  if (options.slot.repeating === false) {
+    return undefined;
+  }
+  if (!options.eventStart) {
+    return undefined;
+  }
+  if (normalizeWeekdays(options.slot).length === 0) {
+    return undefined;
+  }
+  if (typeof options.slot.startTimeMinutes !== "number") {
+    return undefined;
+  }
+  if (typeof options.slot.endTimeMinutes !== "number") {
     return undefined;
   }
   try {
-    const validationWindow = resolveRepeatingTimeSlotValidationWindow({
-      slot: options.slot,
+    return resolveRepeatingSlotTemporalError({
+      ...options,
       eventStart: options.eventStart,
-      eventEnd: options.eventEnd,
     });
-    if (!validationWindow) {
-      return undefined;
-    }
-    enumerateRepeatingTimeSlotOccurrences({
-      slot: options.slot,
-      windowStart: validationWindow.start,
-      windowEnd: validationWindow.end,
-    });
-    return undefined;
   } catch (error) {
     return error instanceof RepeatingTimeSlotValidationError
       ? error.message
       : "Repeating timeslot cannot be resolved.";
   }
 };
+
 
 export const computeOneTimeSlotBoundsError = (options: {
   slot: LeagueSlotForm;
@@ -356,9 +384,85 @@ export const computeOneTimeSlotBoundsError = (options: {
     assertOneTimeTimeSlotFutureEnd(resolved);
     return undefined;
   } catch (error) {
+    if (
+      error instanceof TimeSlotValidationError &&
+      error.code === "ONE_TIME_SLOT_OUTSIDE_EVENT_BOUNDS"
+    ) {
+      return error.message.startsWith("Schedule Boundary Error")
+        ? error.message
+        : `Schedule Boundary Error: ${error.message}`;
+    }
     return error instanceof TimeSlotValidationError
       ? error.message
       : "Timeslot cannot be resolved.";
+  }
+};
+
+const hasRepeatingSlotTiming = (slot: LeagueSlotForm): boolean => {
+  if (normalizeWeekdays(slot).length === 0) {
+    return false;
+  }
+  if (typeof slot.startTimeMinutes !== "number") {
+    return false;
+  }
+  return typeof slot.endTimeMinutes === "number";
+};
+
+const repeatingOccurrenceOutsideEventBounds = (
+  occurrence: { start: Date; end: Date },
+  eventStart: Date,
+  eventEnd: Date | null,
+): boolean => {
+  if (occurrence.start.getTime() < eventStart.getTime()) {
+    return true;
+  }
+  if (!eventEnd) {
+    return false;
+  }
+  return occurrence.end.getTime() > eventEnd.getTime();
+};
+
+export const computeRepeatingSlotBoundsError = (options: {
+  slot: LeagueSlotForm;
+  eventStart: Date | null;
+  eventEnd: Date | null;
+}): string | undefined => {
+  if (options.slot.repeating === false) {
+    return undefined;
+  }
+  if (!options.eventStart || !hasRepeatingSlotTiming(options.slot)) {
+    return undefined;
+  }
+  try {
+    const slotStart = localDateStartInTimeZone(
+      options.slot.startDate,
+      options.slot.timeZone,
+    );
+    const validationWindow = resolveRepeatingTimeSlotValidationWindow({
+      slot: options.slot,
+      eventStart: slotStart ?? options.eventStart,
+      eventEnd: options.slot.endDate ? null : options.eventEnd,
+    });
+    if (!validationWindow) return undefined;
+    const occurrences = enumerateRepeatingTimeSlotOccurrences({
+      slot: options.slot,
+      windowStart: validationWindow.start,
+      windowEnd: validationWindow.end,
+    });
+    const outsideBoundary = occurrences.some((occurrence) =>
+      repeatingOccurrenceOutsideEventBounds(
+        occurrence,
+        options.eventStart as Date,
+        options.eventEnd,
+      ),
+    );
+    return outsideBoundary
+      ? "Schedule Boundary Error: Repeating Time Slot is outside the Event boundary; Time Slots are rejected rather than clipped."
+      : undefined;
+  } catch (error) {
+    return error instanceof RepeatingTimeSlotValidationError
+      ? error.message
+      : "Repeating timeslot cannot be resolved.";
   }
 };
 

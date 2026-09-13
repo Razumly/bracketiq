@@ -76,10 +76,20 @@ export const createLeagueSlotForm = (
     });
     const isRepeating = slot?.repeating ?? true;
     const normalizedStartDate = isRepeating
-        ? normalizeSlotBoundaryOverrideForForm(slot?.startDate ?? null, fallbackEventStart ?? null, slotTimeZone)
+        ? normalizeSlotBoundaryOverrideForForm(
+            slot?.startDate ?? null,
+            fallbackEventStart ?? null,
+            slotTimeZone,
+            true,
+        )
         : formatEventDateTimeForForm(slot?.startDate ?? null, slotTimeZone) || undefined;
     const normalizedEndDate = isRepeating
-        ? normalizeSlotBoundaryOverrideForForm(slot?.endDate ?? null, fallbackEventEnd ?? null, slotTimeZone)
+        ? normalizeSlotBoundaryOverrideForForm(
+            slot?.endDate ?? null,
+            fallbackEventEnd ?? null,
+            slotTimeZone,
+            true,
+        )
         : formatEventDateTimeForForm(slot?.endDate ?? null, slotTimeZone) || undefined;
     return {
         key: slot?.$id ?? createClientId(),

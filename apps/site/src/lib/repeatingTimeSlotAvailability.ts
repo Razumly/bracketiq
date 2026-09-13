@@ -263,6 +263,15 @@ export const getRepeatingTimeSlotLocalDate = (
   const localDate = localDateFromInput(value, normalizedTimeZone);
   return localDate ? formatLocalDate(localDate) : null;
 };
+const resolveRepeatingSlotDateStart = (
+  value: unknown,
+  timeZone: string,
+): Date | null => {
+  const localDate = getRepeatingTimeSlotLocalDate(value, timeZone);
+  return localDate
+    ? zonedTimeToUtcDate(`${localDate}T00:00:00`, timeZone)
+    : null;
+};
 
 export const addRepeatingTimeSlotLocalDays = (
   value: string,
@@ -1063,29 +1072,167 @@ export const formatOvernightWeekdayWarning = (daysOfWeek: number[]): string => {
   return `Overnight slot ends on the next local weekdays: ${labels.join(", ")}.`;
 };
 
+const assertRepeatingSlotResources = (
+  slot: RepeatingTimeSlotIntervalInput,
+  eligibleResourceIds: Set<string> | null,
+): void => {
+  const resourceIds = normalizeResourceIds(slot);
+  if (resourceIds.length === 0) {
+    throw new RepeatingTimeSlotValidationError(
+      "INVALID_REPEATING_TIME_SLOT",
+      "Assign at least one Resource or delete this Time Slot.",
+      { slotId: normalizeSlotId(slot) },
+    );
+  }
+  if (!eligibleResourceIds) {
+    return;
+  }
+  const unavailableResourceId = resourceIds.find(
+    (resourceId) => !eligibleResourceIds.has(resourceId),
+  );
+  if (unavailableResourceId) {
+    throw new RepeatingTimeSlotValidationError(
+      "INVALID_REPEATING_TIME_SLOT",
+      `Repeating Time Slot "${normalizeSlotId(slot)}" references unavailable Resource "${unavailableResourceId}".`,
+      { slotId: normalizeSlotId(slot) },
+    );
+  }
+};
+
+const repeatingOccurrenceOutsideEventBounds = (
+  occurrence: ResolvedRepeatingTimeSlot,
+  eventStart: Date,
+  eventEnd?: Date | null,
+): boolean => {
+  if (occurrence.start.getTime() < eventStart.getTime()) {
+    return true;
+  }
+  if (!eventEnd) {
+    return false;
+  }
+  return occurrence.end.getTime() > eventEnd.getTime();
+};
+
+const assertRepeatingSlotOccurrences = (options: {
+  slot: RepeatingTimeSlotIntervalInput;
+  eventStart: Date;
+  eventEnd?: Date | null;
+}): void => {
+  const timeZone =
+    typeof options.slot.timeZone === "string"
+      ? options.slot.timeZone
+      : "UTC";
+  const configuredStart = resolveRepeatingSlotDateStart(
+    options.slot.startDate,
+    timeZone,
+  );
+  const fullWindow = resolveRepeatingTimeSlotValidationWindow({
+    slot: options.slot,
+    eventStart: configuredStart ?? options.eventStart,
+    eventEnd: options.slot.endDate ? null : options.eventEnd,
+  });
+  if (!fullWindow) {
+    throw new RepeatingTimeSlotValidationError(
+      "INVALID_REPEATING_TIME_SLOT",
+      "The selected date range contains no occurrence for the selected weekdays. Choose another date range or weekday.",
+      { slotId: normalizeSlotId(options.slot) },
+    );
+  }
+  const allOccurrences = enumerateRepeatingTimeSlotOccurrences({
+    slot: options.slot,
+    windowStart: fullWindow.start,
+    windowEnd: fullWindow.end,
+  });
+  if (allOccurrences.length === 0 && normalizeDays(options.slot).length > 0) {
+    throw new RepeatingTimeSlotValidationError(
+      "INVALID_REPEATING_TIME_SLOT",
+      "The selected date range contains no occurrence for the selected weekdays. Choose another date range or weekday.",
+      { slotId: normalizeSlotId(options.slot) },
+    );
+  }
+  const outsideBoundary = allOccurrences.some((occurrence) =>
+    repeatingOccurrenceOutsideEventBounds(
+      occurrence,
+      options.eventStart,
+      options.eventEnd,
+    ),
+  );
+  if (outsideBoundary) {
+    throw new RepeatingTimeSlotValidationError(
+      "INVALID_REPEATING_TIME_SLOT",
+      "Schedule Boundary Error: Repeating Time Slot is outside the Event boundary; Time Slots are rejected rather than clipped.",
+      { slotId: normalizeSlotId(options.slot) },
+    );
+  }
+};
+
+const assertRepeatingSlotValidation = (options: {
+  slot: RepeatingTimeSlotIntervalInput;
+  eventStart: Date;
+  eventEnd?: Date | null;
+}): void => {
+  const validationWindow = resolveRepeatingTimeSlotValidationWindow({
+    slot: options.slot,
+    eventStart:
+      resolveRepeatingSlotDateStart(
+        options.slot.startDate,
+        typeof options.slot.timeZone === "string"
+          ? options.slot.timeZone
+          : "UTC",
+      ) ?? options.eventStart,
+    eventEnd: options.eventEnd,
+  });
+  if (!validationWindow) {
+    throw new RepeatingTimeSlotValidationError(
+      "INVALID_REPEATING_TIME_SLOT",
+      "The selected date range contains no occurrence for the selected weekdays. Choose another date range or weekday.",
+      { slotId: normalizeSlotId(options.slot) },
+    );
+  }
+  enumerateRepeatingTimeSlotOccurrences({
+    slot: options.slot,
+    windowStart: validationWindow.start,
+    windowEnd: validationWindow.end,
+  });
+};
+
+const assertRepeatingTimeSlotResolvable = (
+  slot: RepeatingTimeSlotIntervalInput,
+  options: { eventStart: Date; eventEnd?: Date | null },
+  eligibleResourceIds: Set<string> | null,
+): void => {
+  if (slot.repeating === false) {
+    return;
+  }
+  assertRepeatingSlotResources(slot, eligibleResourceIds);
+  assertRepeatingSlotOccurrences({
+    slot,
+    eventStart: options.eventStart,
+    eventEnd: options.eventEnd,
+  });
+  assertRepeatingSlotValidation({
+    slot,
+    eventStart: options.eventStart,
+    eventEnd: options.eventEnd,
+  });
+};
+
 export const assertRepeatingTimeSlotsResolvable = (options: {
   slots: RepeatingTimeSlotIntervalInput[];
   eventStart: Date;
   eventEnd?: Date | null;
+  eligibleResourceIds?: string[];
 }): void => {
-  if (
-    !(options.eventStart instanceof Date) ||
-    Number.isNaN(options.eventStart.getTime())
-  ) {
+  if (!(options.eventStart instanceof Date)) {
     return;
   }
+  if (Number.isNaN(options.eventStart.getTime())) {
+    return;
+  }
+  const eligibleResourceIds = options.eligibleResourceIds
+    ? new Set(options.eligibleResourceIds)
+    : null;
   for (const slot of options.slots) {
-    if (slot.repeating === false) continue;
-    const validationWindow = resolveRepeatingTimeSlotValidationWindow({
-      slot,
-      eventStart: options.eventStart,
-      eventEnd: options.eventEnd,
-    });
-    if (!validationWindow) continue;
-    enumerateRepeatingTimeSlotOccurrences({
-      slot,
-      windowStart: validationWindow.start,
-      windowEnd: validationWindow.end,
-    });
+    assertRepeatingTimeSlotResolvable(slot, options, eligibleResourceIds);
   }
 };

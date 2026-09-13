@@ -15,6 +15,11 @@ import {
 import {
   assertRepeatingTimeSlotsResolvable,
 } from '@/lib/repeatingTimeSlotAvailability';
+import {
+  eventRequiresConfiguredTimeSlot,
+  hasWeeklyRepeatingTimeSlot,
+  WEEKLY_REPEATING_TIME_SLOT_REQUIRED_MESSAGE,
+} from '@/lib/eventScheduling';
 import { repeatingTimeSlotValidationResponse } from '@/server/repeatingTimeSlotValidationResponse';
 import {
   parseDateInputInTimeZone,
@@ -229,6 +234,15 @@ function effectivePatchDates(payload: Record<string, unknown>, existingSlot: Slo
 }
 
 function validatePatchInterval(payload: Record<string, unknown>, existingSlot: SlotPatchRow, effectiveTimeZone: string, effectiveScheduledFieldIds: string[], payloadDivisions: string[] | null): NextResponse | null {
+  if (!effectiveScheduledFieldIds.length) {
+    return NextResponse.json(
+      {
+        error: 'Assign at least one Resource or delete this Time Slot.',
+        code: 'INVALID_TIME_SLOT',
+      },
+      { status: 400 },
+    );
+  }
   const id = existingSlot.id;
   const { effectiveRepeating, effectiveStartDate, endDateCandidate } = effectivePatchDates(payload, existingSlot);
   if (effectiveRepeating) {
@@ -356,6 +370,213 @@ async function canAssignPatchFields(payload: Record<string, unknown>, session: A
   return !changesScheduledFields || canManageScheduledFields(session, fieldIds);
 }
 
+function timeSlotPatchErrorResponse(error: unknown): NextResponse | null {
+  const repeatingTimeSlotResponse = repeatingTimeSlotValidationResponse(error);
+  if (repeatingTimeSlotResponse) {
+    return repeatingTimeSlotResponse;
+  }
+  if (error instanceof TimeSlotValidationError) {
+    return NextResponse.json(
+      { error: error.message, code: 'INVALID_TIME_SLOT', slotIds: error.slotIds },
+      { status: 400 },
+    );
+  }
+  return null;
+}
+
+const lockReferencingEvents = async (tx: any, timeSlotId: string): Promise<void> => {
+  const lockedEventIds = new Set<string>();
+  while (true) {
+    const references = await tx.events.findMany({
+      where: { timeSlotIds: { has: timeSlotId }, archivedAt: null },
+      select: { id: true },
+    });
+    const unlockedEventIds = references
+      .map((event: { id: string }) => event.id)
+      .filter((eventId: string) => !lockedEventIds.has(eventId))
+      .sort();
+    if (!unlockedEventIds.length) {
+      return;
+    }
+    for (const eventId of unlockedEventIds) {
+      await acquireEventLock(tx, eventId);
+      lockedEventIds.add(eventId);
+    }
+  }
+};
+
+const buildDivisionReferenceLookup = (
+  divisions: Array<{ id: string; key: string | null }>,
+): Map<string, string> => {
+  const lookup = new Map<string, string>();
+  divisions.forEach((division) => {
+    lookup.set(division.id.trim().toLowerCase(), division.id);
+    if (division.key?.trim()) {
+      lookup.set(division.key.trim().toLowerCase(), division.id);
+    }
+  });
+  return lookup;
+};
+
+const canonicalizeReferencedSlot = (
+  eventId: string,
+  slotId: string,
+  persistedSlotById: Map<string, any>,
+  eligibleResourceIds: Set<string>,
+  divisionIdByReference: Map<string, string>,
+): any => {
+  const slot = persistedSlotById.get(slotId);
+  if (!slot) {
+    throw new TimeSlotValidationError(
+      'INVALID_ONE_TIME_SLOT',
+      `Event "${eventId}" references unavailable Time Slot "${slotId}".`,
+      { slotIds: [slotId] },
+    );
+  }
+  const resourceIds = normalizeFieldIds([
+    ...(Array.isArray(slot.scheduledFieldIds) ? slot.scheduledFieldIds : []),
+    ...(typeof slot.scheduledFieldId === 'string' ? [slot.scheduledFieldId] : []),
+  ]);
+  const unknownResourceId = resourceIds.find(
+    (resourceId) => !eligibleResourceIds.has(resourceId),
+  );
+  if (unknownResourceId) {
+    throw new TimeSlotValidationError(
+      'INVALID_ONE_TIME_SLOT',
+      `One-Time Time Slot "${slotId}" references unavailable Resource "${unknownResourceId}".`,
+      { slotIds: [slotId] },
+    );
+  }
+  const divisionIds = normalizeDivisionKeys(slot.divisions).map(
+    (divisionReference) => {
+      const divisionId = divisionIdByReference.get(divisionReference);
+      if (!divisionId) {
+        throw new TimeSlotValidationError(
+          'INVALID_ONE_TIME_SLOT',
+          `One-Time Time Slot "${slotId}" references unavailable Division "${divisionReference}".`,
+          { slotIds: [slotId] },
+        );
+      }
+      return divisionId;
+    },
+  );
+  return {
+    ...slot,
+    repeating: slot.repeating,
+    scheduledFieldId: resourceIds[0] ?? null,
+    scheduledFieldIds: resourceIds,
+    divisions: divisionIds,
+  };
+};
+
+const validateReferencedEventSlots = (options: {
+  event: any;
+  persistedSlotById: Map<string, any>;
+  divisionRows: Array<{ eventId: string; id: string; key: string | null }>;
+}): void => {
+  const eventDivisions = options.divisionRows.filter(
+    (division) => division.eventId === options.event.id,
+  );
+  const divisionIdByReference = buildDivisionReferenceLookup(eventDivisions);
+  const canonicalSlots = options.event.timeSlotIds.map((slotId: string) =>
+    canonicalizeReferencedSlot(
+      options.event.id,
+      slotId,
+      options.persistedSlotById,
+      new Set(options.event.fieldIds),
+      divisionIdByReference,
+    ),
+  );
+  const isStandaloneWeekly =
+    options.event.eventType === 'WEEKLY_EVENT' &&
+    (!options.event.parentEvent || options.event.parentEvent.trim().length === 0);
+  if (
+    eventRequiresConfiguredTimeSlot(
+      options.event.eventType,
+      options.event.automatedScheduling,
+      options.event.parentEvent,
+    ) &&
+    canonicalSlots.length === 0
+  ) {
+    throw new TimeSlotValidationError(
+      'INVALID_ONE_TIME_SLOT',
+      `Event "${options.event.id}" requires at least one Time Slot.`,
+      { slotIds: [options.event.id] },
+    );
+  }
+  if (isStandaloneWeekly && !hasWeeklyRepeatingTimeSlot(canonicalSlots)) {
+    throw new TimeSlotValidationError(
+      'INVALID_ONE_TIME_SLOT',
+      WEEKLY_REPEATING_TIME_SLOT_REQUIRED_MESSAGE,
+      { slotIds: [options.event.id] },
+    );
+  }
+  const eventEnd = options.event.noFixedEndDateTime ? null : options.event.end;
+  assertValidOneTimeTimeSlots({
+    slots: canonicalSlots,
+    fallbackTimeZone: options.event.timeZone,
+    eventStart: options.event.start,
+    eventEnd,
+    eligibleResourceIds: options.event.fieldIds,
+    eligibleDivisionIds: eventDivisions.map((division) => division.id),
+  });
+  assertRepeatingTimeSlotsResolvable({
+    slots: canonicalSlots,
+    eventStart: options.event.start,
+    eventEnd,
+    eligibleResourceIds: options.event.fieldIds,
+  });
+};
+const buildTimeSlotFieldIdsToLock = (
+  existingSlot: SlotPatchRow,
+  effectiveScheduledFieldIds: string[],
+  referencingEvents: any[],
+): string[] => Array.from(new Set([
+  ...normalizeFieldIds(existingSlot.scheduledFieldIds ?? (
+    existingSlot.scheduledFieldId ? [existingSlot.scheduledFieldId] : []
+  )),
+  ...effectiveScheduledFieldIds,
+  ...referencingEvents.flatMap((event) => event.fieldIds),
+])).sort();
+
+
+const validateTimeSlotEventReferences = async (options: {
+  tx: any;
+  existingSlot: SlotPatchRow;
+  id: string;
+  updateData: Record<string, unknown>;
+  referencingEvents: any[];
+  payloadDivisions: string[] | null;
+}): Promise<void> => {
+  const allSlotIds = Array.from(new Set(
+    options.referencingEvents.flatMap((event) => event.timeSlotIds),
+  ));
+  const [persistedSlots, divisionRows] = await Promise.all([
+    options.tx.timeSlots.findMany({
+      where: { id: { in: allSlotIds }, archivedAt: null },
+    }),
+    options.tx.divisions.findMany({
+      where: {
+        eventId: { in: options.referencingEvents.map((event) => event.id) },
+        role: 'ENTRY',
+        status: 'ACTIVE',
+      },
+      select: { eventId: true, id: true, key: true },
+    }),
+  ]);
+  const persistedSlotById = new Map<string, any>(
+    persistedSlots.map((slot: any) => [slot.id, { ...slot }]),
+  );
+  persistedSlotById.set(options.id, {
+    ...options.existingSlot,
+    ...options.updateData,
+    id: options.id,
+    divisions: options.payloadDivisions ?? options.existingSlot.divisions,
+  });
+  options.referencingEvents.forEach((event) =>
+    validateReferencedEventSlots({ event, persistedSlotById, divisionRows }),
+  );
+};
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession(req);
   const body = await req.json().catch(() => null);
@@ -419,26 +640,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const updateData = buildPatchUpdateData(payload, payloadDivisions);
   try {
     const updated = await prisma.$transaction(async (tx) => {
-      const lockedEventIds = new Set<string>();
-      while (true) {
-        const references = await tx.events.findMany({
-          where: { timeSlotIds: { has: id }, archivedAt: null },
-          select: { id: true },
-        });
-        const unlockedEventIds = references
-          .map((event) => event.id)
-          .filter((eventId) => !lockedEventIds.has(eventId))
-          .sort();
-        if (!unlockedEventIds.length) break;
-        for (const eventId of unlockedEventIds) {
-          await acquireEventLock(tx, eventId);
-          lockedEventIds.add(eventId);
-        }
-      }
-
+      await lockReferencingEvents(tx, id);
       const referencingEvents = await tx.events.findMany({
         where: { timeSlotIds: { has: id }, archivedAt: null },
         select: {
+          eventType: true,
+          parentEvent: true,
+          automatedScheduling: true,
           id: true,
           start: true,
           end: true,
@@ -448,101 +656,22 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           timeSlotIds: true,
         },
       });
-      const fieldIdsToLock = new Set<string>([
-        ...normalizeFieldIds(existingSlot.scheduledFieldIds ?? (
-          existingSlot.scheduledFieldId ? [existingSlot.scheduledFieldId] : []
-        )),
-        ...effectiveScheduledFieldIds,
-        ...referencingEvents.flatMap((event) => event.fieldIds),
-      ]);
-      await acquireFieldLocks(tx, Array.from(fieldIdsToLock).sort());
+      const fieldIdsToLock = buildTimeSlotFieldIdsToLock(
+        existingSlot,
+        effectiveScheduledFieldIds,
+        referencingEvents,
+      );
+      await acquireFieldLocks(tx, fieldIdsToLock);
       await acquireTimeSlotLocks(tx, [id]);
       if (referencingEvents.length) {
-        const allSlotIds = Array.from(new Set(
-          referencingEvents.flatMap((event) => event.timeSlotIds),
-        ));
-        const [persistedSlots, divisionRows] = await Promise.all([
-          tx.timeSlots.findMany({
-            where: { id: { in: allSlotIds }, archivedAt: null },
-          }),
-          tx.divisions.findMany({
-            where: {
-              eventId: { in: referencingEvents.map((event) => event.id) },
-              role: 'ENTRY',
-              status: 'ACTIVE',
-            },
-            select: { eventId: true, id: true, key: true },
-          }),
-        ]);
-        const candidateSlot: Record<string, unknown> = {
-          ...existingSlot,
-          ...updateData,
+        await validateTimeSlotEventReferences({
+          tx,
+          existingSlot,
           id,
-          divisions: payloadDivisions ?? existingSlot.divisions,
-        };
-        const persistedSlotById = new Map<string, Record<string, unknown>>(
-          persistedSlots.map((slot) => [slot.id, { ...slot }]),
-        );
-        persistedSlotById.set(id, candidateSlot);
-
-        for (const event of referencingEvents) {
-          const eligibleResourceIds = new Set(event.fieldIds);
-          const eventDivisions = divisionRows.filter((division) => division.eventId === event.id);
-          const divisionIdByReference = new Map<string, string>();
-          eventDivisions.forEach((division) => {
-            divisionIdByReference.set(division.id.trim().toLowerCase(), division.id);
-            if (division.key?.trim()) {
-              divisionIdByReference.set(division.key.trim().toLowerCase(), division.id);
-            }
-          });
-          const canonicalSlots = event.timeSlotIds.map((slotId) => {
-            const slot = persistedSlotById.get(slotId);
-            if (!slot) {
-              throw new TimeSlotValidationError(
-                'INVALID_ONE_TIME_SLOT',
-                `Event "${event.id}" references unavailable Time Slot "${slotId}".`,
-                { slotIds: [slotId] },
-              );
-            }
-            const resourceIds = normalizeFieldIds([
-              ...(Array.isArray(slot.scheduledFieldIds) ? slot.scheduledFieldIds : []),
-              ...(typeof slot.scheduledFieldId === 'string' ? [slot.scheduledFieldId] : []),
-            ]);
-            const unknownResourceId = resourceIds.find((resourceId) => !eligibleResourceIds.has(resourceId));
-            if (unknownResourceId) {
-              throw new TimeSlotValidationError(
-                'INVALID_ONE_TIME_SLOT',
-                `One-Time Time Slot "${slotId}" references unavailable Resource "${unknownResourceId}".`,
-                { slotIds: [slotId] },
-              );
-            }
-            const divisionIds = normalizeDivisionKeys(slot.divisions).map((divisionReference) => {
-              const divisionId = divisionIdByReference.get(divisionReference);
-              if (!divisionId) {
-                throw new TimeSlotValidationError(
-                  'INVALID_ONE_TIME_SLOT',
-                  `One-Time Time Slot "${slotId}" references unavailable Division "${divisionReference}".`,
-                  { slotIds: [slotId] },
-                );
-              }
-              return divisionId;
-            });
-            return {
-              ...slot,
-              scheduledFieldId: resourceIds[0] ?? null,
-              scheduledFieldIds: resourceIds,
-              divisions: divisionIds,
-            };
-          });
-          assertValidOneTimeTimeSlots({
-            slots: canonicalSlots,
-            fallbackTimeZone: event.timeZone,
-            eventStart: event.start,
-            eventEnd: event.noFixedEndDateTime ? null : event.end,
-            eligibleResourceIds: event.fieldIds,
-            eligibleDivisionIds: eventDivisions.map((division) => division.id),
-          });
-        }
+          updateData,
+          referencingEvents,
+          payloadDivisions,
+        });
       }
 
       // `updateData` is assembled only from the route's explicit mutable-field allowlist.
@@ -553,11 +682,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     });
     return patchedSlotResponse(updated, payloadDivisions);
   } catch (error) {
-    if (error instanceof TimeSlotValidationError) {
-      return NextResponse.json(
-        { error: error.message, code: 'INVALID_TIME_SLOT', slotIds: error.slotIds },
-        { status: 400 },
-      );
+    const errorResponse = timeSlotPatchErrorResponse(error);
+    if (errorResponse) {
+      return errorResponse;
     }
     throw error;
   }

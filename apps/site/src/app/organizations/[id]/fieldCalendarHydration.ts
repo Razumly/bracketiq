@@ -17,16 +17,26 @@ const normalizeFieldIds = (value: unknown): string[] => {
 
 export const resolveFieldIdsForCalendarHydration = ({
   canManage,
+  calendarView,
+  calendarVisibleFieldIds,
   fields,
   selectedFieldIds,
   rentalSelections,
 }: {
   canManage: boolean;
+  calendarView?: 'week' | 'month';
+  calendarVisibleFieldIds?: string[];
   fields: Field[];
   selectedFieldIds: string[];
   rentalSelections: RentalHydrationSelection[];
 }): string[] => {
   if (canManage) {
+    if (calendarView === 'week') {
+      return normalizeFieldIds(fields.map((field) => field.$id));
+    }
+    if (calendarView === 'month' && calendarVisibleFieldIds) {
+      return normalizeFieldIds(calendarVisibleFieldIds);
+    }
     return normalizeFieldIds(selectedFieldIds);
   }
 

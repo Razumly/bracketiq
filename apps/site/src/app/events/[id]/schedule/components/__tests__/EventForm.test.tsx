@@ -50,25 +50,6 @@ describe('buildDefaultSetupChoices', () => {
     expect(choices.useCustomOfficialPositions).toBe(true);
   });
 
-  it('normalizes a fixed-only saved Weekly Event schedule to mixed setup', () => {
-    const choices = buildDefaultSetupChoices({
-      eventType: 'WEEKLY_EVENT',
-      start: '2026-03-12T10:00:00',
-      end: '2026-03-12T12:00:00',
-      leagueSlots: [{
-        key: 'fixed-slot',
-        repeating: false,
-        startDate: '2026-03-12T10:00:00',
-        endDate: '2026-03-12T12:00:00',
-        startTimeMinutes: 600,
-        endTimeMinutes: 720,
-        conflicts: [],
-        checking: false,
-      }],
-    } as any);
-
-    expect(choices.scheduleStyle).toBe('MIXED_SLOTS');
-  });
 });
 
 let mockDateTimePickerValuesByLabel: Record<string, string> = {};
@@ -706,22 +687,6 @@ describe('EventForm dirty state', () => {
 
     expect(await screen.findByRole('heading', { name: 'Review & Publish' })).toBeInTheDocument();
   });
-
-  it('keeps invalid used pages directly selectable while editing', async () => {
-    renderForm(jest.fn(), undefined, { imageId: '' }, null, {
-      initialSetupMode: 'SIMPLE',
-    });
-
-    expect(await screen.findByRole('heading', { name: 'Options' })).toBeInTheDocument();
-    const progress = screen.getByRole('navigation', { name: 'Event setup progress' });
-
-    fireEvent.click(within(progress).getByRole('button', { name: 'Basics: Available' }));
-    expect(await screen.findByRole('heading', { name: 'Basics' })).toBeInTheDocument();
-    expect(within(progress).getByRole('button', { name: 'Options: Available' })).toBeEnabled();
-
-    fireEvent.click(within(progress).getByRole('button', { name: 'Review & Publish: Available' }));
-    expect(await screen.findByRole('heading', { name: 'Review & Publish' })).toBeInTheDocument();
-  });
   it('recalculates optional pages in edit mode without restoring prerequisite locks', async () => {
     const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
     try {
@@ -1234,26 +1199,9 @@ describe('EventForm dirty state', () => {
     expect(screen.queryByRole('heading', { name: 'Schedule' })).not.toBeInTheDocument();
   });
 
-  it('uses descriptive schedule choices without duplicate resource planning inputs', async () => {
-    renderForm(jest.fn(), undefined, {}, null, {
-      isCreateMode: true,
-      initialSetupMode: 'SIMPLE',
-    });
 
-    expect(await screen.findByRole('radiogroup', { name: 'Schedule style' })).toBeInTheDocument();
-    expect(screen.getByText('Use one non-repeating timeslot that always matches the event start and end.')).toBeInTheDocument();
-    expect(screen.getByText('Use the same selected weekdays and times each week during the event.')).toBeInTheDocument();
-    expect(screen.getByText('Add individual dates and times that do not repeat.')).toBeInTheDocument();
-    expect(screen.getByText('Combine weekly availability with one-time dates or exceptions.')).toBeInTheDocument();
-    expect(screen.queryByLabelText('Court source')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Custom court count')).not.toBeInTheDocument();
-    expect(screen.queryByText('Division assignment')).not.toBeInTheDocument();
-  });
-
-  it('applies the fixed event window choice to Schedule and Location', async () => {
-    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
-    const formRef = React.createRef<EventFormHandle>();
-    renderForm(jest.fn(), formRef, {
+  it('keeps calendar slot data when the setup reaches Schedule and Location', async () => {
+    renderForm(jest.fn(), undefined, {
       eventType: 'LEAGUE',
       start: '2026-03-12T10:00:00',
       end: '2026-03-12T12:00:00',
@@ -1275,32 +1223,28 @@ describe('EventForm dirty state', () => {
       initialSetupMode: 'SIMPLE',
     });
 
-    fireEvent.click(screen.getByText('Fixed event window'));
-
     for (const pageName of ['Basics', 'Divisions', 'Schedule & Location']) {
       fireEvent.click(screen.getByRole('button', { name: 'Next' }));
       expect(await screen.findByRole('heading', { name: pageName })).toBeInTheDocument();
     }
-    expect(screen.queryByLabelText('Automated Scheduling')).not.toBeInTheDocument();
+    expect(screen.queryByRole('radiogroup', { name: 'Schedule style' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Start Date & Time' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'End Date & Time' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'End Date & Time' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Set the end date during match generation')).toBeInTheDocument();
     await waitFor(() => {
       const latestScheduleProps = mockLeagueFieldsProps.at(-1);
-      expect(latestScheduleProps?.timeslotMode).toBe('FIXED_WINDOW');
-      expect(latestScheduleProps?.unstyled).toBe(true);
-      expect(latestScheduleProps?.showTimeslotHeading).toBe(false);
+      expect(latestScheduleProps?.timeslotMode).toBe('MIXED');
       expect(latestScheduleProps?.slots).toEqual([
         expect.objectContaining({
-          repeating: false,
-          startDate: '2026-03-12T10:00:00',
-          endDate: '2026-03-12T12:00:00',
+          repeating: true,
+          startTimeMinutes: 600,
+          endTimeMinutes: 720,
         }),
       ]);
     });
-    confirmSpy.mockRestore();
   });
 
-  it('keeps event dates and custom courts when automated scheduling is disabled', async () => {
+  it('keeps event dates and shows a boundary-only calendar when automated scheduling is disabled', async () => {
     renderForm(jest.fn(), undefined, {
       eventType: 'LEAGUE',
       isAutomatedScheduling: true,
@@ -1331,12 +1275,13 @@ describe('EventForm dirty state', () => {
       'data-value',
       '2026-03-12T12:00',
     );
-    expect(screen.queryByRole('heading', { name: 'Schedule' })).not.toBeInTheDocument();
-    expect(screen.queryByTestId('league-fields')).not.toBeInTheDocument();
-
-    const customCourts = await screen.findByText('Custom Courts');
-    const location = screen.getByLabelText('Location');
-    expect(customCourts.compareDocumentPosition(location) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Schedule' })).toBeInTheDocument();
+    expect(screen.getByTestId('league-fields')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: /calendar/i })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mockLeagueFieldsProps.at(-1)?.slots).toEqual([]);
+    });
+    expect(screen.getByLabelText('Location')).toBeInTheDocument();
   });
 
   it('defaults bracket teams to three and rejects smaller counts', async () => {

@@ -18,7 +18,14 @@ function pointerEventValue<T>(value: T | null | undefined, fallback: T): T {
   return value ?? fallback;
 }
 
-class PointerEventMock extends MouseEvent {
+class PointerEventFallback {
+  constructor(_type: string, _init: PointerEventInit = {}) {}
+}
+
+const PointerEventBase =
+  typeof MouseEvent === "function" ? MouseEvent : PointerEventFallback;
+
+class PointerEventMock extends PointerEventBase {
   readonly pointerId: number;
   readonly width: number;
   readonly height: number;

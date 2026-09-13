@@ -2,7 +2,7 @@ import { filterFieldCalendarItems, type FieldCalendarFilterItem } from '../Field
 import FieldCalendarFilter from '../FieldCalendarFilter';
 import { getIndexedEntityColorPair } from '@/lib/entityColors';
 import { renderWithMantine } from '../../../../test/utils/renderWithMantine';
-import { render, screen } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const items: FieldCalendarFilterItem[] = [
@@ -15,10 +15,10 @@ describe('filterFieldCalendarItems', () => {
   it('keeps the last selection and selects only enabled resources through All', async () => {
     const user = userEvent.setup();
     const onChange = jest.fn();
-    render(<FieldCalendarFilter items={[...items, { id: 'closed', label: 'Closed court', disabled: true }]} selectedIds={['field_1']} onSelectedIdsChange={onChange} />);
+    renderWithMantine(<FieldCalendarFilter items={[...items, { id: 'closed', label: 'Closed court', disabled: true }]} selectedIds={['field_1']} onSelectedIdsChange={onChange} />);
     await user.click(screen.getByRole('button', { name: /Court Alpha/ }));
     expect(onChange).not.toHaveBeenCalled();
-    await user.type(screen.getByRole('textbox', { name: 'Search fields' }), 'South');
+    await user.type(screen.getByRole('textbox', { name: 'Search resources' }), 'South');
     await user.click(screen.getByRole('button', { name: /Court Beta/ }));
     expect(onChange).toHaveBeenLastCalledWith(['field_1', 'field_2']);
     await user.click(screen.getByRole('button', { name: 'All' }));

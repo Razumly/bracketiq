@@ -95,6 +95,18 @@ describe('canonical One-Time Time Slot availability', () => {
       eligibleDivisionIds: ['division-1'],
     })).toThrow(/outside the Event boundary.*rejected rather than clipped/);
   });
+  it('rejects unassigned or unavailable Resources on saved One-Time Time Slots', () => {
+    expect(() => assertValidOneTimeTimeSlots({
+      slots: [slot({ scheduledFieldIds: [] })],
+      eligibleResourceIds: ['resource-1'],
+    })).toThrow(/assign at least one Resource/i);
+
+    expect(() => assertValidOneTimeTimeSlots({
+      slots: [slot({ scheduledFieldIds: ['resource-2'] })],
+      eligibleResourceIds: ['resource-1'],
+    })).toThrow(/unavailable Resource "resource-2"/i);
+  });
+
 
   it('accepts adjacent intervals while rejecting a true overlap on a shared Resource', () => {
     const adjacent = [

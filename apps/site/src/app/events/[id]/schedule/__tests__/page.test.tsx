@@ -5297,7 +5297,7 @@ describe('League schedule page', () => {
     expect(second[1]?.body?.createOperationId).not.toBe(first[1]?.body?.createOperationId);
   });
 
-  it('normalizes create payload with multi-day slots and slot divisions before schedule preview', async () => {
+  it('normalizes create payload with multi-day slots before save', async () => {
     useSearchParamsMock.mockReturnValue({
       get: (key: string) => {
         if (key === 'create') return '1';
@@ -5397,7 +5397,7 @@ describe('League schedule page', () => {
       && (options as { method?: string } | undefined)?.method === 'POST'
     ));
     const command = editorSaveCall?.[1]?.body as Record<string, any> | undefined;
-    expect(command?.completion).toEqual({ mode: 'CREATE_AND_BUILD_SCHEDULE' });
+    expect(command?.completion).toEqual({ mode: 'CREATE_ONLY' });
     expect(command?.draft?.resources?.timeSlots?.[0]).toMatchObject({
       dayOfWeek: 1,
       daysOfWeek: [1, 3],
@@ -5414,7 +5414,7 @@ describe('League schedule page', () => {
     ))).toBe(false);
   });
 
-  it('normalizes tournament create payload with weekly timeslots before schedule preview', async () => {
+  it('normalizes tournament create payload with weekly timeslots before save', async () => {
     useSearchParamsMock.mockReturnValue({
       get: (key: string) => {
         if (key === 'create') return '1';
@@ -5504,7 +5504,7 @@ describe('League schedule page', () => {
       && (options as { method?: string } | undefined)?.method === 'POST'
     ));
     const command = editorSaveCall?.[1]?.body as Record<string, any> | undefined;
-    expect(command?.completion).toEqual({ mode: 'CREATE_AND_BUILD_SCHEDULE' });
+    expect(command?.completion).toEqual({ mode: 'CREATE_ONLY' });
     expect(command?.draft?.basics?.eventType).toBe('TOURNAMENT');
     expect(command?.draft?.resources?.timeSlots?.[0]).toMatchObject({
       dayOfWeek: 2,

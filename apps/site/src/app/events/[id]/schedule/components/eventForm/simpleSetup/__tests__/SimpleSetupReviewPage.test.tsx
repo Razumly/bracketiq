@@ -7,7 +7,6 @@ import { buildSimpleSetupReviewModel, type SimpleSetupReviewModel } from '../rev
 import type { EventSetupChoices } from '../types';
 
 const choices: EventSetupChoices = {
-    scheduleStyle: 'WEEKLY_SLOTS',
     paidRegistration: true,
     useRequiredDocuments: true,
     useRegistrationQuestions: true,
@@ -251,12 +250,12 @@ describe('buildSimpleSetupReviewModel', () => {
         expect(JSON.stringify(buildModel('Updated League'))).not.toContain('Summer League');
     });
 
-    it('summarizes a fixed event window without showing a stale weekly timeslot', () => {
-        const eventData = buildEventData('Fixed Window Clinic');
+    it('summarizes current calendar slots without a style row', () => {
+        const eventData = buildEventData('Calendar Clinic');
         eventData.eventType = 'EVENT';
         const model = buildSimpleSetupReviewModel({
             eventData,
-            choices: { ...choices, scheduleStyle: 'FIXED_WINDOW' },
+            choices,
             eventTypeOptions: [{ value: 'EVENT', label: 'Event' }],
             fields: eventData.fields,
             templateOptions: [],
@@ -268,8 +267,8 @@ describe('buildSimpleSetupReviewModel', () => {
         const scheduleLocation = model.sections.find((section) => section.id === 'schedule-location');
 
         expect(scheduleStructure?.rows).toContainEqual({ label: 'Configured timeslots', value: '1' });
-        expect(scheduleLocation?.groups).toEqual([]);
-        expect(JSON.stringify(scheduleLocation)).not.toContain('Weekly timeslot');
+        expect(scheduleStructure?.rows).not.toContainEqual(expect.objectContaining({ label: 'Schedule style' }));
+        expect(scheduleLocation?.groups?.[0]?.title).toBe('Weekly timeslot');
     });
 
     it('hides bracket teams when the event format does not use a bracket', () => {

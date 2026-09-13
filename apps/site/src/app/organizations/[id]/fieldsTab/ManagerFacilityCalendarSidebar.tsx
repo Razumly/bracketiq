@@ -32,6 +32,7 @@ type ManagerFacilityCalendarSidebarProps = {
   conflictCount: number;
   loading?: boolean;
   facilityFilterOptions: SelectOption[];
+  calendarView: 'week' | 'month';
   selectedFacilityFilterValue: string;
   onFacilityFilterChange: (value: string | null) => void;
   calendarLayerOrder: CalendarLayerType[];
@@ -47,6 +48,7 @@ type ManagerFacilityCalendarSidebarProps = {
   selectedFieldIds: string[];
   facilityFilteredFieldIds: string[];
   fieldFilterItems: FieldCalendarFilterItem[];
+  calendarVisibleFieldIds: string[];
   fieldColorReferenceList: EntityColorReferenceValue[];
   createDragMode: ManagerCalendarSelectionMode | null;
   onCreatePointerDown: (mode: ManagerCalendarSelectionMode, event: ReactPointerEvent<HTMLDivElement>) => void;
@@ -54,11 +56,14 @@ type ManagerFacilityCalendarSidebarProps = {
   onCreatePointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onCreatePointerUp: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onCreatePointerCancel: (event: ReactPointerEvent<HTMLDivElement>) => void;
-  onSelectedFieldIdsChange: (fieldIds: string[]) => void;
+  onCalendarVisibleFieldIdsChange: (fieldIds: string[]) => void;
   children: ReactNode;
 };
 
 export default function ManagerFacilityCalendarSidebar({
+  calendarView,
+  calendarVisibleFieldIds,
+  onCalendarVisibleFieldIdsChange,
   conflictCount,
   loading,
   facilityFilterOptions,
@@ -84,10 +89,11 @@ export default function ManagerFacilityCalendarSidebar({
   onCreatePointerMove,
   onCreatePointerUp,
   onCreatePointerCancel,
-  onSelectedFieldIdsChange,
   children,
 }: ManagerFacilityCalendarSidebarProps) {
-  const selectedFacilityFieldIds = selectedFieldIds.filter((fieldId) => facilityFilteredFieldIds.includes(fieldId));
+  const selectedCalendarFieldIds = calendarVisibleFieldIds.length
+    ? calendarVisibleFieldIds.filter((fieldId) => facilityFilteredFieldIds.includes(fieldId))
+    : facilityFilteredFieldIds;
 
   return (
     <>
@@ -98,6 +104,7 @@ export default function ManagerFacilityCalendarSidebar({
           value={selectedFacilityFilterValue}
           onChange={onFacilityFilterChange}
           allowDeselect={false}
+          searchable
           size="sm"
         />
         <Stack gap={6} className="org-facility-layer-group">
@@ -138,22 +145,28 @@ export default function ManagerFacilityCalendarSidebar({
           </Group>
         </Stack>
         <Group gap="xs" wrap="nowrap">
-          <Popover>
-            <Popover.Target><Button variant="outline" size="sm">Resources ({selectedFacilityFieldIds.length})</Button></Popover.Target>
-            <Popover.Dropdown>
-              <FieldCalendarFilter
-                items={fieldFilterItems}
-                selectedIds={selectedFacilityFieldIds}
-                onSelectedIdsChange={onSelectedFieldIdsChange}
-                colorReferenceList={fieldColorReferenceList}
-                title="Resources"
-                ariaLabel="Facility resources"
-                searchPlaceholder="Search resources"
-                searchAriaLabel="Search resources"
-                emptyText="No resources match this facility."
-              />
-            </Popover.Dropdown>
-          </Popover>
+          {calendarView === 'month' ? (
+            <Popover>
+              <Popover.Target>
+                <Button variant="outline" size="sm">
+                  Resources ({selectedCalendarFieldIds.length})
+                </Button>
+              </Popover.Target>
+              <Popover.Dropdown>
+                <FieldCalendarFilter
+                  items={fieldFilterItems}
+                  selectedIds={selectedCalendarFieldIds}
+                  onSelectedIdsChange={onCalendarVisibleFieldIdsChange}
+                  colorReferenceList={fieldColorReferenceList}
+                  title="Resources"
+                  ariaLabel="Facility resources"
+                  searchPlaceholder="Search resources"
+                  searchAriaLabel="Search resources"
+                  emptyText="No resources match this facility."
+                />
+              </Popover.Dropdown>
+            </Popover>
+          ) : null}
           {!loading && conflictCount > 0 ? (
             <Text role="status" className="org-calendar-conflict-count">
               {conflictCount} {conflictCount === 1 ? 'conflict' : 'conflicts'}
