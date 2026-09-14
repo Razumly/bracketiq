@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 
 import LocationSearch from '../LocationSearch';
 import { renderWithMantine } from '../../../../test/utils/renderWithMantine';
+import type { LocationInfo } from '@/lib/locationService';
 
 const mockRequestLocation = jest.fn();
 const mockSearchLocation = jest.fn();
@@ -10,11 +11,12 @@ const mockClearLocation = jest.fn();
 const mockSetLocationFromInfo = jest.fn();
 const mockGetPlacePredictions = jest.fn();
 const mockGetPlaceDetails = jest.fn();
+let mockLocationInfo: LocationInfo | null = null;
 
 jest.mock('@/app/hooks/useLocation', () => ({
   useLocation: () => ({
     location: null,
-    locationInfo: null,
+    locationInfo: mockLocationInfo,
     loading: false,
     error: null,
     requestLocation: mockRequestLocation,
@@ -39,19 +41,40 @@ jest.mock('@/app/hooks/useDebounce', () => ({
 describe('LocationSearch', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockLocationInfo = null;
     mockRequestLocation.mockResolvedValue(undefined);
     mockSearchLocation.mockResolvedValue(true);
     mockGetPlacePredictions.mockResolvedValue([]);
     mockGetPlaceDetails.mockResolvedValue(null);
   });
 
-  it('requests browser location from the Set Location click gesture', async () => {
+  it('requests browser location only from the current location control', async () => {
+    const user = userEvent.setup();
+    renderWithMantine(<LocationSearch />);
+    expect(mockRequestLocation).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Set Location' }));
+    expect(await screen.findByPlaceholderText('Enter city, state, or ZIP')).toBeInTheDocument();
+    expect(mockRequestLocation).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Use Current Location' }));
+    expect(mockRequestLocation).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets the user replace an approximate location with exact browser location', async () => {
+    mockLocationInfo = {
+      lat: 45.5,
+      lng: -122.6,
+      city: 'Portland',
+      state: 'OR',
+      source: 'approximate',
+    };
     const user = userEvent.setup();
     renderWithMantine(<LocationSearch />);
 
-    await user.click(screen.getByRole('button', { name: 'Set Location' }));
-
-    expect(await screen.findByPlaceholderText('Enter city, state, or ZIP')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Portland, OR (approximate)' }));
+    expect(mockRequestLocation).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Use Exact Location' }));
     expect(mockRequestLocation).toHaveBeenCalledTimes(1);
   });
 
@@ -95,5 +118,31 @@ describe('LocationSearch', () => {
       expect(mockSearchLocation).toHaveBeenCalledWith('not-a-real-place');
     });
     expect(locationButton).toHaveAttribute('aria-expanded', 'true');
+  });
+  it('keeps inline location entry in the search surface with only Nearby as the location action', async () => {
+    const user = userEvent.setup();
+    renderWithMantine(<LocationSearch inline />);
+
+    const locationInput = screen.getByRole('textbox', { name: 'Where' });
+    expect(locationInput).toHaveAttribute('placeholder', 'Search destinations');
+    await user.click(locationInput);
+
+    expect(screen.getByRole('button', { name: 'Nearby' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Search' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Clear' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Current|Approximate/)).not.toBeInTheDocument();
+  });
+
+  it('shows the discover location label in the shared inline control', async () => {
+    const user = userEvent.setup();
+    renderWithMantine(<LocationSearch inline displayLabel="Near by" />);
+
+    const locationInput = screen.getByRole('textbox', { name: 'Where' });
+    expect(locationInput).toHaveValue('Near by');
+
+    await user.click(locationInput);
+
+    expect(locationInput).toHaveValue('Near by');
+    expect(screen.getByRole('button', { name: 'Nearby' })).toBeInTheDocument();
   });
 });

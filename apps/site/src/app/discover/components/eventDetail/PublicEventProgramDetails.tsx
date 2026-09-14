@@ -122,7 +122,7 @@ export function PublicEventProgramDetails({
                         <summary className="cursor-pointer py-2 text-base font-bold text-slate-950 marker:text-slate-400">
                           <span className="ml-1 inline-flex w-[calc(100%-1rem)] items-center justify-between gap-3 align-middle">
                             <span>{genderGroup.label}</span>
-                            <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">
+                            <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">
                               {genderDivisionCount}
                             </span>
                           </span>
@@ -217,7 +217,7 @@ export function PublicEventProgramDetails({
                                                       </Text>
                                                     </div>
                                                     {selected ? (
-                                                      <span className="rounded-full bg-emerald-600 px-2 py-1 text-xs font-bold text-white">
+                                                      <span className="rounded-md bg-emerald-600 px-2 py-1 text-xs font-bold text-white">
                                                         Current
                                                       </span>
                                                     ) : null}

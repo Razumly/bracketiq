@@ -13,7 +13,6 @@ import {
   Alert,
   Button,
   Group,
-  Loader,
   Paper,
   Select,
   Text,
@@ -21,12 +20,12 @@ import {
 import { ArrowUpDown } from 'lucide-react';
 
 import OrganizationEventCard from '@/components/organization/OrganizationEventCard';
+import { OrganizationDataPlaceholder } from '@/components/organization/OrganizationDataLoading';
 import {
   ActiveEventFilters,
   EVENT_SORT_OPTIONS,
   type EventSortValue,
 } from '@/components/events/EventFilterControls';
-import Loading from '@/components/ui/Loading';
 import ResponsiveCardGrid from '@/components/ui/ResponsiveCardGrid';
 import {
   eventListFilterKey,
@@ -451,7 +450,6 @@ function EventsTabView<TEventType extends string>(
       : typeof totalEvents === 'number'
         ? totalEvents
         : sortedEvents.length;
-  const hasActiveDistanceFilter = Boolean(location && typeof maxDistance === 'number');
 
 
   const renderSearchActions = () => (
@@ -486,10 +484,6 @@ function EventsTabView<TEventType extends string>(
         maxDistance={maxDistance}
         setMaxDistance={setMaxDistance}
         defaultMaxDistance={defaultMaxDistance}
-        selectedStartDate={selectedStartDate}
-        setSelectedStartDate={setSelectedStartDate}
-        setSelectedEndDate={setSelectedEndDate}
-        selectedEndDate={selectedEndDate}
         divisionFilters={divisionFilters}
         setDivisionFilters={setDivisionFilters}
         divisionOptions={divisionOptions}
@@ -504,14 +498,14 @@ function EventsTabView<TEventType extends string>(
 
   const renderEventCards = () => (
     isLoadingInitial ? (
-      <Loading text="Loading events..." />
+      <OrganizationDataPlaceholder label="events" layout="cards" count={6} />
     ) : sortedEvents.length === 0 && !resultsError ? (
       <Paper withBorder p="xl" radius="lg">
         <Text fw={700} mb={6}>
           No events match your filters
         </Text>
         <Text size="sm" c="dimmed" mb={12}>
-          Try increasing distance, removing a sport filter, or clearing all filters.
+          Try adjusting your current filters or moving the map to explore another area.
         </Text>
         <Button variant="default" onClick={resetFilters}>
           Clear filters
@@ -534,9 +528,7 @@ function EventsTabView<TEventType extends string>(
         </ResponsiveCardGrid>
         <div ref={sentinelRef} style={{ height: 1 }} />
         {isLoadingMore && (
-          <Group justify="center" mt="lg">
-            <Loader />
-          </Group>
+          <OrganizationDataPlaceholder label="more events" layout="cards" count={3} />
         )}
         {!resultsError && !hasMoreEvents && (
           <Text size="sm" c="dimmed" ta="center" mt="lg">
@@ -554,7 +546,7 @@ function EventsTabView<TEventType extends string>(
         <div className="discover-results-summary">
           {(!resultsError || sortedEvents.length > 0) && (
             <Text size="sm" c="dimmed">
-              {eventReadoutCount} event{eventReadoutCount === 1 ? '' : 's'} {hasActiveDistanceFilter ? 'near you' : 'available'}.
+              {eventReadoutCount} event{eventReadoutCount === 1 ? '' : 's'} in this map area.
             </Text>
           )}
           <ActiveEventFilters filters={activeFilters} className="discover-active-event-filters" label="Active filters" />
@@ -563,6 +555,7 @@ function EventsTabView<TEventType extends string>(
           aria-label="Sort events"
           data={EVENT_SORT_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
           value={eventSort}
+          searchable={false}
           onChange={(value) => setEventSort((value as EventSortValue) ?? 'recommended')}
           leftSection={<ArrowUpDown size={14} />}
           style={{ minWidth: 220 }}

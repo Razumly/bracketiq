@@ -1,3 +1,4 @@
+import { getGlobalAgeDivisionTypeOptions } from "@/lib/divisionTypes";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Alert,
@@ -52,6 +53,7 @@ export type DivisionDiscoveryFilterOptions = {
 };
 
 const normalize = (value: string): string => value.trim().toLowerCase();
+const CANONICAL_AGE_OPTIONS: DivisionOption[] = getGlobalAgeDivisionTypeOptions();
 
 export const getSingleSelectedSportKey = (
   selectedSports: string[],
@@ -122,11 +124,11 @@ export function useDivisionDiscoveryOptions(
 ): DivisionDiscoveryFilterOptions {
   const [loadState, setLoadState] = useState<DivisionTypeLoadState>({
     status: "loading",
-    types: {},
+    types: { ages: CANONICAL_AGE_OPTIONS },
   });
   const [requestVersion, setRequestVersion] = useState(0);
   const retry = useCallback(() => {
-    setLoadState({ status: "loading", types: {} });
+    setLoadState({ status: "loading", types: { ages: CANONICAL_AGE_OPTIONS } });
     setRequestVersion((current) => current + 1);
   }, []);
 
@@ -143,7 +145,10 @@ export function useDivisionDiscoveryOptions(
         if (controller.signal.aborted) {
           return;
         }
-        setLoadState({ status: "ready", types: body ?? {} });
+        setLoadState({
+          status: "ready",
+          types: { ...(body ?? {}), ages: CANONICAL_AGE_OPTIONS },
+        });
       })
       .catch((loadError) => {
         if (controller.signal.aborted || loadError.name === "AbortError") {
@@ -151,7 +156,7 @@ export function useDivisionDiscoveryOptions(
         }
         setLoadState({
           status: "error",
-          types: {},
+          types: { ages: CANONICAL_AGE_OPTIONS },
           message: "Unable to load division filters.",
         });
       });
@@ -170,7 +175,7 @@ export function useDivisionDiscoveryOptions(
     loading,
     error,
     genders: types.genders ?? [],
-    ages: types.ages ?? [],
+    ages: CANONICAL_AGE_OPTIONS,
     skillOptions,
     retry,
   };

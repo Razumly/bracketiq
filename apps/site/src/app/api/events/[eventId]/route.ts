@@ -1228,7 +1228,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ eve
     tags,
     staffInvites: staffInvites.map((invite) => invite),
   });
-  const protectedResponse = protectEventResponse(response, capabilities.canEdit);
+  const responseForViewer = capabilities.canEdit
+    ? response
+    : toPublicEventResponse(response);
+  const protectedResponse = capabilities.canEdit
+    ? withAffiliateOutboundAction(responseForViewer, 'event')
+    : protectAffiliateRow(responseForViewer, 'event');
   return NextResponse.json(
     { ...protectedResponse, capabilities },
     { status: 200 },

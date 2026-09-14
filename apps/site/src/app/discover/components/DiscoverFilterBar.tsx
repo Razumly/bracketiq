@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useReducer,
   useId,
   useLayoutEffect,
   useRef,
@@ -12,7 +13,6 @@ import {
 } from 'react';
 import {
   BarChart3,
-  CalendarDays,
   Check,
   ChevronDown,
   DollarSign,
@@ -30,14 +30,14 @@ import {
   Alert,
   Button,
   Checkbox,
-  DatePickerInput,
   Loader,
   NumberInput,
   Text,
   TextInput,
 } from '@/components/organization/organization-operation-ui';
 import { Popover as UiPopover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import type { Event, EventTag } from '@/types';
+import SportCategoryMultiSelect from '@/components/ui/SportCategoryMultiSelect';
+import type { Event, EventTag, SportCategory } from '@/types';
 import { formatEnumDisplayLabel } from '@/lib/enumUtils';
 import { DivisionDiscoveryFilterContent, getSingleSelectedSportKey } from './DivisionDiscoveryFilters';
 import type {
@@ -87,6 +87,15 @@ export function resolveOpenFilter<TFilter extends string>(
 export type FilterOption = { value: string; label: string; count?: number };
 export type DiscoverFilterItem = { key: string; searchText?: string; node: ReactNode };
 
+
+type FilterMeasurement = { key: string; count: number | null };
+type FilterMeasurementAction = FilterMeasurement | ((current: FilterMeasurement) => FilterMeasurement);
+const reduceFilterMeasurement = (
+  current: FilterMeasurement,
+  next: FilterMeasurementAction,
+): FilterMeasurement => (
+  typeof next === 'function' ? next(current) : next
+);
 type OverflowFilterRowProps = {
   items: DiscoverFilterItem[];
   contentKey: string;
@@ -109,7 +118,7 @@ function OverflowFilterRow({
   searchPlaceholder,
 }: OverflowFilterRowProps) {
   const rowRef = useRef<HTMLDivElement>(null);
-  const [measurement, setMeasurement] = useState<{ key: string; count: number | null }>({ key: contentKey, count: null });
+  const [measurement, setMeasurement] = useReducer(reduceFilterMeasurement, { key: contentKey, count: null });
   const [moreOpen, setMoreOpen] = useState(false);
   const [measurementDirty, setMeasurementDirty] = useState(false);
   const [itemSearchTerm, setItemSearchTerm] = useState('');
@@ -125,40 +134,46 @@ function OverflowFilterRow({
     ? items.filter((item) => (item.searchText ?? item.key).toLowerCase().includes(normalizedItemSearchTerm))
     : overflowItems;
 
-  /* eslint-disable react-hooks/set-state-in-effect -- The row width is a DOM measurement that controls overflow visibility. */
   useLayoutEffect(() => {
-    if (measurementDirty) {
-      if (moreOpen) return;
-      setMeasurementDirty(false);
-      setMeasurement((current) => current.count === null ? current : { key: contentKey, count: null });
-      return;
-    }
-    if (measurement.count !== null && measurement.key === contentKey) return;
-    if (preserveOpenOverflow) return;
-    const row = rowRef.current;
-    if (!row) return;
-    const itemElements = Array.from(row.querySelectorAll<HTMLElement>('[data-overflow-item]'));
-    if (itemElements.length === 0) {
-      setMeasurement({ key: contentKey, count: 0 });
-      return;
-    }
+    let cancelled = false;
+    const measure = () => {
+      if (cancelled) return;
+      if (measurementDirty) {
+        if (moreOpen) return;
+        setMeasurementDirty(false);
+        setMeasurement((current) => current.count === null ? current : { key: contentKey, count: null });
+        return;
+      }
+      if (measurement.count !== null && measurement.key === contentKey) return;
+      if (preserveOpenOverflow) return;
+      const row = rowRef.current;
+      if (!row) return;
+      const itemElements = Array.from(row.querySelectorAll<HTMLElement>('[data-overflow-item]'));
+      if (itemElements.length === 0) {
+        setMeasurement({ key: contentKey, count: 0 });
+        return;
+      }
 
-    const availableWidth = row.clientWidth;
-    if (availableWidth <= 0) {
-      setMeasurement({ key: contentKey, count: Math.min(items.length, 3) });
-      return;
-    }
+      const availableWidth = row.clientWidth;
+      if (availableWidth <= 0) {
+        setMeasurement({ key: contentKey, count: Math.min(items.length, 3) });
+        return;
+      }
 
-    const gap = Number.parseFloat(getComputedStyle(row).columnGap || getComputedStyle(row).gap || '0') || 0;
-    const moreElement = row.querySelector<HTMLElement>('[data-overflow-more]');
-    const trailingElement = row.querySelector<HTMLElement>('[data-overflow-trailing]');
-    const moreWidth = moreElement?.getBoundingClientRect().width ?? 0;
-    const trailingWidth = trailingElement?.getBoundingClientRect().width ?? 0;
-    const itemWidths = itemElements.map((item) => item.getBoundingClientRect().width);
-    const visibleItemCount = calculateVisibleFilterCount(itemWidths, availableWidth, gap, moreWidth, trailingWidth);
-    setMeasurement({ key: contentKey, count: visibleItemCount });
+      const gap = Number.parseFloat(getComputedStyle(row).columnGap || getComputedStyle(row).gap || '0') || 0;
+      const moreElement = row.querySelector<HTMLElement>('[data-overflow-more]');
+      const trailingElement = row.querySelector<HTMLElement>('[data-overflow-trailing]');
+      const itemWidths = itemElements.map((item) => item.getBoundingClientRect().width);
+      const moreWidth = moreElement?.getBoundingClientRect().width ?? 0;
+      const trailingWidth = trailingElement?.getBoundingClientRect().width ?? 0;
+      const visibleItemCount = calculateVisibleFilterCount(itemWidths, availableWidth, gap, moreWidth, trailingWidth);
+      setMeasurement({ key: contentKey, count: visibleItemCount });
+    };
+    measure();
+    return () => {
+      cancelled = true;
+    };
   }, [contentKey, items.length, measurement.count, measurement.key, measurementDirty, moreOpen, preserveOpenOverflow]);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     const row = rowRef.current;
@@ -256,10 +271,13 @@ function OverflowFilterRow({
 
 export type DiscoverFilterRowsProps = {
   sports: string[];
+  sportCategories?: SportCategory[];
   selectedSports: string[];
   setSelectedSports: Dispatch<SetStateAction<string[]>>;
   sportsLoading: boolean;
   sportsError?: string | null;
+  showSports?: boolean;
+  showAllFilters?: boolean;
   filters: DiscoverFilterItem[];
   filtersKey: string;
   filterAriaLabel?: string;
@@ -270,10 +288,13 @@ export type DiscoverFilterRowsProps = {
 
 export function DiscoverFilterRows({
   sports,
+  sportCategories = [],
   selectedSports,
   setSelectedSports,
   sportsLoading,
   sportsError,
+  showSports = true,
+  showAllFilters = false,
   filters,
   filtersKey,
   filterAriaLabel = 'Filters',
@@ -281,8 +302,9 @@ export function DiscoverFilterRows({
   activeFilterCount = 0,
   resetFilters,
 }: DiscoverFilterRowsProps) {
-  const sportsKey = `${sports.join('|')}::${selectedSports.join('|')}`;
-  const sportsItems: DiscoverFilterItem[] = sportsLoading
+  const hasSportCategories = sportCategories.length > 0;
+  const sportsKey = showSports ? `${sports.join('|')}::${selectedSports.join('|')}` : '';
+  const sportsItems: DiscoverFilterItem[] = !showSports ? [] : sportsLoading
     ? [{ key: 'loading', node: <Loader size="sm" aria-label="Loading sports" /> }]
     : [
       {
@@ -322,22 +344,52 @@ export function DiscoverFilterRows({
 
   return (
     <div className="discover-filter-bar">
-      <OverflowFilterRow
-        items={sportsItems}
-        contentKey={sportsKey}
-        ariaLabel="Sports"
-        moreLabel="More sports"
-        searchable
-        searchPlaceholder="Search sports"
-      />
-      <OverflowFilterRow
-        items={filters}
-        contentKey={filtersKey}
-        ariaLabel={filterAriaLabel}
-        moreLabel={moreFiltersLabel ?? `More filters${activeFilterCount ? ` (${activeFilterCount})` : ''}`}
-        trailing={clearAllControl}
-      />
-      {sportsError && <div className="discover-filter-error" role="alert">{sportsError}</div>}
+      {showSports && (
+        hasSportCategories ? (
+          <SportCategoryMultiSelect
+            data={sports}
+            categories={sportCategories}
+            value={selectedSports}
+            onChange={setSelectedSports}
+            aria-label="Sports"
+            placeholder="All sports"
+            rightSection={sportsLoading ? <Loader size="xs" aria-label="Loading sports" /> : undefined}
+          />
+        ) : (
+          <OverflowFilterRow
+            items={sportsItems}
+            contentKey={sportsKey}
+            ariaLabel="Sports"
+            moreLabel="More sports"
+            searchable
+            searchPlaceholder="Search sports"
+          />
+        )
+      )}
+      {showAllFilters ? (
+        <div
+          className="discover-filter-row discover-filter-row--all"
+          role="group"
+          aria-label={filterAriaLabel}
+          tabIndex={0}
+        >
+          {filters.map((item) => (
+            <span key={item.key} className="discover-filter-row-item">
+              {item.node}
+            </span>
+          ))}
+          {clearAllControl && <span className="discover-filter-row-trailing">{clearAllControl}</span>}
+        </div>
+      ) : (
+        <OverflowFilterRow
+          items={filters}
+          contentKey={filtersKey}
+          ariaLabel={filterAriaLabel}
+          moreLabel={moreFiltersLabel ?? `More filters${activeFilterCount ? ` (${activeFilterCount})` : ''}`}
+          trailing={clearAllControl}
+        />
+      )}
+      {showSports && sportsError && <div className="discover-filter-error" role="alert">{sportsError}</div>}
     </div>
   );
 }
@@ -412,16 +464,30 @@ export function FilterPopover({ id, label, valueLabel, value, icon: Icon, active
   );
 }
 
-
 export type FilterOptionListProps = {
   options: FilterOption[];
   value: string[];
   allLabel: string;
   onChange: (value: string[]) => void;
   allValue?: string[];
+  searchable?: boolean;
+  searchLabel?: string;
 };
 
-export function FilterOptionList({ options, value, allLabel, onChange, allValue }: FilterOptionListProps) {
+export function FilterOptionList({
+  options,
+  value,
+  allLabel,
+  onChange,
+  allValue,
+  searchable = false,
+  searchLabel,
+}: FilterOptionListProps) {
+  const [searchTerm, setSearchTerm] = useState('');
+  const normalizedSearchTerm = searchTerm.trim().toLowerCase();
+  const visibleOptions = normalizedSearchTerm
+    ? options.filter((option) => option.label.toLowerCase().includes(normalizedSearchTerm))
+    : options;
   const allSelected = allValue ? value.length === allValue.length : value.length === 0;
   const toggle = (option: FilterOption) => {
     onChange(value.includes(option.value)
@@ -430,36 +496,47 @@ export function FilterOptionList({ options, value, allLabel, onChange, allValue 
   };
 
   return (
-    <div className="discover-filter-option-list">
-      <button
-        type="button"
-        className={`discover-filter-option${allSelected ? ' is-selected' : ''}`}
-        aria-pressed={allSelected}
-        onClick={() => onChange(allValue ?? [])}
-      >
-        <span className="discover-filter-option-copy">
-          <span>{allLabel}</span>
-          <small>{allSelected ? 'Remove restriction' : 'Clear selection'}</small>
-        </span>
-        {allSelected && <Check aria-hidden="true" className="discover-filter-option-check" />}
-      </button>
-      {options.map((option) => {
-        const selected = value.includes(option.value);
-        return (
-          <button
-            key={option.value}
-            type="button"
-            className={`discover-filter-option${selected ? ' is-selected' : ''}`}
-            aria-pressed={selected}
-            onClick={() => toggle(option)}
-          >
-            <span>{option.label}</span>
-            {typeof option.count === 'number' && <span className="discover-filter-option-count">{option.count}</span>}
-            {selected && <Check aria-hidden="true" className="discover-filter-option-check" />}
-          </button>
-        );
-      })}
-    </div>
+    <>
+      {searchable && (
+        <TextInput
+          aria-label={searchLabel ?? `Search ${allLabel.toLowerCase()}`}
+          placeholder={searchLabel ?? `Search ${allLabel.toLowerCase()}`}
+          value={searchTerm}
+          onChange={(event) => setSearchTerm(event.currentTarget.value)}
+          className="discover-filter-option-search"
+        />
+      )}
+      <div className="discover-filter-option-list">
+        <button
+          type="button"
+          className={`discover-filter-option${allSelected ? ' is-selected' : ''}`}
+          aria-pressed={allSelected}
+          onClick={() => onChange(allValue ?? [])}
+        >
+          <span className="discover-filter-option-copy">
+            <span>{allLabel}</span>
+            <small>{allSelected ? 'Remove restriction' : 'Clear selection'}</small>
+          </span>
+          {allSelected && <Check aria-hidden="true" className="discover-filter-option-check" />}
+        </button>
+        {visibleOptions.map((option) => {
+          const selected = value.includes(option.value);
+          return (
+            <button
+              key={option.value}
+              type="button"
+              className={`discover-filter-option${selected ? ' is-selected' : ''}`}
+              aria-pressed={selected}
+              onClick={() => toggle(option)}
+            >
+              <span>{option.label}</span>
+              {typeof option.count === 'number' && <span className="discover-filter-option-count">{option.count}</span>}
+              {selected && <Check aria-hidden="true" className="discover-filter-option-check" />}
+            </button>
+          );
+        })}
+      </div>
+    </>
   );
 }
 
@@ -472,10 +549,6 @@ const summaryLabel = (labels: string[]): string | undefined => {
   if (labels.length === 1) return labels[0];
   return `${labels[0]} +${labels.length - 1}`;
 };
-
-const dateLabel = (value: Date | null): string | undefined => (
-  value ? value.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : undefined
-);
 
 const dollarLabel = (value: number | null): string | undefined => (
   typeof value === 'number' && Number.isFinite(value)
@@ -493,14 +566,11 @@ const priceSummary = (minimum: number | null, maximum: number | null): string | 
 };
 
 const optionList = (options: DivisionOption[]): FilterOption[] => options.map((option) => ({ value: option.id, label: option.name }));
+
 type DiscoverFilterItemContext<TEventType extends string> = {
   panelId: string;
   openFilter: string | null;
   setOpen: (id: string) => (open: boolean) => void;
-  selectedStartDate: Date | null;
-  setSelectedStartDate: (value: Date | null) => void;
-  selectedEndDate: Date | null;
-  setSelectedEndDate: (value: Date | null) => void;
   selectedEventTypes: TEventType[];
   setSelectedEventTypes: (value: TEventType[]) => void;
   eventTypeOptions: readonly TEventType[];
@@ -522,7 +592,6 @@ type DiscoverFilterItemContext<TEventType extends string> = {
   defaultMaxDistance: number;
   distanceMiles: number | null;
   distanceActive: boolean;
-  dateActive: boolean;
   priceActive: boolean;
   divisionFilters: DivisionDiscoveryFilterValue;
   setDivisionFilters: (value: DivisionDiscoveryFilterValue) => void;
@@ -540,40 +609,6 @@ type DiscoverFilterItemContext<TEventType extends string> = {
 type DiscoverFilterItemProps<TEventType extends string> = {
   context: DiscoverFilterItemContext<TEventType>;
 };
-
-function DatesFilterItem<TEventType extends string>({ context }: DiscoverFilterItemProps<TEventType>) {
-  const {
-    panelId,
-    openFilter,
-    setOpen,
-    selectedStartDate,
-    setSelectedStartDate,
-    selectedEndDate,
-    setSelectedEndDate,
-    dateActive,
-  } = context;
-  const value = [dateLabel(selectedStartDate), dateLabel(selectedEndDate)].filter(Boolean).join(' – ');
-  return (
-    <FilterPopover
-      id={`${panelId}-dates`}
-      label="Dates"
-      panelClassName="discover-filter-popover--dates"
-      valueLabel={dateActive ? value : undefined}
-      value={dateActive ? value : undefined}
-      icon={CalendarDays}
-      active={dateActive}
-      open={openFilter === 'dates'}
-      onOpenChange={setOpen('dates')}
-      onClear={() => { setSelectedStartDate(null); setSelectedEndDate(null); }}
-    >
-      <div className="discover-filter-popover-heading">Date range</div>
-      <div className="discover-filter-popover-fields">
-        <DatePickerInput label="Start date" aria-label="Filter by start date" value={selectedStartDate} clearable onChange={setSelectedStartDate} />
-        <DatePickerInput label="End date" aria-label="Filter by end date" value={selectedEndDate} minDate={selectedStartDate ?? undefined} clearable onChange={setSelectedEndDate} />
-      </div>
-    </FilterPopover>
-  );
-}
 
 function PriceFilterItem<TEventType extends string>({ context }: DiscoverFilterItemProps<TEventType>) {
   const {
@@ -767,7 +802,7 @@ function AgeGroupFilterItem<TEventType extends string>({ context }: DiscoverFilt
     >
       <div className="discover-filter-popover-heading">Age group</div>
       <DivisionDiscoveryFilterContent options={divisionOptions}>
-      <FilterOptionList options={ageOptions} value={divisionFilters.ageDivisionTypeIds} allLabel="Any age group" onChange={(ageDivisionTypeIds) => setDivisionFilters({ ...divisionFilters, ageDivisionTypeIds })} />
+      <FilterOptionList options={ageOptions} value={divisionFilters.ageDivisionTypeIds} allLabel="Any age group" searchable searchLabel="Search age groups" onChange={(ageDivisionTypeIds) => setDivisionFilters({ ...divisionFilters, ageDivisionTypeIds })} />
       </DivisionDiscoveryFilterContent>
     </FilterPopover>
   );
@@ -789,7 +824,7 @@ function SkillLevelFilterItem<TEventType extends string>({ context }: DiscoverFi
     >
       <div className="discover-filter-popover-heading">Skill level</div>
       <DivisionDiscoveryFilterContent options={divisionOptions}>
-      <FilterOptionList options={skillOptions} value={divisionFilters.skillDivisionTypeIds} allLabel="Any skill level" onChange={(skillDivisionTypeIds) => setDivisionFilters({ ...divisionFilters, skillDivisionTypeIds })} />
+      <FilterOptionList options={skillOptions} value={divisionFilters.skillDivisionTypeIds} allLabel="Any skill level" searchable searchLabel="Search skill levels" onChange={(skillDivisionTypeIds) => setDivisionFilters({ ...divisionFilters, skillDivisionTypeIds })} />
       </DivisionDiscoveryFilterContent>
     </FilterPopover>
   );
@@ -826,8 +861,11 @@ export type DiscoverFilterBarProps<TEventType extends string = Event['eventType'
   selectedSports: string[];
   setSelectedSports: Dispatch<SetStateAction<string[]>>;
   sports: string[];
+  sportCategories?: SportCategory[];
   sportsLoading: boolean;
   sportsError: string | null;
+  showSports?: boolean;
+  showAllFilters?: boolean;
   selectedEventTypes: TEventType[];
   setSelectedEventTypes: (value: TEventType[]) => void;
   eventTypeOptions: readonly TEventType[];
@@ -840,10 +878,6 @@ export type DiscoverFilterBarProps<TEventType extends string = Event['eventType'
   setMaxDistance: (value: number | null) => void;
   defaultMaxDistance: number;
   showDistanceFilter?: boolean;
-  selectedStartDate: Date | null;
-  setSelectedStartDate: (value: Date | null) => void;
-  selectedEndDate: Date | null;
-  setSelectedEndDate: (value: Date | null) => void;
   divisionFilters: DivisionDiscoveryFilterValue;
   setDivisionFilters: (value: DivisionDiscoveryFilterValue) => void;
   divisionOptions: DivisionDiscoveryFilterOptions;
@@ -858,8 +892,11 @@ export default function DiscoverFilterBar<TEventType extends string = Event['eve
   selectedSports,
   setSelectedSports,
   sports,
+  sportCategories = [],
   sportsLoading,
   sportsError,
+  showAllFilters,
+  showSports,
   selectedEventTypes,
   setSelectedEventTypes,
   eventTypeOptions,
@@ -872,10 +909,6 @@ export default function DiscoverFilterBar<TEventType extends string = Event['eve
   setMaxDistance,
   defaultMaxDistance,
   showDistanceFilter = true,
-  selectedStartDate,
-  setSelectedStartDate,
-  selectedEndDate,
-  setSelectedEndDate,
   divisionFilters,
   setDivisionFilters,
   divisionOptions,
@@ -927,10 +960,7 @@ export default function DiscoverFilterBar<TEventType extends string = Event['eve
   const distanceMiles = typeof maxDistance === 'number' ? Math.round(maxDistance / KM_PER_MILE) : null;
   const distanceActive = Boolean(location && distanceMiles !== null);
   const priceActive = divisionFilters.priceMinDollars !== null || divisionFilters.priceMaxDollars !== null;
-  const dateActive = Boolean(selectedStartDate || selectedEndDate);
   const filtersKey = [
-    selectedStartDate?.toISOString() ?? '',
-    selectedEndDate?.toISOString() ?? '',
     selectedEventTypes.join('|'),
     selectedTags.join('|'),
     maxDistance ?? '',
@@ -955,10 +985,6 @@ export default function DiscoverFilterBar<TEventType extends string = Event['eve
     panelId,
     openFilter,
     setOpen,
-    selectedStartDate,
-    setSelectedStartDate,
-    selectedEndDate,
-    setSelectedEndDate,
     selectedEventTypes,
     setSelectedEventTypes,
     eventTypeOptions,
@@ -980,7 +1006,6 @@ export default function DiscoverFilterBar<TEventType extends string = Event['eve
     defaultMaxDistance,
     distanceMiles,
     distanceActive,
-    dateActive,
     priceActive,
     divisionFilters,
     setDivisionFilters,
@@ -995,7 +1020,6 @@ export default function DiscoverFilterBar<TEventType extends string = Event['eve
     setHideWeeklyChildren,
   };
   const filterItems: DiscoverFilterItem[] = [
-    { key: 'dates', node: <DatesFilterItem context={filterContext} /> },
     { key: 'price', node: <PriceFilterItem context={filterContext} /> },
     ...(showDistanceFilter
       ? [{ key: 'distance', node: <DistanceFilterItem context={filterContext} /> }]
@@ -1015,10 +1039,13 @@ export default function DiscoverFilterBar<TEventType extends string = Event['eve
   return (
     <DiscoverFilterRows
       sports={sports}
+      sportCategories={sportCategories}
       selectedSports={selectedSports}
       setSelectedSports={setSelectedSports}
       sportsLoading={sportsLoading}
       sportsError={sportsError}
+      showAllFilters={showAllFilters}
+      showSports={showSports}
       filters={filterItems}
       filtersKey={filtersKey}
       filterAriaLabel="Event filters"

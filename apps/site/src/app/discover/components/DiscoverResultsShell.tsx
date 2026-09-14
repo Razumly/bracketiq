@@ -1,70 +1,78 @@
 'use client';
 
-import { useId, type ReactNode } from 'react';
-import { List, MapPinned } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import { useLayoutEffect, useRef, type ReactNode } from 'react';
 
 export type DiscoverResultsShellProps = {
+  search: ReactNode;
   results: ReactNode;
   map: ReactNode;
   toolbar: ReactNode;
-  showMobileMap?: boolean;
-  onToggleMobileMap?: () => void;
 };
 
 export default function DiscoverResultsShell({
+  search,
   results,
   map,
   toolbar,
-  showMobileMap = false,
-  onToggleMobileMap,
 }: DiscoverResultsShellProps) {
-  const mapId = useId();
-  const isMobileMapVisible = !onToggleMobileMap || showMobileMap;
-  const isMobileResultsVisible = !onToggleMobileMap || !showMobileMap;
+  const searchSectionRef = useRef<HTMLDivElement | null>(null);
+  const resultsSplitRef = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    const searchSection = searchSectionRef.current;
+    const resultsSplit = resultsSplitRef.current;
+    if (!searchSection || !resultsSplit) return;
+
+    const updateMapTopOffset = () => {
+      const styles = window.getComputedStyle(searchSection);
+      if (styles.position !== 'sticky') {
+        resultsSplit.style.removeProperty('--discover-map-top-offset');
+        return;
+      }
+
+      const stickyTop = Number.parseFloat(styles.top);
+      const normalizedStickyTop = Number.isFinite(stickyTop) ? stickyTop : 0;
+      const nextTopOffset = `${Math.max(
+        0,
+        normalizedStickyTop + searchSection.getBoundingClientRect().height,
+      )}px`;
+      if (resultsSplit.style.getPropertyValue('--discover-map-top-offset') !== nextTopOffset) {
+        resultsSplit.style.setProperty('--discover-map-top-offset', nextTopOffset);
+      }
+    };
+
+    const resizeObserver = typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(updateMapTopOffset);
+    resizeObserver?.observe(searchSection);
+    window.addEventListener('resize', updateMapTopOffset);
+    updateMapTopOffset();
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener('resize', updateMapTopOffset);
+      resultsSplit.style.removeProperty('--discover-map-top-offset');
+    };
+  }, []);
 
   return (
-    <div className="mx-auto w-full min-w-0 max-w-7xl">
-      <div className="mb-5 flex min-w-0 flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0 flex-1 break-words">{toolbar}</div>
-        {onToggleMobileMap && (
-          <Button
-            type="button"
-            variant="outline"
-            aria-controls={mapId}
-            aria-expanded={showMobileMap}
-            onClick={onToggleMobileMap}
-            className="min-h-11 min-w-11 rounded-full lg:hidden"
-          >
-            {showMobileMap ? (
-              <List aria-hidden="true" size={16} />
-            ) : (
-              <MapPinned aria-hidden="true" size={16} />
-            )}
-            {showMobileMap ? 'Show results' : 'Show map'}
-          </Button>
-        )}
+    <div className="discover-results-shell w-full min-w-0">
+      <div ref={searchSectionRef} className="discover-search-section">
+        {search}
+        <div className="pb-5 min-w-0">{toolbar}</div>
       </div>
-      <div className="grid min-w-0 grid-cols-1 items-start gap-6 lg:grid-cols-2 lg:gap-8">
+      <div ref={resultsSplitRef} className="discover-results-split">
         <section
-          aria-label="Discover results"
-          className={cn(
-            'mx-auto w-full min-w-0 max-w-2xl break-words lg:mx-0 lg:block lg:max-w-none',
-            !isMobileResultsVisible && 'hidden',
-          )}
-        >
-          {results}
-        </section>
-        <section
-          id={mapId}
           aria-label="Discover map"
-          className={cn(
-            'h-[min(42rem,70dvh)] min-h-96 w-full min-w-0 overflow-hidden rounded-2xl border border-border bg-muted lg:sticky lg:top-24 lg:block lg:h-[calc(100dvh-8rem)] lg:max-h-[52rem]',
-            !isMobileMapVisible && 'hidden',
-          )}
+          className="discover-map-region w-full min-w-0 overflow-hidden rounded-md border border-border bg-muted"
         >
           {map}
+        </section>
+        <section
+          aria-label="Discover results"
+          className="discover-results-region w-full min-w-0 break-words"
+        >
+          {results}
         </section>
       </div>
     </div>

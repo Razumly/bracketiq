@@ -75,27 +75,46 @@ import { useDivisionDiscoveryOptions } from './DivisionDiscoveryFilters';
 import { filterLoadedEvents } from '@/components/events/event-list-filtering';
 import { rentalResourceMatchesSports } from '../rentalSportFilters';
 import { buildTeamDivisionFilterOptions, filterOpenRegistrationTeams } from '../utils/teamFilters';
-import type { DiscoverTabValue } from '@/lib/discoverFilters';
+import { discoverStartOfToday, type DiscoverTabValue } from '@/lib/discoverFilters';
+import {
+  buildMapMarkerGroups,
+  getEventCoordinates,
+  getFacilityCoordinates,
+  getFieldCoordinates,
+  getOrgCoordinates,
+  getRentalListingId,
+  getRentalListingName,
+  kmToMiles,
+  mapCentersAreClose,
+  matchesOrganizationSearch,
+  matchesRentalSearch,
+  matchesTeamSearch,
+  normalizeMapRadiusKm,
+  resolveEventDateRange,
+  type MapCenter,
+  type MapMarkerGroup,
+  type RentalMapListing,
+  type TeamMapListing,
+} from './DiscoverMapModel';
 
-type MapCenter = { lat: number; lng: number };
 type MapSearchTarget = DiscoverTabValue;
 
-type RentalMapListing = {
-  kind: 'slot' | 'affiliateFacility';
-  organization: Organization;
-  facility?: Facility;
-  field?: Field;
-  slot?: TimeSlot;
-  nextOccurrence: Date;
-  coordinates: MapCenter;
-  distanceKm?: number;
+export type DiscoverMapVisibleResults = {
+  target: DiscoverTabValue;
+  filterKey: string;
+  ids: string[];
+  organizationIds: string[];
+  center: MapCenter | null;
+  radiusKm: number | null;
 };
 
-type TeamMapListing = {
-  team: Team;
-  organization: Organization;
-  coordinates: MapCenter;
+type LoadedMapArea = {
+  target: MapSearchTarget;
+  center: MapCenter;
+  radiusKm: number;
+  requestId: number;
 };
+
 
 type MarkerSelection =
   | { type: 'event'; id: string }
@@ -113,16 +132,15 @@ type SearchResult =
   | { type: 'rental'; id: string; label: string; description: string; coordinates: MapCenter; rental: RentalMapListing }
   | { type: 'team'; id: string; label: string; description: string; coordinates: MapCenter; listing: TeamMapListing };
 
-type MapMarkerGroup<T> = {
-  id: string;
-  position: MapCenter;
-  items: T[];
-};
 
 type DiscoverMapModalProps = Omit<DiscoverFilterBarProps, 'divisionOptions' | 'activeFilterCount' | 'resetFilters' | 'showDistanceFilter'> & {
   opened: boolean;
   embedded?: boolean;
   searchQuery?: string;
+  selectedStartDate: Date | null;
+  setSelectedStartDate: (value: Date | null) => void;
+  selectedEndDate: Date | null;
+  setSelectedEndDate: (value: Date | null) => void;
   activeTab: DiscoverTabValue;
   onClose: () => void;
   locationInfo?: LocationInfo | null;
@@ -138,51 +156,19 @@ type DiscoverMapModalProps = Omit<DiscoverFilterBarProps, 'divisionOptions' | 'a
   onEventClick: (event: Event) => void;
   onOrganizationClick: (organization: Organization) => void;
   onTeamClick: (team: Team) => void;
+  onVisibleResultsChange?: (results: DiscoverMapVisibleResults) => void;
 };
 
 const DEFAULT_CENTER: MapCenter = { lat: 39.8283, lng: -98.5795 };
 const DEFAULT_MAP_ZOOM = 11;
 const MAP_SEARCH_RADIUS_KM = 50;
-const MIN_MAP_SEARCH_RADIUS_KM = 1;
-const MAP_CENTER_EPSILON_DEGREES = 0.00001;
 const VIEWPORT_RADIUS_EPSILON_KM = 0.1;
-const KM_PER_MILE = 1.60934;
 const MARKER_SIZE_PX = 44;
 const MARKER_CLICK_TARGET_SIZE_PX = 52;
-const MARKER_GROUP_DISTANCE_PX = MARKER_SIZE_PX;
-const MAP_TILE_SIZE_PX = 256;
-const MAX_MERCATOR_SIN_LAT = 0.9999;
 const TRANSPARENT_MARKER_ICON_URL = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="52" height="52" viewBox="0 0 52 52"><circle cx="26" cy="26" r="26" fill="black" fill-opacity="0.01"/></svg>',
 )}`;
 
-const kmToMiles = (value: number): number => value / KM_PER_MILE;
-const normalizeMapRadiusKm = (value: number | null | undefined): number => {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return MAP_SEARCH_RADIUS_KM;
-  }
-  return Math.max(MIN_MAP_SEARCH_RADIUS_KM, value);
-};
-const mapCentersAreClose = (left: MapCenter, right: MapCenter): boolean =>
-  Math.abs(left.lat - right.lat) < MAP_CENTER_EPSILON_DEGREES &&
-  Math.abs(left.lng - right.lng) < MAP_CENTER_EPSILON_DEGREES;
-
-const projectMapPosition = (position: MapCenter, zoom: number): { x: number; y: number } => {
-  const sinLat = Math.max(
-    -MAX_MERCATOR_SIN_LAT,
-    Math.min(MAX_MERCATOR_SIN_LAT, Math.sin((position.lat * Math.PI) / 180)),
-  );
-  const scale = MAP_TILE_SIZE_PX * 2 ** zoom;
-  return {
-    x: ((position.lng + 180) / 360) * scale,
-    y: (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * scale,
-  };
-};
-
-const distanceBetweenPoints = (
-  left: { x: number; y: number },
-  right: { x: number; y: number },
-): number => Math.hypot(left.x - right.x, left.y - right.y);
 
 const SEARCH_TARGETS: Array<{ value: MapSearchTarget; label: string }> = [
   { value: 'events', label: 'Events' },
@@ -218,201 +204,6 @@ const MARKER_STYLES: Record<MapSearchTarget, {
   },
 };
 
-const getOrgCoordinates = (org: Organization): MapCenter | null => {
-  if (Array.isArray(org.coordinates) && org.coordinates.length >= 2) {
-    const [lng, lat] = org.coordinates;
-    const latNum = typeof lat === 'number' ? lat : Number(lat);
-    const lngNum = typeof lng === 'number' ? lng : Number(lng);
-    if (Number.isFinite(latNum) && Number.isFinite(lngNum)) {
-      return { lat: latNum, lng: lngNum };
-    }
-  }
-  const latRaw = (org as any).lat ?? (org as any).latitude;
-  const lngRaw = (org as any).long ?? (org as any).longitude ?? (org as any).lng;
-  const lat = typeof latRaw === 'number' ? latRaw : Number(latRaw);
-  const lng = typeof lngRaw === 'number' ? lngRaw : Number(lngRaw);
-  if (Number.isFinite(lat) && Number.isFinite(lng)) {
-    return { lat, lng };
-  }
-  return null;
-};
-
-const getFieldCoordinates = (field: Field): MapCenter | null => {
-  const lat = typeof field.lat === 'number' ? field.lat : Number(field.lat);
-  const lng = typeof field.long === 'number' ? field.long : Number(field.long);
-  if (Number.isFinite(lat) && Number.isFinite(lng)) {
-    return { lat, lng };
-  }
-  return null;
-};
-
-const getFacilityCoordinates = (facility: Facility): MapCenter | null => {
-  if (Array.isArray(facility.coordinates) && facility.coordinates.length >= 2) {
-    const [lng, lat] = facility.coordinates;
-    const latNum = typeof lat === 'number' ? lat : Number(lat);
-    const lngNum = typeof lng === 'number' ? lng : Number(lng);
-    if (Number.isFinite(latNum) && Number.isFinite(lngNum)) {
-      return { lat: latNum, lng: lngNum };
-    }
-  }
-  return null;
-};
-
-const getRentalListingId = (rental: RentalMapListing): string => {
-  if (rental.kind === 'affiliateFacility') {
-    return `${rental.organization.$id}:facility:${rental.facility?.$id ?? 'affiliate'}`;
-  }
-  return `${rental.organization.$id}:${rental.field?.$id ?? 'field'}:${rental.slot?.$id ?? 'slot'}`;
-};
-
-const getRentalListingName = (rental: RentalMapListing): string => {
-  if (rental.kind === 'affiliateFacility') {
-    return rental.facility?.name || rental.organization.name;
-  }
-  return rental.field?.name || rental.organization.name;
-};
-
-const matchesOrganizationSearch = (organization: Organization, query: string): boolean => (
-  !query || `${organization.name} ${organization.location ?? ''} ${organization.description ?? ''}`.toLowerCase().includes(query)
-);
-
-const matchesRentalSearch = (rental: RentalMapListing, query: string): boolean => {
-  if (!query) return true;
-  const rentalLocation = rental.kind === 'affiliateFacility'
-    ? rental.facility?.location ?? ''
-    : rental.field?.location ?? '';
-  return `${rental.organization.name} ${rental.organization.description ?? ''} ${rental.organization.location ?? ''} ${getRentalListingName(rental)} ${rentalLocation}`.toLowerCase().includes(query);
-};
-
-const matchesTeamSearch = ({ team, organization }: TeamMapListing, query: string): boolean => (
-  !query || `${team.name} ${team.sport} ${organization.name} ${organization.location ?? ''}`.toLowerCase().includes(query)
-);
-
-const getEventCoordinates = (event: Event): MapCenter | null => {
-  if (!Array.isArray(event.coordinates) || event.coordinates.length < 2) {
-    return null;
-  }
-  const [lng, lat] = event.coordinates;
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-    return null;
-  }
-  return { lat, lng };
-};
-
-const buildMapMarkerGroups = <T,>(
-  items: T[],
-  zoom: number,
-  getId: (item: T) => string,
-  getCoordinates: (item: T) => MapCenter | null,
-): MapMarkerGroup<T>[] => {
-  const markers = items
-    .map((item) => {
-      const coordinates = getCoordinates(item);
-      if (!coordinates) {
-        return null;
-      }
-      return {
-        item,
-        coordinates,
-        point: projectMapPosition(coordinates, zoom),
-      };
-    })
-    .filter((entry): entry is {
-      item: T;
-      coordinates: MapCenter;
-      point: { x: number; y: number };
-    } => Boolean(entry));
-
-  const parent = markers.map((_, index) => index);
-  const find = (index: number): number => {
-    if (parent[index] !== index) {
-      parent[index] = find(parent[index]);
-    }
-    return parent[index];
-  };
-  const union = (left: number, right: number) => {
-    const leftRoot = find(left);
-    const rightRoot = find(right);
-    if (leftRoot !== rightRoot) {
-      parent[rightRoot] = leftRoot;
-    }
-  };
-
-  markers.forEach((marker, markerIndex) => {
-    for (let comparisonIndex = markerIndex + 1; comparisonIndex < markers.length; comparisonIndex += 1) {
-      if (distanceBetweenPoints(marker.point, markers[comparisonIndex].point) <= MARKER_GROUP_DISTANCE_PX) {
-        union(markerIndex, comparisonIndex);
-      }
-    }
-  });
-
-  const groupsByRoot = new Map<number, typeof markers>();
-  markers.forEach((marker, markerIndex) => {
-    const root = find(markerIndex);
-    const group = groupsByRoot.get(root);
-    if (group) {
-      group.push(marker);
-    } else {
-      groupsByRoot.set(root, [marker]);
-    }
-  });
-
-  return Array.from(groupsByRoot.values())
-    .map((group) => {
-      const sortedGroup = [...group].sort((left, right) => getId(left.item).localeCompare(getId(right.item)));
-      const position = sortedGroup.length === 1
-        ? sortedGroup[0].coordinates
-        : {
-            lat: sortedGroup.reduce((sum, marker) => sum + marker.coordinates.lat, 0) / sortedGroup.length,
-            lng: sortedGroup.reduce((sum, marker) => sum + marker.coordinates.lng, 0) / sortedGroup.length,
-          };
-      return {
-        id: sortedGroup.map((marker) => getId(marker.item)).join(':'),
-        position,
-        items: sortedGroup.map((marker) => marker.item),
-      };
-    })
-    .sort((left, right) => left.id.localeCompare(right.id));
-};
-
-const resolveEventDateRange = (startDate: Date | null, endDate: Date | null): { dateFrom: string; dateTo?: string } => {
-  const today = new Date();
-  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0);
-  const normalizedStartDate = startDate instanceof Date && !Number.isNaN(startDate.getTime())
-    ? startDate
-    : null;
-  const normalizedEndDate = endDate instanceof Date && !Number.isNaN(endDate.getTime())
-    ? endDate
-    : null;
-  const effectiveDate = normalizedStartDate
-    ? normalizedStartDate
-    : normalizedEndDate && normalizedEndDate < startOfToday
-      ? normalizedEndDate
-      : startOfToday;
-
-  const dateFrom = new Date(
-    effectiveDate.getFullYear(),
-    effectiveDate.getMonth(),
-    effectiveDate.getDate(),
-    0,
-    0,
-    0,
-    0,
-  ).toISOString();
-  const dateTo = normalizedEndDate
-    ? new Date(
-        normalizedEndDate.getFullYear(),
-        normalizedEndDate.getMonth(),
-        normalizedEndDate.getDate(),
-        23,
-        59,
-        59,
-        999,
-      ).toISOString()
-    : undefined;
-
-  return { dateFrom, dateTo };
-};
 
 
 const getInitials = (value: string, fallback: string): string => {
@@ -692,6 +483,7 @@ export default function DiscoverMapModal({
   rentalFilters,
   teamFilters,
   sports,
+  sportCategories = [],
   sportsLoading,
   sportsError,
   maxDistance,
@@ -704,6 +496,7 @@ export default function DiscoverMapModal({
   onEventClick,
   onOrganizationClick,
   onTeamClick,
+  onVisibleResultsChange,
 }: DiscoverMapModalProps) {
   const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? '';
   const [mapLoadAttempt, setMapLoadAttempt] = useState(0);
@@ -714,7 +507,8 @@ export default function DiscoverMapModal({
 
   const [map, setMap] = useState<google.maps.Map | null>(null);
   const [center, setCenter] = useState<MapCenter>(location ?? DEFAULT_CENTER);
-  const [searchedCenter, setSearchedCenter] = useState<MapCenter | null>(null);
+  const [loadedMapArea, setLoadedMapArea] = useState<LoadedMapArea | null>(null);
+  const searchedCenter = loadedMapArea?.center ?? null;
   const [viewportRadiusKm, setViewportRadiusKm] = useState(MAP_SEARCH_RADIUS_KM);
   const [events, setEvents] = useState<Event[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
@@ -753,10 +547,12 @@ export default function DiscoverMapModal({
     searchTarget,
     embeddedSearchQuery,
     searchTarget === 'events'
-      ? [selectedSports, selectedTags, selectedEventTypes, selectedStartDate, selectedEndDate, maxDistance, divisionFilters]
+      ? [selectedSports, selectedTags, selectedEventTypes, selectedStartDate, selectedEndDate, divisionFilters]
       : searchTarget === 'organizations'
-        ? [selectedSports, organizationFilters.selectedTags, organizationFilters.divisionFilters, organizationFilters.maxDistance]
-        : searchTarget === 'rentals' ? rentalFilters.maxDistance : null,
+        ? [selectedSports, organizationFilters.selectedTags, organizationFilters.divisionFilters]
+        : searchTarget === 'rentals'
+          ? [rentalFilters.timeRange]
+          : [teamFilters.selectedSports, teamFilters.selectedDivisionTypeValues],
   ]);
 
   const eventDateRange = useMemo(
@@ -826,13 +622,11 @@ export default function DiscoverMapModal({
   ) => {
     const requestId = ++loadRequestRef.current;
     pendingLoadRequestRef.current = requestId;
-    const distanceLimit = target === 'events' ? maxDistance : target === 'organizations'
-      ? organizationFilters.maxDistance : target === 'rentals' ? rentalFilters.maxDistance : null;
-    const viewportRadius = normalizeMapRadiusKm(nextRadiusKm);
-    const mapSearchRadiusKm = typeof distanceLimit === 'number' ? Math.min(distanceLimit, viewportRadius) : viewportRadius;
+    const mapSearchRadiusKm = normalizeMapRadiusKm(nextRadiusKm);
     lastLoadedFiltersRef.current = target === searchTarget ? targetFiltersKey : null;
     setLoading(true);
     setError(null);
+    setLoadedMapArea(null);
     setEvents([]);
     setOrganizations([]);
     setRentals([]);
@@ -940,13 +734,13 @@ export default function DiscoverMapModal({
         }))
       )) : [];
       setTeamListings(teamRows);
-      setSearchedCenter(nextCenter);
+      setLoadedMapArea({ target, center: nextCenter, radiusKm: mapSearchRadiusKm, requestId });
       setIsSearchAreaDirty(false);
       setSelected(null);
     } catch (loadError) {
       if (requestId !== loadRequestRef.current) return;
       console.error('Failed to load discover map data:', loadError);
-      setError('Failed to load nearby map results. Please try again.');
+      setError(`Failed to load ${embedded ? 'map' : 'nearby map'} results. Please try again.`);
     } finally {
       if (requestId === loadRequestRef.current) {
         pendingLoadRequestRef.current = null;
@@ -958,7 +752,6 @@ export default function DiscoverMapModal({
     eventDateRange.dateFrom,
     eventDateRange.dateTo,
     kmBetween,
-    maxDistance,
     searchTarget,
     selectedSports,
     selectedTags,
@@ -966,8 +759,8 @@ export default function DiscoverMapModal({
     eventTypeOptions.length,
     divisionFilters,
     organizationFilters,
-    rentalFilters.maxDistance,
     targetFiltersKey,
+    embedded,
   ]);
 
   useEffect(() => {
@@ -1000,7 +793,7 @@ export default function DiscoverMapModal({
       mapSettledOnceRef.current = false;
       setIsSearchAreaDirty(false);
       setCenter(location);
-      setSearchedCenter(null);
+      setLoadedMapArea(null);
       setViewportRadiusKm(MAP_SEARCH_RADIUS_KM);
       setMapZoom(DEFAULT_MAP_ZOOM);
       setSelected(null);
@@ -1029,7 +822,7 @@ export default function DiscoverMapModal({
       void latestLoadMapDataRef.current(DEFAULT_CENTER, MAP_SEARCH_RADIUS_KM, openingTargetRef.current ?? activeTab);
     };
     setCenter(DEFAULT_CENTER);
-    setSearchedCenter(null);
+    setLoadedMapArea(null);
     setViewportRadiusKm(MAP_SEARCH_RADIUS_KM);
     setMapZoom(DEFAULT_MAP_ZOOM);
     setIsSearchAreaDirty(false);
@@ -1041,6 +834,11 @@ export default function DiscoverMapModal({
     setError(null);
     setLoading(false);
 
+    if (embedded) {
+      loadFallback();
+      return;
+    }
+
     void requestMapLocation().catch(loadFallback);
 
     const fallbackTimer = window.setTimeout(() => {
@@ -1051,7 +849,7 @@ export default function DiscoverMapModal({
       cancelled = true;
       window.clearTimeout(fallbackTimer);
     };
-  }, [activeTab, location, opened, requestMapLocation]);
+  }, [activeTab, embedded, location, opened, requestMapLocation]);
 
   useEffect(() => {
     if (!embedded || !opened || searchTarget === activeTab) return;
@@ -1135,15 +933,15 @@ export default function DiscoverMapModal({
     selectedEndDate,
     divisionFilters,
     location: searchedCenter ?? center,
-    maxDistance,
+    maxDistance: loadedMapArea?.radiusKm ?? viewportRadiusKm,
     hideWeeklyChildren: false,
     getEventDistanceKm: (event) => {
       const coordinates = getEventCoordinates(event);
       return coordinates ? kmBetween(searchedCenter ?? center, coordinates) : undefined;
     },
   }) : [], [
-    center, divisionFilters, embeddedSearchQuery, eventDateRange.dateFrom, events, eventTypeOptions, kmBetween, maxDistance,
-    searchedCenter, searchTarget, selectedEndDate, selectedEventTypes, selectedSports, selectedTags,
+    center, divisionFilters, embeddedSearchQuery, eventDateRange.dateFrom, events, eventTypeOptions, kmBetween, loadedMapArea,
+    searchedCenter, searchTarget, selectedEndDate, selectedEventTypes, selectedSports, selectedTags, viewportRadiusKm,
   ]);
   const visibleOrganizations = useMemo(() => {
     if (searchTarget !== 'organizations') return [];
@@ -1154,11 +952,10 @@ export default function DiscoverMapModal({
   const visibleRentals = useMemo(() => searchTarget === 'rentals' ? rentals.filter((rental) => {
     if (!matchesRentalSearch(rental, embeddedSearchQuery)) return false;
     if (!rentalResourceMatchesSports(rental, selectedSports)) return false;
-    if (typeof rentalFilters.maxDistance === 'number' && (rental.distanceKm ?? Infinity) > rentalFilters.maxDistance) return false;
     if (rental.kind !== 'slot') return true;
     const hour = rental.nextOccurrence.getHours() + rental.nextOccurrence.getMinutes() / 60;
     return hour >= rentalFilters.timeRange[0] && hour < rentalFilters.timeRange[1];
-  }) : [], [embeddedSearchQuery, rentalFilters.maxDistance, rentalFilters.timeRange, rentals, searchTarget, selectedSports]);
+  }) : [], [embeddedSearchQuery, rentalFilters.timeRange, rentals, searchTarget, selectedSports]);
   const visibleTeams = useMemo(() => {
     if (searchTarget !== 'teams') return [];
     const matching = new Set(filterOpenRegistrationTeams(teamListings.map((listing) => listing.team), {
@@ -1168,6 +965,39 @@ export default function DiscoverMapModal({
     }));
     return teamListings.filter((listing) => matching.has(listing.team) && matchesTeamSearch(listing, embeddedSearchQuery));
   }, [embeddedSearchQuery, searchTarget, teamDivisionOptions, teamFilters.selectedDivisionTypeValues, teamFilters.selectedSports, teamListings]);
+
+  useEffect(() => {
+    if (!onVisibleResultsChange || !opened || loading || error || !loadedMapArea) return;
+    if (loadedMapArea.requestId !== loadRequestRef.current || loadedMapArea.target !== searchTarget) return;
+    if (embedded && searchTarget !== activeTab) return;
+
+    const ids = searchTarget === 'events'
+      ? visibleEvents.map((event) => event.$id)
+      : searchTarget === 'organizations'
+        ? visibleOrganizations.map((organization) => organization.$id)
+        : searchTarget === 'rentals'
+          ? visibleRentals.map(getRentalListingId)
+          : visibleTeams.map((listing) => listing.team.$id);
+    const organizationIds = searchTarget === 'organizations'
+      ? ids
+      : searchTarget === 'rentals'
+        ? [...new Set(visibleRentals.map((rental) => rental.organization.$id))]
+        : searchTarget === 'teams'
+          ? [...new Set(visibleTeams.map((listing) => listing.organization.$id))]
+          : [];
+    onVisibleResultsChange({
+      target: searchTarget,
+      filterKey: targetFiltersKey,
+      ids,
+      organizationIds,
+      center: loadedMapArea.center,
+      radiusKm: loadedMapArea.radiusKm,
+    });
+  }, [
+    activeTab, embedded, error, loadedMapArea, loading, onVisibleResultsChange, opened, searchTarget, targetFiltersKey,
+    visibleEvents, visibleOrganizations, visibleRentals, visibleTeams,
+  ]);
+
   const eventMarkerGroups = useMemo(
     () => buildMapMarkerGroups(visibleEvents, mapZoom, (event) => event.$id, getEventCoordinates),
     [mapZoom, visibleEvents],
@@ -1298,7 +1128,7 @@ export default function DiscoverMapModal({
   const resetEventFilters = useCallback(() => {
     setSelectedSports([]);
     setSelectedTags([]);
-    setSelectedStartDate(null);
+    setSelectedStartDate(discoverStartOfToday());
     setSelectedEndDate(null);
     setSelectedEventTypes([...eventTypeOptions]);
     setDivisionFilters(EMPTY_DISCOVERY_DIVISION_FILTERS);
@@ -1316,8 +1146,7 @@ export default function DiscoverMapModal({
   const activeEventFilterCount = selectedSports.length + selectedTags.length
     + Number(Boolean(selectedStartDate)) + Number(Boolean(selectedEndDate))
     + Number(selectedEventTypes.length !== eventTypeOptions.length)
-    + Number(hasDiscoveryDivisionFilters(divisionFilters))
-    + Number(typeof maxDistance === 'number');
+    + Number(hasDiscoveryDivisionFilters(divisionFilters));
   const resetTabFilters = () => {
     if (searchTarget === 'teams') {
       teamFilters.setSelectedSports([]);
@@ -1339,9 +1168,7 @@ export default function DiscoverMapModal({
     : selectedSports.length + (searchTarget === 'organizations'
       ? organizationFilters.selectedTags.length
         + Number(hasDiscoveryDivisionFilters(organizationFilters.divisionFilters))
-        + Number(typeof organizationFilters.maxDistance === 'number')
-      : Number(rentalFilters.timeRange.some((hour, index) => hour !== rentalFilters.defaultTimeRange[index]))
-        + Number(typeof rentalFilters.maxDistance === 'number'));
+      : Number(rentalFilters.timeRange.some((hour, index) => hour !== rentalFilters.defaultTimeRange[index])));
 
   const selectedEvent = selected?.type === 'event'
     ? visibleEvents.find((event) => event.$id === selected.id) ?? null
@@ -1384,7 +1211,7 @@ export default function DiscoverMapModal({
   const hasMapSelection = Boolean(selectedEvent || selectedOrganization || selectedRental
     || selectedEventGroup?.events.length || selectedOrganizationGroup?.organizations.length
     || selectedRentalGroup?.rentals.length || selectedTeam || selectedTeamGroup.length);
-  const showResultRail = !hasMapSelection && activeResultCount > 0;
+  const showResultRail = !embedded && !hasMapSelection && activeResultCount > 0;
   const selectedEventSummary = selectedEvent ? getEventSummary(selectedEvent) : null;
   const locationLabel = locationInfo?.formattedAddress?.trim()
     || [locationInfo?.city, locationInfo?.state].filter(Boolean).join(', ')
@@ -1455,7 +1282,7 @@ export default function DiscoverMapModal({
       title={<span className="discover-map-title">Discover map</span>}
       size="xl"
       styles={{
-        body: { padding: 0, flex: 1, minHeight: 0, overflowY: embedded ? 'auto' : undefined },
+        body: { padding: 0, flex: 1, minHeight: 0, overflowY: embedded ? 'hidden' : undefined },
         content: {
           width: embedded ? '100%' : 'calc(100vw - 2rem)',
           maxWidth: embedded ? 'none' : 1275,
@@ -1475,6 +1302,8 @@ export default function DiscoverMapModal({
           googleMapsApiKey={googleMapsApiKey}
           onStateChange={setMapLoadState}
         />
+        {!embedded && (
+          <>
         <div className="discover-map-tabs" role="tablist" aria-label="Map categories">
           {SEARCH_TARGETS.map((target) => (
             <button
@@ -1598,6 +1427,7 @@ export default function DiscoverMapModal({
                   key="events"
                   location={center}
                   sports={sports}
+                  sportCategories={sportCategories}
                   selectedSports={selectedSports}
                   setSelectedSports={setSelectedSports}
                   sportsLoading={sportsLoading}
@@ -1610,16 +1440,13 @@ export default function DiscoverMapModal({
                   eventTags={eventTags}
                   eventTagsLoading={eventTagsLoading}
                   eventTagsError={eventTagsError}
-                  selectedStartDate={selectedStartDate}
-                  setSelectedStartDate={setSelectedStartDate}
-                  selectedEndDate={selectedEndDate}
-                  setSelectedEndDate={setSelectedEndDate}
                   divisionFilters={divisionFilters}
                   setDivisionFilters={setDivisionFilters}
                   divisionOptions={divisionOptions}
                   maxDistance={maxDistance}
                   setMaxDistance={setMaxDistance}
                   defaultMaxDistance={defaultMaxDistance}
+                  showDistanceFilter={false}
                   activeFilterCount={activeEventFilterCount}
                   resetFilters={resetEventFilters}
                 />
@@ -1633,7 +1460,9 @@ export default function DiscoverMapModal({
                       : { target: 'teams', filters: { ...teamFilters, divisionTypeOptions: teamDivisionOptions } } as const)}
                   location={center}
                   defaultMaxDistance={defaultMaxDistance}
+                  showDistanceFilter={false}
                   sports={sports}
+                  sportCategories={sportCategories}
                   selectedSports={searchTarget === 'teams' ? teamFilters.selectedSports : selectedSports}
                   setSelectedSports={searchTarget === 'teams' ? teamFilters.setSelectedSports : setSelectedSports}
                   sportsLoading={sportsLoading}
@@ -1657,16 +1486,19 @@ export default function DiscoverMapModal({
               </ActionIcon>
             </div>
         </div>
+          </>
+        )}
 
         <div
           id="discover-map-workspace"
-          role="tabpanel"
-          aria-labelledby={`discover-map-tab-${searchTarget}`}
+          role={embedded ? 'region' : 'tabpanel'}
+          aria-label={embedded ? 'Discover map' : undefined}
+          aria-labelledby={embedded ? undefined : `discover-map-tab-${searchTarget}`}
           className={`discover-map-workspace${showResultRail ? ' discover-map-workspace--split' : ''}`}
           style={embedded ? {
             gridTemplateColumns: 'minmax(0, 1fr)',
-            gridTemplateRows: showResultRail ? 'minmax(20rem, 1fr) 10rem' : 'minmax(20rem, 1fr)',
-            minHeight: showResultRail ? '30rem' : '20rem',
+            gridTemplateRows: 'minmax(0, 1fr)',
+            minHeight: 0,
           } : undefined}
         >
           <div className="discover-map-canvas">
@@ -1682,6 +1514,7 @@ export default function DiscoverMapModal({
                 onZoomChanged={handleMapZoomChanged}
                 options={{
                   ...GOOGLE_MAP_OPTIONS_WITH_MAP_ID,
+                  gestureHandling: 'greedy',
                   clickableIcons: false,
                   mapTypeControl: false,
                   streetViewControl: false,
@@ -2043,19 +1876,12 @@ export default function DiscoverMapModal({
               </div>
             )}
 
-            {!loading && !error && !hasMapSelection && activeResultCount === 0 && (
-              <div className="discover-map-empty" role="status">
-                <strong>No nearby {searchTarget} found</strong>
-                <span>Move the map or change your filters to search again.</span>
-              </div>
-            )}
           </div>
 
           {showResultRail && (
             <aside
               className="discover-map-results"
               aria-labelledby="discover-map-results-title"
-              style={embedded ? { borderLeft: 0, borderTop: '1px solid var(--discover-border)' } : undefined}
             >
               <h3 id="discover-map-results-title">Nearby {searchTarget}</h3>
               <div ref={resultRailRef} className="discover-map-results-scroll">
@@ -2131,14 +1957,8 @@ export default function DiscoverMapModal({
             </aside>
           )}
         </div>
-        {(loading || error || loadError || locationRequestError || !googleMapsApiKey) && (
+        {(error || loadError || locationRequestError || !googleMapsApiKey) && (
           <div className="discover-map-status">
-            {loading && (
-              <Group gap="xs" role="status">
-                <Loader size="sm" />
-                <Text size="sm">Loading nearby results...</Text>
-              </Group>
-            )}
             {error && (
               <Alert color="red">
                 <Group justify="space-between" gap="sm">
@@ -2171,10 +1991,6 @@ export default function DiscoverMapModal({
             {!googleMapsApiKey && <Alert color="red">Google Maps API key is not configured.</Alert>}
           </div>
         )}
-        <footer className="discover-map-footer">
-          {searchTarget === 'teams' ? 'Teams appear at their organization locations. ' : ''}
-          Move the map, then select Search this area to update results.
-        </footer>
       </div>
     </Modal>
   );

@@ -4,7 +4,7 @@ This ExecPlan is a living document. The sections `Progress`, `Surprises & Discov
 
 ## Purpose / Big Picture
 
-The Discover page lets users search within the active Events, Organizations, Rentals, or Teams tab. The map opens on that same tab and uses its filter values and controls. Visible map tabs support all four result types. The map does not retain a hidden category selector. Team results use their organization coordinates, and the UI states that these are organization locations. Users can move the map, select "Search this area", and select a result to open its details or navigation action. The Dates filter permits its nested calendar to extend beyond the outer date panel. Long non-date filter panels remain scrollable.
+The Discover page always renders the map and result list together. Desktop uses two equal columns. Mobile stacks the map above the list. Page filters stay in one horizontal row. Sport stays in the search bar. The page has no distance filter. The embedded map has no Nearby result rail. The map reports visible result IDs, and the list filters to those IDs. The page first loads an approximate IP location, then offers an exact browser-location action.
 
 ## Progress
 
@@ -33,6 +33,18 @@ The Discover page lets users search within the active Events, Organizations, Ren
 - [x] (2026-09-10, date and map filter parity) Passed 51/51 focused Jest tests across `DiscoverMapModal.test.tsx`, `EventsTabContent.test.tsx`, and `page.test.tsx`. TypeScript, ESLint, and the CRLF-aware diff check passed.
 - [x] (2026-09-10, date and map filter parity) Recorded the browser verification limit. The existing `site-ui-operations-prod` runtime predates these source edits. No restart was authorized for this pass, so browser inspection could not validate this edit. No production deploy occurred.
 
+- [x] (2026-09-10, Discover split redesign) Made the Discover shell full width with an always-visible map and list split. Desktop uses equal columns. Mobile stacks the two regions.
+- [x] (2026-09-10, Discover split redesign) Removed the embedded map's Nearby result rail. The map now reports its loaded center, radius, filter key, result IDs, and organization IDs to the page.
+- [x] (2026-09-10, Discover split redesign) Scoped Events, Organizations, Rentals, and Teams lists to the current map result set. Rental cards use the same listing IDs as map markers.
+- [x] (2026-09-10, Discover split redesign) Replaced page filter overflow buttons with one inline row. Removed Sports from that row and removed page distance controls.
+- [x] (2026-09-10, Discover split redesign) Added approximate location loading through `/api/location/approximate`. Added an explicit `Use Exact Location` action for browser permission.
+- [x] (2026-09-10, Discover split redesign) Updated focused page, map, shell, event, location, and route tests. The latest focused run passed 7 suites and 87 tests.
+- [x] (2026-09-13T23:17:43Z) Refined the Discover search surface into one compact summary that expands over the result content.
+- [x] (2026-09-13T23:17:43Z) Moved location entry into the expanded search and kept only Nearby plus recommendations in the location panel.
+- [x] (2026-09-13T23:17:43Z) Validated the unified sections, green filter exception, date section clear action, and responsive layout.
+- [x] (2026-09-13, search motion follow-up) Replaced the abrupt expanded-panel jump with a shared selector morph, height transition, query fade, and grey backdrop fade. Non-active tabs fade before their containers collapse to zero, and the compact layout keeps the active tab at the left.
+- [x] (2026-09-13, shared search control correction) Replaced the separate compact summary with one persistent Where, When, Sport, and Search control row. The same controls now resize between states, keep visible dividers, center the type selector in both states, and expand from the surface background. Open surfaces allow dropdown overflow. Location labels show `Near by` for current and approximate location and `Near [city/state or ZIP]` for manual location.
+
 ## Surprises & Discoveries
 
 - Observation: The mobile map uses Google Maps camera bounds and a "search places in bounds" model for place search, but its event search currently loads events from a repository using bounds derived from the current location.
@@ -54,6 +66,17 @@ The Discover page lets users search within the active Events, Organizations, Ren
 - Observation (2026-09-10, date and map filter parity): A running browser surface does not prove later source edits.
   Evidence: The existing `site-ui-operations-prod` runtime predates this pass. No restart was authorized. Earlier browser results remain evidence for the earlier build only.
 
+- Observation (2026-09-10, Discover split redesign): A map result callback needs a filter key. Without it, a delayed result from an earlier query can replace the current list scope.
+  Evidence: The page rejects callbacks whose target or filter key is not current. Map and page tests cover filter changes.
+- Observation (2026-09-10, Discover split redesign): Rental map IDs must match page rental IDs. Organization-only filtering can show cards for rentals that are not on the map.
+  Evidence: Both map and page use `${organizationId}:facility:${facilityId}` or `${organizationId}:${fieldId}:${slotId}`.
+- Observation (2026-09-10, Discover split redesign): Browser exact-location permission must start from a user action.
+  Evidence: `LocationSearch` exposes `Use Exact Location` for an approximate location. Opening the picker does not call geolocation.
+- Observation (2026-09-13, compact search surface): The existing location component serves map and page callers with different interaction contracts.
+  Evidence: Inline `LocationSearch` mode now provides the Airbnb-style field while the default mode preserves the existing trigger, exact-location action, summary, and clear behavior for other callers.
+- Observation (2026-09-13, compact search surface): Section spacing must be removed on desktop for hover backgrounds to meet the divider edges.
+  Evidence: `.discover-search-sections` uses zero desktop gap and gives the Search action its own margin; the mobile stack keeps a small row gap.
+
 ## Decision Log
 
 - Decision: Implement open-registration team discovery by extending the existing `/api/teams` list path instead of creating a parallel discover-only teams endpoint.
@@ -73,7 +96,21 @@ The Discover page lets users search within the active Events, Organizations, Ren
   Date/Author: 2026-09-10 / Codex
 - Decision: Show open-registration teams at their loaded organization coordinates. State the organization-location meaning in markers, result rows, and selection details.
   Rationale: This supports team discovery without claiming that a team has direct coordinates. It supersedes the earlier page-only team map decision.
+
+- Decision (2026-09-10, Discover split redesign): Use the embedded map callback as the list scope authority.
+  Rationale: The list must show the same filtered result set as the map. A second list-only distance model would diverge.
+- Decision (2026-09-10, Discover split redesign): Keep `Search this area` for map movement.
+  Rationale: It avoids request storms while making the list update after the user commits the new map area.
+- Decision (2026-09-10, Discover split redesign): Ask for exact location through the visible location picker action.
+  Rationale: Browsers require a user gesture for reliable permission prompts. Approximate location remains active when permission is denied.
   Date/Author: 2026-09-10 / Codex
+
+- Decision (2026-09-13, compact search surface): Keep one `DiscoverSearchBar` component for collapsed and expanded states. The collapsed summary remains in normal flow, while the expanded controls use the same surface at a larger size instead of a separate fade-in card.
+  Rationale: The reference shows continuity between the summary and the open search. One component avoids duplicate state and preserves focus restoration.
+- Decision (2026-09-13, inline location entry): Put the location text input in the expanded search surface. The location panel keeps only the Nearby action and recommendation results, with no separate clear action.
+  Rationale: The location field should behave like the reference search field, while clearing is unnecessary when the user can replace the text.
+- Decision (2026-09-13, filter exception): Keep Discover filter controls green even though the site default field focus color is orange.
+  Rationale: Filter state must remain visually distinct from ordinary text entry.
 
 ## Outcomes & Retrospective
 
@@ -93,6 +130,21 @@ The rebuilt browser verified page-level Dates to Price and Event type to Event t
 2026-09-10 outcome (date and map filter parity): The Dates overflow fix is scoped to the date panel. The map opens on the current Discover tab. Events use the shared event filter bar and apply event type, dates, sports, tags, division, price, and distance filters. Organizations use tag slugs, sports, division filters, and distance in area requests. Rentals use the shared rental-resource sport helper and the same time-range rules as the page. Teams use the shared open-registration and division helpers. Their markers and details state that they use organization locations.
 
 The focused Jest run passed 51/51 tests across the map, event tab, and page suites. TypeScript, ESLint, and the CRLF-aware diff check passed. These results cover source behavior and code checks, not the rendered calendar or map layout. Browser verification could not validate this edit because `site-ui-operations-prod` predates the source edits and no restart was authorized. No production deploy occurred.
+
+2026-09-10 outcome (Discover split redesign): The page now renders a full-width map and list together. The list follows map-visible IDs for all four tabs. The embedded map has no Nearby rail. Page filters are inline, and Sports remains in the search bar. The page distance filter is absent. Discover loads approximate network location and lets the user replace it with exact browser location.
+
+The focused direct Jest run passed 7 suites and 87 tests. Changed-file ESLint passed with no output. Workspace TypeScript still reports 51 existing diagnostics in unrelated Prisma and API files. The package test command remains blocked by the existing generated shared-icon check; direct Jest bypassed that unrelated pretest gate. The CRLF-aware diff check passed. The running port-3001 process serves an older bundle that still shows the previous cards-only and distance-filter surface. No restart or deploy was authorized, so browser inspection did not validate this source revision.
+
+2026-09-13 outcome (compact search surface): Discover now uses one bounded search surface. The collapsed summary shows Where, When, and Sport as independent section buttons. The expanded surface reuses those sections over the result content, removes the inner bordered grid and backdrop fade, and keeps the orange search/query actions distinct from green filters. Where uses an inline destination field with recommendation results and only the green Nearby action. When uses a right-side X action and no calendar footer clear control. Sport opens in the same active section.
+
+The focused Discover run passed 3 suites and 23 tests. TypeScript and targeted ESLint passed. The production build passed and the user-authorized `site-ui-operations-prod` restart became ready on port 3001. Browser verification on rebuilt `/discover` confirmed the desktop summary, expanded overlay, section hover and selection, typed location recommendations, green Nearby action, date clearing affordance, sport list, and mobile stacked layout with no horizontal page overflow. No production deploy occurred.
+
+2026-09-13 outcome (search motion follow-up): The collapsed and expanded states now share one selector group and one bounded surface. The active tab stays at the compact left anchor, then the other tabs expand around it and move it to the centered expanded position. The surface height, query, sections, and grey backdrop animate independently. Non-active tab content fades before width, padding, and borders collapse. The expanded panel remains hidden from layout and tab order after close.
+
+The focused Jest run passed 3 suites and 23 tests. TypeScript and targeted ESLint passed. The production build passed with the existing multiple-lockfile warning. Browser verification on rebuilt port 3001 covered desktop and mobile open/close transitions, zero-width collapsed tabs, query visibility, no input clipping at settled states, mobile no-overflow, and reduced-motion styles. No production deploy occurred.
+2026-09-13 outcome (shared search control correction): The compact and expanded Discover states now use the same rendered location, date, sport, and Search controls. Compact styling reduces the controls and hides only the Search label while preserving the circular action. Vertical dividers remain visible. The centered tab selector uses the same tab buttons in both states. The search surface and panel no longer clip open dropdowns. Background clicks expand the surface. Discover location labels use `Near by` for current or approximate location and `Near [city/state or ZIP]` for manual selections.
+
+The focused Jest run passed 3 suites and 24 tests. TypeScript, targeted ESLint, and the production build passed. Browser verification on rebuilt port 3001 confirmed shared DOM identity across states, centered compact and expanded controls, visible sport options beyond the surface edge, `Near by` and `Near Vancouver, WA` labels, mobile no-horizontal-overflow, background-click expansion, and reduced-motion overrides. No production deploy occurred.
 
 ## Context and Orientation
 
@@ -115,6 +167,10 @@ Second, create a shared discover search control component with the text field an
 Third, add the map modal. It opens on the active Discover tab and uses the current location when available. Otherwise, it requests the current location and uses a default center if that request cannot supply one. The fallback must retain the opening tab. Moving the map exposes "Search this area". Selecting that action reloads the current result type around the map center. Events, Organizations, Rentals, and Teams share the page's filter values and controls. Server-backed filter changes reload the current area. Local rental and team filters update loaded results. Selection actions open the relevant event, organization, rental, or team destination. Team results use organization coordinates with explicit location labels.
 
 Fourth, validate with focused tests around team API filtering, current-tab search behavior where practical, TypeScript, lint, and rendered browser checks against `/discover`.
+
+Fifth, reshape `src/app/discover/components/DiscoverSearchBar.tsx` and the related Discover CSS into a single bounded search surface. The collapsed state shows the Where, When, and Sport sections without nested control boxes. The expanded state grows over the result content, uses the same section layout, and removes the old backdrop fade. Section hover states use rounded rectangles that stop at the dividers. Selecting When opens the calendar, which exposes a right-side clear action instead of a footer clear button. Selecting Where keeps the text input in the search surface and leaves only a Nearby action and recommendation results in the location panel.
+
+Sixth, preserve green Discover filter tokens as a local exception to the orange default field focus tokens. Verify that the search summary, event-creation field primitives, and expanded search text input use orange, while sport, date, and other filter controls use green.
 
 ## Concrete Steps
 
@@ -202,3 +258,14 @@ Revision note (2026-09-10, date and map filter parity): Recorded the scoped Date
 Revision note (2026-09-10, Issue 121 completion pass): Completed the remaining Discover map and search parity work. Map retries now remount only the script loader, map requests retain stale-response guards, and current-location and clear-location controls expose retryable errors. Grouped result close restores the matching rail row focus. Event local filtering now matches server-searchable event and organization fields and server date boundaries. The final focused Discover run passed 8 suites and 92 tests. Changed-file lint passed with 0 errors and 9 complexity warnings. Workspace typechecking, full CI, full Jest, and production build remain blocked by unrelated existing Prisma/API errors, generated shared-icon drift, and the test setup MouseEvent failure. Browser smoke used the existing pre-edit runtime; it was not restarted. No production deploy occurred.
 Revision note (2026-09-10, Airbnb-style Discover redesign): Replaced the page title and legacy primary controls with a bounded target-aware search surface for Events, Organizations, Rentals, and Teams. Added location, event dates, sports, expand/collapse focus restoration, and explicit Events-only date state for non-event targets. Added the post-search split results shell with inline embedded map, responsive mobile stacking, per-tab Filters modal, and shared event card width rules with content growth. Embedded map queries and active targets now follow the page search. Rental map/list search fields now match. Focused Discover validation passed 9 suites and 104 tests. Changed-file lint passed with 0 errors and 14 warnings. Typechecking still reports 51 unrelated diagnostics. Full CI and build remain blocked by unrelated generated shared-icon drift and project errors. Browser verification of this source remains unavailable because the existing port-3001 process predates the edit and no restart was authorized. No production deploy occurred.
 Revision note (2026-09-10, search overlay refinement): Removed the visible collapse control. The expanded search keeps the compact summary anchor in normal flow, renders the full controls over the results, dims the viewport with an animated grey backdrop, dismisses on outside click or Escape, restores focus, and honors reduced motion. Focused Discover validation passed 9 suites and 108 tests. Changed-file lint passed with 0 errors and 1 existing complexity warning. Browser verification of this source awaits an explicit rebuild and restart because the current runtime serves the previous bundle. No production deploy occurred.
+
+Revision note (2026-09-10, Discover split redesign): Recorded the full-width map/list shell, map-authoritative list scope, inline filters, distance-control removal, approximate-to-exact location flow, focused validation, and browser verification limit. Preserved earlier map-modal history. No restart or production deploy occurred.
+
+Revision note (2026-09-13, compact search surface): Added the plan for the reference-style Discover search redesign. The implementation will preserve one search component, move location entry into the expanded surface, replace the date footer clear action with the section clear action, and keep green filter styling as a scoped exception to the orange default field theme.
+Revision note (2026-09-13, compact search surface completion): Marked the reference-style search work complete. Recorded the controlled Where, When, and Sport sections, inline location entry, date section clear action, transform-only expansion, focused Jest/type/lint/build checks, and rebuilt desktop/mobile browser evidence. No production deploy occurred.
+Revision note (2026-09-13, search motion follow-up): Replaced the transform-only and open-on-mount behavior with a persistent closed panel that reveals on the next animation frame. Added height and selector-grid transitions, delayed tab fade-in, fast tab fade-out before zero-width collapse, query and section fade transitions, grey backdrop fade-in and fade-out keyframes, mobile transitions, and reduced-motion overrides. Updated the overlay focus test. Rebuilt browser verification passed on desktop and mobile. No production deploy occurred.
+Revision note (2026-09-13, shared search control correction): Removed the duplicate compact summary controls. Kept one persistent control row and resized its existing components for compact mode. Centered the selector, restored explicit dividers, allowed open dropdown overflow, added current/manual location display labels, and made the surface background expand the search. Added shared-label and background-expansion regression coverage. Rebuilt and verified desktop, mobile, dropdown, location-label, identity, and reduced-motion behavior. No production deploy occurred.
+Revision note (2026-09-13, search surface sizing correction): Removed fixed collapsed and expanded surface heights and the surface height transition. The surface now follows its content. Matched bottom padding to horizontal padding in desktop and mobile states. Synchronized the query transition with the section transition and added a mobile sections frame so the stacked filters expand and collapse within the same motion window. Active filter popovers remain visible. Focused Jest validation passed 3 suites and 24 tests. TypeScript, targeted ESLint, Prettier, production build, and rebuilt browser checks passed. No production deploy occurred.
+Revision note (2026-09-13, search control motion correction): Made the expanded Search control the same icon-only circular control as the collapsed state at 48px, centered it with the filters, and added 360ms geometry transitions for the button, type buttons, and filter controls. Preserved reduced-motion overrides. Focused Jest passed 3 suites and 24 tests. TypeScript, targeted ESLint, Prettier, production build, and rebuilt desktop/mobile browser checks passed. No production deploy occurred.
+Revision note (2026-09-13, search collapse clipping correction): Reserved a 48px minimum action-column track so the expanded icon button remains inside its grid cell while it shrinks to the 40px compact size. Focused Jest passed 3 suites and 24 tests. TypeScript, targeted ESLint, Prettier, production build, and desktop/mobile collapse containment checks passed. No production deploy occurred.
+Revision note (2026-09-13, mobile reference examples): Generated fourteen approved mobile browser examples at 853x1844 RGB pixels under `docs/images/site-ui/discovery-list/`. Coverage includes Events, Organizations, Rentals, Teams, searchable tags, division filters, price filters, loading, no-results, network-error, location-unavailable, end-of-results, grouped-map selection, and single-event map selection. The examples use the local site runtime; temporary browser fixtures supplied the open team result and failure states only during capture. No production deploy occurred.
