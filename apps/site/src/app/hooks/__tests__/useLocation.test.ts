@@ -93,6 +93,32 @@ describe('useLocation', () => {
     expect(result.current.locationInfo).toMatchObject({ city: 'Washougal', state: 'WA' });
   });
 
+  it('uses approximate location when browser permission is blocked', async () => {
+    mockedLocationService.getCurrentLocation.mockRejectedValue(
+      new Error('Location access is blocked. Enable location permission, then try again.'),
+    );
+    mockedLocationService.getApproximateLocation.mockResolvedValue({
+      lat: 45.5,
+      lng: -122.6,
+      city: 'Portland',
+      state: 'OR',
+      source: 'approximate',
+    });
+
+    const { result } = renderHook(() => useLocation());
+
+    await act(async () => {
+      await result.current.requestLocation();
+    });
+
+    expect(mockedLocationService.getApproximateLocation).toHaveBeenCalledWith(expect.any(AbortSignal));
+    expect(result.current.locationInfo).toMatchObject({
+      city: 'Portland',
+      source: 'approximate',
+    });
+    expect(result.current.error).toBeNull();
+  });
+
   it('searches for a location via geocode', async () => {
     mockedLocationService.geocodeLocation.mockResolvedValue({
       lat: 51.5,
