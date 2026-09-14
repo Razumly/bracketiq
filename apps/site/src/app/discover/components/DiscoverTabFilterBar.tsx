@@ -190,8 +190,9 @@ export default function DiscoverTabFilterBar(props: Props) {
     ) });
   }
 
-  return <DiscoverFilterRows sports={props.sports} selectedSports={selectedSports} setSelectedSports={props.setSelectedSports}
+  return <DiscoverFilterRows sports={props.sports} sportCategories={props.sportCategories} selectedSports={selectedSports} setSelectedSports={props.setSelectedSports}
     sportsLoading={props.sportsLoading} sportsError={props.sportsError} filters={items}
+    showSports={props.showSports} showAllFilters={props.showAllFilters}
     filtersKey={JSON.stringify([target, props.filters, Boolean(location), showDistanceFilter, props.activeFilterCount])}
     filterAriaLabel={target === 'organizations' ? 'Organization filters' : target === 'rentals' ? 'Rental filters' : 'Team filters'}
     activeFilterCount={props.activeFilterCount} resetFilters={props.resetFilters} />;

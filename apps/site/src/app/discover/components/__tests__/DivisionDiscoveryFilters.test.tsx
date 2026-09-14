@@ -7,6 +7,7 @@ import DivisionDiscoveryFilters, {
   type DivisionDiscoveryFilterOptions,
   useDivisionDiscoveryOptions,
 } from "../DivisionDiscoveryFilters";
+import { getGlobalAgeDivisionTypeOptions } from "@/lib/divisionTypes";
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -68,10 +69,6 @@ function DiscoverFiltersHarness({
       maxDistance={null}
       setMaxDistance={jest.fn()}
       defaultMaxDistance={50}
-      selectedStartDate={null}
-      setSelectedStartDate={jest.fn()}
-      selectedEndDate={null}
-      setSelectedEndDate={jest.fn()}
       divisionFilters={divisionFilters}
       setDivisionFilters={(next) => {
         setDivisionFilters(next);
@@ -121,6 +118,26 @@ describe("DivisionDiscoveryFilters async lifecycle", () => {
       screen.queryByLabelText("Loading division filters"),
     ).not.toBeInTheDocument();
     expect(onChange).not.toHaveBeenCalled();
+  });
+  it("uses the global age catalog when the API omits age groups", async () => {
+    const onChange = jest.fn();
+    const user = userEvent.setup();
+    globalThis.fetch = jest.fn(() =>
+      Promise.resolve(response({ ages: [{ id: "u8", name: "U8" }] })),
+    ) as typeof fetch;
+
+    render(
+      <DivisionDiscoveryFilters value={filterValue()} onChange={onChange} />,
+    );
+
+    const ageInput = await screen.findByPlaceholderText("Any age group");
+    await user.click(ageInput);
+
+    expect(screen.getAllByRole("option")).toHaveLength(
+      getGlobalAgeDivisionTypeOptions().length,
+    );
+    expect(screen.getByRole("option", { name: "U20" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "80+" })).toBeInTheDocument();
   });
 
   it("renders a failed request without reconciling selected skills", async () => {

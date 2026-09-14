@@ -2,12 +2,15 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { Sport } from '@/types';
-import { sportsService } from '@/lib/sportsService';
+import { sportsService, type SportCatalog } from '@/lib/sportsService';
 
 export const useSports = () => {
-  const initialSports = useMemo(() => sportsService.getCached({ allowStale: true }) ?? [], []);
-  const [sports, setSports] = useState<Sport[]>(initialSports);
-  const [loading, setLoading] = useState<boolean>(initialSports.length === 0);
+  const initialCatalog = useMemo(
+    () => sportsService.getCachedCatalog({ allowStale: true }) ?? { sports: [], categories: [] },
+    [],
+  );
+  const [catalog, setCatalog] = useState<SportCatalog>(initialCatalog);
+  const [loading, setLoading] = useState<boolean>(initialCatalog.sports.length === 0);
   const [error, setError] = useState<Error | null>(null);
 
   useEffect(() => {
@@ -15,12 +18,12 @@ export const useSports = () => {
 
     const load = async () => {
       try {
-        if (!initialSports.length) {
+        if (!initialCatalog.sports.length) {
           setLoading(true);
         }
-        const data = await sportsService.getAll(true);
+        const data = await sportsService.getCatalog(true);
         if (!active) return;
-        setSports(data);
+        setCatalog(data);
         setError(null);
       } catch (err) {
         if (!active) return;
@@ -37,28 +40,29 @@ export const useSports = () => {
     return () => {
       active = false;
     };
-  }, [initialSports.length]);
+  }, [initialCatalog.sports.length]);
 
   const sportsById = useMemo(() => {
     const map = new Map<string, Sport>();
-    sports.forEach((sport) => {
+    catalog.sports.forEach((sport) => {
       if (sport.$id) {
         map.set(sport.$id, sport);
       }
     });
     return map;
-  }, [sports]);
+  }, [catalog.sports]);
 
   const sportsByName = useMemo(() => {
     const map = new Map<string, Sport>();
-    sports.forEach((sport) => {
+    catalog.sports.forEach((sport) => {
       map.set(sport.name.toLowerCase(), sport);
     });
     return map;
-  }, [sports]);
+  }, [catalog.sports]);
 
   return {
-    sports,
+    sports: catalog.sports,
+    categories: catalog.categories,
     sportsById,
     sportsByName,
     loading,

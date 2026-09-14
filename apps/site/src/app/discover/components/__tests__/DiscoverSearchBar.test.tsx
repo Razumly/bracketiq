@@ -45,6 +45,209 @@ function SearchHarness({
     />
   );
 }
+const dateKey = (date: Date): string => (
+  [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-')
+);
+
+const relativeDate = (days: number): Date => {
+  const value = new Date();
+  value.setHours(0, 0, 0, 0);
+  value.setDate(value.getDate() + days);
+  return value;
+};
+
+const dateLabel = (date: Date): string => new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+}).format(date);
+
+const getDayButton = (calendar: HTMLElement, date: Date): HTMLElement => {
+  const dayCell = within(calendar).getAllByRole('gridcell').find((entry) => (
+    entry.getAttribute('data-day') === dateKey(date)
+    && entry.getAttribute('data-outside') !== 'true'
+  ));
+  if (!dayCell) throw new Error(`Calendar day ${dateKey(date)} is not rendered.`);
+  return within(dayCell).getByRole('button');
+};
+
+it('hides a portaled date panel immediately when Escape collapses the search', async () => {
+  const user = userEvent.setup();
+  render(<SearchHarness />);
+  await user.click(screen.getByRole('button', { name: 'When: Any dates' }));
+  const dates = screen.getByRole('dialog', { name: 'Choose dates' });
+  await user.click(within(dates).getByRole('button', { name: /^Select start date/ }));
+  expect(screen.getByRole('textbox', { name: 'Search by name or keyword' })).toBeInTheDocument();
+
+  await user.keyboard('{Escape}');
+
+  expect(screen.queryByRole('dialog', { name: 'Choose dates' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('textbox', { name: 'Search by name or keyword' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Search', exact: true })).toHaveFocus();
+});
+
+it('selects a start date, then an end date, and highlights the range', async () => {
+  const user = userEvent.setup();
+  const callbacks = { setSelectedStartDate: jest.fn(), setSelectedEndDate: jest.fn() };
+  const startDate = relativeDate(1);
+  const middleDate = relativeDate(2);
+  const endDate = relativeDate(3);
+  render(<SearchHarness callbacks={callbacks} />);
+
+  await user.click(screen.getByRole('button', { name: 'When: Any dates' }));
+  const dates = screen.getByRole('dialog', { name: 'Choose dates' });
+  expect(within(dates).getByText('Select a start date', { exact: true })).toBeInTheDocument();
+  expect(within(dates).getAllByRole('gridcell')
+    .filter((cell) => cell.getAttribute('data-outside') === 'true')
+    .every((cell) => !cell.querySelector('button'))).toBe(true);
+  expect(within(dates).getByRole('button', { name: /^Select start date/ })).toHaveAttribute('aria-pressed', 'true');
+
+  await user.click(getDayButton(dates, startDate));
+  expect(callbacks.setSelectedStartDate).toHaveBeenLastCalledWith(startDate);
+  expect(within(dates).getByText('Select an end date', { exact: true })).toBeInTheDocument();
+  expect(getDayButton(dates, startDate)).toHaveAttribute('data-selected-single', 'true');
+  expect(getDayButton(dates, relativeDate(2)).parentElement).toHaveClass('discover-date-preview-forward-1');
+  expect(getDayButton(dates, relativeDate(3)).parentElement).toHaveClass('discover-date-preview-forward-2');
+  expect(getDayButton(dates, relativeDate(4)).parentElement).toHaveClass('discover-date-preview-forward-3');
+
+  await user.click(getDayButton(dates, endDate));
+  expect(callbacks.setSelectedEndDate).toHaveBeenLastCalledWith(endDate);
+  expect(within(dates).getByText('Select a start date', { exact: true })).toBeInTheDocument();
+  expect(getDayButton(dates, startDate)).toHaveAttribute('data-range-start', 'true');
+  expect(getDayButton(dates, middleDate)).toHaveAttribute('data-range-middle', 'true');
+  expect(getDayButton(dates, endDate)).toHaveAttribute('data-range-end', 'true');
+  expect(screen.getByRole('button', {
+    name: `When: ${dateLabel(startDate)} – ${dateLabel(endDate)}`,
+  })).toBeInTheDocument();
+
+  await user.click(screen.getByRole('button', { name: 'Clear dates' }));
+  expect(callbacks.setSelectedStartDate).toHaveBeenLastCalledWith(null);
+  expect(callbacks.setSelectedEndDate).toHaveBeenLastCalledWith(null);
+  expect(within(dates).queryByRole('button', { name: 'Clear dates' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'When: Any dates' })).toBeInTheDocument();
+});
+
+it('switches to end selection and supports an end-only date', async () => {
+  const user = userEvent.setup();
+  const callbacks = { setSelectedStartDate: jest.fn(), setSelectedEndDate: jest.fn() };
+  const endDate = relativeDate(2);
+  render(<SearchHarness callbacks={callbacks} />);
+
+  await user.click(screen.getByRole('button', { name: 'When: Any dates' }));
+  const dates = screen.getByRole('dialog', { name: 'Choose dates' });
+  await user.click(within(dates).getByRole('button', { name: /^Select end date/ }));
+  expect(within(dates).getByText('Select an end date', { exact: true })).toBeInTheDocument();
+
+  await user.click(getDayButton(dates, endDate));
+  expect(callbacks.setSelectedStartDate).not.toHaveBeenCalled();
+  expect(callbacks.setSelectedEndDate).toHaveBeenLastCalledWith(endDate);
+  expect(within(dates).getByText('Select a start date', { exact: true })).toBeInTheDocument();
+  expect(getDayButton(dates, endDate)).toHaveAttribute('data-selected-single', 'true');
+  expect(getDayButton(dates, relativeDate(1)).parentElement).toHaveClass('discover-date-preview-backward-1');
+  expect(getDayButton(dates, relativeDate(0)).parentElement).toHaveClass('discover-date-preview-backward-2');
+  expect(getDayButton(dates, relativeDate(-1)).parentElement).toHaveClass('discover-date-preview-backward-3');
+  expect(within(dates).getByRole('button', { name: /^Select start date/ })).toHaveAttribute('aria-pressed', 'true');
+});
+
+it('removes a selected marker when it is clicked again', async () => {
+  const user = userEvent.setup();
+  const callbacks = { setSelectedStartDate: jest.fn(), setSelectedEndDate: jest.fn() };
+  const startDate = relativeDate(1);
+  const endDate = relativeDate(2);
+  render(<SearchHarness callbacks={callbacks} />);
+
+  await user.click(screen.getByRole('button', { name: 'When: Any dates' }));
+  const dates = screen.getByRole('dialog', { name: 'Choose dates' });
+  await user.click(getDayButton(dates, startDate));
+  await user.click(getDayButton(dates, startDate));
+
+  expect(callbacks.setSelectedStartDate).toHaveBeenLastCalledWith(null);
+  expect(screen.getByRole('button', { name: 'When: Any dates' })).toBeInTheDocument();
+  expect(within(dates).getByText('Select a start date', { exact: true })).toBeInTheDocument();
+
+  await user.click(within(dates).getByRole('button', { name: /^Select end date/ }));
+  await user.click(getDayButton(dates, endDate));
+  await user.click(getDayButton(dates, endDate));
+
+  expect(callbacks.setSelectedEndDate).toHaveBeenLastCalledWith(null);
+  expect(screen.getByRole('button', { name: 'When: Any dates' })).toBeInTheDocument();
+  expect(within(dates).getByText('Select an end date', { exact: true })).toBeInTheDocument();
+});
+
+it('keeps past dates selectable', async () => {
+  const user = userEvent.setup();
+  const callbacks = { setSelectedStartDate: jest.fn(), setSelectedEndDate: jest.fn() };
+  const pastDate = relativeDate(-2);
+  render(<SearchHarness callbacks={callbacks} />);
+
+  await user.click(screen.getByRole('button', { name: 'When: Any dates' }));
+  const dates = screen.getByRole('dialog', { name: 'Choose dates' });
+  await user.click(getDayButton(dates, pastDate));
+
+  expect(callbacks.setSelectedStartDate).toHaveBeenLastCalledWith(pastDate);
+  expect(getDayButton(dates, pastDate)).toHaveAttribute('data-selected-single', 'true');
+});
+
+it('clears the opposite date when either endpoint crosses the range', async () => {
+  const user = userEvent.setup();
+  const callbacks = { setSelectedStartDate: jest.fn(), setSelectedEndDate: jest.fn() };
+  const initialStartDate = relativeDate(1);
+  const initialEndDate = relativeDate(3);
+  const laterStartDate = relativeDate(4);
+  const earlierEndDate = relativeDate(0);
+  render(<SearchHarness callbacks={callbacks} />);
+
+  await user.click(screen.getByRole('button', { name: 'When: Any dates' }));
+  const dates = screen.getByRole('dialog', { name: 'Choose dates' });
+  await user.click(getDayButton(dates, initialStartDate));
+  await user.click(getDayButton(dates, initialEndDate));
+  await user.click(within(dates).getByRole('button', { name: /^Select start date/ }));
+  await user.click(getDayButton(dates, laterStartDate));
+
+  expect(callbacks.setSelectedStartDate).toHaveBeenLastCalledWith(laterStartDate);
+  expect(callbacks.setSelectedEndDate).toHaveBeenLastCalledWith(null);
+  expect(within(dates).getByText('Select an end date', { exact: true })).toBeInTheDocument();
+
+  await user.click(within(dates).getByRole('button', { name: /^Select end date/ }));
+  await user.click(getDayButton(dates, earlierEndDate));
+
+  expect(callbacks.setSelectedStartDate).toHaveBeenLastCalledWith(null);
+  expect(callbacks.setSelectedEndDate).toHaveBeenLastCalledWith(earlierEndDate);
+  expect(within(dates).getByText('Select a start date', { exact: true })).toBeInTheDocument();
+});
+
+it('keeps event dates out of non-event searches and restores them for Events', async () => {
+  const user = userEvent.setup();
+  const startDate = relativeDate(1);
+  const endDate = relativeDate(3);
+  render(<SearchHarness />);
+
+  await user.click(screen.getByRole('button', { name: 'When: Any dates' }));
+  let dates = screen.getByRole('dialog', { name: 'Choose dates' });
+  await user.click(getDayButton(dates, startDate));
+  await user.click(getDayButton(dates, endDate));
+
+  for (const target of ['Organizations', 'Rentals', 'Teams']) {
+    await user.click(within(screen.getByRole('group', { name: 'Search type' })).getByRole('button', { name: target }));
+    const when = screen.getByRole('group', { name: 'When: Events only' });
+    expect(within(when).getByText('Events only')).toBeVisible();
+    expect(screen.queryByRole('dialog', { name: 'Choose dates' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Select start date/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Select end date/ })).not.toBeInTheDocument();
+  }
+
+  await user.click(within(screen.getByRole('group', { name: 'Search type' })).getByRole('button', { name: 'Events' }));
+  await user.click(screen.getByRole('button', {
+    name: `When: ${dateLabel(startDate)} – ${dateLabel(endDate)}`,
+  }));
+  dates = screen.getByRole('dialog', { name: 'Choose dates' });
+  expect(within(dates).getByRole('button', {
+    name: `Select start date: ${dateLabel(startDate)}`,
+  })).toBeInTheDocument();
+  expect(within(dates).getByRole('button', {
+    name: `Select end date: ${dateLabel(endDate)}`,
+  })).toBeInTheDocument();
+});
 
 it('preserves the query and selected tab across controlled collapse and expansion', async () => {
   const user = userEvent.setup();
@@ -52,7 +255,6 @@ it('preserves the query and selected tab across controlled collapse and expansio
   render(<SearchHarness callbacks={callbacks} />);
   const search = within(screen.getByRole('search', { name: 'Discover search' }));
 
-  expect(search.queryByRole('button', { name: 'Collapse search' })).not.toBeInTheDocument();
   await user.type(search.getByRole('textbox', { name: 'Search by name or keyword' }), 'Evening');
   await user.click(within(search.getByRole('group', { name: 'Search type' })).getByRole('button', { name: 'Teams' }));
 
@@ -62,22 +264,19 @@ it('preserves the query and selected tab across controlled collapse and expansio
   expect(search.getByRole('button', { name: 'Events' })).toHaveAttribute('aria-pressed', 'false');
   await user.keyboard('{Escape}');
 
-  const summary = search.getByRole('button', { name: /^Edit search: Teams, Evening,/ });
-  expect(summary).toHaveAttribute('aria-expanded', 'false');
-  expect(summary).toHaveFocus();
+  const searchButton = search.getByRole('button', { name: 'Search', exact: true });
+  expect(searchButton).toHaveFocus();
   expect(callbacks.onExpandedChange).toHaveBeenLastCalledWith(false);
   expect(search.queryByRole('textbox')).not.toBeInTheDocument();
-  await user.click(summary);
+  await user.click(searchButton);
 
   expect(callbacks.onExpandedChange).toHaveBeenLastCalledWith(true);
-  expect(summary).toHaveAttribute('aria-expanded', 'true');
-  expect(search.queryByRole('button', { name: 'Collapse search' })).not.toBeInTheDocument();
   expect(search.getByRole('textbox', { name: 'Search by name or keyword' })).toHaveValue('Evening');
   expect(search.getByRole('textbox', { name: 'Search by name or keyword' })).toHaveFocus();
   expect(search.getByRole('button', { name: 'Teams' })).toHaveAttribute('aria-pressed', 'true');
 });
 
-it('keeps the summary anchor in place and dismisses the overlay through its backdrop', async () => {
+it('keeps the shared controls in place and expands from the surface background', async () => {
   const user = userEvent.setup();
   const onExpandedChange = jest.fn();
   const openResult = jest.fn();
@@ -88,41 +287,50 @@ it('keeps the summary anchor in place and dismisses the overlay through its back
     </>,
   );
   const search = screen.getByRole('search', { name: 'Discover search' });
-  const summary = within(search).getByRole('button', { name: /^Edit search:/ });
+  const surface = search.querySelector('.discover-search-surface');
+  const whereSection = search.querySelector('[data-section="where"]');
   const result = screen.getByRole('button', { name: 'Open result' });
+  if (!surface || !whereSection) throw new Error('The collapsed search surface is missing.');
   expect(within(search).queryByRole('textbox')).not.toBeInTheDocument();
 
-  await user.click(summary);
+  await user.click(surface);
 
   expect(onExpandedChange).toHaveBeenLastCalledWith(true);
   expect(screen.getByRole('textbox', { name: 'Search by name or keyword' })).toHaveFocus();
-  // JSDOM has no layout engine; retain the flow anchor and following result node.
-  expect(summary.parentElement).toBe(search);
-  expect(search.nextElementSibling).toBe(result);
-  expect(summary).toHaveAttribute('aria-hidden', 'true');
-  expect(summary).toHaveAttribute('tabindex', '-1');
+  expect(search.querySelector('[data-section="where"]')).toBe(whereSection);
   const backdrop = search.querySelector('.discover-search-backdrop');
-  const panel = document.getElementById(summary.getAttribute('aria-controls')!);
+  const panel = search.querySelector('.discover-search-panel');
   if (!backdrop || !panel) throw new Error('The expanded search overlay is missing.');
 
   await user.click(backdrop);
 
   expect(onExpandedChange).toHaveBeenLastCalledWith(false);
   expect(openResult).not.toHaveBeenCalled();
-  expect(summary).toHaveFocus();
-  expect(panel).toHaveAttribute('aria-hidden', 'true');
-  expect(panel).toHaveAttribute('inert');
-  expect(within(search).queryByRole('textbox')).not.toBeInTheDocument();
-  expect(search.nextElementSibling).toBe(result);
+  expect(within(search).getByRole('button', { name: 'Search', exact: true })).toHaveFocus();
+  expect(panel).toHaveAttribute('data-state', 'closing');
+  expect(within(search).queryByRole('textbox', { name: 'Search by name or keyword' })).not.toBeInTheDocument();
 
   fireEvent.animationEnd(panel);
-  expect(panel).not.toBeInTheDocument();
-  expect(backdrop).not.toBeInTheDocument();
+  expect(panel).toHaveAttribute('data-state', 'closed');
+  expect(search.querySelector('.discover-search-backdrop')).not.toBeInTheDocument();
   await user.tab();
   expect(result).toHaveFocus();
 });
 
-it('collapses after a click outside the search and returns focus to its summary', async () => {
+it('selects a section when its surface label is clicked', async () => {
+  const user = userEvent.setup();
+  render(<SearchHarness />);
+
+  const search = screen.getByRole('search', { name: 'Discover search' });
+  const whereSection = search.querySelector('[data-section="where"]');
+  if (!whereSection) throw new Error('The Where section is missing.');
+
+  await user.click(within(whereSection).getByText('Where'));
+
+  expect(whereSection).toHaveClass('is-active');
+});
+
+it('collapses after a click outside the search and returns focus to its Search control', async () => {
   const user = userEvent.setup();
   const onExpandedChange = jest.fn();
   render(
@@ -136,121 +344,32 @@ it('collapses after a click outside the search and returns focus to its summary'
 
   expect(onExpandedChange).toHaveBeenCalledTimes(1);
   expect(onExpandedChange).toHaveBeenCalledWith(false);
-  expect(screen.getByRole('button', { name: /^Edit search:/ })).toHaveFocus();
+  expect(screen.getByRole('button', { name: 'Search', exact: true })).toHaveFocus();
   expect(screen.queryByRole('textbox', { name: 'Search by name or keyword' })).not.toBeInTheDocument();
 });
 
-it('hides a portaled date panel immediately when Escape collapses the search', async () => {
-  const user = userEvent.setup();
-  render(<SearchHarness />);
-  await user.click(screen.getByRole('button', { name: 'When: Any dates' }));
-  const dates = screen.getByRole('dialog', { name: 'Choose dates' });
-  await user.click(within(dates).getByLabelText('Start date'));
-  expect(screen.getByRole('textbox', { name: 'Search by name or keyword' })).toBeInTheDocument();
-
-  await user.keyboard('{Escape}');
-
-  expect(screen.queryByRole('dialog', { name: 'Choose dates' })).not.toBeInTheDocument();
-  expect(screen.queryByRole('textbox', { name: 'Search by name or keyword' })).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: /^Edit search:/ })).toHaveFocus();
-});
 
 it('keeps a reopened panel active when the previous close animation finishes', async () => {
   const user = userEvent.setup();
   render(<SearchHarness />);
   await user.keyboard('{Escape}');
-  const summary = screen.getByRole('button', { name: /^Edit search:/ });
-  const panel = document.getElementById(summary.getAttribute('aria-controls')!);
+  const searchButton = screen.getByRole('button', { name: 'Search', exact: true });
+  const panel = screen.getByRole('search', { name: 'Discover search' }).querySelector('.discover-search-panel');
   if (!panel) throw new Error('The closing search panel is missing.');
 
-  await user.click(summary);
+  await user.click(searchButton);
   fireEvent.animationEnd(panel);
 
   const query = screen.getByRole('textbox', { name: 'Search by name or keyword' });
   expect(query).toHaveFocus();
-  expect(panel).not.toHaveAttribute('inert');
   await user.type(query, 'Late match');
   expect(query).toHaveValue('Late match');
 });
 
-it('updates and clears the date range through the responsive date panel', async () => {
-  const user = userEvent.setup();
-  const callbacks = { setSelectedStartDate: jest.fn(), setSelectedEndDate: jest.fn() };
-  render(<SearchHarness callbacks={callbacks} />);
-  await user.click(screen.getByRole('button', { name: 'When: Any dates' }));
-  const dates = within(screen.getByRole('dialog', { name: 'Choose dates' }));
 
-  fireEvent.change(dates.getByLabelText('Start date'), { target: { value: '2099-09-10' } });
-  fireEvent.change(dates.getByLabelText('End date'), { target: { value: '2099-09-12' } });
-  expect(callbacks.setSelectedStartDate).toHaveBeenLastCalledWith(new Date(2099, 8, 10));
-  expect(callbacks.setSelectedEndDate).toHaveBeenLastCalledWith(new Date(2099, 8, 12));
-  expect(dates.getByLabelText('Start date')).toHaveValue('2099-09-10');
-  expect(dates.getByLabelText('End date')).toHaveValue('2099-09-12');
-  await user.click(dates.getByRole('button', { name: 'Done' }));
 
-  await user.click(screen.getByRole('button', { name: 'When: Sep 10, 2099 – Sep 12, 2099' }));
-  await user.click(screen.getByRole('button', { name: 'Clear dates' }));
-  expect(callbacks.setSelectedStartDate).toHaveBeenLastCalledWith(null);
-  expect(callbacks.setSelectedEndDate).toHaveBeenLastCalledWith(null);
-  expect(screen.getByLabelText('Start date')).toHaveValue('');
-  expect(screen.getByLabelText('End date')).toHaveValue('');
-  await user.click(screen.getByRole('button', { name: 'Done' }));
-  expect(screen.getByRole('button', { name: 'When: Any dates' })).toBeVisible();
-});
 
-it('clears the opposite date when either endpoint crosses the range', async () => {
-  const user = userEvent.setup();
-  render(<SearchHarness />);
-  await user.click(screen.getByRole('button', { name: 'When: Any dates' }));
-  let dates = within(screen.getByRole('dialog', { name: 'Choose dates' }));
-
-  fireEvent.change(dates.getByLabelText('Start date'), { target: { value: '2099-09-10' } });
-  fireEvent.change(dates.getByLabelText('End date'), { target: { value: '2099-09-12' } });
-  fireEvent.change(dates.getByLabelText('Start date'), { target: { value: '2099-09-13' } });
-
-  expect(dates.getByLabelText('Start date')).toHaveValue('2099-09-13');
-  expect(dates.getByLabelText('End date')).toHaveValue('');
-  await user.click(dates.getByRole('button', { name: 'Done' }));
-  await user.click(screen.getByRole('button', { name: 'When: From Sep 13, 2099' }));
-  dates = within(screen.getByRole('dialog', { name: 'Choose dates' }));
-  fireEvent.change(dates.getByLabelText('End date'), { target: { value: '2099-09-09' } });
-
-  expect(dates.getByLabelText('Start date')).toHaveValue('');
-  expect(dates.getByLabelText('End date')).toHaveValue('2099-09-09');
-  await user.click(dates.getByRole('button', { name: 'Done' }));
-  expect(screen.getByRole('button', { name: 'When: Until Sep 9, 2099' })).toBeVisible();
-});
-
-it('keeps event dates out of non-event searches and restores them for Events', async () => {
-  const user = userEvent.setup();
-  render(<SearchHarness />);
-  await user.click(screen.getByRole('button', { name: 'When: Any dates' }));
-  const dates = within(screen.getByRole('dialog', { name: 'Choose dates' }));
-  fireEvent.change(dates.getByLabelText('Start date'), { target: { value: '2099-09-10' } });
-  fireEvent.change(dates.getByLabelText('End date'), { target: { value: '2099-09-12' } });
-  await user.click(dates.getByRole('button', { name: 'Done' }));
-
-  for (const target of ['Organizations', 'Rentals', 'Teams']) {
-    await user.click(within(screen.getByRole('group', { name: 'Search type' })).getByRole('button', { name: target }));
-    const when = screen.getByRole('group', { name: 'When: Events only' });
-    expect(within(when).getByText('Events only')).toBeVisible();
-    await user.click(when);
-    expect(screen.queryByRole('dialog', { name: 'Choose dates' })).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Start date')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('End date')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Search', exact: true }));
-    const summary = screen.getByRole('button', { name: new RegExp(`^Edit search: ${target},`) });
-    expect(within(summary).getByText('Events only')).toBeVisible();
-    await user.click(summary);
-  }
-
-  await user.click(within(screen.getByRole('group', { name: 'Search type' })).getByRole('button', { name: 'Events' }));
-  await user.click(screen.getByRole('button', { name: 'When: Sep 10, 2099 – Sep 12, 2099' }));
-  expect(screen.getByLabelText('Start date')).toHaveValue('2099-09-10');
-  expect(screen.getByLabelText('End date')).toHaveValue('2099-09-12');
-});
-
-it('keeps multiple sport selections in the collapsed search summary', async () => {
+it('keeps multiple sport selections in the collapsed search controls', async () => {
   const user = userEvent.setup();
   const setSelectedSports = jest.fn();
   render(<SearchHarness callbacks={{ setSelectedSports }} />);
@@ -262,7 +381,7 @@ it('keeps multiple sport selections in the collapsed search summary', async () =
   expect(screen.getByRole('option', { name: 'Soccer' })).toHaveAttribute('aria-selected', 'true');
   expect(screen.getByRole('option', { name: 'Tennis' })).toHaveAttribute('aria-selected', 'true');
   await user.keyboard('{Escape}');
-  await user.click(screen.getByRole('button', { name: 'Edit search: Events, Portland, OR, Any dates, Soccer, Tennis' }));
+  await user.click(screen.getByRole('button', { name: 'Search', exact: true }));
 
   expect(screen.getByRole('combobox', { name: 'Sport' })).toHaveValue('Soccer, Tennis');
 });
@@ -276,12 +395,12 @@ it('submits with the Search button and Enter while retaining the query', async (
   await user.click(screen.getByRole('button', { name: 'Search', exact: true }));
 
   expect(onSearch).toHaveBeenCalledTimes(1);
-  const summary = screen.getByRole('button', { name: 'Edit search: Events, Night games, Portland, OR, Any dates, All sports' });
-  expect(summary).toHaveFocus();
-  await user.click(summary);
+  const searchButton = screen.getByRole('button', { name: 'Search', exact: true });
+  expect(searchButton).toHaveFocus();
+  await user.click(searchButton);
   expect(screen.getByRole('textbox', { name: 'Search by name or keyword' })).toHaveValue('Night games');
   await user.keyboard('{Enter}');
 
   expect(onSearch).toHaveBeenCalledTimes(2);
-  expect(screen.getByRole('button', { name: 'Edit search: Events, Night games, Portland, OR, Any dates, All sports' })).toHaveFocus();
+  expect(screen.getByRole('button', { name: 'Search', exact: true })).toHaveFocus();
 });

@@ -122,7 +122,7 @@ it('searches the complete sport collection from More sports', async () => {
 it('keeps the Price maximum input focused while editing from More filters', async () => {
   const clientWidthDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
   const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
-  Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, value: 200 });
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, value: 100 });
   HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
     if (this.matches('[data-overflow-item]') || this.matches('[data-overflow-more]')) {
       return { width: 80 } as DOMRect;
@@ -170,7 +170,7 @@ it('shows the skill trigger only for one sport when the toolbar has room', async
   Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, value: 2000 });
   try {
     render(<Harness />);
-    ['Dates', 'Price', /^Distance/, 'Event type', 'Event tags', 'Gender', 'Age group'].forEach((name) => {
+    ['Price', /^Distance/, 'Event type', 'Event tags', 'Gender', 'Age group'].forEach((name) => {
       expect(screen.getByRole('button', { name, exact: typeof name === 'string' })).toBeInTheDocument();
     });
     expect(screen.queryByRole('button', { name: 'More filters' })).not.toBeInTheDocument();
@@ -222,22 +222,15 @@ it('keeps the event type all option mapped to every event type', async () => {
     }
   }
 });
+it('keeps dates in the shared search group instead of the event filter row', () => {
+  render(<Harness />);
+  expect(screen.queryByRole('button', { name: 'Dates', exact: true })).not.toBeInTheDocument();
+});
 it('reserves the More control gap when fitting the first filter', () => {
   expect(calculateVisibleFilterCount([100, 100], 150, 8, 50, 0)).toBe(0);
 });
 
 
-it('opens the shared date filter popover from the desktop filter row', async () => {
-  const user = userEvent.setup();
-  render(<Harness />);
-
-  await user.click(screen.getByRole('button', { name: 'Dates', exact: true }));
-
-  expect(screen.getByRole('button', { name: 'Dates', exact: true })).toHaveAttribute('aria-expanded', 'true');
-  expect(screen.getByRole('button', { name: 'Filter by start date', exact: true })).toBeInTheDocument();
-  const dateDialog = screen.getByRole('dialog', { name: 'Dates filter' });
-  expect(dateDialog.closest('.discover-filter-row')).toBeNull();
-});
 it.each(['Basketball', 'All sports'])('clears skills when a single sport becomes ineligible through %s', async (sportButton) => {
   globalThis.fetch = jest.fn().mockResolvedValue({
     ok: true,
@@ -272,18 +265,6 @@ it.each(['Basketball', 'All sports'])('clears skills when a single sport becomes
   await waitFor(() => expect(screen.queryByRole('button', { name: 'Division filters', exact: true })).not.toBeInTheDocument());
 });
 
-it('returns focus to Dates when its date controls close with Escape', async () => {
-  const user = userEvent.setup();
-  render(<Harness />);
-
-  const datesButton = screen.getByRole('button', { name: 'Dates', exact: true });
-  await user.click(datesButton);
-  const startDateButton = screen.getByRole('button', { name: 'Filter by start date', exact: true });
-  await user.click(startDateButton);
-  await user.keyboard('{Escape}');
-
-  await waitFor(() => expect(datesButton).toHaveFocus());
-});
 const originalFetch = globalThis.fetch;
 beforeEach(() => {
   jest.resetAllMocks();
@@ -316,10 +297,10 @@ it('filters the complete cache locally, updates counts, removes chips, and opens
   const onFilterChange = jest.fn();
   const onEventClick = jest.fn();
   render(<Harness onFilterChange={onFilterChange} onEventClick={onEventClick} />);
-  expect(screen.getByText('37 events available.')).toBeInTheDocument();
+  expect(screen.getByText('37 events in this map area.')).toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: 'Basketball', exact: true }));
   expect(cardNames()).toEqual(['Basketball late', 'Basketball middle']);
-  expect(screen.getByText('2 events available.').parentElement).toContainElement(
+  expect(screen.getByText('2 events in this map area.').parentElement).toContainElement(
     screen.getByLabelText('Active event filters'),
   );
   await user.type(screen.getByRole('textbox', { name: 'Search events', exact: true }), 'middle');
@@ -337,6 +318,7 @@ it.each(['Soonest', 'Price (Low to High)'])('sorts cached cards by %s without fe
   const user = userEvent.setup();
   const onFilterChange = jest.fn();
   render(<Harness onFilterChange={onFilterChange} />);
+  expect(screen.getByRole('combobox', { name: 'Sort events' })).toHaveAttribute('readonly');
   await user.click(screen.getByRole('combobox', { name: 'Sort events' }));
   await user.click(screen.getByRole('option', { name: label }));
   expect(cardNames()).toEqual(['Volleyball early', 'Basketball middle', 'Basketball late']);
@@ -346,7 +328,7 @@ it('keeps the server total for a matching scoped cache', () => {
   render(<Harness initialSelectedSports={['Basketball']} hasScopedEventCache />);
 
   expect(cardNames()).toEqual(['Basketball late', 'Basketball middle']);
-  expect(screen.getByText('37 events available.')).toBeInTheDocument();
+  expect(screen.getByText('37 events in this map area.')).toBeInTheDocument();
 });
 
 
@@ -370,7 +352,7 @@ it('offers retry after a request failure instead of reporting empty or exhausted
   );
   expect(screen.getByRole('alert')).toHaveTextContent('Events are unavailable');
   expect(screen.queryByText('No events match your filters')).not.toBeInTheDocument();
-  expect(screen.queryByText('0 events available.')).not.toBeInTheDocument();
+  expect(screen.queryByText('0 events in this map area.')).not.toBeInTheDocument();
   expect(screen.queryByText("You've reached the end of the results.")).not.toBeInTheDocument();
 
   await user.click(screen.getByRole('button', { name: 'Retry events' }));
