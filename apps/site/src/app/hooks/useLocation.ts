@@ -188,8 +188,16 @@ export function useLocation({ loadApproximate = false }: UseLocationOptions = {}
         // Exact coordinates remain useful when the address cannot load.
       }
       if (isCurrent()) saveLocation({ ...info, ...coords, source: 'exact' });
-    } catch (err) {
-      if (isCurrent()) setError(err instanceof Error ? err.message : 'Failed to get location');
+    } catch (error) {
+      if (!isCurrent()) return;
+      try {
+        const approximateInfo = await locationService.getApproximateLocation(controller.signal);
+        if (isCurrent()) saveLocation({ ...approximateInfo, source: 'approximate' });
+      } catch {
+        if (isCurrent()) {
+          setError(error instanceof Error ? error.message : 'Failed to get location');
+        }
+      }
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
