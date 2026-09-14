@@ -2,7 +2,10 @@ import { z } from 'zod';
 import { createId } from '@/lib/id';
 import { prisma } from '@/lib/prisma';
 import {
+  AffiliateSourceIntakeQueueConflictError,
+  isAffiliateExistingDataRepairEvidenceOnlyRun,
   addAffiliateSourceIntakePage,
+  assertOrdinaryAffiliateSourceIntakeQueueOwnership,
   createAffiliateSourceIntake,
   queueAffiliateSourceIntakeRun,
   reviewAffiliateSourceIntakePolicy,
@@ -235,12 +238,17 @@ const findReusableIntake = async (
     orderBy: { createdAt: 'asc' },
   });
 };
-
 const queueAllowedIntake = async (intake: any, userId: string) => {
+  await assertOrdinaryAffiliateSourceIntakeQueueOwnership(intake.id);
   const active = await intakeDb().runs.findFirst({
-    where: { intakeId: intake.id, status: { in: ['QUEUED', 'RUNNING'] } },
+    where: { intakeId: intake.id, status: { in: ['QUEUED', 'RUNNING', 'CLAIMED'] } },
   });
-  if (active) return { run: active, alreadyCaptured: false };
+  if (active) {
+    if (isAffiliateExistingDataRepairEvidenceOnlyRun(active)) {
+      throw new AffiliateSourceIntakeQueueConflictError('A governed capture owns this intake.');
+    }
+    return { run: active, alreadyCaptured: false };
+  }
   if (intake.lastRunId) return { run: null, alreadyCaptured: true };
   const pages = await intakeDb().pages.findMany({
     where: { intakeId: intake.id, status: 'ACTIVE' },

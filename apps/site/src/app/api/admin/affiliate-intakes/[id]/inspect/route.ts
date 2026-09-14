@@ -19,7 +19,12 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   } catch (error) {
     if (error instanceof Response) return error;
     const message = error instanceof Error ? error.message : 'Failed to queue source inspection.';
-    const status = message.includes('not found') ? 404 : message.includes('policy') ? 409 : 400;
+    const code = error && typeof error === 'object' && 'code' in error
+      ? String((error as { code?: unknown }).code ?? '')
+      : '';
+    const status = code === 'GOVERNED_CAPTURE_OWNERSHIP_CONFLICT'
+      ? 409
+      : message.includes('not found') ? 404 : message.includes('policy') ? 409 : 400;
     return NextResponse.json({ error: message }, { status });
   }
 }

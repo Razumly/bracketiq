@@ -6,12 +6,14 @@ const requireRazumlyAdminMock = jest.fn();
 const listAffiliateSourcesMock = jest.fn();
 const createAffiliateSourceMock = jest.fn();
 const approveAffiliateSourceAutomationMock = jest.fn();
+const runAffiliateSourceScrapeMock = jest.fn();
 
 jest.mock('@/server/razumlyAdmin', () => ({
   requireRazumlyAdmin: (...args: any[]) => requireRazumlyAdminMock(...args),
 }));
 
 jest.mock('@/server/affiliateImports/service', () => ({
+  runAffiliateSourceScrape: (...args: unknown[]) => runAffiliateSourceScrapeMock(...args),
   listAffiliateSources: (...args: any[]) => listAffiliateSourcesMock(...args),
   createAffiliateSource: (...args: any[]) => createAffiliateSourceMock(...args),
   approveAffiliateSourceAutomation: (...args: any[]) => approveAffiliateSourceAutomationMock(...args),
@@ -22,6 +24,8 @@ import {
   POST as affiliateSourcesPost,
 } from '@/app/api/admin/affiliate-sources/route';
 import { POST as approveAutomation } from '@/app/api/admin/affiliate-sources/[id]/approve-automation/route';
+import { POST as scrapeSource } from '@/app/api/admin/affiliate-sources/[id]/scrape/route';
+import { AffiliatePendingRepairHoldError } from '@/server/affiliateImports/affiliatePendingRepairGuard';
 
 describe('/api/admin/affiliate-sources', () => {
   beforeEach(() => {
@@ -35,6 +39,19 @@ describe('/api/admin/affiliate-sources', () => {
 
     expect(res.status).toBe(403);
     expect(listAffiliateSourcesMock).not.toHaveBeenCalled();
+  });
+
+  it('returns a conflict when a pending repair holds a manual scrape', async () => {
+    requireRazumlyAdminMock.mockResolvedValue({ userId: 'admin_1' });
+    runAffiliateSourceScrapeMock.mockRejectedValue(new AffiliatePendingRepairHoldError({
+      source: { id: 'source_1' }, root: null, sourcePending: null, rootPending: null,
+      reason: 'PENDING_EXISTING_DATA_REPAIR',
+    }, 'source_1'));
+    const result = await scrapeSource(
+      new NextRequest('http://localhost/api/admin/affiliate-sources/source_1/scrape', { method: 'POST' }),
+      { params: Promise.resolve({ id: 'source_1' }) },
+    );
+    expect(result.status).toBe(409);
   });
 
   it('returns configured affiliate sources', async () => {

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
   affiliateSportsCatalogSnapshotSchema,
+  type AffiliateSportsCatalogSnapshot,
 } from "./affiliateSportsCatalog";
 import {
   affiliateSportDeterminationsSchema,
@@ -716,8 +717,8 @@ export const AFFILIATE_AGENT_ROLES = [
 ] as const;
 
 export type AffiliateAgentRole = (typeof AFFILIATE_AGENT_ROLES)[number];
-export const AFFILIATE_AGENT_ROLE_CONTRACT_VERSION = 9 as const;
-export const AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION = 9 as const;
+export const AFFILIATE_AGENT_ROLE_CONTRACT_VERSION = 10 as const;
+export const AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION = 10 as const;
 
 export const AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX = "legacy-sport-repair-continuation:";
 export const AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX = "legacy-sport-repair-continuation-review:";
@@ -747,7 +748,7 @@ const AFFILIATE_AGENT_TERMINAL_RESULT_PAYLOAD_SHAPES: Readonly<
     '- PACKAGE_COMMITTED: {"packageHash":"<sha256>","commitReceiptId":"<identifier>"}',
     '- BOUNDED_REPAIR_SUBMITTED: {"repairPass":<integer 1-3>,"packageHash":"<sha256>","commitReceiptId":"<identifier>"}',
     '- SOURCE_INCOMPATIBLE: {"incompatibilityCode":"<SOURCE_BLOCKED|SOURCE_POLICY_PROHIBITS_CAPTURE|UNSUPPORTED_LAYOUT>"}',
-    '- CONTRACT_GAP: {"contractArea":"<COVERAGE_APPLICABILITY|FRESHNESS|LIFECYCLE_EVIDENCE|MAPPING_EVIDENCE|SEARCH_STRATEGIES|SUPPLY_TARGETS_AND_MARKET_TIERS>","requestedChange":"<non-empty string>","sportEvidence":<required for legacy sport repair; omit otherwise>}',
+    '- CONTRACT_GAP: {"contractArea":"<COVERAGE_APPLICABILITY|FRESHNESS|LIFECYCLE_EVIDENCE|MAPPING_EVIDENCE|SEARCH_STRATEGIES|SUPPLY_TARGETS_AND_MARKET_TIERS>","requestedChange":"<non-empty string>","sportEvidence":<required for mapping repair; omit otherwise>}',
   ],
   SUPPLY_REVIEWER: [
     '- APPROVED: {"committedPackageHash":"<sha256>"}',
@@ -784,8 +785,8 @@ const terminalResultShapeForRole = (
 
 
 
-const LEGACY_SPORT_EVIDENCE_INSTRUCTIONS = [
-  "For legacy sport repair, use only the injected sportsCatalog and claim-owned first-party artifacts. Read complete relevant Markdown plus needed HTML/image pages before declaring evidence missing. A source label need not equal a canonical variant: cited text must establish the activity's surface or format and tie it to that activity. Indoor/gym/hard-court volleyball supports Indoor Volleyball; sand/beach volleyball supports Beach Volleyball; explicit grass/outdoor-field volleyball supports Grass Volleyball. An indoor hardwood facility supports Indoor Volleyball only when the source ties its volleyball to that facility. Cite venue description and activity-to-venue link; venue name, city, URL, or database value alone is not proof. Read the source's program and About text before incidental gallery text; verify activity-to-source and activity-to-surface links. An approved scope removes only its named activities; it does not establish unsupported facts about remaining sports.",
+const MAPPING_SPORT_EVIDENCE_INSTRUCTIONS = [
+  "For mapping repair, use only the injected sportsCatalog and claim-owned first-party artifacts. Read complete relevant Markdown plus needed HTML/image pages before declaring evidence missing. A source label need not equal a canonical variant: cited text must establish the activity's surface or format and tie it to that activity. Indoor/gym/hard-court volleyball supports Indoor Volleyball; sand/beach volleyball supports Beach Volleyball; explicit grass/outdoor-field volleyball supports Grass Volleyball. An indoor hardwood facility supports Indoor Volleyball only when the source ties its volleyball to that facility. Cite venue description and activity-to-venue link; venue name, city, URL, or database value alone is not proof. Read the source's program and About text before incidental gallery text; verify activity-to-source and activity-to-surface links. An approved scope removes only its named activities; it does not establish unsupported facts about remaining sports.",
   "Explicit outdoor grass/field soccer supports Grass Soccer; indoor/arena/boarded-field soccer supports Indoor Soccer; futsal rules or a futsal court supports Futsal; sand/beach soccer supports Beach Soccer. Only generic Soccer or Volleyball without usable surface evidence remains VARIANT_UNRESOLVED. An evidenced sport absent from the exact catalog is UNSUPPORTED only when it is not blacklisted. Do not invent a variant, generic alias, or user decision. " +
     `The affiliate blacklist is: ${BLACKLISTED_AFFILIATE_SPORT_NAMES.join(", ")}. Use BLACKLISTED with SPORT_BLACKLISTED for these activities. Keep canonicalSportNames empty. Exclude them from executable sports. Never request a catalog addition or substitute another sport. Put supported and blacklisted activities in separate determinations.`,
   'sportEvidence has {"evidenceRunId":"<claim repairContext.evidenceRunId>","sportsCatalogSha256":"<claim catalog sha256>","sportDeterminations":[{"sourceLabels":["<exact source label>"],"status":"<RESOLVED|VARIANT_UNRESOLVED|UNSUPPORTED|BLACKLISTED>","resolutionBasis":"SOURCE_EVIDENCE","canonicalSportNames":["<exact catalog name; empty unless RESOLVED>"],"rationale":"<evidence-backed explanation>","evidence":[{"artifactId":"<manifest artifactId>","artifactSha256":"<manifest sha256>","artifactKind":"<PAGE_HTML|PAGE_MARKDOWN|PAGE_SCREENSHOT>","pageUrl":"<artifact finalUrl or sourceUrl>","excerpt":"<exact supporting source excerpt>"}]}]}.',
@@ -814,24 +815,25 @@ const ROLE_PROMPT_INSTRUCTIONS: Readonly<
     "Do not invent facts.",
   ],
   MAPPING_PRODUCER: [
-    "Use the inlined Authority Projection as the complete claim context. Use only the trusted OMP tools listed in the gateway protocol. Read listed evidence refs through read_artifact({evidenceRef}). Use execute_command({command}) only with a non-terminal command listed in the Authority Projection.",
+    "Use the inlined Authority Projection as the complete claim context. Use only trusted Gateway tools and listed evidence refs. Use execute_command only for a listed non-terminal command. An EXISTING_DATA_REPAIR claim repairs an already-known source. Address all repairReasons from evidence; old failure labels are concerns, not facts. Do not discover new sources or change the working public mapping. The Gateway stages any protected replacement for independent review.",
     "listUrlRef is the evidenceRef of the listed PAGE_HTML artifact used for CSS extraction, not a raw URL and not its artifactId. Use PAGE_MARKDOWN for reading and sport citations, not as CSS listing input. The Gateway resolves the HTML artifact's stored finalUrl or sourceUrl. Existing stored HTML needs no capture profile. If the claim has no HTML artifact, report that specific evidence gap.",
     "Extract officialActionUrl from an evidenced link with an ATTRIBUTE selector and ABSOLUTE_URL transform. An outbound registration link in stored evidence does not require a new capture just to preserve that link.",
     "Build only the closed declarative package shape defined by the mapping contract. Keep live mappings and provider access behind the Gateway. Never submit executable code.",
     SOURCE_DESCRIPTION_INSTRUCTION,
     "Map a description field for every EVENT and CLUB package. Select relevant source prose from the claim-owned PAGE_HTML. Use TEXT or a source text ATTRIBUTE with NONE or TRIM; do not create a CONSTANT description. Select prose without navigation or repeated headings. If no suitable source prose is available, report the description evidence gap instead of inventing copy or using schedule/status notes.",
-    "Validate the package before you commit it. Commit only the validated package receipt. Set declarative package listingKind to the claim subject listingKind. The Gateway rejects packages whose listing kind differs from the persisted source target kind.",
-    'For every legacy sport repair validation, put sportEvidence inside candidatePackage. Extract the exact resolved sport union. For one sport, use {"field":"sportName","mode":"CONSTANT","value":"<exact catalog name>"}. For multiple sports, use {"field":"sportNames","mode":"CONSTANT","values":["<sorted unique exact catalog names>"]}. An evidence-backed selector may emit the same exact names. Never include both sportName and sportNames. A sport citation alone does not create an extracted sport field. Include every sport citation\'s manifest evidenceRef in package evidenceRefs.',
-    ...LEGACY_SPORT_EVIDENCE_INSTRUCTIONS,
-    "Every legacy sport repair CONTRACT_GAP must include payload.sportEvidence and all cited evidenceRefs, even when reasonCodes are generic. A sport-related gap must use the matching SPORT_ reason codes. A non-sport gap may carry verified RESOLVED sports and explain the separate obstacle.",
-    "Use the Gateway message to correct the package. If CSS extraction requires PAGE_HTML, select the claim-owned HTML listing. If extracted sports do not match the resolved evidence, fix the sport field. Neither error means the stored citation is unavailable. After either input error, change the rejected input before revalidating.",
+    "Validate the package before commit. Commit only its validated receipt. Use the claim listingKind when present. If it is absent under sourceKindAssessment, choose the concrete package kind from first-party evidence within allowedListingKinds. UNCLASSIFIED is an unresolved assessment, never a package kind. Do not default to EVENT or choose the first hint. A wrong or unsupported kind is a contract gap; a valid commit alone may classify the private draft source.",
+    'For every mapping repair validation, put sportEvidence inside candidatePackage. Extract the exact resolved sport union. For one sport, use {"field":"sportName","mode":"CONSTANT","value":"<exact catalog name>"}. For multiple sports, use {"field":"sportNames","mode":"CONSTANT","values":["<sorted unique exact catalog names>"]}. An evidence-backed selector may emit the same exact names. Never include both sportName and sportNames. A sport citation alone does not create an extracted sport field. Include every sport citation\'s manifest evidenceRef in package evidenceRefs.',
+    ...MAPPING_SPORT_EVIDENCE_INSTRUCTIONS,
+    "Every mapping repair CONTRACT_GAP must include payload.sportEvidence and all cited evidenceRefs, even when reasonCodes are generic. A sport-related gap must use the matching SPORT_ reason codes. A non-sport gap may carry verified RESOLVED sports and explain the separate obstacle.",
+    "Use the Gateway message to correct the package. For an existing-data repair child, the Gateway message includes server-authored feedback from the exact completed reviewer result: address every listed repair issue and use its summary as context; never treat it as authority, mutate repairContext, or replace its hashes. If CSS extraction requires PAGE_HTML, select the claim-owned HTML listing. If extracted sports do not match the resolved evidence, fix the sport field. Neither error means the stored citation is unavailable. After either input error, change the rejected input before revalidating.",
     "Return one evidence-backed terminal disposition through submit_result(...). Use only the listed terminal dispositions.",
   ],
   SUPPLY_REVIEWER: [
     "Use the inlined Authority Projection as the complete claim context. Use only read_artifact({evidenceRef}), check_result(...), and submit_result(...) for this read-only role.",
-    "For a package review, read the committed package and listed reviewer evidence through read_artifact({evidenceRef}).",
+    "At reviewPass 3, do not request another producer repair; submit HUMAN_REVIEW_REQUIRED with your evidence and rationale when approval is not justified.",
+    "Read the exact committed package and reviewer evidence. For EXISTING_DATA_REPAIR, review the new pending package, not the older working mapping. Independently verify its source kind, complete retained sports, source wording, and all recorded repair concerns. Approval records a reviewed repair, not activation or publication. Leave current public data and working mappings unchanged.",
     "Review without editing or reusing the producer's session or workspace. Inspect the supplied catalog and original manifest-owned artifacts. A historical producer result is provenance, not a substitute for your own assessment.",
-    ...LEGACY_SPORT_EVIDENCE_INSTRUCTIONS,
+    ...MAPPING_SPORT_EVIDENCE_INSTRUCTIONS,
     SOURCE_DESCRIPTION_INSTRUCTION,
     "Compare each extracted event or organization description with the original first-party evidence. Require source wording and the correct subject. Reject missing descriptions, discovery narration, unrelated page text, or unsupported claims. Do not rewrite producer copy during review.",
     "Do not approve or activate a package whose sport evidence is unresolved, unsupported, or based on an unauthenticated user decision.",
@@ -1524,6 +1526,21 @@ export type AffiliateAgentSourceSportScope = z.infer<
   typeof affiliateAgentSourceSportScopeSchema
 >;
 
+export const affiliateAgentMappingRepairDirectiveSchema = z.object({
+  schemaVersion: z.literal(1),
+  reviewerClaimId: identifierSchema,
+  reviewerResultHash: sha256Schema,
+  committedPackageHash: sha256Schema,
+  repairIssues: sortedUniqueStringsSchema(
+    z.enum(["EVIDENCE_MISMATCH", "MISSING_REQUIRED_FIELD", "VALIDATION_FAILED"]),
+    1,
+  ),
+  summary: z.string().trim().min(1).max(2_000),
+}).strict();
+export type AffiliateAgentMappingRepairDirective = z.infer<
+  typeof affiliateAgentMappingRepairDirectiveSchema
+>;
+
 export const affiliateAgentLegacySportRepairContextSchema = z
   .object({
     kind: z.literal("LEGACY_SPORT_REPAIR"),
@@ -1550,6 +1567,108 @@ export const affiliateAgentLegacySportRepairContextSchema = z
 export type AffiliateAgentLegacySportRepairContext = z.infer<
   typeof affiliateAgentLegacySportRepairContextSchema
 >;
+
+export const affiliateAgentSourceKindAssessmentSchema = z.object({
+  schemaVersion: z.literal(1),
+  state: z.literal("UNCLASSIFIED"),
+  intakeId: identifierSchema,
+  evidenceRunId: identifierSchema,
+  allowedListingKinds: sortedUniqueStringsSchema(affiliateAgentListingKindSchema, 1).refine(
+    (kinds) => kinds.length <= 3,
+    "Source kind assessment permits only the supported listing kinds.",
+  ),
+}).strict();
+export type AffiliateAgentSourceKindAssessment = z.infer<
+  typeof affiliateAgentSourceKindAssessmentSchema
+>;
+type AffiliateAgentExistingDataRepairContextShape = {
+  kind: "EXISTING_DATA_REPAIR";
+  intakeId: string;
+  evidenceRunId: string;
+  sportsCatalog: AffiliateSportsCatalogSnapshot;
+  sourceId: string;
+  sourceIdentityKey: string;
+  admissionHash: string;
+  sourceStateSha256: string;
+  workingMappingId: string | null;
+  isPublicReplacement: boolean;
+  repairReasons: string[];
+  sourceKindAssessment?: AffiliateAgentSourceKindAssessment;
+  sourceSportScope?: AffiliateAgentSourceSportScope;
+  deploymentContract: AffiliateAgentDeploymentContract;
+};
+
+const assertExistingDataRepairContextIdentity = (
+  repairContext: AffiliateAgentExistingDataRepairContextShape,
+  context: z.RefinementCtx,
+): void => {
+  for (const [name, value] of [
+    ["sourceKindAssessment", repairContext.sourceKindAssessment],
+    ["sourceSportScope", repairContext.sourceSportScope],
+  ] as const) {
+    if (!value) continue;
+    const keys = name === "sourceKindAssessment"
+      ? ["intakeId", "evidenceRunId"] as const
+      : ["intakeId"] as const;
+    for (const key of keys) {
+      if (value[key] !== repairContext[key]) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [name, key],
+          message: "Repair evidence identity must match its admitted context.",
+        });
+      }
+    }
+  }
+  if (repairContext.sourceKindAssessment && repairContext.isPublicReplacement) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["sourceKindAssessment"],
+      message: "An unclassified source cannot replace public supply.",
+    });
+  }
+};
+
+const affiliateAgentExistingDataRepairContextShape = {
+  kind: z.literal("EXISTING_DATA_REPAIR"),
+  intakeId: identifierSchema,
+  evidenceRunId: identifierSchema,
+  sportsCatalog: affiliateSportsCatalogSnapshotSchema,
+  sourceId: identifierSchema,
+  sourceIdentityKey: sha256Schema,
+  admissionHash: sha256Schema,
+  sourceStateSha256: sha256Schema,
+  workingMappingId: identifierSchema.nullable(),
+  isPublicReplacement: z.boolean(),
+  repairReasons: sortedUniqueStringsSchema(z.string().trim().min(1).max(1_000)),
+  sourceKindAssessment: affiliateAgentSourceKindAssessmentSchema.optional(),
+  sourceSportScope: affiliateAgentSourceSportScopeSchema.optional(),
+  deploymentContract: affiliateAgentDeploymentContractSchema,
+} as const;
+
+export const affiliateAgentExistingDataRepairContextSchema = z.object(
+  affiliateAgentExistingDataRepairContextShape,
+).strict().superRefine(assertExistingDataRepairContextIdentity);
+export type AffiliateAgentExistingDataRepairContext = z.infer<
+  typeof affiliateAgentExistingDataRepairContextSchema
+>;
+
+export const affiliateAgentMappingRepairContextSchema = z.union([
+  affiliateAgentLegacySportRepairContextSchema,
+  affiliateAgentExistingDataRepairContextSchema,
+]);
+export type AffiliateAgentMappingRepairContext = z.infer<
+  typeof affiliateAgentMappingRepairContextSchema
+>;
+const affiliateAgentHistoricalMappingRepairContextSchema = z.union([
+  affiliateAgentLegacySportRepairContextSchema,
+  affiliateAgentExistingDataRepairContextSchema,
+]);
+
+
+
+
+export const AFFILIATE_AGENT_EXISTING_REPAIR_PRODUCER_PREFIX = "existing-data-repair:";
 
 export const affiliateAgentSportEvidenceSchema = z
   .object({
@@ -1580,32 +1699,36 @@ export const affiliateAgentQueuedMappingProducerSubjectSchema = z
     mappingJobId: identifierSchema,
     listingKind: affiliateAgentListingKindSchema.optional(),
     pass: z.number().int().min(1).max(3),
-    repairContext: affiliateAgentLegacySportRepairContextSchema.optional(),
+    repairContext: affiliateAgentMappingRepairContextSchema.optional(),
+    repairDirective: affiliateAgentMappingRepairDirectiveSchema.optional(),
   })
   .strict();
 export type AffiliateAgentQueuedMappingProducerSubject = z.infer<
   typeof affiliateAgentQueuedMappingProducerSubjectSchema
 >;
-export const affiliateAgentHistoricalMappingProducerSubjectSchema =
-  affiliateAgentQueuedMappingProducerSubjectSchema;
+export const affiliateAgentHistoricalMappingProducerSubjectSchema = z
+  .object({
+    type: z.literal("MAPPING_PRODUCER"),
+    supplySourceId: identifierSchema,
+    mappingJobId: identifierSchema,
+    listingKind: affiliateAgentListingKindSchema.optional(),
+    pass: z.number().int().min(1).max(3),
+    repairContext: affiliateAgentHistoricalMappingRepairContextSchema.optional(),
+    repairDirective: affiliateAgentMappingRepairDirectiveSchema.optional(),
+  })
+  .strict();
 export type AffiliateAgentHistoricalMappingProducerSubject = z.infer<
   typeof affiliateAgentHistoricalMappingProducerSubjectSchema
 >;
-
-const historicalProducerContractVersionSchema = z.union([
-  z.literal(2),
-  z.literal(3),
-]);
-
-
 const mappingProducerSubjectSchema = z
   .object({
     type: z.literal("MAPPING_PRODUCER"),
     supplySourceId: identifierSchema,
     mappingJobId: identifierSchema,
-    listingKind: affiliateAgentListingKindSchema,
+    listingKind: affiliateAgentListingKindSchema.optional(),
     pass: z.number().int().min(1).max(3),
-    repairContext: affiliateAgentLegacySportRepairContextSchema.optional(),
+    repairContext: affiliateAgentMappingRepairContextSchema.optional(),
+    repairDirective: affiliateAgentMappingRepairDirectiveSchema.optional(),
   })
   .strict();
 
@@ -1625,7 +1748,7 @@ const supplyReviewerSubjectSchema = z
     targetId: identifierSchema,
     targetType: z.enum(["EVENT", "FACILITY", "ORGANIZATION"]),
     reviewPass: z.number().int().min(1).max(3),
-    repairContext: affiliateAgentLegacySportRepairContextSchema.optional(),
+    repairContext: affiliateAgentMappingRepairContextSchema.optional(),
   })
   .strict();
 
@@ -1751,6 +1874,42 @@ export const affiliateAgentClaimEnvelopeSchema = z
     assertClaimEnvelopeSourceRequirements(claim, context);
     assertClaimEnvelopeSubjectSource(claim, context);
     assertSupplyReviewerIdentity(claim, context);
+    if (claim.subject.type === "MAPPING_PRODUCER" && claim.subject.listingKind === undefined) {
+      const repair = claim.subject.repairContext;
+      if (repair?.kind !== "EXISTING_DATA_REPAIR" || !repair.sourceKindAssessment) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["subject", "listingKind"],
+          message: "A current producer requires a listing kind or an admitted source-kind assessment.",
+        });
+      }
+    }
+    if (claim.subject.type === "MAPPING_PRODUCER") {
+      const repair = claim.subject.repairContext;
+      if (repair?.kind === "EXISTING_DATA_REPAIR"
+        && repair.sourceKindAssessment
+        && claim.subject.listingKind !== undefined
+        && !repair.sourceKindAssessment.allowedListingKinds.includes(claim.subject.listingKind)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["subject", "listingKind"],
+          message: "The claimed kind is outside the admitted source-kind assessment.",
+        });
+      }
+    }
+    if (
+      claim.subject.type === "MAPPING_PRODUCER"
+      && claim.subject.repairContext?.kind === "EXISTING_DATA_REPAIR"
+      && claim.subject.pass > 1
+      && !claim.subject.repairDirective
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["subject", "repairDirective"],
+        message: "Existing-data repair producer children require the server-authored reviewer directive.",
+      });
+
+    }
     if (claim.subject.type === "SOURCE_EXCLUSION_REVIEW") {
       if (claim.executionBudget !== "SINGLE_CLAIM") {
         context.addIssue({
@@ -1881,6 +2040,12 @@ const assertSupplyReviewerIdentity = (
 export type AffiliateAgentClaimEnvelope = z.infer<
   typeof affiliateAgentClaimEnvelopeSchema
 >;
+
+const historicalProducerContractVersionSchema = z.union([
+  z.literal(2),
+  z.literal(3),
+]);
+
 export const affiliateAgentHistoricalProducerClaimEnvelopeSchema = z
   .object({
     ...claimEnvelopeBase,
@@ -1946,17 +2111,34 @@ export const parseAffiliateAgentProducerClaimEnvelopeForHistoricalRead = (
 
 const affiliateAgentDeclarativePackageFieldNames = [
   "address",
+  "ageGroup",
   "city",
+  "currentParticipantsText",
   "dateDisplayMode",
   "dateDisplayText",
   "description",
   "divisions",
+  "durationText",
+  "endsAt",
+  "formatLabel",
+  "locationEvidence",
+  "locationSource",
+  "maxParticipantsText",
   "officialActionUrl",
+  "organizerName",
+  "participantOptionsText",
+  "priceText",
+  "registrationDeadlineText",
+  "scheduleText",
+  "skillLevel",
   "sourceUrl",
   "sportName",
   "sportNames",
+  "spotsRemainingText",
   "startsAt",
+  "statusText",
   "tags",
+  "timeZone",
   "title",
   "venueName",
 ] as const;
@@ -2561,14 +2743,14 @@ export const renderAffiliateAgentPrompt = (
   );
   const promptTemplate =
     AFFILIATE_AGENT_PROMPT_TEMPLATES[authorityProjection.role];
-  const isLegacySportRepair = authorityProjection.subject.type === "MAPPING_PRODUCER"
-    ? authorityProjection.subject.repairContext?.kind === "LEGACY_SPORT_REPAIR"
-    : authorityProjection.subject.type === "SUPPLY_REVIEWER"
-      && authorityProjection.subject.repairContext?.kind === "LEGACY_SPORT_REPAIR";
-  const repairInstructions = isLegacySportRepair
+  const isMappingRepair = (
+    authorityProjection.subject.type === "MAPPING_PRODUCER"
+    || authorityProjection.subject.type === "SUPPLY_REVIEWER"
+  ) && authorityProjection.subject.repairContext !== undefined;
+  const repairInstructions = isMappingRepair
     ? [
       "",
-      "## Legacy Sport Repair",
+      "## Mapping Repair",
       "Inspect the supplied repairContext sports catalog and original manifest-owned artifacts before making a sport claim.",
       "Do not guess a sport surface or forge a citation. Bind sportEvidence to the exact intakeId, evidenceRunId, catalog hash, artifact bytes, and source URLs.",
       "Use sportName for one retained canonical sport or sportNames for multiple retained canonical sports; any CONSTANT values or selector output must equal the exact evidence-supported canonical sport union.",

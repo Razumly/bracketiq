@@ -38,6 +38,16 @@ import {
   parseAffiliateAutomationBaseline,
 } from './automationBaseline';
 import {
+  AFFILIATE_EXISTING_DATA_REPAIR_LEGACY_HOLD_STATUS,
+  captureAffiliateExistingRepairSourceState,
+  existingDataRepairContextForMetadata,
+  metadataWithPendingMapping,
+  pendingMappingForMetadata,
+  type AffiliateExistingDataRepairContext,
+  type AffiliateExistingDataRepairPendingMapping,
+  type AffiliateExistingDataRepairSourceState,
+} from './affiliateExistingDataRepairState';
+import {
   AFFILIATE_REPLENISHMENT_PRIORITY,
   affiliateSupplyContractManifestSchema,
   buildAffiliateSupplyContractImpactReport,
@@ -105,10 +115,12 @@ import type {
 } from './agentGatewayAdapters';
 import {
   affiliateAgentClaimEnvelopeSchema,
+  affiliateAgentEvidenceManifestSchema,
   affiliateAgentTerminalResultEnvelopeSchema,
   parseAffiliateAgentProducerClaimEnvelopeForHistoricalRead,
   hashAffiliateAgentValue,
   canonicalizeAffiliateAgentValue,
+  type AffiliateAgentEvidenceManifest,
   type AffiliateAgentProducerClaimEnvelopeForHistoricalRead,
 } from './agentGatewayContracts';
 import {
@@ -4166,6 +4178,7 @@ export type ExecuteAffiliateSupplyLifecycleCommandInput = Readonly<{
   actorKind: AffiliateSupplyLifecycleActorKind;
   actorId: string;
   executingAgentId?: string | null;
+  reviewerPass?: number;
   supplyContractVersion?: number;
   supplyContractHash?: string;
   rolloutCohort?: string;
@@ -4506,7 +4519,283 @@ type AffiliateLifecycleCommandContext = Readonly<{
   assessmentBefore: AffiliateSupplyAssessment;
   commandContractVersion: number;
   commandContractHash: string;
+  existingDataRepairContext: AffiliateExistingDataRepairContext | null;
+  existingDataRepairPendingMapping: AffiliateExistingDataRepairPendingMapping | null;
+  existingDataRepairSourceState: AffiliateExistingDataRepairSourceState | null;
 }>;
+
+type ExistingRepairLifecycleBinding = Readonly<{
+  context: AffiliateExistingDataRepairContext;
+  pendingMapping: AffiliateExistingDataRepairPendingMapping;
+  sourceState: AffiliateExistingDataRepairSourceState;
+}>;
+const existingRepairPendingEvidenceHashFor = (
+  manifest: AffiliateAgentEvidenceManifest,
+  evidenceRefs: readonly string[],
+): string => {
+  const refs = Array.from(new Set(evidenceRefs)).sort();
+  const entries = refs.map((evidenceRef) => (
+    manifest.entries.find((entry) => entry.evidenceRef === evidenceRef)
+  ));
+  if (entries.some((entry) => !entry)) {
+    throw new Error('Existing-data repair pending mapping references unknown producer evidence.');
+  }
+  const kinds = Array.from(new Set(entries.map((entry) => entry!.kind))).sort();
+  return hashAffiliateAgentValue({
+    manifestHash: manifest.hash,
+    refs,
+    kinds,
+  });
+};
+
+const assertExistingRepairPendingLineage = async (
+  input: Readonly<{
+    transactionDatabase: AffiliateSupplyDatabase;
+    root: AffiliateSupplySources;
+    source: AffiliateScrapeSources;
+    pendingMapping: AffiliateExistingDataRepairPendingMapping;
+    repairContext: AffiliateExistingDataRepairContext;
+  }>,
+): Promise<void> => {
+  const producerClaimId = input.pendingMapping.producerClaimId;
+  const producerJobId = input.pendingMapping.producerJobId;
+  if (!producerClaimId || !producerJobId) {
+    throw new Error('Existing-data repair pending mapping has no producer lineage.');
+  }
+  const producerClaim = await input.transactionDatabase.gatewayClaims.findUnique({
+    where: { id: producerClaimId },
+  });
+  const producerJob = await input.transactionDatabase.gatewayJobs.findUnique({
+    where: { id: producerJobId },
+  });
+  const claimEnvelope = parseAffiliateAgentProducerClaimEnvelopeForHistoricalRead(
+    producerClaim?.claimEnvelopeJson,
+  );
+  const claimRepairContext = claimEnvelope?.subject.type === 'MAPPING_PRODUCER'
+    ? claimEnvelope.subject.repairContext
+    : undefined;
+  const manifestResult = affiliateAgentEvidenceManifestSchema.safeParse(
+    producerJob?.evidenceManifestJson,
+  );
+  if (
+    !producerClaim
+    || !producerJob
+    || upper(producerClaim.status) !== 'COMPLETED'
+    || upper(producerClaim.role) !== 'MAPPING_PRODUCER'
+    || stringValue(producerClaim.jobId) !== producerJobId
+    || !stringValue(producerClaim.terminalReceiptId)
+    || upper(producerJob.status) !== 'COMPLETED'
+    || producerJob.activeClaimId !== null
+    || stringValue(producerJob.terminalReceiptId) !== stringValue(producerClaim.terminalReceiptId)
+    || stringValue(producerJob.subjectId) !== input.pendingMapping.mappingJobId
+    || stringValue(producerJob.parentClaimId) !== stringValue(input.pendingMapping.reviewerClaimId)
+    || !claimEnvelope
+    || claimEnvelope.claimId !== producerClaimId
+    || claimEnvelope.jobId !== producerJobId
+    || claimEnvelope.role !== 'MAPPING_PRODUCER'
+    || claimEnvelope.subject.type !== 'MAPPING_PRODUCER'
+    || claimEnvelope.subject.mappingJobId !== input.pendingMapping.mappingJobId
+    || claimRepairContext?.kind !== 'EXISTING_DATA_REPAIR'
+    || canonicalizeAffiliateAgentValue(claimRepairContext)
+      !== canonicalizeAffiliateAgentValue(input.repairContext)
+    || claimRepairContext?.sourceId !== input.source.id
+    || hashAffiliateAgentValue(claimEnvelope) !== stringValue(producerClaim.claimEnvelopeHash)
+    || !manifestResult.success
+    || canonicalizeAffiliateAgentValue(manifestResult.data)
+      !== canonicalizeAffiliateAgentValue(claimEnvelope.evidenceManifest)
+    || input.pendingMapping.evidenceHash
+      !== existingRepairPendingEvidenceHashFor(manifestResult.data, input.pendingMapping.evidenceRefs)
+  ) {
+    throw new Error('Existing-data repair pending mapping producer lineage is invalid.');
+  }
+  const terminalResult = affiliateAgentTerminalResultEnvelopeSchema.safeParse(
+    producerJob.resultJson,
+  );
+  if (!terminalResult.success) {
+    throw new Error('Existing-data repair pending mapping producer has no terminal result.');
+  }
+  const result = recordValue(terminalResult.data);
+  const payload = recordValue(result.payload);
+  if (
+    result.role !== 'MAPPING_PRODUCER'
+    || (result.disposition !== 'PACKAGE_COMMITTED'
+      && result.disposition !== 'BOUNDED_REPAIR_SUBMITTED')
+    || result.claimId !== producerClaimId
+    || result.jobId !== producerJobId
+    || Number(result.claimGeneration) !== claimEnvelope.claimGeneration
+    || payload.packageHash !== input.pendingMapping.packageHash
+    || stringValue(producerJob.resultHash) !== hashAffiliateAgentValue(terminalResult.data)
+  ) {
+    throw new Error('Existing-data repair pending mapping producer result is invalid.');
+  }
+  const mapping = await input.transactionDatabase.mappings.findUnique({
+    where: { id: input.pendingMapping.mappingId },
+  });
+  const mappingJson = recordValue(mapping?.mapping);
+  const mappingMetadata = recordValue(mappingJson.metadata);
+  const validationOutput = recordValue(mappingMetadata.validationOutput);
+  const mappingEvidenceRefs = Array.isArray(mappingMetadata.evidenceRefs)
+    ? mappingMetadata.evidenceRefs.filter((value): value is string => typeof value === 'string').sort()
+    : [];
+  if (
+    !mapping
+    || mapping.sourceId !== input.source.id
+    || mapping.supplySourceId !== input.root.id
+    || (
+      input.pendingMapping.mappingSha256 !== undefined
+      && (
+        mapping.isActive !== false
+        || hashAffiliateAgentValue(mapping.mapping) !== input.pendingMapping.mappingSha256
+      )
+    )
+    || stringValue(mappingMetadata.packageHash) !== input.pendingMapping.packageHash
+    || stringValue(validationOutput.validatedPackageHash) !== input.pendingMapping.candidatePackageHash
+    || stringValue(validationOutput.candidateHash) !== input.pendingMapping.candidateHash
+    || canonicalizeAffiliateAgentValue(mappingEvidenceRefs)
+      !== canonicalizeAffiliateAgentValue(input.pendingMapping.evidenceRefs)
+    || stringValue(validationOutput.validationReceiptId) !== input.pendingMapping.validationReceiptId
+    || hashAffiliateAgentValue(validationOutput) !== input.pendingMapping.validationHash
+  ) {
+    throw new Error('Existing-data repair pending mapping package hashes are invalid.');
+  }
+};
+
+const existingRepairMetadataValue = (
+  metadata: unknown,
+  key: string,
+): unknown => recordValue(metadata)[key];
+
+type ExistingRepairLifecycleBindingInput = Readonly<{
+  transactionDatabase: AffiliateSupplyDatabase;
+  root: AffiliateSupplySources;
+  source: AffiliateScrapeSources | null;
+  mappingId: string | null;
+}>;
+
+const loadExistingRepairLifecycleBinding = async (
+  input: ExistingRepairLifecycleBindingInput,
+): Promise<ExistingRepairLifecycleBinding | null> => {
+  const sourceMetadata = recordValue(input.source?.metadata);
+  const rootMetadata = recordValue(input.root.metadata);
+  const sourceContextValue = existingRepairMetadataValue(
+    sourceMetadata,
+    'existingDataRepair',
+  );
+  const rootContextValue = existingRepairMetadataValue(
+    rootMetadata,
+    'existingDataRepair',
+  );
+  const sourceContext = existingDataRepairContextForMetadata(sourceMetadata);
+  const rootContext = existingDataRepairContextForMetadata(rootMetadata);
+  if (
+    (sourceContextValue !== undefined && !sourceContext)
+    || (rootContextValue !== undefined && !rootContext)
+  ) {
+    throw new Error('Existing-data repair context metadata is invalid.');
+  }
+  if (
+    (sourceContext && !rootContext)
+    || (!sourceContext && rootContext)
+  ) {
+    throw new Error('Existing-data repair context metadata is incomplete.');
+  }
+  if (sourceContext && rootContext) {
+    if (
+      canonicalizeAffiliateAgentValue(sourceContext)
+      !== canonicalizeAffiliateAgentValue(rootContext)
+    ) {
+      throw new Error('Existing-data repair context metadata is inconsistent.');
+    }
+  }
+  const repairContext = sourceContext ?? rootContext;
+  const sourcePendingValue = existingRepairMetadataValue(
+    sourceMetadata,
+    'pendingMapping',
+  );
+  const rootPendingValue = existingRepairMetadataValue(
+    rootMetadata,
+    'pendingMapping',
+  );
+  const sourcePending = pendingMappingForMetadata(sourceMetadata);
+  const rootPending = pendingMappingForMetadata(rootMetadata);
+  if (
+    (sourcePendingValue !== undefined && !sourcePending)
+    || (rootPendingValue !== undefined && !rootPending)
+  ) {
+    throw new Error('Existing-data repair pending mapping metadata is invalid.');
+  }
+  if (
+    (sourcePending && !rootPending)
+    || (!sourcePending && rootPending)
+  ) {
+    throw new Error('Existing-data repair pending mapping metadata is incomplete.');
+  }
+  if (sourcePending && rootPending) {
+    if (
+      canonicalizeAffiliateAgentValue(sourcePending)
+      !== canonicalizeAffiliateAgentValue(rootPending)
+    ) {
+      throw new Error('Existing-data repair pending mapping metadata is inconsistent.');
+    }
+  }
+  const pendingMapping = sourcePending ?? rootPending;
+  if (!repairContext && !pendingMapping) return null;
+  if (!repairContext || !pendingMapping || !input.source?.id) {
+    throw new Error('Existing-data repair metadata is incomplete.');
+  }
+  if (
+    repairContext.sourceId !== input.source.id
+    || input.source.supplySourceId !== input.root.id
+    || input.root.identityKey !== repairContext.sourceIdentityKey
+    || (
+      input.root.liveSourceId !== null
+      && input.root.liveSourceId !== undefined
+      && input.root.liveSourceId !== input.source.id
+    )
+    || pendingMapping.sourceId !== input.source.id
+    || pendingMapping.supplySourceId !== input.root.id
+    || pendingMapping.sourceIdentityKey !== repairContext.sourceIdentityKey
+    || pendingMapping.admissionHash !== repairContext.admissionHash
+    || pendingMapping.mappingId !== (input.mappingId ?? pendingMapping.mappingId)
+  ) {
+    throw new Error('Existing-data repair pending mapping is not bound to this source.');
+  }
+  const sourceState = await captureAffiliateExistingRepairSourceState(
+    {
+      affiliateScrapeSources: input.transactionDatabase.sources,
+      affiliateSupplySources: input.transactionDatabase.supplySources,
+      affiliateScrapeMappings: input.transactionDatabase.mappings,
+      organizations: input.transactionDatabase.organizations,
+      affiliateImportCandidates: input.transactionDatabase.candidates,
+      affiliateSupplyTargets: input.transactionDatabase.targets,
+    },
+    input.source.id,
+  );
+  if (
+    pendingMapping.sourceStateSha256 !== repairContext.sourceStateSha256
+    || sourceState.sourceStateSha256 !== pendingMapping.postCommitSourceStateSha256
+    || sourceState.workingMappingStateSha256 !== pendingMapping.workingMappingStateSha256
+    || sourceState.workingMappingStateSha256 !== pendingMapping.postCommitWorkingMappingStateSha256
+    || sourceState.organizationStateSha256 !== pendingMapping.organizationStateSha256
+    || sourceState.organizationStateSha256 !== pendingMapping.postCommitOrganizationStateSha256
+    || sourceState.workingMappingId !== pendingMapping.workingMappingId
+    || sourceState.isPublicReplacement !== pendingMapping.isPublicReplacement
+  ) {
+    throw new Error('Existing-data repair working state changed after admission.');
+  }
+  await assertExistingRepairPendingLineage({
+    transactionDatabase: input.transactionDatabase,
+    root: input.root,
+    source: input.source,
+    pendingMapping,
+    repairContext,
+  });
+  return {
+    context: repairContext,
+    pendingMapping,
+    sourceState,
+  };
+};
 
 const affiliateSuccessorExpectedIntakeId = (
   successorRequest: Record<string, unknown>,
@@ -4848,7 +5137,7 @@ const persistAffiliateMappingLifecycle = async (
     mappingJobId: stringValue(request.mappingJobId),
     db: transactionDatabase,
   });
-  if (source?.id) {
+  if (source?.id && context.existingDataRepairContext?.kind !== 'EXISTING_DATA_REPAIR') {
     await transactionDatabase.sources.update({
       where: { id: source.id },
       data: { activeMappingId: mappingId, autoScrapeEnabled: false },
@@ -4875,6 +5164,7 @@ type AffiliateApprovalContext = Readonly<{
   mapping: AffiliateScrapeMappings;
   mappingId: string;
   baseline: Record<string, unknown> | undefined;
+  existingRepairBinding: ExistingRepairLifecycleBinding | null;
 }>;
 
 const loadAffiliateApprovalContext = async (
@@ -4885,7 +5175,17 @@ const loadAffiliateApprovalContext = async (
   const baseline = context.request.baseline && typeof context.request.baseline === 'object'
     ? context.request.baseline as Record<string, unknown>
     : undefined;
-  const mappingId = context.mappingId ?? source.activeMappingId;
+  const existingRepairBinding = context.existingDataRepairContext?.kind === 'EXISTING_DATA_REPAIR'
+    ? await loadExistingRepairLifecycleBinding({
+      transactionDatabase: context.transactionDatabase,
+      root: context.root,
+      source,
+      mappingId: context.mappingId,
+    })
+    : null;
+  const mappingId = existingRepairBinding?.pendingMapping.mappingId
+    ?? context.mappingId
+    ?? source.activeMappingId;
   if (!mappingId) {
     throw new Error('Affiliate lifecycle approval requires a mapping package.');
   }
@@ -4893,7 +5193,7 @@ const loadAffiliateApprovalContext = async (
     ? await context.transactionDatabase.mappings.findUnique({ where: { id: mappingId } })
     : null;
   if (!mapping) throw new Error('Affiliate lifecycle approval requires the exact mapping package.');
-  return { source, mapping, mappingId, baseline };
+  return { source, mapping, mappingId, baseline, existingRepairBinding };
 };
 
 const affiliateApprovalPackageHash = (mapping: AffiliateScrapeMappings): string => {
@@ -4908,12 +5208,17 @@ const assertAffiliateApprovalMapping = (
   context: AffiliateLifecycleCommandContext,
   approval: AffiliateApprovalContext,
 ): void => {
-  const { mapping, source, mappingId } = approval;
+  const { mapping, source, mappingId, existingRepairBinding } = approval;
   const packageHash = affiliateApprovalPackageHash(mapping);
+  const requestedPackageHash = stringValue(context.request.packageHash);
+  const expectedPackageHash = existingRepairBinding?.pendingMapping.packageHash
+    ?? requestedPackageHash;
   if (
     (mapping.sourceId && mapping.sourceId !== source.id)
     || (mapping.supplySourceId && mapping.supplySourceId !== context.input.supplySourceId)
-    || stringValue(context.request.packageHash) !== packageHash
+    || expectedPackageHash !== packageHash
+    || (requestedPackageHash && requestedPackageHash !== packageHash)
+    || (existingRepairBinding && existingRepairBinding.pendingMapping.mappingId !== mappingId)
   ) {
     throw new Error('Affiliate lifecycle approval requires the exact mapping package.');
   }
@@ -4931,11 +5236,15 @@ const persistAffiliateApproval = async (
     now,
     evidenceRefs,
   } = context;
+  const isExistingDataRepair = approval.existingRepairBinding !== null;
+  const approvedPackageHash = approval.existingRepairBinding?.pendingMapping.packageHash
+    ?? stringValue(request.packageHash)
+    ?? affiliateApprovalPackageHash(approval.mapping);
   const decision = {
     decision: 'APPROVE',
     isIndependent: true,
     reviewerId: input.actorId,
-    packageHash: stringValue(request.packageHash),
+    packageHash: approvedPackageHash,
     evidenceRefs,
     lifecycleEvidenceKinds: stringArray(request.lifecycleEvidenceKinds),
   };
@@ -4970,6 +5279,30 @@ const persistAffiliateApproval = async (
       where: { id: approval.mappingId },
       data: { isActive: false, validatedAt: now },
     });
+  }
+  if (isExistingDataRepair) {
+    const pendingMapping = {
+      ...approval.existingRepairBinding!.pendingMapping,
+      state: 'APPROVED' as const,
+      updatedAt: now.toISOString(),
+    };
+    await transactionDatabase.sources.update({
+      where: { id: approval.source.id },
+      data: {
+        metadata: prismaJsonValue(
+          metadataWithPendingMapping(approval.source.metadata, pendingMapping),
+        ),
+      },
+    });
+    await transactionDatabase.supplySources.update({
+      where: { id: context.input.supplySourceId },
+      data: {
+        metadata: prismaJsonValue(
+          metadataWithPendingMapping(context.root.metadata, pendingMapping),
+        ),
+      },
+    });
+    return;
   }
   await transactionDatabase.sources.update({
     where: { id: approval.source.id },
@@ -5375,6 +5708,9 @@ const persistAffiliateActivation = async (
 const executeAffiliateActivate = async (
   context: AffiliateLifecycleCommandContext,
 ): Promise<void> => {
+  if (context.existingDataRepairContext?.kind === 'EXISTING_DATA_REPAIR') {
+    throw new Error('Existing-data repair mappings remain held for independent review.');
+  }
   const activation = resolveAffiliateActivationContract(context);
   const review = await resolveAffiliateCandidateReview(context, activation);
   const candidateById = resolveAffiliateReviewedCandidates(context, review);
@@ -5428,11 +5764,13 @@ const persistAffiliatePublication = async (
     context.contract.policy,
   );
 };
-
 const executeAffiliatePublishTarget = async (
   context: AffiliateLifecycleCommandContext,
 ): Promise<void> => {
   if (context.input.command !== 'PUBLISH_TARGET') return;
+  if (context.existingDataRepairContext?.kind === 'EXISTING_DATA_REPAIR') {
+    throw new Error('Existing-data repair targets remain held for independent review.');
+  }
   const candidate = resolveAffiliatePublicationCandidate(context);
   await persistAffiliatePublication(context, candidate);
 };
@@ -5569,11 +5907,13 @@ const executeAffiliateRefresh = async (
   context: AffiliateLifecycleCommandContext,
 ): Promise<void> => {
   if (!isAffiliateRefreshCommand(context.input.command)) return;
+  if (context.existingDataRepairPendingMapping) {
+    throw new Error('Existing-data repair refreshes are evidence-only while a replacement is staged.');
+  }
   await persistAffiliateRefreshRun(context);
   await persistAffiliateRefreshTargets(context);
   await persistAffiliateRefreshSource(context);
 };
-
 const executeAffiliateExclude = async (
   context: AffiliateLifecycleCommandContext,
 ): Promise<void> => {
@@ -5583,18 +5923,21 @@ const executeAffiliateExclude = async (
     source,
     now,
   } = context;
-    if (input.command === 'EXCLUDE_SOURCE') {
-      await transactionDatabase.supplySources.update({
-        where: { id: input.supplySourceId },
-        data: { isExcluded: true, excludedAt: now },
-      });
-      if (source?.id) {
-        await transactionDatabase.sources.update({
-          where: { id: source.id },
-          data: { status: 'EXCLUDED', autoScrapeEnabled: false },
-        });
-      }
+  if (input.command === 'EXCLUDE_SOURCE') {
+    if (context.existingDataRepairContext?.kind === 'EXISTING_DATA_REPAIR') {
+      throw new Error('Existing-data repair sources cannot be unlisted during staging or review.');
     }
+    await transactionDatabase.supplySources.update({
+      where: { id: input.supplySourceId },
+      data: { isExcluded: true, excludedAt: now },
+    });
+    if (source?.id) {
+      await transactionDatabase.sources.update({
+        where: { id: source.id },
+        data: { status: 'EXCLUDED', autoScrapeEnabled: false },
+      });
+    }
+  }
 };
 
 type AffiliateReviewerDisposition = Readonly<{
@@ -5684,7 +6027,9 @@ const persistAffiliateProducerRepair = async (
   const updated = await context.transactionDatabase.mappingJobs.updateMany({
     where: { id: mappingJobId },
     data: {
-      status: 'REVIEW_REQUIRED',
+      status: context.existingDataRepairContext
+        ? AFFILIATE_EXISTING_DATA_REPAIR_LEGACY_HOLD_STATUS
+        : 'REVIEW_REQUIRED',
       errorMessage: repairIssues.join(', '),
     },
   });
@@ -5761,6 +6106,24 @@ const persistAffiliateReviewerDispositionSource = async (
 ): Promise<void> => {
   const { transactionDatabase, source, input, now, evidenceRefs } = context;
   if (!source?.id) return;
+  if (context.existingDataRepairContext?.kind === 'EXISTING_DATA_REPAIR') {
+    if (disposition.reviewerOutcome === 'HUMAN_REVIEW_REQUIRED') {
+      const pending = context.existingDataRepairPendingMapping;
+      if (!pending) throw new Error('Existing-data human review requires the pending mapping lineage.');
+      const held = await transactionDatabase.mappingJobs.updateMany({
+        where: {
+          id: pending.mappingJobId,
+          sourceId: source.id,
+          supplySourceId: input.supplySourceId,
+        },
+        data: { status: 'HUMAN_REVIEW_REQUIRED', errorMessage: disposition.caseReason },
+      });
+      if (held.count !== 1) throw new Error('Existing-data human review must hold its exact mapping job.');
+    }
+    // Repair review state remains in the Gateway/mapping-job lineage. Do not
+    // mutate the protected working source while the replacement is held.
+    return;
+  }
   const sourceMetadata = recordValue(source.metadata);
   const exceptionEntry = {
     type: 'SUPPLY_REVIEWER_DISPOSITION',
@@ -6087,12 +6450,38 @@ const prepareAffiliateLifecycleCommandContext = async (
   const refreshFailureRunId = refreshFailureRunIdFor(input, request);
   const refreshFailureRun = await loadAffiliateRefreshFailureRun(transactionDatabase, refreshFailureRunId);
   assertAffiliateRefreshFailureRun(input, root, refreshFailureRunId, refreshFailureRun);
+  const source = await loadAffiliateLifecycleSource(
+    transactionDatabase,
+    root,
+    input.supplySourceId,
+  );
+  const requestedMappingId = stringValue(request.mappingId);
   const contract = await loadActiveAffiliateSupplyContract({
     db: transactionDatabase,
     rolloutCohort: input.rolloutCohort ?? root.rolloutCohort,
   });
   const commandContractVersion = commandContractVersionFor(input, request, contract);
   const commandContractHash = commandContractHashFor(input, request, contract);
+  const existingDataRepairBinding = input.command === 'APPROVE'
+    ? await loadExistingRepairLifecycleBinding({
+      transactionDatabase,
+      root,
+      source,
+      mappingId: requestedMappingId,
+    })
+    : null;
+  const sourceRepairContext = existingDataRepairContextForMetadata(source?.metadata);
+  const rootRepairContext = existingDataRepairContextForMetadata(root.metadata);
+  const existingDataRepairContext = existingDataRepairBinding?.context
+    ?? sourceRepairContext
+    ?? rootRepairContext;
+  const pendingMapping = existingDataRepairBinding?.pendingMapping
+    ?? pendingMappingForMetadata(source?.metadata)
+    ?? pendingMappingForMetadata(root.metadata);
+  const mappingId = requestedMappingId
+    ?? existingDataRepairBinding?.pendingMapping.mappingId
+    ?? pendingMapping?.mappingId
+    ?? null;
   const snapshotBefore = await loadSnapshot(
     transactionDatabase,
     input.supplySourceId,
@@ -6112,17 +6501,21 @@ const prepareAffiliateLifecycleCommandContext = async (
     commandContractHash,
     evidenceRefs: stringArray(request.evidenceRefs),
     reviewerOutcome: stringValue(request.reviewerOutcome),
+    reviewerPass: input.reviewerPass,
     assessment: assessmentBefore,
+    ...(existingDataRepairBinding && input.command === 'APPROVE'
+      ? {
+        existingDataRepairApprovalProof: {
+          verified: true as const,
+          pendingMappingId: existingDataRepairBinding.pendingMapping.mappingId,
+          sourceStateSha256: existingDataRepairBinding.sourceState.sourceStateSha256,
+        },
+      }
+      : {}),
   });
   if (!commandDecision.isAccepted) {
     throw new Error(`Affiliate lifecycle command rejected: ${commandDecision.reasonCodes.join(', ')}`);
   }
-  const source = await loadAffiliateLifecycleSource(
-    transactionDatabase,
-    root,
-    input.supplySourceId,
-  );
-  const mappingId = stringValue(request.mappingId);
   const evidenceRefs = [
     ...stringArray(request.evidenceRefs),
     ...(refreshFailureRunId ? [`scrape-run:${refreshFailureRunId}`] : []),
@@ -6144,6 +6537,9 @@ const prepareAffiliateLifecycleCommandContext = async (
     assessmentBefore,
     commandContractVersion,
     commandContractHash,
+    existingDataRepairContext,
+    existingDataRepairPendingMapping: existingDataRepairBinding?.pendingMapping ?? pendingMapping ?? null,
+    existingDataRepairSourceState: existingDataRepairBinding?.sourceState ?? null,
   };
 };
 
@@ -6151,7 +6547,12 @@ const refreshAffiliateLifecycleAssessment = async (
   context: AffiliateLifecycleCommandContext,
   assessment: AffiliateSupplyAssessment,
 ): Promise<AffiliateSupplyAssessment> => {
-  if (!assessment.isAutomationEnabled || context.source?.autoScrapeEnabled !== true || !context.source.id) {
+  if (
+    context.existingDataRepairContext?.kind === 'EXISTING_DATA_REPAIR'
+    || !assessment.isAutomationEnabled
+    || context.source?.autoScrapeEnabled !== true
+    || !context.source.id
+  ) {
     return assessment;
   }
   await context.transactionDatabase.sources.update({
@@ -6170,6 +6571,9 @@ const refreshAffiliateLifecycleAssessment = async (
 const persistAffiliateLifecycleAssessment = async (
   context: AffiliateLifecycleCommandContext,
 ): Promise<AffiliateSupplyAssessment> => {
+  if (context.existingDataRepairContext?.kind === 'EXISTING_DATA_REPAIR') {
+    return context.assessmentBefore;
+  }
   const assessment = await deriveAndPersistAffiliateSupplyAssessment({
     supplySourceId: context.input.supplySourceId,
     contract: context.contract.policy,
@@ -6192,6 +6596,7 @@ const updateAffiliateLifecycleContractFields = async (
       activeSupplyContractHash: context.commandContractHash,
     },
   });
+  if (context.existingDataRepairContext?.kind === 'EXISTING_DATA_REPAIR') return;
   if (!context.source?.id || !context.transactionDatabase.sources?.update) return;
   await context.transactionDatabase.sources.update({
     where: { id: context.source.id },

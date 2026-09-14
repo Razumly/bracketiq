@@ -16,6 +16,17 @@ import {
   AffiliateSourceExclusionAdmissionError,
 } from '../src/server/affiliateImports/affiliateSourceExclusionAdmission';
 import {
+  previewAffiliateExistingDataRepairAdmission,
+  applyAffiliateExistingDataRepairAdmission,
+  AffiliateExistingDataRepairAdmissionError,
+} from '../src/server/affiliateImports/affiliateExistingDataRepairAdmission';
+import {
+  previewAffiliateExistingRepairCapture,
+  applyAffiliateExistingRepairCapture,
+  processAffiliateExistingRepairCapture,
+  AffiliateExistingDataRepairCaptureError,
+} from '../src/server/affiliateImports/affiliateExistingDataRepairCapture';
+import {
   affiliateAgentContractBundleSchema,
   affiliateAgentDeploymentContractSchema,
   affiliateAgentSourceSportScopeLabelsSchema,
@@ -682,6 +693,9 @@ export type AffiliateAgentGatewayHttpDependencies = Readonly<{
   legacyRepairRetry?: (request: LegacyRepairRetryRequest) => Promise<unknown>;
   legacyRepairContinuation: (request: LegacyRepairContinuationRequest) => Promise<unknown>;
   sourceExclusionAdmission: (request: SourceExclusionAdmissionRequest) => Promise<unknown>;
+  existingDataRepairAdmission: (request: ExistingDataRepairAdmissionRequest) => Promise<unknown>;
+  existingRepairCapture: (request: ExistingRepairCaptureRequest) => Promise<unknown>;
+  existingRepairCaptureProcess: (request: ExistingRepairCaptureProcessRequest) => Promise<unknown>;
   reviewerEffectRecovery: (
     request: AffiliateAgentReviewerEffectRecoveryRequest,
   ) => Promise<AffiliateAgentReviewerEffectRecoveryReport>;
@@ -1227,6 +1241,122 @@ const handleSourceExclusionAdmissionRequest = async (
   return true;
 };
 
+const existingRepairReasonSchema = z.string().trim().min(1).max(1_000).refine(
+  (value) => Buffer.byteLength(value, 'utf8') <= 1_000,
+  'Repair reason must not exceed 1,000 UTF-8 bytes.',
+);
+const existingRepairIdentifierSchema = z.string().trim().min(1).max(200);
+const existingRepairIdentifiersSchema = z.array(existingRepairIdentifierSchema).min(1).max(20)
+  .refine((values) => new Set(values).size === values.length, 'Identifiers must be unique.');
+const reviewedRepairRequest = (
+  value: { mode: 'PREVIEW' | 'APPLY'; expectedReportHash?: string },
+  context: z.RefinementCtx,
+): void => {
+  if ((value.mode === 'APPLY') !== (value.expectedReportHash !== undefined)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['expectedReportHash'],
+      message: 'Only APPLY requires the reviewed PREVIEW report hash.',
+    });
+  }
+};
+const existingDataRepairAdmissionRequestSchema = z.object({
+  mode: z.enum(['PREVIEW', 'APPLY']),
+  jobIds: existingRepairIdentifiersSchema.optional(),
+  sourceIds: existingRepairIdentifiersSchema.optional(),
+  evidenceSelections: z.array(z.object({
+    jobId: existingRepairIdentifierSchema,
+    runId: existingRepairIdentifierSchema,
+    pageId: existingRepairIdentifierSchema,
+    supportingPageIds: z.array(existingRepairIdentifierSchema).min(1).max(2).refine(
+      (values) => new Set(values).size === values.length,
+      'Supporting page identifiers must be unique.',
+    ).optional(),
+  }).strict().refine(
+    (selection) => !selection.supportingPageIds?.includes(selection.pageId),
+    'The listing page must not be repeated as a supporting page.',
+  )).min(1).max(20).refine(
+    (selections) => new Set(selections.map((selection) => selection.jobId)).size === selections.length,
+    'Select evidence once for each repair job.',
+  ).optional(),
+  reason: existingRepairReasonSchema,
+  limit: z.number().int().min(1).max(20).default(20),
+  expectedReportHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+}).strict().superRefine((value, context) => {
+  reviewedRepairRequest(value, context);
+  const selectedCount = (value.jobIds?.length ?? 0) + (value.sourceIds?.length ?? 0);
+  if (selectedCount < 1 || selectedCount > 20) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['jobIds'],
+      message: 'Select one to twenty exact existing jobs or sources.',
+    });
+  }
+});
+export type ExistingDataRepairAdmissionRequest = z.infer<typeof existingDataRepairAdmissionRequestSchema>;
+const existingRepairCaptureRequestSchema = z.object({
+  mode: z.enum(['PREVIEW', 'APPLY']),
+  targets: z.array(z.object({
+    intakeId: existingRepairIdentifierSchema,
+    pageIds: z.array(existingRepairIdentifierSchema).min(1).max(3).refine(
+      (values) => new Set(values).size === values.length,
+      'Page identifiers must be unique.',
+    ),
+  }).strict()).min(1).max(20).refine(
+    (targets) => new Set(targets.map((target) => target.intakeId)).size === targets.length,
+    'Select each existing intake once.',
+  ),
+  reason: existingRepairReasonSchema,
+  expectedReportHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+}).strict().superRefine(reviewedRepairRequest);
+export type ExistingRepairCaptureRequest = z.infer<typeof existingRepairCaptureRequestSchema>;
+const existingRepairCaptureProcessRequestSchema = z.object({
+  runId: existingRepairIdentifierSchema,
+}).strict();
+export type ExistingRepairCaptureProcessRequest = z.infer<typeof existingRepairCaptureProcessRequestSchema>;
+
+const handleExistingRepairRequest = async (
+  request: IncomingMessage,
+  httpRequest: AffiliateAgentGatewayHttpRequest,
+  response: ServerResponse,
+  input: AffiliateAgentGatewayHttpDependencies,
+  body: unknown,
+): Promise<boolean> => {
+  if (!['/existing-repair/admission', '/existing-repair/capture', '/existing-repair/capture/process']
+    .includes(httpRequest.route ?? '')) return false;
+  if (!authorizeOperatorRequest(request, response, input.operatorToken)) return true;
+  if (input.admission.isOpen()) {
+    sendJson(response, 409, { error: {
+      code: 'EXISTING_REPAIR_ADMISSION_OPEN',
+      safeMessage: 'Gateway admission must be closed before existing-data repair.',
+      isRetryable: false,
+    } });
+    return true;
+  }
+  try {
+    if (httpRequest.route === '/existing-repair/admission') {
+      const parsed = existingDataRepairAdmissionRequestSchema.safeParse(body);
+      if (!parsed.success) sendJson(response, 400, { error: 'Invalid existing-data repair admission request.' });
+      else sendGatewayResult(response, await input.existingDataRepairAdmission(parsed.data));
+    } else if (httpRequest.route === '/existing-repair/capture') {
+      const parsed = existingRepairCaptureRequestSchema.safeParse(body);
+      if (!parsed.success) sendJson(response, 400, { error: 'Invalid existing-source capture request.' });
+      else sendGatewayResult(response, await input.existingRepairCapture(parsed.data));
+    } else {
+      const parsed = existingRepairCaptureProcessRequestSchema.safeParse(body);
+      if (!parsed.success) sendJson(response, 400, { error: 'Invalid existing-source capture process request.' });
+      else sendGatewayResult(response, await input.existingRepairCaptureProcess(parsed.data));
+    }
+  } catch (error) {
+    if (!(error instanceof AffiliateExistingDataRepairAdmissionError)
+      && !(error instanceof AffiliateExistingDataRepairCaptureError)) throw error;
+    sendJson(response, 409, {
+      error: { code: error.code, safeMessage: error.message, isRetryable: false, details: error.details },
+    });
+  }
+  return true;
+};
+
 const legacyRepairAdmissionRequestSchema = z.object({
   mode: z.enum(['PREVIEW', 'APPLY']),
   limit: z.number().int().min(1).max(20).default(1),
@@ -1458,6 +1588,7 @@ const handlePostRequest = async (
   if (await handleReviewerEffectRecoveryRequest(request, httpRequest, response, input, body)) return;
   if (await handleWorkerAdmissionStatusRequest(httpRequest, response, input, body)) return;
   if (await handleReplenishmentRequest(request, httpRequest, response, input)) return;
+  if (await handleExistingRepairRequest(request, httpRequest, response, input, body)) return;
   if (await handleLegacyRepairAdmissionRequest(request, httpRequest, response, input, body)) return;
   if (await handleLegacyRepairRetryRequest(request, httpRequest, response, input, body)) return;
   if (await handleLegacyRepairContinuationRequest(request, httpRequest, response, input, body)) return;
@@ -1601,6 +1732,9 @@ type AffiliateAgentGatewayRuntime = Readonly<{
   legacyRepairRetry: (request: LegacyRepairRetryRequest) => Promise<unknown>;
   legacyRepairContinuation: (request: LegacyRepairContinuationRequest) => Promise<unknown>;
   sourceExclusionAdmission: (request: SourceExclusionAdmissionRequest) => Promise<unknown>;
+  existingDataRepairAdmission: (request: ExistingDataRepairAdmissionRequest) => Promise<unknown>;
+  existingRepairCapture: (request: ExistingRepairCaptureRequest) => Promise<unknown>;
+  existingRepairCaptureProcess: (request: ExistingRepairCaptureProcessRequest) => Promise<unknown>;
   reviewerEffectRecovery: (
     request: AffiliateAgentReviewerEffectRecoveryRequest,
   ) => Promise<AffiliateAgentReviewerEffectRecoveryReport>;
@@ -1770,6 +1904,60 @@ const createGateway = async (): Promise<AffiliateAgentGatewayRuntime> => {
   await healthChecks.startup();
   return {
     gateway,
+    existingDataRepairAdmission: (request) => admission.withClaim(async () => {
+      if (admission.isOpen()) throw new AffiliateExistingDataRepairAdmissionError(
+        'EXISTING_REPAIR_ADMISSION_OPEN', 'Close claim admission before existing-data repair admission.',
+      );
+      const bundle = await contracts.loadActiveBundle();
+      const options = {
+        prisma,
+        bundle,
+        jobIds: request.jobIds,
+        sourceIds: request.sourceIds,
+        evidenceSelections: request.evidenceSelections,
+        reason: request.reason,
+        limit: request.limit,
+        operatorId: AFFILIATE_AGENT_GATEWAY_OPERATOR_ID,
+        artifactStore,
+      };
+      if (request.mode === 'PREVIEW') return previewAffiliateExistingDataRepairAdmission(options);
+      if (!request.expectedReportHash) throw new Error('Existing-data repair apply requires a reviewed hash.');
+      const active = await loadActiveAffiliateSupplyContract({ db: database, rolloutCohort });
+      assertStartupPreflight(active);
+      return applyAffiliateExistingDataRepairAdmission({ ...options, expectedReportHash: request.expectedReportHash });
+    }),
+    existingRepairCapture: (request) => admission.withClaim(async () => {
+      if (admission.isOpen()) throw new AffiliateExistingDataRepairCaptureError(
+        'EXISTING_REPAIR_ADMISSION_OPEN', 'Close claim admission before existing-source capture.',
+      );
+      const bundle = await contracts.loadActiveBundle();
+      const options = {
+        prisma,
+        bundle,
+        targets: request.targets,
+        reason: request.reason,
+        operatorId: AFFILIATE_AGENT_GATEWAY_OPERATOR_ID,
+      };
+      if (request.mode === 'PREVIEW') return previewAffiliateExistingRepairCapture(options);
+      if (!request.expectedReportHash) throw new Error('Existing-source capture apply requires a reviewed hash.');
+      const active = await loadActiveAffiliateSupplyContract({ db: database, rolloutCohort });
+      assertStartupPreflight(active);
+      return applyAffiliateExistingRepairCapture({ ...options, expectedReportHash: request.expectedReportHash });
+    }),
+    existingRepairCaptureProcess: (request) => admission.withClaim(async () => {
+      if (admission.isOpen()) throw new AffiliateExistingDataRepairCaptureError(
+        'EXISTING_REPAIR_ADMISSION_OPEN', 'Close claim admission before existing-source capture processing.',
+      );
+      const bundle = await contracts.loadActiveBundle();
+      const active = await loadActiveAffiliateSupplyContract({ db: database, rolloutCohort });
+      assertStartupPreflight(active);
+      return processAffiliateExistingRepairCapture({
+        prisma,
+        bundle,
+        runId: request.runId,
+        operatorId: AFFILIATE_AGENT_GATEWAY_OPERATOR_ID,
+      });
+    }),
     legacyRepairAdmission: (request) => admission.withClaim(async () => {
       if (admission.isOpen()) {
         throw new Error('Close claim admission before legacy repair admission.');

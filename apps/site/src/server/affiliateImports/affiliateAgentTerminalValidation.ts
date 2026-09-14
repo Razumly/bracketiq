@@ -4,8 +4,8 @@ import {
   affiliateAgentTerminalResultEnvelopeSchema,
   type AffiliateAgentClaimEnvelope,
   type AffiliateAgentRole,
+  type AffiliateAgentMappingRepairContext,
   type AffiliateAgentSchemaIssue,
-  type AffiliateAgentLegacySportRepairContext,
   type AffiliateAgentSportEvidence,
 } from "./agentGatewayContracts";
 import {
@@ -267,7 +267,45 @@ export const checkAffiliateAgentTerminalDraft = async (
     }
   }
   const checked = ["SCHEMA", "CLAIM_IDENTITY"];
-  let context: AffiliateAgentLegacySportRepairContext;
+  if (
+    input.claim.subject.type === "MAPPING_PRODUCER"
+    && result.role === "MAPPING_PRODUCER"
+    && result.disposition === "BOUNDED_REPAIR_SUBMITTED"
+    && result.payload.repairPass !== input.claim.subject.pass
+  ) {
+    return draftCheck(
+      [
+        {
+          path: ["payload", "repairPass"],
+          code: "INVALID_VALUE",
+          message: "Use the repair pass assigned to this Mapping Producer claim.",
+        },
+      ],
+      [...checked, "REPAIR_PASS"],
+    );
+  }
+  if (
+    input.claim.subject.type === "SUPPLY_REVIEWER"
+    && (
+      input.claim.subject.repairContext?.kind === "LEGACY_SPORT_REPAIR"
+      || input.claim.subject.repairContext?.kind === "EXISTING_DATA_REPAIR"
+    )
+    && input.claim.subject.reviewPass === 3
+    && result.role === "SUPPLY_REVIEWER"
+    && result.disposition === "PRODUCER_REPAIR_REQUIRED"
+  ) {
+    return draftCheck(
+      [
+        {
+          path: ["disposition"],
+          code: "INVALID_VALUE",
+          message: "Use HUMAN_REVIEW_REQUIRED at review pass 3. The producer repair budget is exhausted.",
+        },
+      ],
+      [...checked, "REPAIR_PASS_BUDGET"],
+    );
+  }
+  let context: AffiliateAgentMappingRepairContext;
   let sportEvidence: AffiliateAgentSportEvidence | undefined;
   const isSourceExclusion = input.claim.subject.type === "SOURCE_EXCLUSION_REVIEW";
   if (input.claim.subject.type === "SOURCE_EXCLUSION_REVIEW") {
@@ -287,7 +325,10 @@ export const checkAffiliateAgentTerminalDraft = async (
     context = input.claim.subject.repairContext;
     sportEvidence = result.payload.sportEvidence;
   } else if (input.claim.subject.type === "MAPPING_PRODUCER"
-    && input.claim.subject.repairContext?.kind === "LEGACY_SPORT_REPAIR"
+    && (
+      input.claim.subject.repairContext?.kind === "LEGACY_SPORT_REPAIR"
+      || input.claim.subject.repairContext?.kind === "EXISTING_DATA_REPAIR"
+    )
     && result.role === "MAPPING_PRODUCER" && result.disposition === "CONTRACT_GAP") {
     context = input.claim.subject.repairContext;
     sportEvidence = result.payload.sportEvidence;

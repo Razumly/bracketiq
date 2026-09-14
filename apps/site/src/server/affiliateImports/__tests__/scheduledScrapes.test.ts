@@ -47,6 +47,12 @@ jest.mock('@/lib/prismaConfig', () => ({
   }),
 }));
 jest.mock('pg', () => ({ Client: mockPgClientConstructor }));
+jest.mock('@/server/affiliateImports/affiliateRepairActivityLease', () => ({
+  withAffiliateRepairActivityLease: async (
+    _sourceId: string,
+    action: () => Promise<unknown>,
+  ) => action(),
+}));
 jest.mock('@/server/affiliateImports/service', () => ({
   runAffiliateSourceScrape: (...args: any[]) => runAffiliateSourceScrapeMock(...args),
 }));
@@ -450,6 +456,69 @@ describe('scheduled affiliate scrapes', () => {
       [4201042026],
     );
     expect(mockPgClient.end).toHaveBeenCalledTimes(1);
+  });
+
+  it('holds sources with a pending repair before mapping, provider, or lightweight work', async () => {
+    const hash = 'a'.repeat(64);
+    prismaMock.affiliateScrapeSources.findMany.mockResolvedValue([{
+      id: 'source_pending',
+      name: 'Pending Source',
+      sourceKey: 'pending-source',
+      listUrl: 'https://pending.example.test/events',
+      targetKind: 'EVENT',
+      scrapeIntervalMinutes: 1440,
+      metadata: {
+        pendingMapping: {
+          schemaVersion: 1,
+          kind: 'EXISTING_DATA_REPAIR_PENDING_MAPPING',
+          state: 'STAGED',
+          supplySourceId: 'supply_pending',
+          sourceId: 'source_pending',
+          sourceIdentityKey: hash,
+          mappingJobId: 'mapping_job_pending',
+          mappingId: 'mapping_pending',
+          mappingSha256: hash,
+          packageHash: hash,
+          candidatePackageHash: hash,
+          candidateHash: hash,
+          evidenceHash: hash,
+          evidenceRefs: [],
+          validationHash: hash,
+          validationReceiptId: 'validation_pending',
+          admissionHash: hash,
+          sourceStateSha256: hash,
+          postCommitSourceStateSha256: hash,
+          workingMappingId: null,
+          workingMappingStateSha256: hash,
+          postCommitWorkingMappingStateSha256: hash,
+          organizationStateSha256: null,
+          postCommitOrganizationStateSha256: null,
+          isPublicReplacement: true,
+          createdAt: '2026-07-01T00:00:00.000Z',
+          updatedAt: '2026-07-01T00:00:00.000Z',
+        },
+      },
+    }]);
+
+    const result = await runDueAffiliateScrapes({
+      now: new Date('2026-07-04T12:00:00.000Z'),
+      fetchImpl: lightweightFetchMock,
+    });
+
+    expect(result.dueSourceCount).toBe(0);
+    expect(result.lightweightSourceCount).toBe(0);
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        sourceId: 'source_pending',
+        status: 'SKIPPED',
+        reason: 'PENDING_EXISTING_DATA_REPAIR',
+      }),
+    ]);
+    expect(prismaMock.affiliateScrapeMappings.findUnique).not.toHaveBeenCalled();
+    expect(runAffiliateSourceScrapeMock).not.toHaveBeenCalled();
+    expect(lightweightFetchMock).not.toHaveBeenCalled();
+    expect(prismaMock.affiliateScrapeSources.update).not.toHaveBeenCalled();
+    expect(prismaMock.organizations.updateMany).not.toHaveBeenCalled();
   });
 
   it('dry-runs due sources without scraping', async () => {

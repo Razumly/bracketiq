@@ -77,6 +77,12 @@ const prismaMock = {
 let idCounter = 0;
 let completedScrapeRun: any = null;
 
+jest.mock('@/server/affiliateImports/affiliateRepairActivityLease', () => ({
+  withAffiliateRepairActivityLease: async (
+    _sourceId: string,
+    action: () => Promise<unknown>,
+  ) => action(),
+}));
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 jest.mock('@/lib/id', () => ({
   createId: () => {

@@ -78,6 +78,12 @@ import type {
   ExecuteAffiliateSupplyLifecycleCommandInput,
 } from './affiliateSupplyPersistence';
 import { normalizeAffiliateSupplyIdentity, targetRuleFor } from './affiliateSupplyLifecycle';
+import {
+  AffiliatePendingRepairHoldError,
+  assertAffiliatePendingRepairClear,
+  type AffiliatePendingRepairDatabase,
+} from "./affiliatePendingRepairGuard";
+import { withAffiliateRepairActivityLease } from "./affiliateRepairActivityLease";
 import { hashAffiliateAgentValue } from './agentGatewayContracts';
 import { analyzeAffiliateDescriptionQuality } from "./descriptionQuality";
 import {
@@ -132,6 +138,8 @@ type AffiliateScrapeSourceRow = {
   organizationId?: string | null;
   baseUrl?: string | null;
   metadata?: unknown;
+  supplySourceId?: string | null;
+  updatedAt?: Date | string | null;
 };
 
 type AffiliateScrapeMappingRow = {
@@ -597,10 +605,12 @@ const AFFILIATE_SPORT_REVIEW_WARNING =
 const quarantineAffiliateCandidateTarget = async (
   candidate: AffiliateCandidateRecord,
   client: any = prisma,
+  beforeWrite?: () => Promise<void>,
 ): Promise<void> => {
   const { events, facilities, organizations } = affiliatePrisma(client);
   const eventId = nullableString(candidate.publishedEventId);
   if (eventId) {
+    await beforeWrite?.();
     await events.updateMany({
       where: { id: eventId, state: "PUBLISHED" },
       data: { state: "UNPUBLISHED", updatedAt: new Date() },
@@ -608,6 +618,7 @@ const quarantineAffiliateCandidateTarget = async (
   }
   const facilityId = nullableString(candidate.publishedFacilityId);
   if (facilityId) {
+    await beforeWrite?.();
     await facilities.updateMany({
       where: { id: facilityId, status: "ACTIVE" },
       data: { status: "DRAFT", updatedAt: new Date() },
@@ -615,6 +626,7 @@ const quarantineAffiliateCandidateTarget = async (
   }
   const organizationId = nullableString(candidate.publishedOrganizationId);
   if (organizationId) {
+    await beforeWrite?.();
     await organizations.updateMany({
       where: {
         id: organizationId,
@@ -3616,6 +3628,7 @@ const keepSourceOrganizationPrivateForPublishedClub = async (
   source: { organizationId?: string | null },
   targetOrganizationId: string,
   client: any = prisma,
+  beforeWrite?: () => Promise<void>,
 ) => {
   const sourceOrganizationId = nullableString(source.organizationId);
   if (!sourceOrganizationId || sourceOrganizationId === targetOrganizationId)
@@ -3632,6 +3645,7 @@ const keepSourceOrganizationPrivateForPublishedClub = async (
   ) {
     return;
   }
+  await beforeWrite?.();
   await organizations.update({
     where: { id: sourceOrganizationId },
     data: {
@@ -3647,12 +3661,12 @@ const assertSourceOrganization = async (
 ) => {
   await loadSourceOrganization(source, client);
 };
-
 const markSourceOrganizationListedForPublishedContent = async (
   source: { id?: string | null; organizationId?: string | null },
   client: any = prisma,
   preparedCoordinates?: unknown,
   preparedOrganizationFingerprint?: string,
+  beforeWrite?: () => Promise<void>,
 ) => {
   if (await sourceHasSeparatePublishedClubTarget(source, client)) return;
   const organization = await loadSourceOrganization(source, client);
@@ -3684,6 +3698,7 @@ const markSourceOrganizationListedForPublishedContent = async (
     // completed independently without blocking a correctly located child.
     return;
   }
+  await beforeWrite?.();
   const organizationUpdatedAt = candidateUpdatedAtDate(organization);
   await organizations.update({
     where: { id: organization.id, updatedAt: organizationUpdatedAt },
@@ -4321,6 +4336,7 @@ const upsertAffiliateOrganizationForCandidate = async (
     publicPageEnabled?: boolean;
     deferLogoUpload?: boolean;
     client?: any;
+    beforeWrite?: () => Promise<void>;
   } = {},
 ) => {
   const client = options.client ?? prisma;
@@ -4340,6 +4356,7 @@ const upsertAffiliateOrganizationForCandidate = async (
   ) {
     return existingOrganization;
   }
+  await options.beforeWrite?.();
   const data = await buildAffiliateOrganizationData(
     candidate,
     source,
@@ -4348,6 +4365,7 @@ const upsertAffiliateOrganizationForCandidate = async (
     existingOrganization,
     client,
   );
+  await options.beforeWrite?.();
   return organizations.upsert({
     where: { id: organizationId },
     create: affiliateOrganizationCreateData(organizationId, data),
@@ -4872,7 +4890,10 @@ export const enrichAffiliateCandidatesWithDetailPages = async (
   candidates: AffiliateCandidateInput[],
   mapping: AffiliateScrapeMapping,
   client: ScrapePageClient,
-  params: { referenceDate?: Date } = {},
+  params: {
+    referenceDate?: Date;
+    beforeFetch?: () => Promise<void>;
+  } = {},
 ): Promise<AffiliateCandidateInput[]> => {
   const detailPageMapping = mapping.detailPage;
   if (!detailPageMapping) return candidates;
@@ -4887,6 +4908,7 @@ export const enrichAffiliateCandidatesWithDetailPages = async (
     }
     if (fetchedDetailCount > 0) await sleep(delayMs);
     try {
+      await params.beforeFetch?.();
       const detailPage = await client.fetchPage({
         url: detailUrl,
         renderJavascript: detailPageMapping.renderJavascript,
@@ -4908,6 +4930,7 @@ export const enrichAffiliateCandidatesWithDetailPages = async (
         }),
       );
     } catch (error) {
+      if (error instanceof AffiliatePendingRepairHoldError) throw error;
       enriched.push(affiliateDetailFetchFailureCandidate(candidate, error));
     }
   }
@@ -4978,6 +5001,17 @@ type AffiliateScrapeRunContext = {
   sourceOrganization: AffiliateSourceOrganizationLocation | null;
   run: any;
 };
+
+const assertCurrentAffiliateScrapeRepairClear = async (
+  context: AffiliateScrapeRunContext,
+  client?: unknown,
+): Promise<void> => {
+  await assertAffiliateSourceRepairClear({
+    sourceId: context.sourceId,
+    expectedSupplySourceId: context.activeSupplySourceId,
+    client,
+  });
+};
 type AffiliateScrapeCompletionPage = Pick<
   ScrapedPage,
   "finalUrl" | "statusCode"
@@ -4993,6 +5027,20 @@ const assertAffiliateAutomaticScrapeAssessment = (assessment: any): void => {
     );
   }
 };
+
+const affiliatePendingRepairDatabaseFor = (
+  client: unknown,
+): AffiliatePendingRepairDatabase => client as AffiliatePendingRepairDatabase;
+
+const assertAffiliateSourceRepairClear = async (params: {
+  sourceId: string;
+  expectedSupplySourceId?: string | null;
+  client?: unknown;
+}) => assertAffiliatePendingRepairClear({
+  database: affiliatePendingRepairDatabaseFor(params.client ?? prisma),
+  sourceId: params.sourceId,
+  expectedSupplySourceId: params.expectedSupplySourceId,
+});
 
 const loadAffiliateAutomaticSupplyRoot = async (
   source: any,
@@ -5036,6 +5084,12 @@ const loadAffiliateAutomaticSupplyContract = async (
   source: any,
   supplyDatabase: any,
 ): Promise<Parameters<typeof targetRuleFor>[0] | null> => {
+  const supplyClient = supplyDatabase.rawClient ?? prisma;
+  await assertAffiliateSourceRepairClear({
+    sourceId: source.id,
+    expectedSupplySourceId: source.supplySourceId,
+    client: supplyClient,
+  });
   const supplyRoot = await loadAffiliateAutomaticSupplyRoot(
     source,
     supplyDatabase,
@@ -5044,11 +5098,28 @@ const loadAffiliateAutomaticSupplyContract = async (
     supplyDatabase,
     rolloutCohort: supplyRoot?.rolloutCohort,
   });
-  const assessment = await deriveAndPersistAffiliateSupplyAssessment({
-    supplySourceId: source.supplySourceId,
-    contract: contract ?? undefined,
-    db: supplyDatabase,
-  });
+  const assessment = await withAffiliateScrapeTransaction(
+    prisma,
+    async (transactionClient) => {
+      const transactionSupplyDatabase = affiliateSupplyDatabase(transactionClient);
+      await assertAffiliateSourceRepairClear({
+        sourceId: source.id,
+        expectedSupplySourceId: source.supplySourceId,
+        client: transactionClient,
+      });
+      const persistedAssessment = await deriveAndPersistAffiliateSupplyAssessment({
+        supplySourceId: source.supplySourceId,
+        contract: contract ?? undefined,
+        db: transactionSupplyDatabase,
+      });
+      await assertAffiliateSourceRepairClear({
+        sourceId: source.id,
+        expectedSupplySourceId: source.supplySourceId,
+        client: transactionClient,
+      });
+      return persistedAssessment;
+    },
+  );
   assertAffiliateAutomaticScrapeAssessment(assessment);
   return contract;
 };
@@ -5067,17 +5138,25 @@ const loadAffiliateScrapeRunContext = async (
     importMode?: AffiliateScrapeImportMode;
   },
 ): Promise<AffiliateScrapeRunContext> => {
-  const { sources, runs } = affiliatePrisma();
+  const { sources } = affiliatePrisma();
   const source = await sources.findUnique({ where: { id: sourceId } });
   if (!source) {
     throw new Error("Affiliate scrape source not found.");
   }
+  await assertAffiliateSourceRepairClear({
+    sourceId,
+    expectedSupplySourceId: source.supplySourceId,
+  });
   const importMode = params.importMode ?? "REVIEW";
   const supplyDatabase = affiliateSupplyDatabase();
   const automaticSupplyContract =
     importMode === "AUTOMATIC"
       ? await loadAffiliateAutomaticSupplyContract(source, supplyDatabase)
       : null;
+  await assertAffiliateSourceRepairClear({
+    sourceId,
+    expectedSupplySourceId: source.supplySourceId,
+  });
   const { row: mappingRow, mapping } = await resolveActiveMapping(source);
   if (importMode === "AUTOMATIC" && !mappingRow.validatedAt) {
     throw new Error(
@@ -5087,19 +5166,30 @@ const loadAffiliateScrapeRunContext = async (
   const sourceOrganization = mappingRequiresAffiliateSourceOrganization(mapping)
     ? await loadSourceOrganization(source)
     : null;
-  const run = await runs.create({
-    data: {
-      id: createId(),
-      sourceId,
-      ...(source.supplySourceId
-        ? { supplySourceId: source.supplySourceId }
-        : {}),
-      mappingId: mappingRow.id,
-      requestedByUserId: params.requestedByUserId ?? null,
-      status: "RUNNING",
-      fetchedUrl: mapping.listUrl,
+  const run = await withAffiliateScrapeTransaction(
+    prisma,
+    async (transactionClient) => {
+      await assertAffiliateSourceRepairClear({
+        sourceId,
+        expectedSupplySourceId: source.supplySourceId,
+        client: transactionClient,
+      });
+      const transactionRuns = affiliatePrisma(transactionClient).runs;
+      return transactionRuns.create({
+        data: {
+          id: createId(),
+          sourceId,
+          ...(source.supplySourceId
+            ? { supplySourceId: source.supplySourceId }
+            : {}),
+          mappingId: mappingRow.id,
+          requestedByUserId: params.requestedByUserId ?? null,
+          status: "RUNNING",
+          fetchedUrl: mapping.listUrl,
+        },
+      });
     },
-  });
+  );
   return {
     sourceId,
     source,
@@ -5118,6 +5208,10 @@ const fetchAffiliateScrapePage = async (
   context: AffiliateScrapeRunContext,
   client?: ScrapePageClient,
 ) => {
+  await assertAffiliateSourceRepairClear({
+    sourceId: context.sourceId,
+    expectedSupplySourceId: context.activeSupplySourceId,
+  });
   const pageClient = client ?? scrapingDogClient;
   const fetchedPage = await pageClient.fetchPage({
     url: context.mapping.listUrl || context.source.listUrl,
@@ -5169,6 +5263,10 @@ const reconcileAffiliateScrapeSupplyIdentity = async (
     return;
   }
 
+  await assertAffiliateSourceRepairClear({
+    sourceId: context.sourceId,
+    expectedSupplySourceId: context.activeSupplySourceId,
+  });
   // Only a transport-observed redirect can enter identity reconciliation.
   // Validate that resolved transport URL before loading or mutating identity.
   await assertSafePublicUrl(page.finalUrl);
@@ -5191,6 +5289,10 @@ const reconcileAffiliateScrapeSupplyIdentity = async (
     },
   });
   const successorRequired = identity.rootDecision === "SUCCESSOR_REQUIRED";
+  await assertAffiliateSourceRepairClear({
+    sourceId: context.sourceId,
+    expectedSupplySourceId: context.activeSupplySourceId,
+  });
   const identityResult = await ensureAffiliateSupplySource({
     requestedUrl: currentRoot.canonicalUrl,
     resolvedCanonicalUrl: page.finalUrl,
@@ -5359,7 +5461,13 @@ const extractAffiliateScrapeCandidates = async (params: {
     extractedListCandidates,
     params.context.mapping,
     params.client,
-    { referenceDate: effectiveReferenceDate },
+    {
+      referenceDate: effectiveReferenceDate,
+      beforeFetch: () => assertAffiliateSourceRepairClear({
+        sourceId: params.context.sourceId,
+        expectedSupplySourceId: params.context.activeSupplySourceId,
+      }).then(() => undefined),
+    },
   );
   return {
     isEmptyStateMatched,
@@ -5498,12 +5606,14 @@ type AffiliateCandidateTargetPersistenceParams = {
   shouldPublishCandidate: boolean;
   transactionClient: any;
   candidates: any;
+  beforeWrite?: () => Promise<void>;
 };
 
 const persistAffiliateEventTarget = async (
   params: AffiliateCandidateTargetPersistenceParams,
   publishedStatusData: Record<string, string>,
 ) => {
+  await params.beforeWrite?.();
   const event = await upsertAffiliateEventForCandidate(
     params.savedCandidate,
     params.source,
@@ -5516,8 +5626,12 @@ const persistAffiliateEventTarget = async (
     await markSourceOrganizationListedForPublishedContent(
       params.source,
       params.transactionClient,
+      undefined,
+      undefined,
+      params.beforeWrite,
     );
   }
+  await params.beforeWrite?.();
   return params.candidates.update({
     where: { id: params.savedCandidate.id },
     data: {
@@ -5531,6 +5645,7 @@ const persistAffiliateTeamTarget = async (
   params: AffiliateCandidateTargetPersistenceParams,
   publishedStatusData: Record<string, string>,
 ) => {
+  await params.beforeWrite?.();
   const team = await upsertAffiliateTeamForCandidate(
     params.savedCandidate,
     params.source,
@@ -5539,6 +5654,7 @@ const persistAffiliateTeamTarget = async (
       client: params.transactionClient,
     },
   );
+  await params.beforeWrite?.();
   return params.candidates.update({
     where: { id: params.savedCandidate.id },
     data: {
@@ -5552,6 +5668,7 @@ const persistAffiliateFacilityTarget = async (
   params: AffiliateCandidateTargetPersistenceParams,
   publishedStatusData: Record<string, string>,
 ) => {
+  await params.beforeWrite?.();
   const facility = await upsertAffiliateFacilityForCandidate(
     params.savedCandidate,
     params.source,
@@ -5564,8 +5681,12 @@ const persistAffiliateFacilityTarget = async (
     await markSourceOrganizationListedForPublishedContent(
       params.source,
       params.transactionClient,
+      undefined,
+      undefined,
+      params.beforeWrite,
     );
   }
+  await params.beforeWrite?.();
   return params.candidates.update({
     where: { id: params.savedCandidate.id },
     data: {
@@ -5579,6 +5700,7 @@ const persistAffiliateClubTarget = async (
   params: AffiliateCandidateTargetPersistenceParams,
   publishedStatusData: Record<string, string>,
 ) => {
+  await params.beforeWrite?.();
   const organization = await upsertAffiliateOrganizationForCandidate(
     params.savedCandidate,
     params.source,
@@ -5586,8 +5708,10 @@ const persistAffiliateClubTarget = async (
       status: params.shouldPublishCandidate ? "LISTED" : "UNLISTED",
       publicPageEnabled: params.shouldPublishCandidate,
       client: params.transactionClient,
+      beforeWrite: params.beforeWrite,
     },
   );
+  await params.beforeWrite?.();
   const savedWithOrganization = await params.candidates.update({
     where: { id: params.savedCandidate.id },
     data: {
@@ -5600,6 +5724,7 @@ const persistAffiliateClubTarget = async (
       params.source,
       organization.id,
       params.transactionClient,
+      params.beforeWrite,
     );
   }
   return savedWithOrganization;
@@ -5612,6 +5737,7 @@ const persistAffiliateFallbackTarget = async (
     params.shouldPublishCandidate &&
     params.savedCandidate.status !== "PUBLISHED"
   ) {
+    await params.beforeWrite?.();
     return params.candidates.update({
       where: { id: params.savedCandidate.id },
       data: { status: "PUBLISHED" },
@@ -5644,12 +5770,14 @@ const persistAffiliateCandidateTarget = async (
   return persistAffiliateFallbackTarget(params);
 };
 
+
 const persistAffiliateCandidateForRun = async (params: {
   context: AffiliateScrapeRunContext;
   candidate: AffiliateCandidateInput;
   transactionClient: any;
   automaticallyPublishCandidates: boolean;
   automationHeld: boolean;
+  beforeWrite?: () => Promise<void>;
 }): Promise<AffiliateScrapePersistenceResult> => {
   const { candidates } = affiliatePrisma(params.transactionClient);
   const dedupeKey = buildAffiliateCandidateDedupeKey(
@@ -5707,6 +5835,7 @@ const persistAffiliateCandidateForRun = async (params: {
     existingCandidate,
     quarantineInvalidSport,
   );
+  await params.beforeWrite?.();
   const savedCandidate = await saveAffiliateCandidateForRun({
     candidates,
     existingCandidate,
@@ -5714,9 +5843,11 @@ const persistAffiliateCandidateForRun = async (params: {
     status: initialCandidateStatus,
   });
   if (quarantineInvalidSport) {
+    await params.beforeWrite?.();
     await quarantineAffiliateCandidateTarget(
       savedCandidate,
       params.transactionClient,
+      params.beforeWrite,
     );
     return { savedCandidate, existingCandidate };
   }
@@ -5727,6 +5858,7 @@ const persistAffiliateCandidateForRun = async (params: {
     shouldPublishCandidate,
     transactionClient: params.transactionClient,
     candidates,
+    beforeWrite: params.beforeWrite,
   });
   return { savedCandidate: savedWithTarget, existingCandidate };
 };
@@ -5792,6 +5924,7 @@ const persistAffiliateCandidatesForRun = async (params: {
   automaticallyPublishCandidates: boolean;
   automationHeld: boolean;
   transactionClient: any;
+  beforeWrite?: () => Promise<void>;
 }) => {
   const result = {
     savedCandidates: [] as any[],
@@ -5807,6 +5940,7 @@ const persistAffiliateCandidatesForRun = async (params: {
       transactionClient: params.transactionClient,
       automaticallyPublishCandidates: params.automaticallyPublishCandidates,
       automationHeld: params.automationHeld,
+      beforeWrite: params.beforeWrite,
     });
     result.savedCandidates.push(persisted.savedCandidate);
     const lifecycleTarget = buildAffiliateLifecycleTarget({
@@ -5856,28 +5990,53 @@ const buildAffiliateScrapeRunLogs = (params: {
   rejectionSummary: buildAffiliateRejectionSummary(params.rejectedCandidates),
   rejectedCandidates: params.rejectedCandidates.slice(0, 25),
 });
-
 const recordAffiliateAutomationHold = async (params: {
   context: AffiliateScrapeRunContext;
   transactionSources: any;
   automationDriftReasons: string[];
   automationMetrics: Record<string, unknown>;
+  beforeWrite?: () => Promise<void>;
 }) => {
   const heldAt = new Date();
+  const currentSource =
+    typeof params.transactionSources.findUnique === "function"
+      ? await params.transactionSources.findUnique({
+          where: { id: params.context.sourceId },
+          select: { metadata: true, updatedAt: true },
+        })
+      : params.context.source;
+  await params.beforeWrite?.();
+  const metadata = {
+    ...recordValue(currentSource?.metadata ?? params.context.source.metadata),
+    [AFFILIATE_AUTOMATION_REVIEW_METADATA_KEY]: {
+      heldAt: heldAt.toISOString(),
+      runId: params.context.run.id,
+      mappingId: params.context.mappingRow.id,
+      reasons: params.automationDriftReasons,
+      metrics: params.automationMetrics,
+    },
+  };
+  const updatedAt = currentSource?.updatedAt;
+  if (
+    updatedAt !== undefined &&
+    updatedAt !== null &&
+    typeof params.transactionSources.updateMany === "function"
+  ) {
+    const result = await params.transactionSources.updateMany({
+      where: { id: params.context.sourceId, updatedAt },
+      data: {
+        autoScrapeEnabled: false,
+        metadata,
+      },
+    });
+    if (result?.count === 1) return;
+    throw new Error("Affiliate source changed while recording automation hold.");
+  }
   await params.transactionSources.update({
     where: { id: params.context.sourceId },
     data: {
       autoScrapeEnabled: false,
-      metadata: {
-        ...recordValue(params.context.source.metadata),
-        [AFFILIATE_AUTOMATION_REVIEW_METADATA_KEY]: {
-          heldAt: heldAt.toISOString(),
-          runId: params.context.run.id,
-          mappingId: params.context.mappingRow.id,
-          reasons: params.automationDriftReasons,
-          metrics: params.automationMetrics,
-        },
-      },
+      metadata,
     },
   });
 };
@@ -5899,6 +6058,10 @@ const completeAffiliateScrapeWithLifecycle = async (params: {
   automationMetrics: Record<string, unknown>;
   transactionClient: any;
 }) => {
+  await assertCurrentAffiliateScrapeRepairClear(
+    params.context,
+    params.transactionClient,
+  );
   const supplyDatabase = affiliateSupplyDatabase(params.transactionClient);
   const currentRoot = await supplyDatabase.supplySources.findUnique({
     where: { id: params.activeSupplySourceId },
@@ -5919,6 +6082,10 @@ const completeAffiliateScrapeWithLifecycle = async (params: {
     params.isEmptyStateMatched && params.extractedListCandidates.length === 0
       ? "RECORD_EMPTY_REFRESH"
       : "RECORD_REFRESH";
+  await assertCurrentAffiliateScrapeRepairClear(
+    params.context,
+    params.transactionClient,
+  );
   await executeAffiliateSupplyLifecycleCommand({
     supplySourceId: params.activeSupplySourceId,
     rolloutCohort: currentRoot.rolloutCohort,
@@ -5958,12 +6125,17 @@ const completeAffiliateScrapeWithoutLifecycle = async (params: {
   context: AffiliateScrapeRunContext;
   transactionSources: any;
   transactionRuns: any;
+  transactionClient: any;
   extractedCandidates: AffiliateCandidateInput[];
   savedCandidates: any[];
   page: AffiliateScrapeCompletionPage;
   runLogs: Record<string, unknown>;
   finishedAt: Date;
 }) => {
+  await assertCurrentAffiliateScrapeRepairClear(
+    params.context,
+    params.transactionClient,
+  );
   const finishedRun = await params.transactionRuns.update({
     where: { id: params.context.run.id },
     data: {
@@ -5976,6 +6148,10 @@ const completeAffiliateScrapeWithoutLifecycle = async (params: {
       logs: params.runLogs,
     },
   });
+  await assertCurrentAffiliateScrapeRepairClear(
+    params.context,
+    params.transactionClient,
+  );
   await params.transactionSources.update({
     where: { id: params.context.sourceId },
     data: {
@@ -6034,12 +6210,19 @@ const persistAffiliateScrapeRunTransaction = async (params: {
     sources: transactionSources,
     runs: transactionRuns,
   } = affiliatePrisma(params.transactionClient);
+  const beforeWrite = () =>
+    assertCurrentAffiliateScrapeRepairClear(
+      params.context,
+      params.transactionClient,
+    );
+  await beforeWrite();
   if (params.automation.automationHeld) {
     await recordAffiliateAutomationHold({
       context: params.context,
       transactionSources,
       automationDriftReasons: params.automation.automationDriftReasons,
       automationMetrics: params.automation.automationMetrics,
+      beforeWrite,
     });
   }
   const persisted = await persistAffiliateCandidatesForRun({
@@ -6049,6 +6232,7 @@ const persistAffiliateScrapeRunTransaction = async (params: {
       params.automation.automaticallyPublishCandidates,
     automationHeld: params.automation.automationHeld,
     transactionClient: params.transactionClient,
+    beforeWrite,
   });
   const finishedAt = new Date();
   const runLogs = buildAffiliateScrapeRunLogs({
@@ -6062,6 +6246,7 @@ const persistAffiliateScrapeRunTransaction = async (params: {
     automationDriftReasons: params.automation.automationDriftReasons,
     automationMetrics: params.automation.automationMetrics,
   });
+  await beforeWrite();
   return completeAffiliateScrapeRun({
     context: params.context,
     transactionSources,
@@ -6089,6 +6274,7 @@ const tryRecordAffiliateScrapeLifecycleFailure = async (params: {
     return { recorded: false, error: null };
   }
   try {
+    await assertCurrentAffiliateScrapeRepairClear(params.context);
     const supplyDatabase = affiliateSupplyDatabase();
     const currentRoot = await supplyDatabase.supplySources.findUnique({
       where: { id: params.context.activeSupplySourceId },
@@ -6096,6 +6282,7 @@ const tryRecordAffiliateScrapeLifecycleFailure = async (params: {
     if (!currentRoot) {
       return { recorded: false, error: null };
     }
+    await assertCurrentAffiliateScrapeRepairClear(params.context);
     await executeAffiliateSupplyLifecycleCommand({
       supplySourceId: params.context.activeSupplySourceId,
       command: "RECORD_REFRESH_FAILURE",
@@ -6119,6 +6306,9 @@ const tryRecordAffiliateScrapeLifecycleFailure = async (params: {
     });
     return { recorded: true, error: null };
   } catch (failure) {
+    if (failure instanceof AffiliatePendingRepairHoldError) {
+      throw failure;
+    }
     return {
       recorded: false,
       error: failure instanceof Error ? failure : new Error(String(failure)),
@@ -6154,6 +6344,25 @@ const handleAffiliateScrapeFailure = async (
   throw error;
 };
 
+const throwAffiliateSourceScrapeHold = async (
+  error: AffiliatePendingRepairHoldError,
+  context: AffiliateScrapeRunContext | null,
+): Promise<never> => {
+  const run = context?.run ?? null;
+  if (run?.id) {
+    const { runs } = affiliatePrisma();
+    await runs.update({
+      where: { id: run.id },
+      data: {
+        status: "SKIPPED",
+        finishedAt: new Date(),
+        errorMessage: error.reason,
+      },
+    });
+  }
+  throw error;
+};
+
 export const runAffiliateSourceScrape = async (
   sourceId: string,
   params: {
@@ -6161,35 +6370,37 @@ export const runAffiliateSourceScrape = async (
     client?: ScrapePageClient;
     importMode?: AffiliateScrapeImportMode;
   } = {},
-) => {
-  const context = await loadAffiliateScrapeRunContext(sourceId, params);
+) => withAffiliateRepairActivityLease(sourceId, async () => {
+  let context: AffiliateScrapeRunContext | null = null;
   try {
+    const loadedContext = await loadAffiliateScrapeRunContext(sourceId, params);
+    context = loadedContext;
     const { pageClient, page } = await fetchAffiliateScrapePage(
-      context,
+      loadedContext,
       params.client,
     );
-    await reconcileAffiliateScrapeSupplyIdentity(context, page);
+    await reconcileAffiliateScrapeSupplyIdentity(loadedContext, page);
     const extracted = await extractAffiliateScrapeCandidates({
-      context,
+      context: loadedContext,
       page,
       client: pageClient,
     });
     const classified = await classifyAffiliateScrapeCandidates({
       candidates: extracted.extractedCandidates,
-      sourceOrganization: context.sourceOrganization,
+      sourceOrganization: loadedContext.sourceOrganization,
       referenceDate: extracted.effectiveReferenceDate,
-      supplyBacked: Boolean(context.activeSupplySourceId),
+      supplyBacked: Boolean(loadedContext.activeSupplySourceId),
     });
     const automation = buildAffiliateAutomationDecision({
-      context,
+      context: loadedContext,
       importableCandidates: classified.importableCandidates,
       rejectedCandidates: classified.rejectedCandidates,
     });
-    return withAffiliateScrapeTransaction(
+    return await withAffiliateScrapeTransaction(
       prisma,
       async (transactionClient) =>
         persistAffiliateScrapeRunTransaction({
-          context,
+          context: loadedContext,
           transactionClient,
           page,
           extractedCandidates: extracted.extractedCandidates,
@@ -6201,9 +6412,20 @@ export const runAffiliateSourceScrape = async (
         }),
     );
   } catch (error) {
-    return handleAffiliateScrapeFailure(context, error);
+    if (error instanceof AffiliatePendingRepairHoldError) {
+      return throwAffiliateSourceScrapeHold(error, context);
+    }
+    if (!context) throw error;
+    try {
+      return await handleAffiliateScrapeFailure(context, error);
+    } catch (failure) {
+      if (failure instanceof AffiliatePendingRepairHoldError) {
+        return throwAffiliateSourceScrapeHold(failure, context);
+      }
+      throw failure;
+    }
   }
-};
+});
 
 export const listAffiliateCandidates = async (
   params: { status?: string | null; sourceId?: string | null } = {},

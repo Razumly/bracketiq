@@ -2784,3 +2784,316 @@ Contract. TPH and Ultimate are approved repair examples, not authority to
 publish outside that cohort or to start the full fleet. Any hold release,
 activation, publication, or broader admission requires current authorization.
 Issue 70 remains open for those operational acceptance gates.
+
+## Existing-data repair before new collection
+
+The user changed the next priority. Review and repair the complete existing
+mapping and data backlog before new-source discovery or collection. This
+supersedes the proposed next Portland discovery-to-publication trial above.
+TPH and Ultimate remain approved and held. Mission remains excluded.
+
+### Progress
+
+- [x] Inventory all mapping, approval, intake, source, candidate, and Gateway states.
+- [x] Classify the recorded concerns and check stored artifact/identity availability.
+- [x] Run the current governed admission PREVIEW without writes.
+- [x] Set the existing-source refresh boundary with the user.
+- [ ] Implement and review the governed path missing from the current backlog.
+- [ ] Run bounded producer and independent reviewer repair batches.
+- [ ] Verify candidate/source updates and preserve current public content.
+- [ ] Report every remaining human, policy, identity, or evidence blocker.
+
+### Inventory
+
+The live census found 402 HUMAN_REVIEW_REQUIRED mapping jobs, 453 QUEUED jobs,
+523 FAILED jobs, one REVIEW_REQUIRED job, 601 legacy APPROVED jobs, four
+COMPLETED governed repairs, and 79 EXPANDED jobs. These are mapping-job counts,
+not source counts.
+
+The 402 human-review jobs are the same jobs behind 228 deferred and 174
+rejected mapping-package approvals. The 301 sport-requeued jobs account for
+another 301 rejected approvals. Four old rejected approvals belong to the
+now-completed governed repairs. Those historical rows must not be retried.
+The sole REVIEW_REQUIRED mapping job belongs to the excluded Mission source.
+Do not add approval and mapping counts together.
+
+All 402 human-review jobs lack sourceId, mappingId, supplySourceId, a current
+claim catalog, and parsed sport determinations. Their old sport review labels
+are unrecorded. They must be reassessed from evidence before a new human sport
+decision is requested. The existing guidance provisionally assigns 15 to
+MAPPING_AGENT, 151 to SYSTEM/handoff repair, and 236 to USER. These are triage
+labels, not fresh independent review decisions.
+
+Stored PAGE_HTML and PAGE_MARKDOWN artifacts with File records exist for all
+402 human-review and 453 queued jobs, plus 514 of the 523 failed jobs. Nine
+failed jobs lack that paired metadata. This does not prove every stored byte
+is readable or that every page contains sufficient source evidence; the
+repair admission must verify both.
+
+For human-review jobs, exact source-key/provenance joins find one source for
+205 jobs, two for one job, and none for 196 jobs. No identity is assigned by
+this census. The failed and queued sets also need source identity work.
+The stored capture range is July 16 through August 15, 2026. Mapping repair
+alone cannot prove that current schedules, links, or prices are fresh.
+
+There are 168 NEEDS_REVIEW candidates: 97 CLUB, 46 EVENT, and 25 RENTAL.
+All carry the noncanonical sport warning. Some also lack event location or
+division evidence. Source mapping approval does not itself repair these
+persisted candidate rows. There are 2,821 legacy PUBLISHED candidates whose
+visible content must remain protected during repair.
+
+### Current execution barrier
+
+The deployed Gateway's legacy admission PREVIEW scanned its 306-job
+sport-reconciliation cohort and selected zero eligible jobs. Report hash:
+`a844dfb71ab1a7c131fb488ec112184e013d50d29ce1529dfced23bb057083f0`.
+Among the 301 remaining queued jobs, 237 fail source/mapping identity checks
+and 64 have published or validated state that the private-trial route rejects.
+The five prior trial jobs are already completed or excluded.
+
+The existing Gateway is not a generic backlog repair interface. The human
+review endpoint supports only exact sport decisions and displays at most
+250 rows, with no cursor. Old direct requeue/repair scripts are not a safe
+replacement for governed admission. Do not reset statuses, invent source
+identity, treat old NOT_IN_CATALOG labels as current policy, or restart the
+retired Goal fleet.
+
+### Repair order and safety
+
+Use a governed existing-data repair path with exact reviewed job/source lists.
+Begin with recoverable package/handoff defects and evidence-backed sport
+reassessment. Reconstruct identity only from verified source and capture
+lineage. Hold ambiguous merges, policy exclusions, and unsupported sports for
+the proper independent or human decision. Rebuild from original artifacts
+when an old producer workspace or commit is unavailable.
+
+Store repaired mappings as reviewable versions. Preserve current public
+records and their working mapping while a replacement is under review.
+Apply source/candidate corrections only through a reviewed, atomic,
+idempotent Gateway transition. Keep new-source discovery, fleet expansion,
+and automatic publication outside this repair program.
+
+The user selected Refresh existing sources. The repair program may selectively
+recapture already-known source URLs to verify current data. New-source
+discovery remains off. Corrections are staged for independent review while
+current public records stay protected. No capture or runtime state change
+has occurred during this census. Admission is closed and the workloads are stopped.
+
+### Evidence and outcome
+
+The complete read-only census, 402-row human-review inventory, relationship
+and artifact metadata, and full governed PREVIEW are stored under
+`/home/bracketiq/.config/bracketiq-affiliate-agents/existing-data-repair-inventory-20260913`.
+No production row was changed. The refresh boundary is approved. The next
+implementation must add governed repair admission and public-safe staging;
+restarting the current queue cannot perform that work.
+
+### Governed repair implementation contract
+
+Use a new operator-only existing-data repair admission, not a relaxed legacy
+sport admission. PREVIEW/APPLY names exact existing mapping job IDs or source
+IDs, with a combined limit of 20. The report binds selection, current records,
+source evidence, actor, reason, and current contracts. APPLY is atomic,
+idempotent, closed-admission-only, and rejects active ownership or state drift.
+Preserve old attempts and result history. A new repair cycle does not erase
+old failures or approvals.
+
+The Mapping Producer and reviewer carry an EXISTING_DATA_REPAIR context.
+It contains intake/run/catalog identity, exact source identity, admission hash,
+working mapping identity, protected source-state hash, public-replacement flag,
+all recorded repair reasons, and any existing authenticated sport scope.
+The Gateway derives these fields. The model cannot invent preservation
+authority or relax source restrictions.
+
+For a known intake with no source row, create a real private source and root
+from one exact owned page identity. Do not choose an arbitrary artifact or
+merge ambiguous identities. The source has no organization or active mapping,
+and automation stays disabled. Unresolved kind is explicitly UNCLASSIFIED.
+Its source/root metadata and claim carry the same source-kind assessment and
+supported kind allowlist. Absent hints allow CLUB, EVENT, and RENTAL as possible
+kinds, not as facts. Multiple hints are not reduced to the first one. Explicit
+TEAM or unsupported hints remain held.
+
+The producer chooses a concrete package kind from evidence within that
+allowlist. Successful commit classifies only the private UNCLASSIFIED source
+and root through one compare-and-set transaction. Invalid validation leaves
+them unclassified. Existing concrete sources retain their authoritative kind.
+All current claims still require a kind except this explicit assessment case.
+Old claim formats and hashes remain readable.
+
+A public replacement uses one server-written pending-mapping pointer, with
+the candidate mapping/package/candidate/evidence hashes and a snapshot of
+the protected working source, mapping, and organization state. Commit and
+RECORD_MAPPING do not switch the working mapping. Independent approval
+validates the pending package and records its approval without changing
+public organization fields, current source automation, candidates, or targets.
+The working snapshot remains the public assessment. A trusted, database-derived
+staged-review proof permits approval of the pending mapping; the model cannot
+supply that proof. The producer lineage must point to the new candidate,
+not silently return to the working mapping.
+
+Fresh capture has a separate operator PREVIEW/APPLY/PROCESS interface for
+exact existing intake/page IDs. The capture intent is persisted in the run
+summary and is checked before processing. Evidence-only mode preserves
+existing mapping/intake state, performs no discovered-page persistence or
+successor-root creation, and creates no legacy mapping job. It records final
+URL provenance; redirect identity drift remains held for review. Only the
+reviewed run is processed. Existing ordinary capture behavior stays unchanged.
+
+The Gateway exposes these operator-only POST routes under its configured path
+prefix: `/existing-repair/admission`, `/existing-repair/capture`, and
+`/existing-repair/capture/process`. All three require closed claim admission.
+The admission and capture routes accept PREVIEW or APPLY. APPLY requires the
+exact PREVIEW report hash. The caller cannot supply an operator identity,
+source kind, preservation flag, or new URL.
+
+Admission can select current evidence with `evidenceSelections`. Each selection
+names one existing mapping job, run, and primary page. It can name at most two
+supporting pages from that same intake and run. Source creation requires a
+listing page. An existing source can use its exact known page identity.
+The Gateway verifies page ownership, policy, paired HTML/Markdown, and stored
+bytes. It includes verified supporting pages in the claim. This
+lets a producer use program and About evidence without a new-source search.
+The report hash binds this evidence selection. A fresh evidence-only run does
+not replace the intake's old `lastRunId`; select its exact new run ID.
+
+Most legacy scrape sources have no Supply Source root. PREVIEW binds their
+actual state with a null root. A missing referenced root is still an error.
+APPLY can create and link one verified exact root in its transaction. It then
+captures the admitted working-state hash. It must not change public content,
+the working mapping pointer, or source automation during that link.
+
+For an UNCLASSIFIED source, commit records both the original admitted state
+hash and the exact state hash after the authorized kind change. The immutable
+claim keeps its original context. Later operations must verify the pending
+mapping's server-written provenance before accepting that changed state.
+An unrelated state change remains a conflict.
+
+Keep the original repair context through bounded reviewer-requested repairs.
+Each `mapping-repair:` child must trace to a completed reviewer request and
+its completed producer. Check the exact source, package, pass, manifest union,
+and immutable claim/result hashes. Stop at the original operator admission.
+Reject a cycle, an unrelated parent, or a pass above three. Additional reviewer
+artifacts do not replace the original first-party evidence.
+
+The working-state hash does not include the root's lifecycle generation,
+derived stage, or derived outcome. Those fields record workflow progress.
+The Gateway still checks the separate lifecycle-generation compare-and-set.
+Keep all source content, identity, working mapping, organization, and automation
+fields in the protected state. A valid reviewer-created child can replace the
+pending mapping. It cannot change the working mapping or commit twice in one
+claim. A private provisional kind can change only within the original allowed
+kinds and through a validated child commit.
+
+Producer completion must keep the legacy mapping job linked to the pending
+mapping, not the working mapping. A producer gap leaves that job in
+HUMAN_REVIEW_REQUIRED and records its evidence. It must not change the working
+source's status or automation. Independent approval rechecks the current
+sports catalog and the original artifact citations.
+
+Capture processing checks the reviewed marker hash after it acquires the run.
+It checks the loaded intake and page snapshot again before provider access.
+This prevents a late page-URL edit from changing the reviewed capture scope.
+Generic intake workers cannot use the evidence-only marker as authorization.
+Capture PREVIEW and PROCESS also hold excluded, replaced, ambiguous, or
+policy-blocked source records. An expired recorded domain policy requires
+review before a fresh request.
+
+Reuse the existing importer fields for date, time, location, division, price,
+capacity, and status extraction. Keep source-wording description checks and
+exact catalog sport evidence. An unsupported extraction capability or genuinely
+missing evidence must be reported; no placeholder value or generic sport may
+make a package pass.
+
+Advance role/prompt contracts to version 10 for these interface changes.
+The deployed version-9 fleet remains unchanged while source work is implemented
+and reviewed. Publication, deployment, and opening the backlog workload need
+their own current, exact operational authorization after the source gate.
+
+### Verification status after existing-data repair review
+
+The review fixes are implemented in the Gateway and the retained PostgreSQL
+regression. The Gateway now derives reviewer pass from the authenticated
+producer subject, namespaces newly generated reviewer references by producer
+claim and generation, preserves the pass on `PACKAGE_COMMITTED`, and rejects
+an exhausted `PRODUCER_REPAIR_REQUIRED` result before any terminal effect.
+
+Operator recovery now has an existing-data repair branch. It checks the
+server-owned repair context, pending mapping content hash, producer and
+reviewer lineage, reviewer manifest, contract snapshot, catalog, protected
+working/public state, receipt, and lifecycle transition. An exact persisted
+approval transition completes the quarantined Gateway result without invoking
+the approval adapter or changing working data. The legacy recovery branch is
+unchanged.
+
+The database regression now exercises two reviewer rejections, derives child
+decisions from each server-authored `repairDirective`, checks pass three
+exhaustion after `PACKAGE_COMMITTED`, and rejects an altered pending mapping.
+It retains the existing assertions for working source, mapping, organization,
+public projections, evidence-gap holds, and zero active claims.
+
+The final source gate passed on 2026-09-14. Both review axes are complete.
+The gate ran `npx tsc --noEmit`, targeted ESLint, 14 unit/API suites with
+517 tests, and three PostgreSQL suites with 61 tests. All checks passed.
+ESLint printed two Babel file-size notices. It reported no lint failures.
+
+Admission now rejects snapshot overflow instead of using incomplete evidence
+or ownership rows. It checks active sibling jobs separately. Each selected
+source ID applies only to its own mapping jobs. The baseline includes the
+resolved root before a source backlink is added. Current policy, evidence
+selection, deployment, source state, actor, and reason bind the admission.
+
+The admission identity also binds the current catalog, kind assessment, sport
+scope, and complete repair-reason set. A prior admission counts as current only
+when its stored authority context, exact evidence selection, and manifest match.
+Admission's own source/root links do not force a duplicate cycle. A changed
+catalog, working state, or authority can permit a new reviewed cycle.
+PREVIEW rejects a reason set that exceeds the claim schema. It does not remove
+recorded human guidance to fit the limit.
+
+Capture always runs the server's source, root, and policy checks after claim.
+An optional callback cannot replace them. A policy can expire without a row
+change. Such a policy blocks the provider request. An ordinary queue request
+cannot reuse a governed run that appears between its ownership reads.
+The ordinary queue decision and run creation use one Serializable transaction.
+Policy review and its optional queue use that same transaction. A queue
+conflict rolls back the complete policy save. The admin API returns HTTP 409.
+
+Capture replay follows persisted recovery links, not run ID order. Recovery
+keeps each predecessor link through repeated stale-worker replacements.
+An incomplete or branched recorded request is an error, not a new capture.
+Multiple selected page roots are valid only when each root belongs to the
+same intake and has no conflicting live source.
+
+The retained PostgreSQL scenario now includes two stale capture recoveries,
+an ambiguous terminal branch, and approval recovery before the first lifecycle
+write. The final gate must run these cases before production authorization.
+
+Ordinary full and lightweight source activity use one shared PostgreSQL
+advisory lease. The lease covers provider access, identity reconciliation, and
+later writes. Existing-data admission APPLY and pending-mapping COMMIT use the
+matching exclusive transaction lock. A busy lock blocks the operation.
+The lease uses one global key and permits concurrent shared activity.
+It does not keep a Prisma transaction open during a provider request.
+Every session lease releases its connection in `finally`.
+
+Manual scrape success still returns a non-null run. A pending repair throws
+the typed hold; the admin API returns HTTP 409 and the scheduler reports
+SKIPPED. A source with a pending repair also blocks organization relisting
+through another source that shares that organization.
+
+The PostgreSQL gate proved the forced ordinary/governed queue race, complete
+policy rollback, both advisory lock directions, release after failure,
+oversized-history rejection, and new cycles after catalog or working-state
+changes. It also proved retryable COMMIT contention and approval recovery both
+before and after a lifecycle write. The interrupted pre-write case uses real
+Gateway reconciliation to quarantine the claim before operator recovery.
+
+The deterministic database proof replaces the redundant transaction-wiring
+unit fixture. The temporary smoke script and check configuration are removed.
+The source contains no temporary repair debug logging.
+
+This source work made no production changes or provider requests.
+The version-10 image publication, deployment, and bounded producer/reviewer
+execution still require separate current authorization. Discovery remains
+outside the repair scope.

@@ -8,6 +8,8 @@ import {
 } from "../affiliateSupplyLifecycle";
 import { AffiliateLegacyRepairAdmissionError } from "../affiliateLegacyRepairAdmission";
 import { AffiliateSourceExclusionAdmissionError } from "../affiliateSourceExclusionAdmission";
+import { AffiliateExistingDataRepairAdmissionError } from "../affiliateExistingDataRepairAdmission";
+import { AffiliateExistingDataRepairCaptureError } from "../affiliateExistingDataRepairCapture";
 
 import {
   AffiliateAgentGatewayError,
@@ -500,6 +502,9 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
     reportHash: "a".repeat(64),
     writeCount: 0,
   }));
+  const existingDataRepairAdmission = jest.fn(async () => ({ reportHash: "a".repeat(64), writeCount: 0 }));
+  const existingRepairCapture = jest.fn(async () => ({ reportHash: "a".repeat(64), writeCount: 0 }));
+  const existingRepairCaptureProcess = jest.fn(async () => ({ runId: "repair-run-1", status: "SUCCEEDED" }));
   const reviewerEffectRecovery = jest.fn(async (
     request: AffiliateAgentReviewerEffectRecoveryRequest,
   ): Promise<AffiliateAgentReviewerEffectRecoveryReport> => ({
@@ -535,6 +540,9 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
       legacyRepairAdmission,
       legacyRepairRetry,
       sourceExclusionAdmission,
+      existingDataRepairAdmission,
+      existingRepairCapture,
+      existingRepairCaptureProcess,
       replenishment: gateway.replenishment,
       reviewerEffectRecovery,
       gateway,
@@ -728,6 +736,89 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
     );
     expect(response.status).toBe(404);
     expect(reviewerEffectRecovery).not.toHaveBeenCalled();
+  });
+
+  const existingRepairRoutes = [
+    {
+      route: "/existing-repair/admission",
+      body: { mode: "PREVIEW", jobIds: ["mapping-job-1"], reason: "Repair stored mapping concerns." },
+      action: existingDataRepairAdmission,
+    },
+    {
+      route: "/existing-repair/capture",
+      body: { mode: "PREVIEW", targets: [{ intakeId: "intake-1", pageIds: ["page-1"] }], reason: "Verify current source data." },
+      action: existingRepairCapture,
+    },
+    {
+      route: "/existing-repair/capture/process",
+      body: { runId: "repair-run-1" },
+      action: existingRepairCaptureProcess,
+    },
+  ];
+
+  it.each(existingRepairRoutes)("protects $route from workers, actor forgery, and open admission", async ({ route, body, action }) => {
+    expect((await request(route, WORKER_ROLE_CREDENTIAL, "POST", body)).status).toBe(401);
+    expect((await request(route, OPERATOR_TOKEN, "POST", { ...body, operatorId: "forged-operator" })).status).toBe(400);
+    expect((await requestAt(route, OPERATOR_TOKEN, "POST", body)).status).toBe(404);
+    readinessValue = true;
+    const opened = await request("/admission/open", OPERATOR_TOKEN, "POST", {
+      role: "MAPPING_PRODUCER", workerId: "mapping-producer-1", roleCredential: WORKER_ROLE_CREDENTIAL, leaseSeconds: 300,
+    });
+    expect(opened.status).toBe(200);
+    const blocked = await request(route, OPERATOR_TOKEN, "POST", body);
+    expect(blocked.status).toBe(409);
+    expect(await blocked.json()).toMatchObject({
+      error: { code: "EXISTING_REPAIR_ADMISSION_OPEN", isRetryable: false },
+    });
+    expect(action).not.toHaveBeenCalled();
+  });
+
+  it("rejects unbounded repair selection and writes without a reviewed hash", async () => {
+    const preview = { mode: "PREVIEW", jobIds: ["mapping-job-1"], reason: "Repair stored mapping concerns." };
+    for (const body of [
+      { ...preview, jobIds: undefined },
+      { ...preview, sourceIds: Array.from({ length: 20 }, (_, index) => `source-${index}`) },
+      { ...preview, jobIds: ["mapping-job-1", "mapping-job-1"] },
+      { ...preview, mode: "APPLY" },
+      { ...preview, expectedReportHash: "a".repeat(64) },
+    ]) {
+      expect((await request("/existing-repair/admission", OPERATOR_TOKEN, "POST", body)).status).toBe(400);
+    }
+    expect(existingDataRepairAdmission).not.toHaveBeenCalled();
+  });
+
+  it("rejects capture URL injection and pages outside the bounded request", async () => {
+    const preview = {
+      mode: "PREVIEW", reason: "Verify current source data.",
+      targets: [{ intakeId: "intake-1", pageIds: ["page-1"] }],
+    };
+    for (const body of [
+      { ...preview, mode: "APPLY" },
+      { ...preview, targets: [{ intakeId: "intake-1", pageIds: ["page-1"], url: "https://new-source.example/" }] },
+      { ...preview, targets: [{ intakeId: "intake-1", pageIds: ["page-1", "page-2", "page-3", "page-4"] }] },
+      { ...preview, targets: [...preview.targets, ...preview.targets] },
+    ]) {
+      expect((await request("/existing-repair/capture", OPERATOR_TOKEN, "POST", body)).status).toBe(400);
+    }
+    expect(existingRepairCapture).not.toHaveBeenCalled();
+  });
+
+  it("returns stale repair admission and capture as non-retryable conflicts", async () => {
+    existingDataRepairAdmission.mockRejectedValueOnce(new AffiliateExistingDataRepairAdmissionError(
+      "ADMISSION_REPORT_DRIFT", "The reviewed source state changed.",
+    ));
+    let response = await request("/existing-repair/admission", OPERATOR_TOKEN, "POST", {
+      mode: "APPLY", jobIds: ["mapping-job-1"], reason: "Repair stored mapping concerns.", expectedReportHash: "a".repeat(64),
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: { code: "ADMISSION_REPORT_DRIFT", isRetryable: false } });
+    existingRepairCaptureProcess.mockRejectedValueOnce(new AffiliateExistingDataRepairCaptureError(
+      "CAPTURE_INTENT_DRIFT", "The reviewed capture intent changed.",
+    ));
+    response = await request("/existing-repair/capture/process", OPERATOR_TOKEN, "POST", { runId: "repair-run-1" });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: { code: "CAPTURE_INTENT_DRIFT", isRetryable: false } });
+    expect(admission.isOpen()).toBe(false);
   });
 
   it("keeps legacy repair admission operator-only and rejects unreviewed apply", async () => {

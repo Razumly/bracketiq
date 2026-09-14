@@ -348,7 +348,18 @@ export type AffiliateSupplyCommandValidationInput = Readonly<{
   commandContractHash: string;
   evidenceRefs: readonly string[];
   reviewerOutcome?: string | null;
+  reviewerPass?: number;
   assessment: AffiliateSupplyAssessment;
+  /**
+   * A server-verified pending mapping proof. Existing-data repairs may be
+   * approved while the working snapshot remains at its current stage, but
+   * never become eligible for activation through this proof.
+   */
+  existingDataRepairApprovalProof?: Readonly<{
+    verified: true;
+    pendingMappingId: string;
+    sourceStateSha256: string;
+  }>;
 }>;
 
 export type AffiliateSupplyContractImpactCell = Readonly<{
@@ -1993,6 +2004,25 @@ const commandReviewerValidationReasons = (
     && !AFFILIATE_SUPPLY_REVIEWER_RECONCILE_OUTCOMES.some((outcome) => outcome === input.reviewerOutcome),
     'REVIEWER_OUTCOME_NOT_PERMITTED',
   ),
+  ...assessmentReasonIf(
+    input.command === 'RECONCILE'
+    && input.authority === 'SUPPLY_REVIEWER'
+    && input.reviewerPass !== undefined
+    && (
+      !Number.isInteger(input.reviewerPass)
+      || input.reviewerPass < 1
+      || input.reviewerPass > 3
+    ),
+    'REVIEWER_PASS_INVALID',
+  ),
+  ...assessmentReasonIf(
+    input.command === 'RECONCILE'
+    && input.authority === 'SUPPLY_REVIEWER'
+    && input.reviewerOutcome === 'PRODUCER_REPAIR_REQUIRED'
+    && input.reviewerPass !== undefined
+    && input.reviewerPass >= 3,
+    'PRODUCER_REPAIR_BUDGET_EXHAUSTED',
+  ),
 ];
 
 const isRefreshAllowed = (assessment: AffiliateSupplyAssessment): boolean => (
@@ -2021,14 +2051,19 @@ const commandPreconditionValidationReasons = (
     ['PUBLISHED', 'LAST_KNOWN_GOOD'].includes(target.status.toUpperCase())
   ));
   const lifecycleEvidenceMissing = input.assessment.hasRequiredLifecycleEvidence !== true;
+  const hasExistingRepairApprovalProof = input.existingDataRepairApprovalProof?.verified === true;
   return [
     ...assessmentReasonIf(input.evidenceRefs.length === 0, 'EVIDENCE_REQUIRED'),
     ...assessmentReasonIf(
-      input.command === 'APPROVE' && stage !== 'MAPPED',
+      input.command === 'APPROVE'
+      && stage !== 'MAPPED'
+      && !hasExistingRepairApprovalProof,
       'APPROVAL_PRECONDITION_FAILED',
     ),
     ...assessmentReasonIf(
-      input.command === 'APPROVE' && lifecycleEvidenceMissing,
+      input.command === 'APPROVE'
+      && lifecycleEvidenceMissing
+      && !hasExistingRepairApprovalProof,
       'APPROVAL_LIFECYCLE_EVIDENCE_MISSING',
     ),
     ...assessmentReasonIf(

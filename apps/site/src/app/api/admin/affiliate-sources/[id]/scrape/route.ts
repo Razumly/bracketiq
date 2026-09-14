@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireRazumlyAdmin } from '@/server/razumlyAdmin';
 import { runAffiliateSourceScrape } from '@/server/affiliateImports/service';
+import { AffiliatePendingRepairHoldError } from '@/server/affiliateImports/affiliatePendingRepairGuard';
 
 const normalizeId = (value: unknown): string | null => {
   if (typeof value !== 'string') return null;
@@ -27,6 +28,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     );
   } catch (error) {
     if (error instanceof Response) return error;
+    if (error instanceof AffiliatePendingRepairHoldError) {
+      return NextResponse.json({ error: error.reason }, { status: 409 });
+    }
     const message = error instanceof Error ? error.message : 'Failed to scrape affiliate source.';
     const status = message.includes('not found')
       ? 404

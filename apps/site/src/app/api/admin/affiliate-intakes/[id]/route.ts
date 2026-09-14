@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireRazumlyAdmin } from '@/server/razumlyAdmin';
 import {
+  AffiliateSourceIntakeQueueConflictError,
   getAffiliateSourceIntakeContext,
   reviewAffiliateSourceIntakePolicy,
   updateAffiliateSourceIntake,
@@ -39,6 +40,9 @@ export async function PATCH(req: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ intake });
   } catch (error) {
     if (error instanceof Response) return error;
+    if (error instanceof AffiliateSourceIntakeQueueConflictError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
     const message = error instanceof Error ? error.message : 'Failed to update affiliate source intake.';
     return NextResponse.json({ error: message }, { status: message.includes('not found') ? 404 : 400 });
   }

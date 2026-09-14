@@ -5164,7 +5164,7 @@ describe("Prisma affiliate Agent Gateway", () => {
           hash: expect.any(String),
           entries: expect.arrayContaining([
             expect.objectContaining({
-              evidenceRef: "committed-package",
+              evidenceRef: expect.stringMatching(/-[a-f0-9]{16}$/i),
               kind: "COMMITTED_PACKAGE",
               artifactId: "mapping-package-file-domain",
               sha256: packageHash,

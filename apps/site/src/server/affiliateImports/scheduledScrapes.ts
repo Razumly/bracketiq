@@ -3,7 +3,14 @@ import { Client } from 'pg';
 import { prisma } from '@/lib/prisma';
 import { resolvePrismaPgPoolConfig } from '@/lib/prismaConfig';
 import { runAffiliateSourceScrape } from './service';
+import {
+  AffiliatePendingRepairHoldError,
+  affiliatePendingRepairReasonFor,
+  readAffiliatePendingRepairSnapshot,
+  type AffiliatePendingRepairDatabase,
+} from './affiliatePendingRepairGuard';
 import { emitAffiliateOperationalAlerts, type AffiliateOperationalAlertInput } from './affiliateOperationalAlerts';
+import { withAffiliateRepairActivityLease } from './affiliateRepairActivityLease';
 const MIN_INTERVAL_MINUTES = 60;
 const DAILY_INTERVAL_MINUTES = 1440;
 const DEFAULT_LIGHTWEIGHT_CHECK_TIMEOUT_MS = 10_000;
@@ -17,10 +24,13 @@ type AffiliateSourceScheduleRow = {
   name: string;
   sourceKey: string;
   activeMappingId?: string | null;
+  organizationId?: string | null;
+  supplySourceId?: string | null;
   listUrl: string;
   targetKind?: string | null;
   scrapeIntervalMinutes?: number | null;
   metadata?: unknown;
+  updatedAt?: Date | string | null;
 };
 
 type AffiliateRunScheduleRow = {
@@ -77,10 +87,11 @@ export type LightweightSourceCheckResult = {
   sourceId: string;
   sourceName: string;
   sourceKey: string;
-  status: 'BASELINED' | 'UNCHANGED' | 'CHANGED' | 'FAILED';
+  status: 'BASELINED' | 'UNCHANGED' | 'CHANGED' | 'FAILED' | 'SKIPPED';
   checkedAt: Date;
   httpStatus?: number;
   errorMessage?: string;
+  reason?: string;
 };
 
 
@@ -219,6 +230,76 @@ const acquireSchedulerLock = async (): Promise<SchedulerLockLease | null> => {
     throw error;
   }
 };
+type SchedulerDatabase = {
+  affiliateImportCandidates: {
+    findMany: (args: unknown) => Promise<readonly { sourceId: string }[]>;
+  };
+  affiliateScrapeSources: {
+    findMany: (args: unknown) => Promise<readonly AffiliateSourceScheduleRow[]>;
+    findUnique?: (args: unknown) => Promise<AffiliateSourceScheduleRow | null>;
+    update: (args: unknown) => Promise<unknown>;
+    updateMany?: (args: unknown) => Promise<{ count?: number }>;
+  };
+  affiliateScrapeMappings?: {
+    findUnique?: (args: unknown) => Promise<unknown>;
+  };
+  affiliateSupplySources?: {
+    findMany?: (args: unknown) => Promise<readonly { id: string; metadata?: unknown }[]>;
+    findUnique?: (args: unknown) => Promise<{ id: string; metadata?: unknown } | null>;
+  };
+  organizations: {
+    updateMany: (args: unknown) => Promise<{ count?: number }>;
+  };
+};
+
+type SchedulerTransactionalClient = {
+  $transaction?: (
+    callback: (client: unknown) => Promise<unknown>,
+    options?: unknown,
+  ) => Promise<unknown>;
+};
+
+const schedulerDatabaseFor = (client: unknown): SchedulerDatabase => (
+  client as SchedulerDatabase
+);
+
+const withSchedulerTransaction = async <T>(
+  callback: (database: SchedulerDatabase) => Promise<T>,
+): Promise<T> => {
+  const transaction = (prisma as unknown as SchedulerTransactionalClient).$transaction;
+  if (!transaction) return callback(schedulerDatabaseFor(prisma));
+  const result = await transaction.call(prisma,
+    (client) => callback(schedulerDatabaseFor(client)),
+    { isolationLevel: 'Serializable' },
+  );
+  return result as T;
+};
+
+const repairSnapshotForSource = async (
+  database: SchedulerDatabase,
+  source: AffiliateSourceScheduleRow,
+) => readAffiliatePendingRepairSnapshot({
+  database: database as unknown as AffiliatePendingRepairDatabase,
+  sourceId: source.id,
+  expectedSupplySourceId: source.supplySourceId,
+  fallbackSource: source,
+});
+
+const pendingRepairReasonFor = (
+  source: {
+    id: string;
+    supplySourceId?: string | null;
+    metadata?: unknown;
+  },
+  root?: { id: string; metadata?: unknown } | null,
+): string | null => affiliatePendingRepairReasonFor({
+  sourceId: source.id,
+  supplySourceId: source.supplySourceId,
+  rootId: root?.id ?? source.supplySourceId,
+  sourceMetadata: source.metadata,
+  rootMetadata: root?.metadata,
+});
+
 
 const latestRunForSource = async (sourceId: string): Promise<AffiliateRunScheduleRow | null> => (
   (prisma as any).affiliateScrapeRuns.findFirst({
@@ -235,7 +316,7 @@ const latestRunForSource = async (sourceId: string): Promise<AffiliateRunSchedul
 );
 
 const pendingApprovalCountForSource = async (sourceId: string): Promise<number> => (
-  (prisma as any).affiliateImportCandidates.count({
+  prisma.affiliateImportCandidates.count({
     where: {
       sourceId,
       NOT: { status: 'PUBLISHED' },
@@ -244,43 +325,98 @@ const pendingApprovalCountForSource = async (sourceId: string): Promise<number> 
 );
 
 const reconcilePublishedSourceOrganizations = async (): Promise<number> => {
-  const publishedCandidates: Array<{ sourceId: string }> = await (prisma as any).affiliateImportCandidates.findMany({
-    where: {
-      status: 'PUBLISHED',
-      listingKind: { in: ['EVENT', 'RENTAL'] },
-    },
-    select: { sourceId: true },
-    distinct: ['sourceId'],
-  });
-  const sourceIds = Array.from(new Set(publishedCandidates.map((candidate) => candidate.sourceId)));
-  if (!sourceIds.length) {
-    return 0;
-  }
+  try {
+    return await withAffiliateRepairActivityLease(
+      'scheduled:published-source-organization-reconciliation',
+      () => withSchedulerTransaction(async (database) => {
+        const publishedCandidates = await database.affiliateImportCandidates.findMany({
+          where: {
+            status: 'PUBLISHED',
+            listingKind: { in: ['EVENT', 'RENTAL'] },
+          },
+          select: { sourceId: true },
+          distinct: ['sourceId'],
+        });
+        const sourceIds = Array.from(new Set(
+          publishedCandidates.map((candidate) => candidate.sourceId),
+        ));
+        if (!sourceIds.length) return 0;
 
-  const sources: Array<{ organizationId?: string | null }> = await (prisma as any).affiliateScrapeSources.findMany({
-    where: { id: { in: sourceIds } },
-    select: { organizationId: true },
-  });
-  const organizationIds = Array.from(new Set(
-    sources
-      .map((source) => source.organizationId?.trim())
-      .filter((organizationId): organizationId is string => Boolean(organizationId)),
-  ));
-  if (!organizationIds.length) {
-    return 0;
-  }
+        const candidateSources = await database.affiliateScrapeSources.findMany({
+          where: { id: { in: sourceIds } },
+          select: {
+            id: true,
+            organizationId: true,
+            supplySourceId: true,
+            metadata: true,
+          },
+        });
+        const organizationIds = Array.from(new Set(
+          candidateSources
+            .map((source) => source.organizationId?.trim())
+            .filter((organizationId): organizationId is string => Boolean(organizationId)),
+        ));
+        if (!organizationIds.length) return 0;
 
-  const result = await (prisma as any).organizations.updateMany({
-    where: {
-      id: { in: organizationIds },
-      status: { not: 'LISTED' },
-    },
-    data: {
-      status: 'LISTED',
-      updatedAt: new Date(),
-    },
-  });
-  return typeof result?.count === 'number' ? result.count : 0;
+        const allOrganizationSources = await database.affiliateScrapeSources.findMany({
+          where: { organizationId: { in: organizationIds } },
+          select: {
+            id: true,
+            organizationId: true,
+            supplySourceId: true,
+            metadata: true,
+          },
+        });
+        const rootIds = Array.from(new Set(
+          allOrganizationSources
+            .map((source) => source.supplySourceId)
+            .filter((supplySourceId): supplySourceId is string => Boolean(supplySourceId)),
+        ));
+        const roots = rootIds.length && database.affiliateSupplySources?.findMany
+          ? await database.affiliateSupplySources.findMany({
+            where: { id: { in: rootIds } },
+            select: { id: true, metadata: true },
+          })
+          : rootIds.length && database.affiliateSupplySources?.findUnique
+            ? (await Promise.all(rootIds.map((id) => (
+              database.affiliateSupplySources?.findUnique?.({
+                where: { id },
+                select: { id: true, metadata: true },
+              })
+            )))).filter((root): root is { id: string; metadata?: unknown } => root !== null)
+            : [];
+        const rootsById = new Map(roots.map((root) => [root.id, root]));
+        const blockedOrganizationIds = new Set(
+          allOrganizationSources
+            .filter((source) => Boolean(pendingRepairReasonFor(
+              source,
+              rootsById.get(source.supplySourceId ?? ''),
+            )))
+            .map((source) => source.organizationId?.trim())
+            .filter((organizationId): organizationId is string => Boolean(organizationId)),
+        );
+        const reconciledOrganizationIds = organizationIds.filter(
+          (organizationId) => !blockedOrganizationIds.has(organizationId),
+        );
+        if (!reconciledOrganizationIds.length) return 0;
+
+        const result = await database.organizations.updateMany({
+          where: {
+            id: { in: reconciledOrganizationIds },
+            status: { not: 'LISTED' },
+          },
+          data: {
+            status: 'LISTED',
+            updatedAt: new Date(),
+          },
+        });
+        return typeof result?.count === 'number' ? result.count : 0;
+      }),
+    );
+  } catch (error) {
+    if (error instanceof AffiliatePendingRepairHoldError) return 0;
+    throw error;
+  }
 };
 
 const loadScheduledSources = async (
@@ -289,6 +425,7 @@ const loadScheduledSources = async (
 ): Promise<{
   dueSources: AffiliateSourceScheduleRow[];
   lightweightSources: AffiliateSourceScheduleRow[];
+  skippedSources: ScheduledScrapeSkipped[];
 }> => {
   const sources: AffiliateSourceScheduleRow[] = await (prisma as any).affiliateScrapeSources.findMany({
     where: sourceWhere,
@@ -298,35 +435,46 @@ const loadScheduledSources = async (
       name: true,
       sourceKey: true,
       activeMappingId: true,
+      supplySourceId: true,
       listUrl: true,
       targetKind: true,
       scrapeIntervalMinutes: true,
       metadata: true,
+      updatedAt: true,
     },
   });
   const dueSources: AffiliateSourceScheduleRow[] = [];
   const lightweightSources: AffiliateSourceScheduleRow[] = [];
+  const skippedSources: ScheduledScrapeSkipped[] = [];
+  const schedulerDatabase = schedulerDatabaseFor(prisma);
   for (const source of sources) {
+    const pendingReason = (await repairSnapshotForSource(schedulerDatabase, source)).reason;
+    if (pendingReason) {
+      skippedSources.push({
+        sourceId: source.id,
+        sourceName: source.name,
+        sourceKey: source.sourceKey,
+        status: 'SKIPPED',
+        reason: pendingReason,
+      });
+      continue;
+    }
     const activeMappingId = source.activeMappingId ?? `mapping_${source.id}`;
     const activeMapping = await (prisma as any).affiliateScrapeMappings.findUnique({
       where: { id: activeMappingId },
       select: { id: true, sourceId: true, validatedAt: true },
     });
-    if (!activeMapping?.validatedAt || activeMapping.sourceId !== source.id) {
-      continue;
-    }
+    if (!activeMapping?.validatedAt || activeMapping.sourceId !== source.id) continue;
     const latestRun = await latestRunForSource(source.id);
     if (isAffiliateSourceDue(source, latestRun, now)) {
-      if (!limit || dueSources.length < limit) {
-        dueSources.push(source);
-      }
+      if (!limit || dueSources.length < limit) dueSources.push(source);
       continue;
     }
     if (normalizeIntervalMinutes(source.scrapeIntervalMinutes) > DAILY_INTERVAL_MINUTES) {
       lightweightSources.push(source);
     }
   }
-  return { dueSources, lightweightSources };
+  return { dueSources, lightweightSources, skippedSources };
 };
 
 const normalizeLightweightBody = (body: string): string => body
@@ -368,34 +516,65 @@ const readBoundedResponseText = async (response: Response): Promise<string> => {
   return new TextDecoder().decode(combined);
 };
 
-const lightweightStateForSource = (source: AffiliateSourceScheduleRow): LightweightCheckMetadata => {
+const lightweightStateForSource = (source: Pick<AffiliateSourceScheduleRow, 'metadata'>): LightweightCheckMetadata => {
   const metadata = readRecord(source.metadata);
   return readRecord(metadata[LIGHTWEIGHT_METADATA_KEY]) as LightweightCheckMetadata;
 };
 
+type LightweightStoreResult = Readonly<{
+  stored: boolean;
+  reason?: string;
+}>;
+
 const storeLightweightState = async (
   source: AffiliateSourceScheduleRow,
   state: LightweightCheckMetadata,
-): Promise<void> => {
+): Promise<LightweightStoreResult> => {
   const persistedState = Object.fromEntries(
     Object.entries(state).filter(([, value]) => value !== undefined),
   );
-  const metadata = {
-    ...readRecord(source.metadata),
-    [LIGHTWEIGHT_METADATA_KEY]: persistedState,
-  };
-  await (prisma as any).affiliateScrapeSources.update({
-    where: { id: source.id },
-    data: { metadata },
+  return withSchedulerTransaction(async (database) => {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const snapshot = await repairSnapshotForSource(database, source);
+      if (snapshot.reason) return { stored: false, reason: snapshot.reason };
+      const currentSource = snapshot.source ?? source;
+      const metadata = {
+        ...readRecord(currentSource.metadata),
+        [LIGHTWEIGHT_METADATA_KEY]: persistedState,
+      };
+      const sourceDelegate = database.affiliateScrapeSources;
+      if (
+        sourceDelegate.updateMany
+        && currentSource.updatedAt !== undefined
+        && currentSource.updatedAt !== null
+      ) {
+        const result = await sourceDelegate.updateMany({
+          where: { id: source.id, updatedAt: currentSource.updatedAt },
+          data: { metadata },
+        });
+        if (result.count === 1) {
+          source.metadata = metadata;
+          source.updatedAt = new Date();
+          return { stored: true };
+        }
+        continue;
+      }
+      await sourceDelegate.update({
+        where: { id: source.id },
+        data: { metadata },
+      });
+      source.metadata = metadata;
+      return { stored: true };
+    }
+    return { stored: false, reason: 'LIGHTWEIGHT_METADATA_CONCURRENT_UPDATE' };
   });
-  source.metadata = metadata;
 };
 
 const lightweightResult = (
   source: AffiliateSourceScheduleRow,
   checkedAt: Date,
   status: LightweightSourceCheckResult['status'],
-  details: Pick<LightweightSourceCheckResult, 'httpStatus' | 'errorMessage'> = {},
+  details: Pick<LightweightSourceCheckResult, 'httpStatus' | 'errorMessage' | 'reason'> = {},
 ): LightweightSourceCheckResult => ({
   sourceId: source.id,
   sourceName: source.name,
@@ -410,79 +589,116 @@ const checkSourceForLightweightChanges = async (
   checkedAt: Date,
   fetchImpl: FetchLike,
 ): Promise<LightweightSourceCheckResult> => {
-  const previous = lightweightStateForSource(source);
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), lightweightCheckTimeoutMs());
   try {
-    const url = new URL(source.listUrl);
-    if (!['http:', 'https:'].includes(url.protocol)) {
-      throw new Error(`Unsupported source protocol: ${url.protocol}`);
-    }
-    const headers: Record<string, string> = {
-      Accept: 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.5',
-      Range: `bytes=0-${MAX_LIGHTWEIGHT_BODY_BYTES - 1}`,
-      'User-Agent': 'BracketIQAffiliateMonitor/1.0 (+https://bracket-iq.com)',
-    };
-    const etag = readString(previous.etag);
-    const lastModified = readString(previous.lastModified);
-    if (etag) headers['If-None-Match'] = etag;
-    if (lastModified) headers['If-Modified-Since'] = lastModified;
+    return await withAffiliateRepairActivityLease(source.id, async () => {
+      const initialSnapshot = await repairSnapshotForSource(
+        schedulerDatabaseFor(prisma),
+        source,
+      );
+      if (initialSnapshot.reason) {
+        return lightweightResult(source, checkedAt, 'SKIPPED', {
+          reason: initialSnapshot.reason,
+        });
+      }
+      const currentSource = initialSnapshot.source ?? source;
+      const previous = lightweightStateForSource(currentSource);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), lightweightCheckTimeoutMs());
+      try {
+        const beforeFetch = await repairSnapshotForSource(
+          schedulerDatabaseFor(prisma),
+          source,
+        );
+        if (beforeFetch.reason) {
+          return lightweightResult(source, checkedAt, 'SKIPPED', {
+            reason: beforeFetch.reason,
+          });
+        }
+        const url = new URL(source.listUrl);
+        if (!['http:', 'https:'].includes(url.protocol)) {
+          throw new Error(`Unsupported source protocol: ${url.protocol}`);
+        }
+        const headers: Record<string, string> = {
+          Accept: 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.5',
+          Range: `bytes=0-${MAX_LIGHTWEIGHT_BODY_BYTES - 1}`,
+          'User-Agent': 'BracketIQAffiliateMonitor/1.0 (+https://bracket-iq.com)',
+        };
+        const etag = readString(previous.etag);
+        const lastModified = readString(previous.lastModified);
+        if (etag) headers['If-None-Match'] = etag;
+        if (lastModified) headers['If-Modified-Since'] = lastModified;
 
-    const response = await fetchImpl(url, {
-      method: 'GET',
-      headers,
-      redirect: 'follow',
-      signal: controller.signal,
-    });
-    if (response.status === 304) {
-      await storeLightweightState(source, {
-        ...previous,
-        checkedAt: checkedAt.toISOString(),
-        status: 'UNCHANGED',
-        httpStatus: response.status,
-        errorMessage: undefined,
-      });
-      return lightweightResult(source, checkedAt, 'UNCHANGED', { httpStatus: response.status });
-    }
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
+        const response = await fetchImpl(url, {
+          method: 'GET',
+          headers,
+          redirect: 'follow',
+          signal: controller.signal,
+        });
+        if (response.status === 304) {
+          const stored = await storeLightweightState(source, {
+            ...previous,
+            checkedAt: checkedAt.toISOString(),
+            status: 'UNCHANGED',
+            httpStatus: response.status,
+            errorMessage: undefined,
+          });
+          if (!stored.stored) {
+            return lightweightResult(source, checkedAt, 'SKIPPED', { reason: stored.reason });
+          }
+          return lightweightResult(source, checkedAt, 'UNCHANGED', { httpStatus: response.status });
+        }
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
 
-    const body = await readBoundedResponseText(response);
-    const fingerprint = fingerprintLightweightBody(body);
-    const status: LightweightSourceCheckResult['status'] = previous.fingerprint
-      ? previous.fingerprint === fingerprint ? 'UNCHANGED' : 'CHANGED'
-      : 'BASELINED';
-    await storeLightweightState(source, {
-      checkedAt: checkedAt.toISOString(),
-      status,
-      fingerprint,
-      etag: readString(response.headers.get('etag')),
-      lastModified: readString(response.headers.get('last-modified')),
-      lastChangedAt: status === 'CHANGED'
-        ? checkedAt.toISOString()
-        : readString(previous.lastChangedAt),
-      httpStatus: response.status,
-      errorMessage: undefined,
+        const body = await readBoundedResponseText(response);
+        const fingerprint = fingerprintLightweightBody(body);
+        const status: LightweightSourceCheckResult['status'] = previous.fingerprint
+          ? previous.fingerprint === fingerprint ? 'UNCHANGED' : 'CHANGED'
+          : 'BASELINED';
+        const stored = await storeLightweightState(source, {
+          checkedAt: checkedAt.toISOString(),
+          status,
+          fingerprint,
+          etag: readString(response.headers.get('etag')),
+          lastModified: readString(response.headers.get('last-modified')),
+          lastChangedAt: status === 'CHANGED'
+            ? checkedAt.toISOString()
+            : readString(previous.lastChangedAt),
+          httpStatus: response.status,
+          errorMessage: undefined,
+        });
+        if (!stored.stored) {
+          return lightweightResult(source, checkedAt, 'SKIPPED', { reason: stored.reason });
+        }
+        return lightweightResult(source, checkedAt, status, { httpStatus: response.status });
+      } catch (error) {
+        const errorMessage = error instanceof Error
+          ? error.name === 'AbortError' ? 'Lightweight check timed out' : error.message
+          : 'Unknown lightweight check failure';
+        try {
+          const stored = await storeLightweightState(source, {
+            ...previous,
+            checkedAt: checkedAt.toISOString(),
+            status: 'FAILED',
+            errorMessage,
+          });
+          if (!stored.stored) {
+            return lightweightResult(source, checkedAt, 'SKIPPED', { reason: stored.reason });
+          }
+        } catch {
+          // The result still reports the original source check failure when metadata persistence also fails.
+        }
+        return lightweightResult(source, checkedAt, 'FAILED', { errorMessage });
+      } finally {
+        clearTimeout(timeout);
+      }
     });
-    return lightweightResult(source, checkedAt, status, { httpStatus: response.status });
   } catch (error) {
-    const errorMessage = error instanceof Error
-      ? error.name === 'AbortError' ? 'Lightweight check timed out' : error.message
-      : 'Unknown lightweight check failure';
-    try {
-      await storeLightweightState(source, {
-        ...previous,
-        checkedAt: checkedAt.toISOString(),
-        status: 'FAILED',
-        errorMessage,
-      });
-    } catch {
-      // The result still reports the original source check failure when metadata persistence also fails.
+    if (error instanceof AffiliatePendingRepairHoldError) {
+      return lightweightResult(source, checkedAt, 'SKIPPED', { reason: error.reason });
     }
-    return lightweightResult(source, checkedAt, 'FAILED', { errorMessage });
-  } finally {
-    clearTimeout(timeout);
+    throw error;
   }
 };
 
@@ -526,7 +742,7 @@ const runLightweightChecks = async (
 const summarizeRunResult = async (
   source: AffiliateSourceScheduleRow,
   scrapeResult: Awaited<ReturnType<typeof runAffiliateSourceScrape>>,
-): Promise<ScheduledScrapeSuccess> => {
+): Promise<ScheduledScrapeResultRow> => {
   const logs = readLogs((scrapeResult.run as any).logs);
   const pendingApprovalCandidateCount = await pendingApprovalCountForSource(source.id);
   const touchedApprovalCandidateCount = scrapeResult.candidates.filter((candidate) => (
@@ -591,11 +807,11 @@ export const runDueAffiliateScrapes = async (
   }
 
   try {
-    const { dueSources, lightweightSources } = await loadScheduledSources(startedAt, options.limit);
+    const { dueSources, lightweightSources, skippedSources } = await loadScheduledSources(startedAt, options.limit);
     const reconciledSourceOrganizationCount = options.dryRun
       ? 0
       : await reconcilePublishedSourceOrganizations();
-    const results: ScheduledScrapeResultRow[] = [];
+    const results: ScheduledScrapeResultRow[] = [...skippedSources];
     for (const source of dueSources) {
       if (options.dryRun) {
         results.push({
@@ -614,6 +830,10 @@ export const runDueAffiliateScrapes = async (
         });
         results.push(await summarizeRunResult(source, scrapeResult));
       } catch (error) {
+        if (error instanceof AffiliatePendingRepairHoldError) {
+          results.push({ sourceId: source.id, sourceName: source.name, sourceKey: source.sourceKey, status: 'SKIPPED', reason: error.reason });
+          continue;
+        }
         results.push({
           sourceId: source.id,
           sourceName: source.name,

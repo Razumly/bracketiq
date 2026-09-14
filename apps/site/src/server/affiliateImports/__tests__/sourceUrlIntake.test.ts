@@ -108,6 +108,7 @@ const reviewPolicyMock = jest.fn(async (intakeId: string, review: any) => {
   return intake;
 });
 
+const assertQueueOwnershipMock = jest.fn(async () => undefined);
 const queueRunMock = jest.fn(async (intakeId: string, requestedPageIds: string[], userId: string) => {
   const run = {
     id: `run_${++idCounter}`,
@@ -121,12 +122,13 @@ const queueRunMock = jest.fn(async (intakeId: string, requestedPageIds: string[]
 });
 
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
-jest.mock('@/lib/id', () => ({ createId: () => `generated_${++idCounter}` }));
 jest.mock('@/server/affiliateImports/sourceIntake', () => ({
+  ...jest.requireActual('@/server/affiliateImports/sourceIntake'),
   createAffiliateSourceIntake: (...args: any[]) => createIntakeMock(...args),
   addAffiliateSourceIntakePage: (...args: any[]) => addPageMock(...args),
   reviewAffiliateSourceIntakePolicy: (...args: any[]) => reviewPolicyMock(...args),
   queueAffiliateSourceIntakeRun: (...args: any[]) => queueRunMock(...args),
+  assertOrdinaryAffiliateSourceIntakeQueueOwnership: (...args: any[]) => assertQueueOwnershipMock(...args),
 }));
 
 import { enqueueAffiliateSourceUrlProposals } from '../sourceUrlIntake';

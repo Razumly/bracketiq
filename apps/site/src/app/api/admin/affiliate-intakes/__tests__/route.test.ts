@@ -6,11 +6,14 @@ const requireRazumlyAdminMock = jest.fn();
 const listMock = jest.fn();
 const createMock = jest.fn();
 const queueMock = jest.fn();
+const reviewPolicyMock = jest.fn();
 
 jest.mock('@/server/razumlyAdmin', () => ({
   requireRazumlyAdmin: (...args: unknown[]) => requireRazumlyAdminMock(...args),
 }));
 jest.mock('@/server/affiliateImports/sourceIntake', () => ({
+  ...jest.requireActual('@/server/affiliateImports/sourceIntake'),
+  reviewAffiliateSourceIntakePolicy: (...args: unknown[]) => reviewPolicyMock(...args),
   listAffiliateSourceIntakes: (...args: unknown[]) => listMock(...args),
   createAffiliateSourceIntake: (...args: unknown[]) => createMock(...args),
   queueAffiliateSourceIntakeRun: (...args: unknown[]) => queueMock(...args),
@@ -18,6 +21,8 @@ jest.mock('@/server/affiliateImports/sourceIntake', () => ({
 
 import { GET, POST } from '@/app/api/admin/affiliate-intakes/route';
 import { POST as inspect } from '@/app/api/admin/affiliate-intakes/[id]/inspect/route';
+import { PATCH as updateIntake } from '@/app/api/admin/affiliate-intakes/[id]/route';
+import { AffiliateSourceIntakeQueueConflictError } from '@/server/affiliateImports/sourceIntake';
 
 describe('/api/admin/affiliate-intakes', () => {
   beforeEach(() => {
@@ -76,5 +81,27 @@ describe('/api/admin/affiliate-intakes', () => {
     );
     expect(response.status).toBe(202);
     expect(queueMock).toHaveBeenCalledWith('intake_1', ['page_1'], 'admin_1');
+  });
+
+  it('returns a conflict when governed capture owns an inspection request', async () => {
+    queueMock.mockRejectedValue(new AffiliateSourceIntakeQueueConflictError('A governed capture owns this intake.'));
+    const response = await inspect(
+      new NextRequest('http://localhost/api/admin/affiliate-intakes/intake_1/inspect', {
+        method: 'POST', body: JSON.stringify({ pageIds: ['page_1'] }),
+      }),
+      { params: Promise.resolve({ id: 'intake_1' }) },
+    );
+    expect(response.status).toBe(409);
+  });
+
+  it('returns a conflict when policy auto-queue cannot own the intake', async () => {
+    reviewPolicyMock.mockRejectedValue(new AffiliateSourceIntakeQueueConflictError('A governed capture owns this intake.'));
+    const response = await updateIntake(
+      new NextRequest('http://localhost/api/admin/affiliate-intakes/intake_1', {
+        method: 'PATCH', body: JSON.stringify({ policy: { complianceStatus: 'ALLOWED' } }),
+      }),
+      { params: Promise.resolve({ id: 'intake_1' }) },
+    );
+    expect(response.status).toBe(409);
   });
 });

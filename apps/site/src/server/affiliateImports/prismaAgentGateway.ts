@@ -5,6 +5,9 @@ import type {
   AffiliateAgentGatewayClaims,
   AffiliateAgentGatewayJobs,
   AffiliateAgentGatewayOperationReceipts,
+  AffiliateScrapeMappings,
+  AffiliateScrapeSources,
+  AffiliateSupplySources,
   PrismaClient,
 } from "@/generated/prisma/client";
 import { Prisma } from "@/generated/prisma/client";
@@ -70,6 +73,17 @@ import {
   assertAffiliateLegacyRepairScopeClaimBinding,
 } from "./affiliateLegacyRepairAdmission";
 import {
+  assertAffiliateExistingDataRepairClaimBinding,
+  AffiliateExistingDataRepairAdmissionError,
+} from "./affiliateExistingDataRepairAdmission";
+import {
+  captureAffiliateExistingRepairSourceState,
+  existingDataRepairContextForMetadata,
+  pendingMappingForMetadata,
+  type AffiliateExistingDataRepairPendingMapping,
+  type AffiliateExistingDataRepairSourceState,
+} from "./affiliateExistingDataRepairState";
+import {
   AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX,
   AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX,
   AFFILIATE_AGENT_SOURCE_EXCLUSION_REVIEWER_PREFIX,
@@ -99,6 +113,7 @@ import {
   type AffiliateAgentClaimEnvelope,
   type AffiliateAgentCommand,
   type AffiliateAgentContractBundle,
+  type AffiliateAgentExistingDataRepairContext,
   type AffiliateAgentRoleContract,
   type AffiliateAgentSubject,
   type AffiliateAgentQueuedMappingProducerSubject,
@@ -1424,12 +1439,29 @@ const assertMappingProducerSourceKind = async (
   if (subject.type !== "MAPPING_PRODUCER") return subject;
   const source = await transaction.affiliateSupplySources.findUnique({
     where: { id: subject.supplySourceId },
-    select: { targetKind: true },
+    select: { id: true, targetKind: true, metadata: true },
   });
   const sourceKind = typeof source?.targetKind === "string"
     ? source.targetKind.trim().toUpperCase()
     : null;
   const parsedSourceKind = affiliateAgentListingKindSchema.safeParse(sourceKind);
+  const repairContext = subject.repairContext;
+  const isExistingDataRepair = repairContext?.kind === "EXISTING_DATA_REPAIR";
+  const sourceKindAssessment = isExistingDataRepair
+    ? repairContext.sourceKindAssessment
+    : undefined;
+  if (isExistingDataRepair && sourceKindAssessment) {
+    if (
+      subject.listingKind !== undefined
+      && !sourceKindAssessment.allowedListingKinds.includes(subject.listingKind)
+    ) {
+      throw gatewayError(
+        "COMMAND_SCHEMA_INVALID",
+        SOURCE_KIND_MISMATCH_SAFE_MESSAGE,
+      );
+    }
+    return subject;
+  }
   if (
     !parsedSourceKind.success
     || (
@@ -1881,6 +1913,28 @@ const assertReviewerProducerAdmission = async (
     );
   }
   if (
+    subject.type === "SUPPLY_REVIEWER"
+    && context.producerEnvelope?.subject.type === "MAPPING_PRODUCER"
+    && context.producerEnvelope.subject.repairContext?.kind === "EXISTING_DATA_REPAIR"
+    && context.producerJob
+  ) {
+    try {
+      await assertAffiliateExistingDataRepairClaimBinding({
+        prisma: transaction,
+        job: context.producerJob,
+        claim: context.producerEnvelope,
+      });
+    } catch (error) {
+      if (error instanceof AffiliateExistingDataRepairAdmissionError) {
+        throw gatewayError(
+          "REVIEW_WORKSPACE_INVALID",
+          "The existing-data repair claim binding is invalid.",
+        );
+      }
+      throw error;
+    }
+  }
+  if (
     subject.producerWorkerId === input.workerId
     || subject.producerInvocationId === input.invocationId
   ) {
@@ -1890,7 +1944,6 @@ const assertReviewerProducerAdmission = async (
     );
   }
   if (subject.producerWorkspaceId === input.workspaceAttestation.workspaceId) {
-
     throw gatewayError(
       "REVIEW_WORKSPACE_INVALID",
       "The reviewer workspace must differ from the producer workspace.",
@@ -2544,7 +2597,30 @@ const persistClaim = async (
     claimId,
     timing,
   );
-  if (envelope.subject.type === "MAPPING_PRODUCER") {
+  if (
+    envelope.subject.type === "MAPPING_PRODUCER"
+    && envelope.subject.repairContext?.kind === "EXISTING_DATA_REPAIR"
+  ) {
+    try {
+      await assertAffiliateExistingDataRepairClaimBinding({
+        prisma: transaction,
+        job,
+        claim: envelope,
+      });
+    } catch (error) {
+      if (error instanceof AffiliateExistingDataRepairAdmissionError) {
+        throw gatewayError(
+          "REVIEW_WORKSPACE_INVALID",
+          "The existing-data repair claim binding is invalid.",
+        );
+      }
+      throw error;
+    }
+  }
+  if (
+    envelope.subject.type === "MAPPING_PRODUCER"
+    && envelope.subject.repairContext?.kind === "LEGACY_SPORT_REPAIR"
+  ) {
     try {
       await assertAffiliateLegacyRepairScopeClaimBinding({
         prisma: transaction,
@@ -6819,15 +6895,18 @@ const executePackageValidation = async (
       "The package Supply Source does not match the claim.",
     );
   }
-  if (
-    authorized.envelope.role === "MAPPING_PRODUCER"
-    && command.data.candidatePackage.listingKind
-      !== authorized.envelope.subject.listingKind
-  ) {
-    throw gatewayError(
-      "COMMAND_SCHEMA_INVALID",
-      SOURCE_KIND_MISMATCH_SAFE_MESSAGE,
-    );
+  if (authorized.envelope.role === "MAPPING_PRODUCER") {
+    const subject = authorized.envelope.subject;
+    const assessment = subject.repairContext?.kind === "EXISTING_DATA_REPAIR"
+      ? subject.repairContext.sourceKindAssessment
+      : undefined;
+    const packageKind = command.data.candidatePackage.listingKind;
+    const kindMatches = subject.listingKind !== undefined
+      ? packageKind === subject.listingKind
+      : assessment?.allowedListingKinds.includes(packageKind) === true;
+    if (!kindMatches) {
+      throw gatewayError("COMMAND_SCHEMA_INVALID", SOURCE_KIND_MISMATCH_SAFE_MESSAGE);
+    }
   }
   if (
     command.data.evidenceManifestHash !==
@@ -8132,6 +8211,28 @@ const validateReviewerSupplySource = (
     );
   }
 };
+const rejectExhaustedProducerRepair = (
+  authorized: AuthorizedClaim,
+  result: AffiliateAgentTerminalResultEnvelope,
+): void => {
+  if (
+    authorized.envelope.subject.type === "SUPPLY_REVIEWER"
+    && (
+      authorized.envelope.subject.repairContext?.kind === "LEGACY_SPORT_REPAIR"
+      || authorized.envelope.subject.repairContext?.kind === "EXISTING_DATA_REPAIR"
+    )
+    && authorized.envelope.subject.reviewPass === 3
+    && result.role === "SUPPLY_REVIEWER"
+    && result.disposition === "PRODUCER_REPAIR_REQUIRED"
+  ) {
+    throw gatewayError(
+      "TERMINAL_DISPOSITION_NOT_PERMITTED",
+      "The final repair pass requires HUMAN_REVIEW_REQUIRED.",
+    );
+  }
+};
+
+
 
 const validateNestedTerminalEvidence = (
   result: AffiliateAgentTerminalResultEnvelope,
@@ -8161,12 +8262,13 @@ const validateSourceExclusionTerminalScope = (
 ): void => {
   if (authorized.envelope.subject.type !== "SOURCE_EXCLUSION_REVIEW") return;
   if (
-    result.disposition !== "SOURCE_EXCLUSION_ASSESSED"
-    && result.disposition !== "HUMAN_REVIEW_REQUIRED"
+    result.role !== "SUPPLY_REVIEWER"
+    || (result.disposition !== "SOURCE_EXCLUSION_ASSESSED"
+      && result.disposition !== "HUMAN_REVIEW_REQUIRED")
   ) {
     throw gatewayError(
       "TERMINAL_DISPOSITION_NOT_PERMITTED",
-      "A source exclusion review permits only source assessment or human review.",
+      "Source-only reviewer claims permit source assessment or human review only.",
     );
   }
   if (result.evidenceRefs.length === 0) {
@@ -8189,6 +8291,7 @@ const validateTerminalResultScope = (
   validateSourceExclusionTerminalScope(authorized, result);
   validateReviewerExactTarget(authorized, result);
   validateTerminalResultDisposition(authorized, result);
+  rejectExhaustedProducerRepair(authorized, result);
   validateReviewerCommittedPackage(authorized, result);
   validateReviewerSupplySource(authorized, result);
   validateNestedTerminalEvidence(result);
@@ -8201,17 +8304,20 @@ const validateTerminalResultScope = (
   ) {
     throw gatewayError(
       "COMMAND_NOT_PERMITTED",
-      "Sport repair outcomes require a claim-bound legacy sport repair context.",
+      "Sport repair outcomes require a claim-bound repair context.",
     );
   }
   if (
     subject.type === "SUPPLY_REVIEWER"
-    && subject.repairContext?.kind === "LEGACY_SPORT_REPAIR"
+    && (
+      subject.repairContext?.kind === "LEGACY_SPORT_REPAIR"
+      || subject.repairContext?.kind === "EXISTING_DATA_REPAIR"
+    )
     && !["APPROVED", "PRODUCER_REPAIR_REQUIRED", "HUMAN_REVIEW_REQUIRED"].includes(result.disposition)
   ) {
     throw gatewayError(
       "COMMAND_NOT_PERMITTED",
-      "Legacy sport repair permits package review only, not activation or publication.",
+      "Repair claims permit package review only, not activation or publication.",
     );
   }
 };
@@ -10040,10 +10146,11 @@ const verifyLegacySportRepairTerminal = async (
 ): Promise<void> => {
   if (
     authorized.envelope.subject.type !== "MAPPING_PRODUCER"
-    || !authorized.envelope.subject.repairContext
     || result.role !== "MAPPING_PRODUCER"
     || result.disposition !== "CONTRACT_GAP"
   ) return;
+  const repairContext = authorized.envelope.subject.repairContext;
+  if (!repairContext) return;
   const sportEvidence = result.payload.sportEvidence;
   if (!sportEvidence || sportEvidence.sportDeterminations.length === 0) {
     throw new AffiliateAgentSportEvidenceError([{
@@ -12510,6 +12617,7 @@ type MappingProducerLineage = Readonly<{
   supplySourceId: string;
   mappingJob: Record<string, unknown>;
   source: Record<string, unknown> | null;
+  existingDataRepairContext: AffiliateAgentExistingDataRepairContext | null;
 }>;
 
 const mappingSourceFor = async (
@@ -12558,7 +12666,12 @@ const mappingProducerLineageFor = async (
       "The mapping producer terminal result is not bound to its supply source.",
     );
   }
-  return { mappingJobId, supplySourceId, mappingJob, source };
+  return {
+    mappingJobId, supplySourceId, mappingJob, source,
+    existingDataRepairContext: mappingSubject.repairContext?.kind === "EXISTING_DATA_REPAIR"
+      ? mappingSubject.repairContext
+      : null,
+  };
 };
 
 const updateMappingProducerLineage = async (
@@ -12568,11 +12681,24 @@ const updateMappingProducerLineage = async (
   now: Date,
 ): Promise<void> => {
   const mappingSummary = gatewayDomainRecord(lineage.mappingJob.resultSummary) ?? {};
+  const pending = lineage.existingDataRepairContext
+    ? pendingMappingForMetadata(lineage.source?.metadata)
+    : null;
+  if (lineage.existingDataRepairContext && (
+    !pending
+    || pending.sourceId !== lineage.source?.id
+    || pending.supplySourceId !== lineage.supplySourceId
+    || pending.mappingJobId !== lineage.mappingJobId
+    || pending.packageHash !== result.payload.packageHash
+    || pending.admissionHash !== lineage.existingDataRepairContext.admissionHash
+  )) {
+    throw gatewayError("INTERNAL_ERROR", "The producer result does not match its staged repair mapping.");
+  }
   await mappingJobs.update?.({
     where: { id: lineage.mappingJob.id },
     data: {
       sourceId: lineage.source?.id ?? lineage.mappingJob.sourceId ?? null,
-      mappingId: lineage.source?.activeMappingId ?? lineage.mappingJob.mappingId ?? null,
+      mappingId: pending?.mappingId ?? lineage.source?.activeMappingId ?? lineage.mappingJob.mappingId ?? null,
       status: "COMPLETED",
       commit: result.payload.commitReceiptId,
       resultSummary: asPrismaJson({
@@ -12613,6 +12739,7 @@ const updateMappingProducerFailureSource = async (
   result: MappingProducerFailureTerminalResult,
   failure: Readonly<Record<string, unknown>>,
 ): Promise<void> => {
+  if (lineage.existingDataRepairContext) return;
   const sourceId = typeof lineage.source?.id === "string"
     ? lineage.source.id.trim()
     : "";
@@ -12647,7 +12774,7 @@ const updateMappingProducerFailure = async (
   await mappingJobs.update?.({
     where: { id: lineage.mappingJob.id },
     data: {
-      status: "REVIEW_REQUIRED",
+      status: lineage.existingDataRepairContext ? "HUMAN_REVIEW_REQUIRED" : "REVIEW_REQUIRED",
       resultSummary: asPrismaJson({
         ...(gatewayDomainRecord(lineage.mappingJob.resultSummary) ?? {}),
         gatewayTerminalResult: result,
@@ -12686,14 +12813,17 @@ const mappingReviewerArtifactsFor = (
   return {
     committedArtifact: currentClaimArtifacts.find(
       (artifact) => artifact.evidenceKind === "COMMITTED_PACKAGE"
+        && artifact.creatingClaimId === claimId
         && artifact.contentHash === packageHash,
     ),
     deterministicArtifact: currentClaimArtifacts.find(
-      (artifact) => artifact.evidenceKind === "DETERMINISTIC_VALIDATION",
+      (artifact) => artifact.evidenceKind === "DETERMINISTIC_VALIDATION"
+        && artifact.creatingClaimId === claimId,
     ),
     durableArtifact: currentClaimArtifacts.find(
-      (artifact) => artifact.evidenceKind === "DURABLE_EVIDENCE",
-    ),
+      (artifact) => artifact.evidenceKind === "DURABLE_EVIDENCE"
+        && artifact.creatingClaimId === claimId,
+    ) ?? currentClaimArtifacts.find((artifact) => artifact.evidenceKind === "DURABLE_EVIDENCE"),
   };
 };
 
@@ -12717,11 +12847,16 @@ const mappingReviewerManifestFor = (
     canonicalizeAffiliateAgentValue(activeSupplyContractPreimage),
     "utf8",
   );
+  const producerNamespace = hashAffiliateAgentValue({
+    producerClaimId: authorized.claim.id,
+    producerClaimGeneration: authorized.claim.claimGeneration,
+  }).slice(0, 16);
+  const evidenceRefFor = (base: string): string => `${base}-${producerNamespace}`;
   const preimage = {
     schemaVersion: 1 as const,
     entries: [
       {
-        evidenceRef: "active-contract",
+        evidenceRef: evidenceRefFor("active-contract"),
         kind: "ACTIVE_SUPPLY_CONTRACT" as const,
         artifactId: `supply-contract:${activeSupplyContract.hash}`,
         sha256: activeSupplyContract.hash,
@@ -12731,17 +12866,17 @@ const mappingReviewerManifestFor = (
       },
       reviewerManifestEntryForArtifact(
         "COMMITTED_PACKAGE",
-        "committed-package",
+        evidenceRefFor("committed-package"),
         artifacts.committedArtifact,
       ),
       reviewerManifestEntryForArtifact(
         "DETERMINISTIC_VALIDATION",
-        "deterministic-validation",
+        evidenceRefFor("deterministic-validation"),
         artifacts.deterministicArtifact,
       ),
       reviewerManifestEntryForArtifact(
         "DURABLE_EVIDENCE",
-        "durable-evidence",
+        evidenceRefFor("durable-evidence"),
         artifacts.durableArtifact,
       ),
     ],
@@ -12789,10 +12924,24 @@ const upsertMappingReviewerJob = async (
     targetType: "EVENT" | "FACILITY" | "ORGANIZATION";
   }>,
   evidenceManifest: Record<string, unknown>,
+  expectedLifecycleGeneration: number,
 ): Promise<Record<string, unknown> | null> => {
-  const reviewPass = result.disposition === "BOUNDED_REPAIR_SUBMITTED"
-    ? result.payload.repairPass
-    : 1;
+  if (authorized.envelope.subject.type !== "MAPPING_PRODUCER") {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The mapping reviewer job is not bound to a Mapping Producer claim.",
+    );
+  }
+  const reviewPass = authorized.envelope.subject.pass;
+  if (
+    result.disposition === "BOUNDED_REPAIR_SUBMITTED"
+    && result.payload.repairPass !== reviewPass
+  ) {
+    throw gatewayError(
+      "TERMINAL_DISPOSITION_NOT_PERMITTED",
+      "The repair pass does not match the Mapping Producer claim.",
+    );
+  }
   const reviewerJobDedupeKey = isAffiliateAgentSingleClaimJob(authorized.job.dedupeKey)
     ? `${AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX}${authorized.claim.id}`
     : [
@@ -12830,7 +12979,7 @@ const upsertMappingReviewerJob = async (
       }),
       evidenceManifestJson: asPrismaJson(evidenceManifest),
       supplySourceId: lineage.supplySourceId,
-      expectedLifecycleGeneration: Number(lineage.source?.lifecycleGeneration),
+      expectedLifecycleGeneration,
       status: "QUEUED",
       priority: Number(authorized.job.priority ?? 0),
       nextAttemptAt: now,
@@ -12944,6 +13093,15 @@ const applyMappingProducerSuccessDomainEffect = async (
     gatewayDomainDelegate(transaction, "affiliateSupplyTargets"),
     committedLineage,
   );
+  let expectedLifecycleGeneration = Number(committedLineage.source?.lifecycleGeneration);
+  if (committedLineage.existingDataRepairContext) {
+    const root = await transaction.affiliateSupplySources.findUnique({
+      where: { id: committedLineage.supplySourceId },
+      select: { lifecycleGeneration: true },
+    });
+    if (!root) throw gatewayError("INTERNAL_ERROR", "The repaired source lifecycle root is missing.");
+    expectedLifecycleGeneration = root.lifecycleGeneration;
+  }
   const reviewerJob = await upsertMappingReviewerJob(
     gatewayJobs,
     authorized,
@@ -12952,6 +13110,7 @@ const applyMappingProducerSuccessDomainEffect = async (
     committedLineage,
     target,
     evidenceManifest,
+    expectedLifecycleGeneration,
   );
   return {
     kind: "MAPPING_PRODUCER_TERMINAL_EFFECT",
@@ -15440,6 +15599,244 @@ type ReviewerEffectRecoveryTransition = Readonly<{
   requestJson: Prisma.JsonValue;
   resultJson: Prisma.JsonValue;
 }>;
+type ExistingDataRepairRecoveryState = Readonly<{
+  context: AffiliateAgentExistingDataRepairContext | null;
+  pendingMapping: AffiliateExistingDataRepairPendingMapping | null;
+  root: AffiliateSupplySources | null;
+  source: AffiliateScrapeSources | null;
+  mapping: AffiliateScrapeMappings | null;
+  sourceState: AffiliateExistingDataRepairSourceState | null;
+  metadataValid: boolean;
+  pendingValid: boolean;
+  mappingValid: boolean;
+  protectedStateValid: boolean;
+  reviewerManifestValid: boolean;
+}>;
+
+const recoveryMetadataOwns = (metadata: unknown, key: string): boolean => (
+  isGatewayRecord(metadata)
+  && Object.prototype.hasOwnProperty.call(metadata, key)
+);
+
+const emptyExistingDataRepairRecoveryState = (): ExistingDataRepairRecoveryState => ({
+  context: null,
+  pendingMapping: null,
+  root: null,
+  source: null,
+  mapping: null,
+  sourceState: null,
+  metadataValid: false,
+  pendingValid: false,
+  mappingValid: false,
+  protectedStateValid: false,
+  reviewerManifestValid: false,
+});
+
+const loadExistingDataRepairRecoveryState = async (
+  transaction: Prisma.TransactionClient,
+  envelope: AffiliateAgentClaimEnvelope | null,
+  supplySourceId: string,
+): Promise<ExistingDataRepairRecoveryState> => {
+  const reviewerSubject = envelope?.subject.type === "SUPPLY_REVIEWER"
+    ? envelope.subject
+    : null;
+  const context = reviewerSubject?.repairContext?.kind === "EXISTING_DATA_REPAIR"
+    ? reviewerSubject.repairContext
+    : null;
+  if (!context) return emptyExistingDataRepairRecoveryState();
+
+  const database = affiliateSupplyDatabase(transaction);
+  const [root, source] = await Promise.all([
+    database.supplySources.findUnique({ where: { id: supplySourceId } }),
+    database.sources.findUnique({ where: { id: context.sourceId } }),
+  ]);
+  const sourceMetadata = source?.metadata;
+  const rootMetadata = root?.metadata;
+  const sourceContext = existingDataRepairContextForMetadata(sourceMetadata);
+  const rootContext = existingDataRepairContextForMetadata(rootMetadata);
+  const sourcePending = pendingMappingForMetadata(sourceMetadata);
+  const rootPending = pendingMappingForMetadata(rootMetadata);
+  const metadataValid = Boolean(
+    root
+    && source
+    && source.supplySourceId === root.id
+    && root.id === supplySourceId
+    && root.liveSourceId === source.id
+    && root.intakeId === context.intakeId
+    && sourceContext
+    && rootContext
+    && canonicalizeAffiliateAgentValue(sourceContext)
+      === canonicalizeAffiliateAgentValue(rootContext)
+    && canonicalizeAffiliateAgentValue(sourceContext)
+      === canonicalizeAffiliateAgentValue(context)
+    && recoveryMetadataOwns(sourceMetadata, "existingDataRepair")
+    && recoveryMetadataOwns(rootMetadata, "existingDataRepair")
+  );
+  const pendingMapping = sourcePending ?? rootPending;
+  const pendingValid = Boolean(
+    metadataValid
+    && sourcePending
+    && rootPending
+    && canonicalizeAffiliateAgentValue(sourcePending)
+      === canonicalizeAffiliateAgentValue(rootPending)
+    && pendingMapping
+    && pendingMapping.supplySourceId === supplySourceId
+    && pendingMapping.sourceId === context.sourceId
+    && pendingMapping.sourceIdentityKey === context.sourceIdentityKey
+    && pendingMapping.admissionHash === context.admissionHash
+    && recoveryMetadataOwns(sourceMetadata, "pendingMapping")
+    && recoveryMetadataOwns(rootMetadata, "pendingMapping")
+  );
+  const [mapping, mappingJob, producerJob] = pendingMapping
+    ? await Promise.all([
+      database.mappings.findUnique({ where: { id: pendingMapping.mappingId } }),
+      transaction.affiliateSourceMappingJobs.findUnique({
+        where: { id: pendingMapping.mappingJobId },
+      }),
+      pendingMapping.producerJobId
+        ? transaction.affiliateAgentGatewayJobs.findUnique({
+          where: { id: pendingMapping.producerJobId },
+        })
+        : Promise.resolve(null),
+    ])
+    : [null, null, null];
+  const mappingJson = mapping?.mapping;
+  const mappingRecord = isGatewayRecord(mappingJson) ? mappingJson : {};
+  const mappingMetadata = isGatewayRecord(mappingRecord.metadata)
+    ? mappingRecord.metadata
+    : {};
+  const validationOutput = isGatewayRecord(mappingMetadata.validationOutput)
+    ? mappingMetadata.validationOutput
+    : {};
+  const mappingEvidenceRefs = Array.isArray(mappingMetadata.evidenceRefs)
+    ? mappingMetadata.evidenceRefs
+      .filter((value): value is string => typeof value === "string")
+      .sort()
+    : [];
+  const pendingMappingSha256 = pendingMapping
+    ? (pendingMapping as AffiliateExistingDataRepairPendingMapping & {
+      mappingSha256?: string;
+    }).mappingSha256
+    : undefined;
+  const producerManifestResult = affiliateAgentEvidenceManifestSchema.safeParse(
+    producerJob?.evidenceManifestJson,
+  );
+  const producerManifest = producerManifestResult.success
+    ? producerManifestResult.data
+    : null;
+  const producerEvidenceEntries = pendingMapping && producerManifest
+    ? pendingMapping.evidenceRefs.map((evidenceRef) => (
+      producerManifest.entries.find((entry) => entry.evidenceRef === evidenceRef)
+    ))
+    : [];
+  const producerEvidenceBound = producerEvidenceEntries.length > 0
+    && producerEvidenceEntries.every((entry) => entry !== undefined);
+  const expectedEvidenceKinds = producerEvidenceBound
+    ? Array.from(new Set(
+      producerEvidenceEntries.map((entry) => entry!.kind),
+    )).sort()
+    : [];
+  const expectedEvidenceHash = pendingMapping && producerManifest && producerEvidenceBound
+    ? hashAffiliateAgentValue({
+      manifestHash: producerManifest.hash,
+      refs: pendingMapping.evidenceRefs,
+      kinds: expectedEvidenceKinds,
+    })
+    : null;
+  const mappingValid = Boolean(
+    pendingValid
+    && pendingMapping
+    && mapping
+    && mappingJob
+    && producerJob
+    && producerManifest
+    && producerEvidenceBound
+    && mappingJob.id === pendingMapping.mappingJobId
+    && mappingJob.status === "COMPLETED"
+    && mappingJob.supplySourceId === supplySourceId
+    && mappingJob.sourceId === context.sourceId
+    && mappingJob.mappingId === pendingMapping.mappingId
+    && mapping.sourceId === context.sourceId
+    && mapping.supplySourceId === supplySourceId
+    && mapping.id === pendingMapping.mappingId
+    && mapping.isActive === false
+    && isRecoverySha256(pendingMappingSha256)
+    && hashAffiliateAgentValue(mappingJson) === pendingMappingSha256
+    && pendingMapping.candidatePackageHash === pendingMapping.packageHash
+    && mappingMetadata.packageHash === pendingMapping.packageHash
+    && validationOutput.validatedPackageHash === pendingMapping.candidatePackageHash
+    && validationOutput.candidateHash === pendingMapping.candidateHash
+    && validationOutput.evidenceManifestHash === producerManifest.hash
+    && canonicalizeAffiliateAgentValue(mappingEvidenceRefs)
+      === canonicalizeAffiliateAgentValue(pendingMapping.evidenceRefs)
+    && canonicalizeAffiliateAgentValue(
+      Array.isArray(mappingMetadata.evidenceKinds)
+        ? mappingMetadata.evidenceKinds
+        : [],
+    ) === canonicalizeAffiliateAgentValue(expectedEvidenceKinds)
+    && canonicalizeAffiliateAgentValue(
+      Array.isArray(validationOutput.evidenceRefs)
+        ? validationOutput.evidenceRefs
+        : [],
+    ) === canonicalizeAffiliateAgentValue(pendingMapping.evidenceRefs)
+    && canonicalizeAffiliateAgentValue(
+      Array.isArray(validationOutput.evidenceKinds)
+        ? validationOutput.evidenceKinds
+        : [],
+    ) === canonicalizeAffiliateAgentValue(expectedEvidenceKinds)
+    && validationOutput.validationReceiptId === pendingMapping.validationReceiptId
+    && hashAffiliateAgentValue(validationOutput) === pendingMapping.validationHash
+    && pendingMapping.evidenceHash === expectedEvidenceHash
+  );
+  let sourceState: AffiliateExistingDataRepairSourceState | null = null;
+  if (source) {
+    try {
+      sourceState = await captureAffiliateExistingRepairSourceState(
+        {
+          affiliateScrapeSources: database.sources,
+          affiliateSupplySources: database.supplySources,
+          affiliateScrapeMappings: database.mappings,
+          organizations: database.organizations,
+          affiliateImportCandidates: database.candidates,
+          affiliateSupplyTargets: database.targets,
+        },
+        source.id,
+      );
+    } catch {
+      sourceState = null;
+    }
+  }
+  const protectedStateValid = Boolean(
+    pendingValid
+    && pendingMapping
+    && sourceState
+    && sourceState.workingMappingId === pendingMapping.workingMappingId
+    && sourceState.workingMappingStateSha256
+      === pendingMapping.workingMappingStateSha256
+    && sourceState.workingMappingStateSha256
+      === pendingMapping.postCommitWorkingMappingStateSha256
+    && sourceState.organizationStateSha256
+      === pendingMapping.organizationStateSha256
+    && sourceState.organizationStateSha256
+      === pendingMapping.postCommitOrganizationStateSha256
+    && sourceState.isPublicReplacement === pendingMapping.isPublicReplacement
+    && sourceState.sourceStateSha256 === pendingMapping.postCommitSourceStateSha256
+  );
+  return {
+    context,
+    pendingMapping,
+    root,
+    source,
+    mapping,
+    sourceState,
+    metadataValid,
+    pendingValid,
+    mappingValid,
+    protectedStateValid,
+    reviewerManifestValid: false,
+  };
+};
+
 
 type ReviewerEffectRecoveryRows = Readonly<{
   receipt: AffiliateAgentGatewayOperationReceipts | null;
@@ -15461,6 +15858,7 @@ type ReviewerEffectRecoveryRows = Readonly<{
   approvedAdapterAvailable: boolean;
   sourceExclusionAdapterAvailable: boolean;
   reviewerHumanAdapterAvailable: boolean;
+  existingDataRepair: ExistingDataRepairRecoveryState;
 }>;
 
 type ReviewerEffectRecoveryEvaluation = Readonly<{
@@ -15584,6 +15982,69 @@ const recoveryTransitionFor = (
     && request.reviewerWorkerId === claim.workerId
   );
 };
+const existingDataRepairTransitionFor = (
+  value: ReviewerEffectRecoveryTransition | null,
+  receiptId: string,
+  claim: AffiliateAgentGatewayClaims | null,
+  result: AffiliateAgentReviewerTerminalResult | null,
+  sourceRead: AffiliateSupplySourceReadAssessment | null,
+  repair: ExistingDataRepairRecoveryState,
+): boolean => {
+  if (
+    !value
+    || !claim
+    || !result
+    || !sourceRead
+    || !repair.context
+    || !repair.pendingMapping
+    || !repair.mapping
+    || !value.id
+  ) return false;
+  const request = isGatewayRecord(value.requestJson)
+    ? value.requestJson
+    : null;
+  const transitionResult = isGatewayRecord(value.resultJson)
+    ? value.resultJson
+    : null;
+  const committedPackageHash = recoveryCommittedPackageHash(result);
+  const pending = repair.pendingMapping;
+  return (
+    value.supplySourceId === sourceRead.snapshot.supplySourceId
+    && value.commandRef === receiptId
+    && value.idempotencyKey === receiptId
+    && value.command === "APPROVE"
+    && value.toStage === sourceRead.assessment.stage
+    && value.generation === sourceRead.assessment.lifecycleGeneration
+    && value.actorKind === "SUPPLY_REVIEWER"
+    && value.actorId === claim.workerId
+    && value.executingAgentId === result.invocationId
+    && value.contractVersion === result.supplyContractVersion
+    && value.contractHash === result.supplyContractHash
+    && value.requestHash === recoveryTransitionRequestHash(value)
+    && value.resultHash === hashAffiliateAgentValue(value.resultJson)
+    && transitionResult?.supplySourceId === sourceRead.snapshot.supplySourceId
+    && transitionResult?.lifecycleGeneration === value.generation
+    && transitionResult?.stage === value.toStage
+    && request?.commandRef === receiptId
+    && request.sourceId === sourceRead.rootId
+    && (request.mappingId === undefined || request.mappingId === pending.mappingId)
+    && request.packageHash === committedPackageHash
+    && request.packageHash === pending.packageHash
+    && request.reviewerClaimId === claim.id
+    && request.reviewerClaimGeneration === result.claimGeneration
+    && request.reviewerInvocationId === result.invocationId
+    && request.reviewerSupplySourceId === sourceRead.snapshot.supplySourceId
+    && request.reviewerWorkerId === claim.workerId
+    && request.evidenceRefs !== undefined
+    && hashAffiliateAgentValue(request.evidenceRefs)
+      === hashAffiliateAgentValue(result.evidenceRefs)
+    && claim.lifecycleGeneration !== null
+    && value.generation === claim.lifecycleGeneration + 1
+    && sourceRead.snapshot.source.activeMappingId === pending.workingMappingId
+    && repair.mapping.id === pending.mappingId
+  );
+};
+
 const sourceExclusionTransitionFor = (
   value: ReviewerEffectRecoveryTransition | null,
   receiptId: string,
@@ -15976,6 +16437,28 @@ const recoveryFingerprint = (
     }
     : null,
   producerContext: recoveryProducerContextFingerprint(rows.producerContext),
+  existingDataRepair: rows.existingDataRepair.context
+    ? {
+      contextHash: hashAffiliateAgentValue(rows.existingDataRepair.context),
+      pendingMappingHash: hashAffiliateAgentValue(
+        rows.existingDataRepair.pendingMapping,
+      ),
+      rootId: rows.existingDataRepair.root?.id ?? null,
+      sourceId: rows.existingDataRepair.source?.id ?? null,
+      mappingId: rows.existingDataRepair.mapping?.id ?? null,
+      mappingJsonHash: hashAffiliateAgentValue(
+        rows.existingDataRepair.mapping?.mapping ?? null,
+      ),
+      sourceStateHash: hashAffiliateAgentValue(
+        rows.existingDataRepair.sourceState,
+      ),
+      metadataValid: rows.existingDataRepair.metadataValid,
+      pendingValid: rows.existingDataRepair.pendingValid,
+      mappingValid: rows.existingDataRepair.mappingValid,
+      protectedStateValid: rows.existingDataRepair.protectedStateValid,
+      reviewerManifestValid: rows.existingDataRepair.reviewerManifestValid,
+    }
+    : null,
   priorApprovalTransition: rows.priorApprovalTransition
     ? {
       id: rows.priorApprovalTransition.id,
@@ -16066,6 +16549,11 @@ const loadReviewerEffectRecoveryRows = async (
         envelope.subject.producerClaimId,
       )
       : null;
+  let existingDataRepair = await loadExistingDataRepairRecoveryState(
+    transaction,
+    envelope,
+    request.supplySourceId,
+  );
   let sourceRead: AffiliateSupplySourceReadAssessment | null = null;
   try {
     sourceRead = await readAffiliateSupplySourceAssessment({
@@ -16083,6 +16571,33 @@ const loadReviewerEffectRecoveryRows = async (
     );
   } catch {
     activeBundle = null;
+  }
+  if (
+    existingDataRepair.context
+    && envelope?.subject.type === "SUPPLY_REVIEWER"
+    && activeBundle
+  ) {
+    const producerArtifacts = await transaction.affiliateAgentGatewayArtifacts.findMany({
+      where: {
+        OR: [
+          { claimId: envelope.subject.producerClaimId },
+          { creatingClaimId: envelope.subject.producerClaimId },
+        ],
+      },
+    });
+    const manifest = affiliateAgentEvidenceManifestSchema.safeParse(
+      envelope.evidenceManifest,
+    );
+    existingDataRepair = {
+      ...existingDataRepair,
+      reviewerManifestValid: manifest.success
+        && hasValidReviewerManifest(
+          manifest.data,
+          activeBundle,
+          envelope.subject,
+          producerArtifacts,
+        ),
+    };
   }
   let currentCatalogHash: string | null = null;
   try {
@@ -16201,6 +16716,7 @@ const loadReviewerEffectRecoveryRows = async (
     .map((sourceJob) => sourceJob.id);
   return {
     receipt,
+    existingDataRepair,
     claim,
     job,
     envelope,
@@ -16481,10 +16997,399 @@ const evaluateSourceExclusionEffectRecovery = (
   };
 };
 
+type RecoveryClaimContractIdentity = Readonly<{
+  role: string;
+  deploymentContractVersion: number;
+  deploymentContractHash: string;
+  supplyContractVersion: number;
+  supplyContractHash: string;
+  roleContractVersion: number;
+  roleContractHash: string;
+  promptTemplateVersion: number;
+  promptTemplateHash: string;
+}>;
+
+const existingDataRepairClaimContractBindingsValid = (
+  claim: AffiliateAgentGatewayClaims | null,
+  envelope: RecoveryClaimContractIdentity | null,
+  role: "MAPPING_PRODUCER" | "SUPPLY_REVIEWER",
+  context: AffiliateAgentExistingDataRepairContext | null,
+  activeBundle: AffiliateAgentContractBundle | null,
+): boolean => {
+  if (!claim || !envelope || !context || !activeBundle || envelope.role !== role) {
+    return false;
+  }
+  const deploymentRole = context.deploymentContract.roleContracts.find(
+    (candidate) => candidate.role === role,
+  );
+  const deploymentPrompt = context.deploymentContract.promptTemplates.find(
+    (candidate) => candidate.role === role,
+  );
+  const activeRole = activeBundle.roleContracts.find(
+    (candidate) => candidate.role === role,
+  );
+  const activePrompt = activeBundle.promptTemplates.find(
+    (candidate) => candidate.role === role,
+  );
+  return Boolean(
+    deploymentRole
+    && deploymentPrompt
+    && activeRole
+    && activePrompt
+    && activeBundle.deploymentContract.version === context.deploymentContract.version
+    && activeBundle.deploymentContract.hash === context.deploymentContract.hash
+    && activeBundle.deploymentContract.activeSupplyContract.version
+      === context.deploymentContract.activeSupplyContract.version
+    && activeBundle.deploymentContract.activeSupplyContract.hash
+      === context.deploymentContract.activeSupplyContract.hash
+    && deploymentRole.version === activeRole.version
+    && deploymentRole.hash === activeRole.hash
+    && deploymentPrompt.version === activePrompt.version
+    && deploymentPrompt.hash === activePrompt.hash
+    && claim.deploymentContractVersion === context.deploymentContract.version
+    && claim.deploymentContractHash === context.deploymentContract.hash
+    && envelope.deploymentContractVersion === context.deploymentContract.version
+    && envelope.deploymentContractHash === context.deploymentContract.hash
+    && claim.supplyContractVersion === context.deploymentContract.activeSupplyContract.version
+    && claim.supplyContractHash === context.deploymentContract.activeSupplyContract.hash
+    && envelope.supplyContractVersion === context.deploymentContract.activeSupplyContract.version
+    && envelope.supplyContractHash === context.deploymentContract.activeSupplyContract.hash
+    && claim.roleContractVersion === deploymentRole.version
+    && claim.roleContractHash === deploymentRole.hash
+    && envelope.roleContractVersion === deploymentRole.version
+    && envelope.roleContractHash === deploymentRole.hash
+    && claim.promptTemplateVersion === deploymentPrompt.version
+    && claim.promptTemplateHash === deploymentPrompt.hash
+    && envelope.promptTemplateVersion === deploymentPrompt.version
+    && envelope.promptTemplateHash === deploymentPrompt.hash
+  );
+};
+
+const evaluateExistingDataRepairEffectRecovery = (
+  request: AffiliateAgentReviewerEffectRecoveryRequest,
+  rows: ReviewerEffectRecoveryRows,
+): ReviewerEffectRecoveryEvaluation => {
+  const reasonCodes: string[] = [];
+  const {
+    receipt,
+    claim,
+    job,
+    envelope,
+    effectState,
+    reviewerResult,
+  } = rows;
+  const repair = rows.existingDataRepair;
+  const reviewerSubject = envelope?.subject.type === "SUPPLY_REVIEWER"
+    ? envelope.subject
+    : null;
+  const producerEnvelope = rows.producerContext?.producerEnvelope;
+  const producerSubject = producerEnvelope?.subject.type === "MAPPING_PRODUCER"
+    ? producerEnvelope.subject
+    : null;
+  const producerClaim = rows.producerContext?.producerClaim ?? null;
+  const producerJob = rows.producerContext?.producerJob ?? null;
+  const producerResult = rows.producerContext?.producerResult ?? null;
+  const pending = repair.pendingMapping;
+  const context = repair.context;
+  const transitionAlreadyRecorded = existingDataRepairTransitionFor(
+    rows.priorApprovalTransition,
+    request.receiptId,
+    claim,
+    reviewerResult,
+    rows.sourceRead,
+    repair,
+  );
+  const sourceIdentityValid = Boolean(
+    repair.metadataValid
+    && repair.source
+    && repair.root
+    && rows.sourceRead
+    && rows.sourceRead.rootId === request.supplySourceId
+    && rows.sourceRead.snapshot.supplySourceId === request.supplySourceId
+    && rows.sourceRead.rootLiveSourceId === repair.source.id
+    && rows.sourceRead.persistedLiveSource?.id === repair.source.id
+    && rows.sourceRead.persistedLiveSource.supplySourceId === request.supplySourceId
+    && rows.sourceRead.snapshot.source.id === repair.source.id
+    && rows.sourceRead.snapshot.source.activeMappingId === pending?.workingMappingId
+  );
+  const producerPassValid = Boolean(
+    producerResult
+    && producerSubject
+    && (
+      producerResult.disposition === "PACKAGE_COMMITTED"
+      || (
+        producerResult.disposition === "BOUNDED_REPAIR_SUBMITTED"
+        && producerResult.payload.repairPass === producerSubject.pass
+      )
+    )
+  );
+  const producerProofValid = Boolean(
+    reviewerSubject
+    && pending
+    && producerClaim
+    && producerJob
+    && producerEnvelope
+    && producerSubject
+    && producerResult
+    && producerClaim.id === pending.producerClaimId
+    && producerJob.id === pending.producerJobId
+    && producerJob.parentClaimId === pending.reviewerClaimId
+    && producerJob.subjectId === pending.mappingJobId
+    && producerSubject.mappingJobId === pending.mappingJobId
+    && producerSubject.supplySourceId === request.supplySourceId
+    && producerSubject.pass === reviewerSubject.reviewPass
+    && producerEnvelope.claimId === producerClaim.id
+    && producerEnvelope.jobId === producerJob.id
+    && producerSubject.repairContext?.kind === "EXISTING_DATA_REPAIR"
+    && context
+    && canonicalizeAffiliateAgentValue(producerSubject.repairContext)
+      === canonicalizeAffiliateAgentValue(context)
+    && producerPackageHash(producerResult) === pending.packageHash
+    && producerJob.resultHash === hashAffiliateAgentValue(producerResult)
+    && isProducerClaimValid(rows.producerContext!, reviewerSubject, job!)
+    && producerPassValid
+  );
+  const reviewerContractBindingsValid = existingDataRepairClaimContractBindingsValid(
+    claim,
+    envelope,
+    "SUPPLY_REVIEWER",
+    context,
+    rows.activeBundle,
+  );
+  const producerContractBindingsValid = existingDataRepairClaimContractBindingsValid(
+    producerClaim,
+    producerEnvelope ?? null,
+    "MAPPING_PRODUCER",
+    context,
+    rows.activeBundle,
+  );
+  const activeContractBindingsValid = Boolean(
+    context
+    && rows.activeBundle
+    && rows.sourceRead
+    && rows.activeBundle.supplyContract.version
+      === context.deploymentContract.activeSupplyContract.version
+    && rows.activeBundle.supplyContract.hash
+      === context.deploymentContract.activeSupplyContract.hash
+    && rows.sourceRead.contract.version
+      === context.deploymentContract.activeSupplyContract.version
+    && rows.sourceRead.contract.hash
+      === context.deploymentContract.activeSupplyContract.hash
+  );
+  if (
+    !receipt
+    || receipt.claimId !== request.claimId
+    || receipt.jobId !== request.jobId
+    || receipt.claimGeneration !== claim?.claimGeneration
+  ) {
+    reasonCodes.push("RECEIPT_IDENTITY_MISMATCH");
+  }
+  if (
+    !claim
+    || claim.id !== request.claimId
+    || claim.jobId !== request.jobId
+    || !envelope
+    || envelope.claimId !== request.claimId
+    || envelope.jobId !== request.jobId
+    || envelope.supplySourceId !== request.supplySourceId
+    || envelope.role !== "SUPPLY_REVIEWER"
+    || envelope.subject.type !== "SUPPLY_REVIEWER"
+    || envelope.subject.repairContext?.kind !== "EXISTING_DATA_REPAIR"
+    || claim.role !== "SUPPLY_REVIEWER"
+    || claim.status !== "RECONCILIATION_REQUIRED"
+    || claim.tokenInvalidatedAt === null
+  ) {
+    reasonCodes.push("CLAIM_NOT_QUARANTINED");
+  }
+  if (
+    !job
+    || job.id !== request.jobId
+    || job.supplySourceId !== request.supplySourceId
+    || job.role !== "SUPPLY_REVIEWER"
+    || job.subjectType !== "SUPPLY_REVIEWER"
+    || job.status !== "RECONCILIATION_REQUIRED"
+    || job.activeClaimId !== request.claimId
+    || job.claimGeneration !== claim?.claimGeneration
+  ) {
+    reasonCodes.push("JOB_NOT_QUARANTINED");
+  }
+  if (
+    !receipt
+    || receipt.status !== "UNKNOWN"
+    || receipt.safeErrorCode !== "PARTIAL_COMMAND_UNRESOLVED"
+    || receipt.responseHash !== null
+  ) {
+    reasonCodes.push("RECEIPT_NOT_UNKNOWN_PARTIAL");
+  }
+  if (
+    !receipt
+    || receipt.operationKind !== AFFILIATE_AGENT_TERMINAL_EFFECT_OPERATION
+    || receipt.commandName !== AFFILIATE_AGENT_TERMINAL_EFFECT_COMMAND
+    || receipt.idempotencyKey !== reviewerTerminalEffectIdempotencyKey()
+  ) {
+    reasonCodes.push("NOT_REVIEWER_TERMINAL_EFFECT");
+  }
+  if (!envelope || !claim || hashAffiliateAgentValue(envelope) !== claim.claimEnvelopeHash) {
+    reasonCodes.push("CLAIM_ENVELOPE_INVALID");
+  }
+  if (
+    !effectState
+    || effectState.kind !== "PENDING"
+    || !reviewerResult
+    || !isRecoverySha256(effectState.terminalRequestHash)
+    || effectState.terminalIdempotencyKey.trim().length === 0
+  ) {
+    reasonCodes.push("RETAINED_RESULT_INVALID");
+  }
+  if (
+    !receipt
+    || !claim
+    || !reviewerResult
+    || receipt.requestHash !== reviewerTerminalEffectRequestHash(claim, reviewerResult)
+  ) {
+    reasonCodes.push("EFFECT_REQUEST_HASH_INVALID");
+  }
+  if (
+    !claim
+    || !envelope
+    || !job
+    || !matchesReviewerClaimEnvelopeIdentity(claim, envelope, job)
+    || !reviewerResult
+    || reviewerResult.role !== "SUPPLY_REVIEWER"
+    || reviewerResult.jobId !== claim.jobId
+    || reviewerResult.claimId !== claim.id
+    || reviewerResult.claimGeneration !== claim.claimGeneration
+    || reviewerResult.lifecycleGeneration !== claim.lifecycleGeneration
+    || reviewerResult.workerId !== claim.workerId
+    || reviewerResult.invocationId !== claim.invocationId
+    || reviewerResult.deploymentContractVersion !== claim.deploymentContractVersion
+    || reviewerResult.deploymentContractHash !== claim.deploymentContractHash
+    || reviewerResult.roleContractVersion !== claim.roleContractVersion
+    || reviewerResult.roleContractHash !== claim.roleContractHash
+    || reviewerResult.promptTemplateVersion !== claim.promptTemplateVersion
+    || reviewerResult.promptTemplateHash !== claim.promptTemplateHash
+    || reviewerResult.supplyContractVersion !== claim.supplyContractVersion
+    || reviewerResult.supplyContractHash !== claim.supplyContractHash
+    || reviewerResult.disposition !== "APPROVED"
+  ) {
+    reasonCodes.push("REVIEWER_RESULT_IDENTITY_INVALID");
+  }
+  if (
+    !envelope
+    || !reviewerResult
+    || !reviewerResultTargetsEnvelope(envelope, reviewerResult)
+    || !repair.reviewerManifestValid
+  ) {
+    reasonCodes.push("EVIDENCE_REFERENCE_INVALID");
+  }
+  if (
+    !reviewerSubject
+    || !context
+    || !pending
+    || reviewerSubject.supplySourceId !== request.supplySourceId
+    || reviewerSubject.committedPackageHash !== pending.packageHash
+    || !sourceIdentityValid
+  ) {
+    reasonCodes.push("EXISTING_REPAIR_SCOPE_INVALID");
+  }
+  if (!repair.metadataValid) reasonCodes.push("EXISTING_REPAIR_METADATA_INVALID");
+  if (
+    !repair.pendingValid
+    || !pending
+    || (pending.state !== "STAGED" && pending.state !== "APPROVED")
+  ) {
+    reasonCodes.push("EXISTING_REPAIR_PENDING_INVALID");
+  }
+  if (!repair.mappingValid) reasonCodes.push("EXISTING_REPAIR_MAPPING_INVALID");
+  if (!repair.protectedStateValid) reasonCodes.push("EXISTING_REPAIR_STATE_INVALID");
+  if (!producerProofValid) reasonCodes.push("PRODUCER_PROOF_INVALID");
+  if (
+    !reviewerContractBindingsValid
+    || !producerContractBindingsValid
+    || !activeContractBindingsValid
+  ) {
+    reasonCodes.push("DEPLOYMENT_CONTRACT_STALE");
+  }
+  if (!rows.currentCatalogHash || !context || rows.currentCatalogHash !== context.sportsCatalog.sha256) {
+    reasonCodes.push("SPORTS_CATALOG_STALE");
+  }
+  if (!transitionAlreadyRecorded && rows.priorApprovalTransition) {
+    reasonCodes.push("AMBIGUOUS_PRIOR_EFFECT");
+  }
+  if (
+    transitionAlreadyRecorded
+    && (!pending || pending.state !== "APPROVED")
+  ) {
+    reasonCodes.push("APPROVAL_TRANSITION_INVALID");
+  }
+  if (rows.otherActiveClaimIds.length > 0) {
+    reasonCodes.push("OTHER_ACTIVE_CLAIM");
+  }
+  if (!transitionAlreadyRecorded && !rows.activeBundle) {
+    reasonCodes.push("ACTIVE_CONTRACT_UNAVAILABLE");
+  }
+  if (!transitionAlreadyRecorded && !rows.approvedAdapterAvailable) {
+    reasonCodes.push("APPROVED_ADAPTER_UNAVAILABLE");
+  }
+  if (
+    !transitionAlreadyRecorded
+    && rows.sourceRead
+    && claim
+    && pending
+    && context
+    && claim.lifecycleGeneration !== null
+  ) {
+    const decision = validateAffiliateSupplyCommand({
+      command: "APPROVE",
+      authority: "SUPPLY_REVIEWER",
+      expectedLifecycleGeneration: claim.lifecycleGeneration,
+      currentLifecycleGeneration: rows.sourceRead.assessment.lifecycleGeneration,
+      activeContractVersion: rows.sourceRead.contract.version,
+      activeContractHash: rows.sourceRead.contract.hash,
+      commandContractVersion: reviewerResult?.supplyContractVersion ?? claim.supplyContractVersion,
+      commandContractHash: reviewerResult?.supplyContractHash ?? claim.supplyContractHash,
+      evidenceRefs: reviewerResult?.evidenceRefs ?? [],
+      reviewerOutcome: "APPROVED",
+      assessment: rows.sourceRead.assessment,
+      existingDataRepairApprovalProof: {
+        verified: true,
+        pendingMappingId: pending.mappingId,
+        sourceStateSha256: pending.sourceStateSha256,
+      },
+    });
+    if (!decision.isAccepted) reasonCodes.push(...decision.reasonCodes);
+  }
+  const uniqueReasonCodes = Array.from(new Set(reasonCodes)).sort();
+  const eligible = uniqueReasonCodes.length === 0;
+  const finalReasonCodes = eligible
+    ? transitionAlreadyRecorded
+      ? ["ELIGIBLE", "LIFECYCLE_ALREADY_RECORDED"]
+      : ["ELIGIBLE"]
+    : uniqueReasonCodes;
+  return {
+    eligible,
+    reasonCodes: finalReasonCodes,
+    reportHash: reviewerEffectRecoveryReportHash(
+      request,
+      rows,
+      eligible,
+      finalReasonCodes,
+      transitionAlreadyRecorded,
+    ),
+    transitionAlreadyRecorded,
+  };
+};
+
 const evaluateReviewerEffectRecovery = (
   request: AffiliateAgentReviewerEffectRecoveryRequest,
   rows: ReviewerEffectRecoveryRows,
 ): ReviewerEffectRecoveryEvaluation => {
+  if (
+    rows.envelope?.subject.type === "SUPPLY_REVIEWER"
+    && rows.envelope.subject.repairContext?.kind === "EXISTING_DATA_REPAIR"
+  ) {
+    return evaluateExistingDataRepairEffectRecovery(request, rows);
+  }
   if (rows.envelope?.subject.type === "SOURCE_EXCLUSION_REVIEW") {
     return evaluateSourceExclusionEffectRecovery(request, rows);
   }
@@ -17897,6 +18802,151 @@ export const recoverAffiliateAgentReviewerEffect = async (
     );
   }
   const terminalEffects = dependencies.terminalEffects;
+  const isExistingDataRepairRecovery =
+    reviewerEnvelope.subject.type === "SUPPLY_REVIEWER"
+    && reviewerEnvelope.subject.repairContext?.kind === "EXISTING_DATA_REPAIR";
+  if (isExistingDataRepairRecovery && reservation.rows.priorApprovalTransition) {
+    const priorTransition = reservation.rows.priorApprovalTransition;
+    if (
+      !existingDataRepairTransitionFor(
+        priorTransition,
+        request.receiptId,
+        reservation.rows.claim,
+        approvedResult,
+        reservation.rows.sourceRead,
+        reservation.rows.existingDataRepair,
+      )
+    ) {
+      throw recoveryError(
+        "REVIEWER_EFFECT_RECOVERY_STALE",
+        "The existing-data repair approval transition is missing or ambiguous.",
+        request.receiptId,
+      );
+    }
+    let safeOutput: Readonly<Record<string, unknown>>;
+    try {
+      safeOutput = parseBoundedSafeOutput(
+        priorTransition?.resultJson,
+        effectReceipt.id,
+      );
+    } catch {
+      const failureAuditWrites = await appendReviewerEffectRecoveryFailure(
+        dependencies,
+        request,
+        operator,
+        reservation.rows,
+        reservation.reportHash,
+        reservation.attempt,
+        ["RECOVERY_OUTPUT_INVALID"],
+      );
+      const currentRows = await readReviewerEffectRecoveryState(
+        dependencies,
+        request,
+      );
+      return recoveryReport(
+        request,
+        currentRows,
+        reservation.reportHash,
+        "RECONCILIATION_REQUIRED",
+        false,
+        reservation.writeCount + failureAuditWrites,
+      );
+    }
+    let committedWriteCount = reservation.writeCount;
+    try {
+      const finalized = await finalizeOperatorReviewerEffect(
+        dependencies,
+        effectReceipt,
+        approvedResult,
+        safeOutput,
+        operator.operatorId,
+      );
+      committedWriteCount += finalized.writeCount;
+      const completed = await completeOperatorReviewerResult(
+        dependencies,
+        effectReceipt,
+        approvedResult,
+        operator.operatorId,
+      );
+      committedWriteCount += completed.writeCount;
+      const currentRows = await readReviewerEffectRecoveryState(
+        dependencies,
+        request,
+      );
+      const completionAuditWrites = await runSerializableEffectTransaction(
+        dependencies,
+        (transaction) => appendReviewerEffectRecoveryEvent(
+          transaction,
+          dependencies,
+          {
+            eventType: REVIEWER_EFFECT_RECOVERY_COMPLETED_EVENT,
+            eventKey: [
+              "reviewer-effect-recovery:completed",
+              request.receiptId,
+              reservation.reportHash,
+            ].join(":"),
+            requestHash: reservation.rows.receipt?.requestHash ?? null,
+            reportHash: reservation.reportHash,
+            jobId: request.jobId,
+            claimId: request.claimId,
+            receiptId: request.receiptId,
+            role: "SUPPLY_REVIEWER",
+            actorId: operator.operatorId,
+            payload: {
+              ...recoveryEventPayload(
+                currentRows,
+                request,
+                operator,
+                reservation.reportHash,
+                reservation.attempt,
+                "COMPLETED",
+              ),
+              outcome: "COMPLETED",
+              transitionAlreadyRecorded: true,
+            },
+            reasonCodes: ["COMPLETED", "LIFECYCLE_ALREADY_RECORDED"],
+          },
+        ),
+        {
+          code: "REVIEWER_EFFECT_RECOVERY_STALE",
+          safeMessage: "The reviewer recovery completion could not be recorded.",
+          receiptId: request.receiptId,
+        },
+      );
+      committedWriteCount += completionAuditWrites;
+      return recoveryReport(
+        request,
+        currentRows,
+        reservation.reportHash,
+        completed.outcome === "REPLAYED" ? "REPLAYED" : "COMPLETED",
+        false,
+        committedWriteCount,
+      );
+    } catch (error) {
+      if (!(error instanceof AffiliateAgentGatewayError)) throw error;
+      const failureAuditWrites = await appendReviewerEffectRecoveryFailure(
+        dependencies,
+        request,
+        operator,
+        reservation.rows,
+        reservation.reportHash,
+        reservation.attempt,
+        ["COMPLETION_FAILED"],
+      );
+      const currentRows = await readReviewerEffectRecoveryState(
+        dependencies,
+        request,
+      );
+      return recoveryReport(
+        request,
+        currentRows,
+        reservation.reportHash,
+        "RECONCILIATION_REQUIRED",
+        false,
+        committedWriteCount + failureAuditWrites,
+      );
+    }
+  }
   const recoveryHandler =
     approvedResult.disposition === "APPROVED"
       ? terminalEffects?.APPROVED

@@ -5,6 +5,9 @@ import { Readable } from "node:stream";
 import type { PrismaClient } from "@/generated/prisma/client";
 import type { StorageProvider } from "@/lib/storageProvider";
 
+jest.mock('../affiliateRepairActivityLease', () => ({
+  tryLockAffiliateRepairWrites: async () => true,
+}));
 import {
   AFFILIATE_AGENT_ROLE_CONTRACTS,
   canonicalizeAffiliateAgentValue,
@@ -26,6 +29,7 @@ import {
   type AffiliateAgentCommandAdapters,
   type AffiliateAgentReviewerTerminalResult,
 } from "../agentGatewayAdapters";
+import { captureAffiliateExistingRepairSourceState } from "../affiliateExistingDataRepairState";
 
 import * as affiliateSupplyPersistence from "../affiliateSupplyPersistence";
 import type {
@@ -3035,5 +3039,86 @@ describe("production active Supply Contract artifact resolver", () => {
       }]),
       entry,
     })).rejects.toThrow("The active Supply Contract artifact is not valid.");
+  });
+});
+
+describe("existing-data repair source state hashing", () => {
+  it("ignores only root lifecycle/projection fields while retaining source lifecycle binding", async () => {
+    const source = {
+      id: "repair-source",
+      supplySourceId: "repair-root",
+      sourceKey: "repair-source-key",
+      name: "Repair source",
+      organizationId: null,
+      baseUrl: "https://repair.example.test",
+      listUrl: "https://repair.example.test/list",
+      targetKind: "EVENT",
+      status: "ACTIVE",
+      activeMappingId: null,
+      lastScrapeRunId: null,
+      lifecycleGeneration: 4,
+      activeSupplyContractVersion: 1,
+      activeSupplyContractHash: "contract-hash",
+      autoScrapeEnabled: false,
+      scrapeIntervalMinutes: null,
+      notes: null,
+      metadata: {},
+    };
+    const root = {
+      id: "repair-root",
+      identityKey: "repair-identity",
+      canonicalUrl: "https://repair.example.test",
+      origin: "https://repair.example.test",
+      pathKey: "https://repair.example.test/",
+      operatorDomain: "repair.example.test",
+      targetKind: "EVENT",
+      rolloutCohort: "default",
+      intakeId: null,
+      liveSourceId: "repair-source",
+      predecessorId: null,
+      successorId: null,
+      lifecycleGeneration: 2,
+      activeSupplyContractVersion: 1,
+      activeSupplyContractHash: "contract-hash",
+      derivedStage: "READY",
+      derivedOutcome: "PUBLISHED",
+      freshnessStatus: "FRESH",
+      targetContribution: "PRIMARY",
+      repairPriority: 0,
+      isAutomationEnabled: false,
+      isExcluded: false,
+      automationHoldReason: null,
+      metadata: {},
+    };
+    const database = {
+      affiliateScrapeSources: {
+        findUnique: jest.fn(async () => source),
+      },
+      affiliateSupplySources: {
+        findUnique: jest.fn(async () => root),
+      },
+      affiliateScrapeMappings: {
+        findUnique: jest.fn(async () => null),
+      },
+      organizations: {
+        findUnique: jest.fn(async () => null),
+      },
+    } as unknown as Parameters<typeof captureAffiliateExistingRepairSourceState>[0];
+
+    const before = await captureAffiliateExistingRepairSourceState(database, source.id);
+    root.lifecycleGeneration = 3;
+    root.derivedStage = "DEGRADED";
+    root.derivedOutcome = "HELD";
+    const afterRootProjection = await captureAffiliateExistingRepairSourceState(database, source.id);
+    expect(afterRootProjection.sourceStateSha256).toBe(before.sourceStateSha256);
+
+    root.freshnessStatus = "STALE";
+    const afterProtectedRootField = await captureAffiliateExistingRepairSourceState(database, source.id);
+    expect(afterProtectedRootField.sourceStateSha256).not.toBe(before.sourceStateSha256);
+
+    root.freshnessStatus = "FRESH";
+    source.lifecycleGeneration = 5;
+    const afterSourceLifecycle = await captureAffiliateExistingRepairSourceState(database, source.id);
+    expect(afterSourceLifecycle.sourceStateSha256).not.toBe(before.sourceStateSha256);
   });
 });

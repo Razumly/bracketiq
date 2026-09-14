@@ -7,6 +7,7 @@ import {
   ensureAffiliateSupplySource,
 } from './affiliateSupplyPersistence';
 import { normalizeAffiliateSupplyIdentity } from './affiliateSupplyLifecycle';
+import { hashAffiliateAgentValue } from './agentGatewayContracts';
 import {
   deriveAffiliateHtmlArtifacts,
   evaluateAffiliateHtmlQuality,
@@ -48,6 +49,9 @@ import {
   fetchBoundedPublicResource,
   type BoundedPublicResource,
 } from './sourceIntakeUrlSafety';
+import {
+  pendingMappingForMetadata,
+} from './affiliateExistingDataRepairState';
 import { affiliateDiscoveryPolicyKeyForUrl } from './sourceDiscoveryRules';
 import {
   discoverAffiliateSourcePages,
@@ -107,6 +111,19 @@ const VALID_INTAKE_STATUSES = new Set([
   'MAPPING_IN_PROGRESS',
   'EXPANDED',
 ]);
+export const AFFILIATE_EXISTING_DATA_REPAIR_EVIDENCE_ONLY_PURPOSE =
+  'EXISTING_DATA_REPAIR_EVIDENCE_ONLY' as const;
+
+export type AffiliateExistingDataRepairEvidenceOnlyMarker = Readonly<{
+  schemaVersion: 1;
+  purpose: typeof AFFILIATE_EXISTING_DATA_REPAIR_EVIDENCE_ONLY_PURPOSE;
+  requestHash: string;
+  operatorId: string;
+  intakeId: string;
+  pageIds: readonly string[];
+  baseline: unknown;
+}>;
+
 
 type JsonRecord = Record<string, unknown>;
 export type AffiliateSourceIntakePageInput = {
@@ -136,14 +153,39 @@ export type AffiliateSourceIntakeImportResult = {
   rejected: Array<{ name: string; reason: string }>;
   intakeIds: string[];
 };
-
 export type AffiliateSourcePolicyReview = {
   complianceStatus: string;
   termsUrl?: string | null;
   notes?: string | null;
 };
 
+export type AffiliateSourceIntakeRunQueueOptions = {
+  db?: unknown;
+  existingDataRepairEvidenceOnly?: AffiliateExistingDataRepairEvidenceOnlyMarker;
+};
+export type AffiliateSourceIntakeGovernedProcessIntent = Readonly<{
+  purpose: typeof AFFILIATE_EXISTING_DATA_REPAIR_EVIDENCE_ONLY_PURPOSE;
+  operatorId: string;
+  markerSha256: string;
+  /**
+   * The capture owner supplies this callback after the run is claimed. It
+   * closes the claim-to-provider race for marked runs.
+   */
+  verifyAfterClaim?: (input: Readonly<{
+    database: unknown;
+    run: Record<string, unknown>;
+    intake: Record<string, unknown>;
+    pages: readonly Record<string, unknown>[];
+  }>) => Promise<void>;
+}>;
+
+export class AffiliateSourceIntakeQueueConflictError extends Error {
+  readonly code = 'GOVERNED_CAPTURE_OWNERSHIP_CONFLICT';
+  readonly status = 409;
+}
+
 export type AffiliateSourceIntakeProcessingDependencies = {
+  db?: unknown;
   captureClient?: AffiliateSourceCaptureClient;
   fallbackCaptureClient?: AffiliateSourceCaptureClient | null;
   screenshotMode?: AffiliateIntakeScreenshotMode;
@@ -190,6 +232,10 @@ const intakePrisma = (client: unknown = prisma) => {
     policies: dbClient.affiliateSourceDomainPolicies as any,
     discoveryResults: dbClient.affiliateSourceDiscoveryResults as any,
     mappingJobs: dbClient.affiliateSourceMappingJobs as any,
+    sources: dbClient.affiliateScrapeSources as any,
+    supplySources: dbClient.affiliateSupplySources as any,
+    gatewayJobs: dbClient.affiliateAgentGatewayJobs as any,
+    gatewayClaims: dbClient.affiliateAgentGatewayClaims as any,
   };
 };
 
@@ -349,15 +395,17 @@ const ensureAffiliateIntakeSupplySource = async (input: Readonly<{
   return linkedSupplySourceId;
 };
 const reconcileCapturedAffiliateSupplySource = async (
-  intake: any,
-  page: any,
+  intake: Record<string, unknown>,
+  page: Record<string, unknown>,
   capture: AffiliateSourcePageCapture,
+  client: unknown = prisma,
 ): Promise<string | null> => {
-  const currentSupplySourceId = page.supplySourceId ?? intake.supplySourceId ?? null;
+  const currentSupplySourceId = stringValue(page.supplySourceId)
+    ?? stringValue(intake.supplySourceId);
   const finalUrl = stringValue(capture.finalUrl);
   if (
     !finalUrl
-    || finalUrl === String(page.url).trim()
+    || finalUrl === String(page.url ?? '').trim()
     || capture.isRedirectVerified !== true
   ) {
     return currentSupplySourceId;
@@ -365,15 +413,15 @@ const reconcileCapturedAffiliateSupplySource = async (
   await assertSafePublicUrl(finalUrl);
   const targetKindHints = normalizedTargetKinds(intake.targetKindHints);
   return ensureAffiliateIntakeSupplySource({
-    intakeId: intake.id,
-    pageId: page.id,
+    intakeId: String(intake.id),
+    pageId: String(page.id),
     existingSupplySourceId: currentSupplySourceId,
-    expectedIntakeSupplySourceId: intake.supplySourceId ?? null,
+    expectedIntakeSupplySourceId: stringValue(intake.supplySourceId),
     pageUrl: finalUrl,
     targetKindHints: targetKindHints.length ? targetKindHints : null,
     isIntakeLinkPending: true,
     isRedirectVerified: capture.isRedirectVerified === true,
-    db: prisma,
+    db: client,
   });
 };
 
@@ -384,6 +432,66 @@ const stringValue = (value: unknown): string | null => (
 const recordValue = (value: unknown): JsonRecord => (
   value && typeof value === 'object' && !Array.isArray(value) ? value as JsonRecord : {}
 );
+const existingDataRepairEvidenceMarkerFrom = (
+  summary: unknown,
+): AffiliateExistingDataRepairEvidenceOnlyMarker | null => {
+  const candidate = recordValue(summary).existingDataRepairEvidenceOnly;
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return null;
+  const marker = candidate as Record<string, unknown>;
+  const rawPageIds = marker.pageIds;
+  if (
+    marker.schemaVersion !== 1
+    || marker.purpose !== AFFILIATE_EXISTING_DATA_REPAIR_EVIDENCE_ONLY_PURPOSE
+    || !stringValue(marker.requestHash)
+    || !stringValue(marker.operatorId)
+    || !stringValue(marker.intakeId)
+    || !Array.isArray(rawPageIds)
+    || rawPageIds.some((pageId) => !stringValue(pageId))
+    || !Object.prototype.hasOwnProperty.call(marker, 'baseline')
+  ) {
+    return null;
+  }
+  return {
+    schemaVersion: 1,
+    purpose: AFFILIATE_EXISTING_DATA_REPAIR_EVIDENCE_ONLY_PURPOSE,
+    requestHash: String(marker.requestHash),
+    operatorId: String(marker.operatorId),
+    intakeId: String(marker.intakeId),
+    pageIds: stringArray(rawPageIds),
+    baseline: marker.baseline,
+  };
+};
+
+const isExistingDataRepairEvidenceOnlyRun = (run: unknown): boolean => {
+  const summary = run && typeof run === 'object' && 'summary' in run
+    ? run.summary
+    : null;
+  return recordValue(recordValue(summary).existingDataRepairEvidenceOnly).purpose
+    === AFFILIATE_EXISTING_DATA_REPAIR_EVIDENCE_ONLY_PURPOSE;
+};
+
+export const isAffiliateExistingDataRepairEvidenceOnlyRun = isExistingDataRepairEvidenceOnlyRun;
+
+const sameStringArray = (left: unknown, right: unknown): boolean => {
+  const normalizedLeft = stringArray(left).sort();
+  const normalizedRight = stringArray(right).sort();
+  return normalizedLeft.length === normalizedRight.length
+    && normalizedLeft.every((value, index) => value === normalizedRight[index]);
+};
+
+const runSummaryWithPreservedMarker = (
+  priorSummary: unknown,
+  nextSummary: unknown,
+): JsonRecord => {
+  const prior = recordValue(priorSummary);
+  const next = recordValue(nextSummary);
+  const marker = prior.existingDataRepairEvidenceOnly
+    ?? next.existingDataRepairEvidenceOnly;
+  return marker === undefined
+    ? { ...prior, ...next }
+    : { ...prior, ...next, existingDataRepairEvidenceOnly: marker };
+};
+
 
 const stringArray = (value: unknown): string[] => (
   Array.isArray(value)
@@ -391,6 +499,332 @@ const stringArray = (value: unknown): string[] => (
     : []
 );
 
+const normalizedSnapshotUrl = (value: unknown): string | null => {
+  const text = stringValue(value);
+  if (!text) return null;
+  try {
+    return canonicalizeAffiliateIntakeUrl(text);
+  } catch {
+    return text;
+  }
+};
+
+export const affiliateExistingRepairCaptureSnapshot = (
+  intake: Readonly<Record<string, unknown>> | null,
+  pages: readonly Readonly<Record<string, unknown>>[],
+) => ({
+  intake: intake ? {
+    id: stringValue(intake.id),
+    sourceKey: stringValue(intake.sourceKey),
+    baseUrl: normalizedSnapshotUrl(intake.baseUrl),
+    status: stringValue(intake.status),
+    complianceStatus: stringValue(intake.complianceStatus),
+    targetKindHints: Array.from(new Set(stringArray(intake.targetKindHints))).sort(),
+    organizationId: stringValue(intake.organizationId),
+    affiliateSourceId: stringValue(intake.affiliateSourceId),
+    supplySourceId: stringValue(intake.supplySourceId),
+  } : null,
+  pages: pages.map((page) => ({
+    id: stringValue(page.id),
+    intakeId: stringValue(page.intakeId),
+    supplySourceId: stringValue(page.supplySourceId),
+    url: normalizedSnapshotUrl(page.url),
+    canonicalUrl: normalizedSnapshotUrl(page.canonicalUrl),
+    status: stringValue(page.status),
+    role: stringValue(page.role),
+    targetKindHints: Array.from(new Set(stringArray(page.targetKindHints))).sort(),
+  })).sort((left, right) => (left.id ?? '') < (right.id ?? '') ? -1 : (left.id ?? '') > (right.id ?? '') ? 1 : 0),
+});
+
+const snapshotDate = (value: unknown): string | null => {
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.toISOString();
+  return stringValue(value);
+};
+
+const snapshotStringList = (value: unknown): string[] => Array.from(new Set(
+  stringArray(value),
+)).sort();
+
+const snapshotSource = (source: Readonly<Record<string, unknown>> | null): Record<string, unknown> | null => (
+  source
+    ? {
+      id: stringValue(source.id),
+      name: stringValue(source.name),
+      sourceKey: stringValue(source.sourceKey),
+      organizationId: stringValue(source.organizationId),
+      baseUrl: normalizedSnapshotUrl(source.baseUrl),
+      listUrl: normalizedSnapshotUrl(source.listUrl),
+      targetKind: stringValue(source.targetKind),
+      status: stringValue(source.status),
+      activeMappingId: stringValue(source.activeMappingId),
+      supplySourceId: stringValue(source.supplySourceId),
+      lastScrapeRunId: stringValue(source.lastScrapeRunId),
+      lifecycleGeneration: typeof source.lifecycleGeneration === 'number' ? source.lifecycleGeneration : null,
+      activeSupplyContractVersion: typeof source.activeSupplyContractVersion === 'number'
+        ? source.activeSupplyContractVersion
+        : null,
+      activeSupplyContractHash: stringValue(source.activeSupplyContractHash),
+      lastScrapedAt: snapshotDate(source.lastScrapedAt),
+      autoScrapeEnabled: source.autoScrapeEnabled === true,
+      scrapeIntervalMinutes: typeof source.scrapeIntervalMinutes === 'number'
+        ? source.scrapeIntervalMinutes
+        : null,
+      notes: stringValue(source.notes),
+      metadata: recordValue(source.metadata),
+    }
+    : null
+);
+
+const snapshotRoot = (root: Readonly<Record<string, unknown>>): Record<string, unknown> => ({
+  id: stringValue(root.id),
+  identityKey: stringValue(root.identityKey),
+  canonicalUrl: normalizedSnapshotUrl(root.canonicalUrl),
+  origin: stringValue(root.origin),
+  pathKey: stringValue(root.pathKey),
+  operatorDomain: stringValue(root.operatorDomain),
+  targetKind: stringValue(root.targetKind),
+  rolloutCohort: stringValue(root.rolloutCohort),
+  intakeId: stringValue(root.intakeId),
+  liveSourceId: stringValue(root.liveSourceId),
+  predecessorId: stringValue(root.predecessorId),
+  successorId: stringValue(root.successorId),
+  lifecycleGeneration: typeof root.lifecycleGeneration === 'number' ? root.lifecycleGeneration : null,
+  activeSupplyContractVersion: typeof root.activeSupplyContractVersion
+    === 'number' ? root.activeSupplyContractVersion : null,
+  activeSupplyContractHash: stringValue(root.activeSupplyContractHash),
+  derivedStage: stringValue(root.derivedStage),
+  derivedOutcome: stringValue(root.derivedOutcome),
+  freshnessStatus: stringValue(root.freshnessStatus),
+  targetContribution: typeof root.targetContribution === 'number' ? root.targetContribution : null,
+  repairPriority: typeof root.repairPriority === 'number' ? root.repairPriority : null,
+  isAutomationEnabled: root.isAutomationEnabled === true,
+  isExcluded: root.isExcluded === true,
+  automationHoldReason: stringValue(root.automationHoldReason),
+  excludedAt: snapshotDate(root.excludedAt),
+  lastSuccessfulRefreshAt: snapshotDate(root.lastSuccessfulRefreshAt),
+  lastAssessmentAt: snapshotDate(root.lastAssessmentAt),
+  assessmentJson: root.assessmentJson ?? null,
+  invariantViolations: snapshotStringList(root.invariantViolations),
+  metadata: recordValue(root.metadata),
+});
+
+const snapshotPolicy = (policy: Readonly<Record<string, unknown>>): Record<string, unknown> => ({
+  id: stringValue(policy.id),
+  policyKey: stringValue(policy.policyKey),
+  status: stringValue(policy.status),
+  reviewedByUserId: stringValue(policy.reviewedByUserId),
+  reviewedAt: snapshotDate(policy.reviewedAt),
+  expiresAt: snapshotDate(policy.expiresAt),
+  termsUrl: normalizedSnapshotUrl(policy.termsUrl),
+  restrictionNotes: stringValue(policy.restrictionNotes),
+  evidence: policy.evidence ?? null,
+  robotsSummary: stringValue(policy.robotsSummary),
+});
+
+export const affiliateExistingRepairAuthoritySnapshot = (
+  intake: Readonly<Record<string, unknown>> | null,
+  pages: readonly Readonly<Record<string, unknown>>[],
+  source: Readonly<Record<string, unknown>> | null,
+  roots: readonly Readonly<Record<string, unknown>>[],
+  policies: readonly Readonly<Record<string, unknown>>[],
+) => ({
+  ...affiliateExistingRepairCaptureSnapshot(intake, pages),
+  source: snapshotSource(source),
+  roots: roots
+    .map(snapshotRoot)
+    .sort((left, right) => String(left.id ?? '').localeCompare(String(right.id ?? ''))),
+  policies: policies
+    .map(snapshotPolicy)
+    .sort((left, right) => String(left.policyKey ?? '').localeCompare(String(right.policyKey ?? ''))),
+});
+
+const captureAuthorityError = (code: string, message: string): Error & { code: string } => {
+  const error = new Error(`${code}: ${message}`) as Error & { code: string };
+  error.code = code;
+  return error;
+};
+
+const authoritySnapshotFor = async (
+  database: Record<string, unknown>,
+  intake: Record<string, unknown>,
+  pages: readonly Record<string, unknown>[],
+) => {
+  const tables = intakePrisma(database);
+  if (!tables.sources?.findMany || !tables.supplySources?.findMany
+    || !tables.policies?.findMany || !tables.runs?.findMany) {
+    throw captureAuthorityError(
+      'PERSISTENCE_UNAVAILABLE',
+      'Existing repair capture authority tables are unavailable after claim.',
+    );
+  }
+  const explicitSourceId = stringValue(intake.affiliateSourceId);
+  const sourceKey = stringValue(intake.sourceKey);
+  const sourceRows = explicitSourceId
+    ? await tables.sources.findMany({ where: { id: explicitSourceId } })
+    : await tables.sources.findMany({ where: { sourceKey } });
+  const sourceMatches = Array.isArray(sourceRows)
+    ? sourceRows.filter((row: unknown) => row && typeof row === 'object')
+    : [];
+  const source = sourceMatches.length === 1 ? sourceMatches[0] as Record<string, unknown> : null;
+  const sourceRootId = source ? stringValue(source.supplySourceId) : null;
+  const rootIds = Array.from(new Set([
+    stringValue(intake.supplySourceId),
+    sourceRootId,
+    ...pages.map((page) => stringValue(page.supplySourceId)),
+  ].filter((value): value is string => Boolean(value))));
+  const roots = rootIds.length
+    ? await tables.supplySources.findMany({ where: { id: { in: rootIds } } })
+    : [];
+  const policyUrls = [
+    stringValue(intake.baseUrl),
+    ...pages.map((page) => stringValue(page.canonicalUrl) ?? stringValue(page.url)),
+  ].filter((value): value is string => Boolean(value));
+  const policyKeys = Array.from(new Set(policyUrls.map((url) => {
+    try {
+      return affiliateDiscoveryPolicyKeyForUrl(url);
+    } catch {
+      return null;
+    }
+  }).filter((value): value is string => Boolean(value))));
+  const policies = policyKeys.length
+    ? await tables.policies.findMany({ where: { policyKey: { in: policyKeys } } })
+    : [];
+  return {
+    source,
+    roots: Array.isArray(roots) ? roots : [],
+    policies: Array.isArray(policies) ? policies : [],
+    activeRuns: (await tables.runs.findMany({ where: { intakeId: intake.id } }))
+      .filter((run: unknown) => {
+        if (!run || typeof run !== 'object') return false;
+        const row = run as Record<string, unknown>;
+        return row.id !== undefined
+          && ['QUEUED', 'RUNNING', 'CLAIMED'].includes(String(row.status).toUpperCase());
+      }),
+  };
+};
+
+const hasAuthoritySnapshot = (baseline: unknown): boolean => {
+  const value = recordValue(baseline);
+  return Boolean(
+    value.authoritySnapshot
+    && typeof value.authoritySnapshot === 'object'
+    && typeof value.authorityFingerprint === 'string',
+  );
+};
+
+const verifyExistingRepairCaptureAfterClaim = async (
+  database: Record<string, unknown>,
+  run: Record<string, unknown>,
+  intake: Record<string, unknown>,
+  pages: readonly Record<string, unknown>[],
+  marker: AffiliateExistingDataRepairEvidenceOnlyMarker,
+): Promise<void> => {
+  const baseline = recordValue(marker.baseline);
+  if (!hasAuthoritySnapshot(marker.baseline)) {
+    throw captureAuthorityError(
+      'CAPTURE_INTENT_INVALID',
+      'The admitted capture marker does not contain a complete authority snapshot.',
+    );
+  }
+  const current = await authoritySnapshotFor(database, intake, pages);
+  const currentAuthoritySnapshot = affiliateExistingRepairAuthoritySnapshot(
+    intake,
+    pages,
+    current.source,
+    current.roots,
+    current.policies,
+  );
+  const expectedAuthorityFingerprint = stringValue(baseline.authorityFingerprint);
+  if (
+    !expectedAuthorityFingerprint
+    || hashAffiliateAgentValue(currentAuthoritySnapshot) !== expectedAuthorityFingerprint
+  ) {
+    throw captureAuthorityError(
+      'CAPTURE_INTENT_DRIFT',
+      'The reviewed source, root, or domain policy state changed after claim.',
+    );
+  }
+  for (const value of current.policies) {
+    const policy = recordValue(value);
+    const expiresAt = snapshotDate(policy.expiresAt);
+    const expiresAtMs = expiresAt ? Date.parse(expiresAt) : Number.NaN;
+    if (policy.status !== 'ALLOWED'
+      || (policy.expiresAt != null && (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()))) {
+      throw captureAuthorityError('CAPTURE_POLICY_NOT_ALLOWED', 'The current source policy does not permit capture.');
+    }
+  }
+  for (const value of current.roots) {
+    const root = recordValue(value);
+    const sourceId = stringValue(current.source?.id);
+    const isPrimarySourceRoot = root.id === stringValue(current.source?.supplySourceId);
+    if (stringValue(root.intakeId) !== String(intake.id)
+      || (isPrimarySourceRoot && stringValue(root.liveSourceId) !== sourceId)
+      || (stringValue(root.liveSourceId) !== null && stringValue(root.liveSourceId) !== sourceId)) {
+      throw captureAuthorityError('CAPTURE_OWNERSHIP_CONFLICT', 'The selected root does not belong to the reviewed intake and source.');
+    }
+    if (Object.prototype.hasOwnProperty.call(recordValue(root.metadata), 'pendingMapping')) {
+      throw captureAuthorityError('CAPTURE_OWNERSHIP_CONFLICT', 'A root pending repair blocks evidence capture.');
+    }
+  }
+  const activeRuns = current.activeRuns.filter((candidate: Record<string, unknown>) => (
+    String(candidate.id) !== String(run.id)
+  ));
+  if (activeRuns.length) {
+    throw captureAuthorityError(
+      'CAPTURE_OWNERSHIP_CONFLICT',
+      'Another intake capture run is active for this source.',
+    );
+  }
+  const sourceMetadata = recordValue(current.source?.metadata);
+  if (Object.prototype.hasOwnProperty.call(sourceMetadata, 'pendingMapping')
+    && !pendingMappingForMetadata(current.source?.metadata)) {
+    throw captureAuthorityError(
+      'CAPTURE_OWNERSHIP_CONFLICT',
+      'The source has a malformed pending repair pointer.',
+    );
+  }
+  if (pendingMappingForMetadata(current.source?.metadata)) {
+    throw captureAuthorityError(
+      'CAPTURE_OWNERSHIP_CONFLICT',
+      'A staged or approved mapping repair blocks evidence capture.',
+    );
+  }
+  const rootIds = current.roots
+    .map((root: unknown) => String(recordValue(root).id ?? ''))
+    .filter(Boolean);
+  if (rootIds.length && !tablesHaveGatewayDelegates(database)) {
+    throw captureAuthorityError(
+      'PERSISTENCE_UNAVAILABLE',
+      'Gateway ownership tables are unavailable after claim.',
+    );
+  }
+  if (rootIds.length) {
+    const tables = intakePrisma(database);
+    const jobs = await tables.gatewayJobs.findMany({ where: { supplySourceId: { in: rootIds } } });
+    if (Array.isArray(jobs) && jobs.some((job: unknown) => stringValue(recordValue(job).activeClaimId) !== null)) {
+      throw captureAuthorityError('CAPTURE_OWNERSHIP_CONFLICT', 'An active Gateway pointer blocks evidence capture.');
+    }
+    const jobIds = Array.isArray(jobs)
+      ? jobs.map((job: unknown) => String(recordValue(job).id ?? '')).filter(Boolean)
+      : [];
+    if (jobIds.length) {
+      const claims = await tables.gatewayClaims.findMany({
+        where: { jobId: { in: jobIds }, status: 'ACTIVE' },
+      });
+      if (Array.isArray(claims) && claims.length) {
+        throw captureAuthorityError(
+          'CAPTURE_OWNERSHIP_CONFLICT',
+          'An active Gateway owner blocks evidence capture.',
+        );
+      }
+    }
+  }
+};
+
+const tablesHaveGatewayDelegates = (database: Record<string, unknown>): boolean => {
+  const tables = intakePrisma(database);
+  return Boolean(tables.gatewayJobs?.findMany && tables.gatewayClaims?.findMany);
+};
 const normalizedTargetKinds = (value: unknown): string[] => Array.from(new Set(
   stringArray(value)
     .map((entry) => entry.toUpperCase())
@@ -601,94 +1035,93 @@ export const reviewAffiliateSourceIntakePolicy = async (
   userId: string,
   options: { queueCaptureOnAllow?: boolean; db?: unknown } = {},
 ) => {
-  const { intakes, pages, runs, policies, discoveryResults } = intakePrisma(options.db);
   const complianceStatus = stringValue(review.complianceStatus)?.toUpperCase() ?? '';
   if (!VALID_COMPLIANCE_STATUSES.has(complianceStatus)) {
     throw new Error('Unsupported affiliate source compliance status.');
   }
-  const intake = await intakes.findUnique({ where: { id: intakeId } });
-  if (!intake) throw new Error('Affiliate source intake not found.');
-  const status = complianceStatus === 'ALLOWED'
-    ? 'READY'
-    : complianceStatus === 'BLOCKED'
-      ? 'BLOCKED'
-      : 'REVIEW_REQUIRED';
-  const reviewedAt = new Date();
-  const updated = await intakes.update({
-    where: { id: intakeId },
-    data: {
-      complianceStatus,
-      status,
-      complianceReviewedByUserId: userId,
-      complianceReviewedAt: reviewedAt,
-      complianceTermsUrl: stringValue(review.termsUrl),
-      complianceNotes: stringValue(review.notes),
-    },
-  });
-  const policyUrl = stringValue(intake.baseUrl)
-    ?? (await pages.findFirst({ where: { intakeId }, orderBy: { createdAt: 'asc' }, select: { canonicalUrl: true } }))?.canonicalUrl
-    ?? null;
-  if (policyUrl) {
-    const policyKey = affiliateDiscoveryPolicyKeyForUrl(policyUrl);
-    const existingPolicy = await policies.findUnique({ where: { policyKey } });
-    const existingEvidence = recordValue(existingPolicy?.evidence);
-    const reviewHistory = Array.isArray(existingEvidence.reviewHistory)
-      ? existingEvidence.reviewHistory
-      : [];
-    const evidence = {
-      ...existingEvidence,
-      reviewHistory: [
-        ...reviewHistory,
-        {
-          reviewedAt: reviewedAt.toISOString(),
-          reviewedByUserId: userId,
-          previousStatus: existingPolicy?.status ?? null,
+  return withAffiliateIntakeTransaction(options.db ?? prisma, async (transactionClient) => {
+    const { intakes, pages, policies, discoveryResults } = intakePrisma(transactionClient);
+    const intake = await intakes.findUnique({ where: { id: intakeId } });
+    if (!intake) throw new Error('Affiliate source intake not found.');
+    const status = complianceStatus === 'ALLOWED'
+      ? 'READY'
+      : complianceStatus === 'BLOCKED'
+        ? 'BLOCKED'
+        : 'REVIEW_REQUIRED';
+    const reviewedAt = new Date();
+    const updated = await intakes.update({
+      where: { id: intakeId },
+      data: {
+        complianceStatus,
+        status,
+        complianceReviewedByUserId: userId,
+        complianceReviewedAt: reviewedAt,
+        complianceTermsUrl: stringValue(review.termsUrl),
+        complianceNotes: stringValue(review.notes),
+      },
+    });
+    const policyUrl = stringValue(intake.baseUrl)
+      ?? (await pages.findFirst({ where: { intakeId }, orderBy: { createdAt: 'asc' }, select: { canonicalUrl: true } }))?.canonicalUrl
+      ?? null;
+    if (policyUrl) {
+      const policyKey = affiliateDiscoveryPolicyKeyForUrl(policyUrl);
+      const existingPolicy = await policies.findUnique({ where: { policyKey } });
+      const existingEvidence = recordValue(existingPolicy?.evidence);
+      const reviewHistory = Array.isArray(existingEvidence.reviewHistory)
+        ? existingEvidence.reviewHistory
+        : [];
+      const evidence = {
+        ...existingEvidence,
+        reviewHistory: [
+          ...reviewHistory,
+          {
+            reviewedAt: reviewedAt.toISOString(),
+            reviewedByUserId: userId,
+            previousStatus: existingPolicy?.status ?? null,
+            status: complianceStatus === 'UNREVIEWED' ? 'NEEDS_REVIEW' : complianceStatus,
+            termsUrl: stringValue(review.termsUrl),
+            restrictionNotes: stringValue(review.notes),
+          },
+        ].slice(-20),
+      };
+      await policies.upsert({
+        where: { policyKey },
+        create: {
+          id: createId(),
+          policyKey,
           status: complianceStatus === 'UNREVIEWED' ? 'NEEDS_REVIEW' : complianceStatus,
+          reviewedByUserId: userId,
+          reviewedAt,
+          expiresAt: complianceStatus === 'ALLOWED'
+            ? new Date(reviewedAt.getTime() + 180 * 86_400_000)
+            : null,
           termsUrl: stringValue(review.termsUrl),
           restrictionNotes: stringValue(review.notes),
+          evidence,
+          robotsSummary: existingPolicy?.robotsSummary ?? undefined,
         },
-      ].slice(-20),
-    };
-    await policies.upsert({
-      where: { policyKey },
-      create: {
-        id: createId(),
-        policyKey,
-        status: complianceStatus === 'UNREVIEWED' ? 'NEEDS_REVIEW' : complianceStatus,
-        reviewedByUserId: userId,
-        reviewedAt,
-        expiresAt: complianceStatus === 'ALLOWED'
-          ? new Date(reviewedAt.getTime() + 180 * 86_400_000)
-          : null,
-        termsUrl: stringValue(review.termsUrl),
-        restrictionNotes: stringValue(review.notes),
-        evidence,
-        robotsSummary: existingPolicy?.robotsSummary ?? undefined,
-      },
-      update: {
-        status: complianceStatus === 'UNREVIEWED' ? 'NEEDS_REVIEW' : complianceStatus,
-        reviewedByUserId: userId,
-        reviewedAt,
-        expiresAt: complianceStatus === 'ALLOWED'
-          ? new Date(reviewedAt.getTime() + 180 * 86_400_000)
-          : null,
-        termsUrl: stringValue(review.termsUrl),
-        restrictionNotes: stringValue(review.notes),
-        evidence,
-      },
-    });
-    await discoveryResults.updateMany({
-      where: { policyKey, matchingIntakeId: intakeId },
-      data: {
-        status: complianceStatus === 'BLOCKED'
-          ? 'BLOCKED'
-          : complianceStatus === 'ALLOWED' ? 'INTAKE_CREATED' : 'REVIEW_REQUIRED',
-      },
-    });
-  }
-  if (complianceStatus === 'ALLOWED' && options.queueCaptureOnAllow !== false) {
-    const activeRun = await runs.findFirst({ where: { intakeId, status: { in: ['QUEUED', 'RUNNING'] } } });
-    if (!activeRun) {
+        update: {
+          status: complianceStatus === 'UNREVIEWED' ? 'NEEDS_REVIEW' : complianceStatus,
+          reviewedByUserId: userId,
+          reviewedAt,
+          expiresAt: complianceStatus === 'ALLOWED'
+            ? new Date(reviewedAt.getTime() + 180 * 86_400_000)
+            : null,
+          termsUrl: stringValue(review.termsUrl),
+          restrictionNotes: stringValue(review.notes),
+          evidence,
+        },
+      });
+      await discoveryResults.updateMany({
+        where: { policyKey, matchingIntakeId: intakeId },
+        data: {
+          status: complianceStatus === 'BLOCKED'
+            ? 'BLOCKED'
+            : complianceStatus === 'ALLOWED' ? 'INTAKE_CREATED' : 'REVIEW_REQUIRED',
+        },
+      });
+    }
+    if (complianceStatus === 'ALLOWED' && options.queueCaptureOnAllow !== false) {
       const selectedPages = await pages.findMany({
         where: { intakeId, status: 'ACTIVE' },
         orderBy: [{ role: 'asc' }, { createdAt: 'asc' }],
@@ -696,21 +1129,16 @@ export const reviewAffiliateSourceIntakePolicy = async (
         select: { id: true },
       });
       if (selectedPages.length) {
-        await runs.create({
-          data: {
-            id: createId(),
-            intakeId,
-            requestedPageIds: selectedPages.map((page: any) => page.id),
-            requestedByUserId: userId,
-            provider: resolveAffiliateIntakeProvider(),
-            status: 'QUEUED',
-            queuedAt: reviewedAt,
-          },
-        });
+        await queueAffiliateSourceIntakeRun(
+          intakeId,
+          selectedPages.map((page: { id: string }) => page.id),
+          userId,
+          { db: transactionClient },
+        );
       }
     }
-  }
-  return updated;
+    return updated;
+  });
 };
 
 export const updateAffiliateSourceIntake = async (
@@ -870,42 +1298,118 @@ export const getAffiliateSourceIntakeContext = async (intakeId: string, runId?: 
     relatedDiscoveryResults,
   };
 };
+export const assertOrdinaryAffiliateSourceIntakeQueueOwnership = async (
+  intakeId: string,
+  database: unknown = prisma,
+): Promise<void> => {
+  const runs = intakePrisma(database).runs;
+  const activeRuns = typeof runs.findMany === 'function'
+    ? await runs.findMany({
+      where: { intakeId, status: { in: ['QUEUED', 'RUNNING', 'CLAIMED'] } },
+      orderBy: { queuedAt: 'asc' },
+    })
+    : [];
+  const governedRun = Array.isArray(activeRuns)
+    ? activeRuns.find((candidate: unknown) => isExistingDataRepairEvidenceOnlyRun(candidate))
+    : null;
+  if (governedRun) {
+    throw new AffiliateSourceIntakeQueueConflictError(
+      'An existing-data repair capture owns this intake. Use the governed capture process.',
+    );
+  }
+};
 
 export const queueAffiliateSourceIntakeRun = async (
   intakeId: string,
   requestedPageIds: string[],
   userId: string,
-  options: { db?: unknown } = {},
-) => {
-  const { intakes, pages, runs } = intakePrisma(options.db);
-  const intake = await intakes.findUnique({ where: { id: intakeId } });
-  if (!intake) throw new Error('Affiliate source intake not found.');
-  if (intake.complianceStatus !== 'ALLOWED') {
-    throw new Error('Affiliate source policy must be reviewed and allowed before inspection.');
-  }
-  const pageIds = Array.from(new Set(stringArray(requestedPageIds)));
-  if (!pageIds.length) throw new Error('Select at least one source page to inspect.');
-  if (pageIds.length > MAX_CAPTURE_PAGES) throw new Error(`At most ${MAX_CAPTURE_PAGES} source pages may be inspected per run.`);
-  const selectedPages = await pages.findMany({ where: { id: { in: pageIds }, intakeId, status: 'ACTIVE' } });
-  if (selectedPages.length !== pageIds.length) throw new Error('One or more selected pages do not belong to this intake.');
-  const activeRun = await runs.findFirst({
-    where: { intakeId, status: { in: ['QUEUED', 'RUNNING'] } },
-    orderBy: { queuedAt: 'asc' },
-  });
-  if (activeRun) return activeRun;
-  return runs.create({
-    data: {
-      id: createId(),
-      intakeId,
-      ...(intake.supplySourceId ? { supplySourceId: intake.supplySourceId } : {}),
-      requestedPageIds: pageIds,
-      requestedByUserId: userId,
-      provider: resolveAffiliateIntakeProvider(),
-      status: 'QUEUED',
-      queuedAt: new Date(),
-    },
-  });
-};
+  options: AffiliateSourceIntakeRunQueueOptions = {},
+) => (
+  withAffiliateIntakeTransaction(options.db ?? prisma, async (transactionClient) => {
+    const { intakes, pages, runs } = intakePrisma(transactionClient);
+    const intake = await intakes.findUnique({ where: { id: intakeId } });
+    if (!intake) throw new Error('Affiliate source intake not found.');
+    if (intake.complianceStatus !== 'ALLOWED') {
+      throw new Error('Affiliate source policy must be reviewed and allowed before inspection.');
+    }
+    const pageIds = Array.from(new Set(stringArray(requestedPageIds)));
+    if (!pageIds.length) throw new Error('Select at least one source page to inspect.');
+    if (pageIds.length > MAX_CAPTURE_PAGES) throw new Error(`At most ${MAX_CAPTURE_PAGES} source pages may be inspected per run.`);
+    const selectedPages = await pages.findMany({
+      where: { id: { in: pageIds }, intakeId, status: 'ACTIVE' },
+    });
+    if (selectedPages.length !== pageIds.length) throw new Error('One or more selected pages do not belong to this intake.');
+
+    const marker = options.existingDataRepairEvidenceOnly;
+    if (marker) {
+      if (
+        marker.intakeId !== intakeId
+        || !sameStringArray(marker.pageIds, pageIds)
+        || marker.operatorId !== userId
+      ) {
+        throw new Error('Existing data repair evidence marker does not match the queued intake run.');
+      }
+      const priorRunsResult = typeof runs.findMany === 'function'
+        ? await runs.findMany({ where: { intakeId }, orderBy: { createdAt: 'desc' } })
+        : [];
+      const priorRuns = Array.isArray(priorRunsResult) ? priorRunsResult : [];
+      const exactRun = priorRuns.find((candidate: unknown) => {
+        const candidateMarker = existingDataRepairEvidenceMarkerFrom(
+          recordValue(candidate).summary,
+        );
+        return candidateMarker
+          && candidateMarker.requestHash === marker.requestHash
+          && candidateMarker.operatorId === marker.operatorId
+          && candidateMarker.intakeId === marker.intakeId
+          && sameStringArray(candidateMarker.pageIds, marker.pageIds);
+      });
+      if (exactRun) return exactRun;
+      const activeRun = priorRuns.find((candidate: unknown) => (
+        ['QUEUED', 'RUNNING', 'CLAIMED'].includes(String(recordValue(candidate).status).toUpperCase())
+      ));
+      if (activeRun) {
+        throw new AffiliateSourceIntakeQueueConflictError(
+          'An active affiliate source intake run already exists.',
+        );
+      }
+      const activeRunFromIndex = await runs.findFirst({
+        where: { intakeId, status: { in: ['QUEUED', 'RUNNING', 'CLAIMED'] } },
+        orderBy: { queuedAt: 'asc' },
+      });
+      if (activeRunFromIndex) {
+        throw new AffiliateSourceIntakeQueueConflictError(
+          'An active affiliate source intake run already exists.',
+        );
+      }
+    } else {
+      await assertOrdinaryAffiliateSourceIntakeQueueOwnership(intakeId, transactionClient);
+      const activeRun = await runs.findFirst({
+        where: { intakeId, status: { in: ['QUEUED', 'RUNNING', 'CLAIMED'] } },
+        orderBy: { queuedAt: 'asc' },
+      });
+      if (activeRun) {
+        if (isAffiliateExistingDataRepairEvidenceOnlyRun(activeRun)) {
+          throw new AffiliateSourceIntakeQueueConflictError('A governed capture owns this intake.');
+        }
+        return activeRun;
+      }
+    }
+
+    return runs.create({
+      data: {
+        id: createId(),
+        intakeId,
+        ...(intake.supplySourceId ? { supplySourceId: intake.supplySourceId } : {}),
+        requestedPageIds: pageIds,
+        requestedByUserId: userId,
+        provider: resolveAffiliateIntakeProvider(),
+        status: 'QUEUED',
+        queuedAt: new Date(),
+        ...(marker ? { summary: { existingDataRepairEvidenceOnly: marker } } : {}),
+      },
+    });
+  })
+);
 
 const inferDiscoveredPageRole = (url: string): string => {
   const path = new URL(url).pathname.toLowerCase();
@@ -1011,13 +1515,41 @@ export const classifyAffiliateSourceEvidence = (
   return { type, confidence: Math.min(1, 0.45 + bestScore * 0.12), reasons };
 };
 
-const claimQueuedRun = async (runId: string | undefined, workerId: string, now: Date) => {
-  const { runs } = intakePrisma();
+const claimQueuedRun = async (
+  runId: string | undefined,
+  workerId: string,
+  now: Date,
+  client: unknown = prisma,
+  governedProcessIntent?: AffiliateSourceIntakeGovernedProcessIntent,
+) => {
+  const { runs } = intakePrisma(client);
+  const allowsEvidenceRun = (candidate: unknown): boolean => {
+    if (!isExistingDataRepairEvidenceOnlyRun(candidate)) return true;
+    const marker = existingDataRepairEvidenceMarkerFrom(recordValue(candidate).summary);
+    return Boolean(
+      governedProcessIntent
+      && governedProcessIntent.purpose === AFFILIATE_EXISTING_DATA_REPAIR_EVIDENCE_ONLY_PURPOSE
+      && marker
+      && marker.operatorId === governedProcessIntent.operatorId
+      && hashAffiliateAgentValue(marker) === governedProcessIntent.markerSha256,
+    );
+  };
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    const queued = runId
+    let queued = runId
       ? await runs.findFirst({ where: { id: runId, status: 'QUEUED' } })
       : await runs.findFirst({ where: { status: 'QUEUED' }, orderBy: { queuedAt: 'asc' } });
     if (!queued) return null;
+    if (!allowsEvidenceRun(queued)) {
+      if (runId || typeof runs.findMany !== 'function') return null;
+      const candidates = await runs.findMany({
+        where: { status: 'QUEUED' },
+        orderBy: { queuedAt: 'asc' },
+      });
+      queued = Array.isArray(candidates)
+        ? candidates.find((candidate: unknown) => allowsEvidenceRun(candidate)) ?? null
+        : null;
+      if (!queued) return null;
+    }
     const claimed = await runs.updateMany({
       where: { id: queued.id, status: 'QUEUED' },
       data: {
@@ -1036,21 +1568,29 @@ const claimQueuedRun = async (runId: string | undefined, workerId: string, now: 
 };
 
 const completeClaimedRun = async (
-  run: any,
+  run: { id: string; summary?: unknown },
   workerId: string,
   data: Record<string, unknown>,
+  client: unknown = prisma,
 ) => {
-  const { runs } = intakePrisma();
-  const completed = await runs.updateMany({
+  const { runs } = intakePrisma(client);
+  const dataToPersist = {
+    ...data,
+    ...(run.summary !== undefined || data.summary !== undefined
+      ? { summary: runSummaryWithPreservedMarker(run.summary, data.summary) }
+      : {}),
+  };
+  const updated = await runs.updateMany({
     where: { id: run.id, status: 'RUNNING', workerId },
-    data,
+    data: dataToPersist,
   });
-  return completed.count === 1 ? { ...run, ...data } : null;
+  if (updated.count !== 1) return null;
+  return { ...run, ...dataToPersist };
 };
-
 export type StaleAffiliateSourceIntakeRun = {
   id: string;
   intakeId: string;
+  supplySourceId?: string | null;
   requestedPageIds: string[];
   requestedByUserId: string | null;
   provider: string;
@@ -1068,6 +1608,7 @@ export type RecoveredAffiliateSourceIntakeRun = {
 };
 
 export const findStaleAffiliateSourceIntakeRuns = async (options: {
+  db?: unknown;
   runIds?: string[];
   now?: Date;
   maxAgeMs?: number;
@@ -1076,7 +1617,7 @@ export const findStaleAffiliateSourceIntakeRuns = async (options: {
   const maxAgeMs = Math.max(20 * 60 * 1000, options.maxAgeMs ?? staleRunAgeMs());
   const cutoff = new Date(now.getTime() - maxAgeMs);
   const runIds = Array.from(new Set(stringArray(options.runIds)));
-  return intakePrisma().runs.findMany({
+  return intakePrisma(options.db).runs.findMany({
     where: {
       status: 'RUNNING',
       ...(runIds.length ? { id: { in: runIds } } : {}),
@@ -1090,6 +1631,7 @@ export const findStaleAffiliateSourceIntakeRuns = async (options: {
 };
 
 export const recoverStaleAffiliateSourceIntakeRuns = async (options: {
+  db?: unknown;
   runIds?: string[];
   now?: Date;
   maxAgeMs?: number;
@@ -1097,73 +1639,78 @@ export const recoverStaleAffiliateSourceIntakeRuns = async (options: {
   const now = options.now ?? new Date();
   const maxAgeMs = Math.max(20 * 60 * 1000, options.maxAgeMs ?? staleRunAgeMs());
   const staleRuns = await findStaleAffiliateSourceIntakeRuns({ ...options, now, maxAgeMs });
-  const recovered: RecoveredAffiliateSourceIntakeRun[] = [];
   const maxAgeMinutes = Math.round(maxAgeMs / 60_000);
-  const { runs } = intakePrisma();
-
-  for (const staleRun of staleRuns) {
-    const otherActiveRun = await runs.findFirst({
-      where: {
-        intakeId: staleRun.intakeId,
-        id: { not: staleRun.id },
-        status: { in: ['QUEUED', 'RUNNING'] },
-      },
-      orderBy: { queuedAt: 'asc' },
-    });
-    const replacementRunId = otherActiveRun?.id ?? createId();
-    const recovery = {
-      reason: 'STALE_WORKER_LEASE',
-      recoveredAt: now.toISOString(),
-      maxAgeMinutes,
-      staleWorkerId: staleRun.workerId,
-      replacementRunId,
-    };
-    const priorSummary = recordValue(staleRun.summary);
-    const marked = await runs.updateMany({
-      where: {
-        id: staleRun.id,
-        status: 'RUNNING',
-        workerId: staleRun.workerId,
-        claimedAt: staleRun.claimedAt,
-      },
-      data: {
-        status: 'FAILED',
-        finishedAt: now,
-        errorMessage: otherActiveRun
-          ? `Capture worker lease exceeded ${maxAgeMinutes} minutes; active replacement run ${replacementRunId} already exists.`
-          : `Capture worker lease exceeded ${maxAgeMinutes} minutes; replacement run ${replacementRunId} was queued.`,
-        summary: { ...priorSummary, recovery },
-      },
-    });
-    if (marked.count !== 1) continue;
-
-    if (!otherActiveRun) {
-      await runs.create({
-        data: {
-          id: replacementRunId,
+  const recovered: RecoveredAffiliateSourceIntakeRun[] = [];
+  await withAffiliateIntakeTransaction(options.db ?? prisma, async (transactionClient) => {
+    const { runs } = intakePrisma(transactionClient);
+    for (const staleRun of staleRuns) {
+      const otherActiveRun = await runs.findFirst({
+        where: {
           intakeId: staleRun.intakeId,
-          requestedPageIds: staleRun.requestedPageIds,
-          requestedByUserId: staleRun.requestedByUserId,
-          provider: staleRun.provider,
-          status: 'QUEUED',
-          queuedAt: now,
+          id: { not: staleRun.id },
+          status: { in: ['QUEUED', 'RUNNING', 'CLAIMED'] },
+        },
+        orderBy: { queuedAt: 'asc' },
+      });
+      if (isExistingDataRepairEvidenceOnlyRun(staleRun) && otherActiveRun) continue;
+      const replacementRunId = otherActiveRun?.id ?? createId();
+      const priorSummary = recordValue(staleRun.summary);
+      const marked = await runs.updateMany({
+        where: {
+          id: staleRun.id,
+          status: 'RUNNING',
+          workerId: staleRun.workerId,
+          claimedAt: staleRun.claimedAt,
+        },
+        data: {
+          status: 'FAILED',
+          finishedAt: now,
+          errorMessage: otherActiveRun
+            ? `Capture worker lease exceeded ${maxAgeMinutes} minutes; active replacement run ${replacementRunId} already exists.`
+            : `Capture worker lease exceeded ${maxAgeMinutes} minutes; replacement run ${replacementRunId} was queued.`,
           summary: {
+            ...priorSummary,
             recovery: {
-              reason: 'STALE_WORKER_LEASE_REPLACEMENT',
-              replacesRunId: staleRun.id,
+              ...recordValue(priorSummary.recovery),
+              reason: 'STALE_WORKER_LEASE',
               recoveredAt: now.toISOString(),
+              maxAgeMinutes,
+              staleWorkerId: staleRun.workerId,
+              replacementRunId,
             },
           },
         },
       });
+      if (marked.count !== 1) continue;
+      if (!otherActiveRun) {
+        await runs.create({
+          data: {
+            id: replacementRunId,
+            intakeId: staleRun.intakeId,
+            ...(staleRun.supplySourceId ? { supplySourceId: staleRun.supplySourceId } : {}),
+            requestedPageIds: staleRun.requestedPageIds,
+            requestedByUserId: staleRun.requestedByUserId,
+            provider: staleRun.provider,
+            status: 'QUEUED',
+            queuedAt: now,
+            summary: {
+              ...priorSummary,
+              recovery: {
+                reason: 'STALE_WORKER_LEASE_REPLACEMENT',
+                replacesRunId: staleRun.id,
+                recoveredAt: now.toISOString(),
+              },
+            },
+          },
+        });
+      }
+      recovered.push({
+        staleRunId: staleRun.id,
+        replacementRunId,
+        intakeId: staleRun.intakeId,
+      });
     }
-    recovered.push({
-      staleRunId: staleRun.id,
-      replacementRunId,
-      intakeId: staleRun.intakeId,
-    });
-  }
-
+  });
   return recovered;
 };
 
@@ -1374,23 +1921,13 @@ const captureWithFallback = async (
   url: string,
   captureOptions: AffiliateSourceCaptureOptions,
   state: IntakeRunSummary,
-): Promise<{ capture: AffiliateSourcePageCapture; client: IntakeCaptureClient }> => {
+): Promise<{
+  capture: AffiliateSourcePageCapture;
+  client: IntakeCaptureClient;
+  budget: AffiliateSourceCaptureBudget;
+}> => {
   const budget = captureBudgetFor(captureOptions);
   const htmlCaptureOptions = captureOptionsFor(captureOptions, budget, false);
-  const captureSelectedProvider = (
-    capture: AffiliateSourcePageCapture,
-    client: IntakeCaptureClient,
-  ) => captureWithDeferredScreenshot(
-    capture,
-    client,
-    url,
-    captureOptionsFor(
-      captureOptions,
-      budget,
-      captureOptions.captureScreenshot === true,
-    ),
-    budget,
-  );
   const capture = (client: IntakeCaptureClient): Promise<AffiliateSourcePageCapture> => (
     withAffiliateSourceCaptureDeadline(
       () => captureWithClient(client, url, htmlCaptureOptions),
@@ -1406,16 +1943,13 @@ const captureWithFallback = async (
         `${providerForClient(primaryClient)} capture quality was rejected for ${url}; `
         + `${fallbackClient.provider} fallback was attempted: ${quality.reasons.join('; ')}`,
       );
-      const fallbackCapture = await capture(fallbackClient);
       return {
-        capture: await captureSelectedProvider(fallbackCapture, fallbackClient),
+        capture: await capture(fallbackClient),
         client: fallbackClient,
+        budget,
       };
     }
-    return {
-      capture: await captureSelectedProvider(primaryCapture, primaryClient),
-      client: primaryClient,
-    };
+    return { capture: primaryCapture, client: primaryClient, budget };
   } catch (primaryError) {
     if (isAffiliateSourceCaptureTimeout(primaryError) || !fallbackClient) throw primaryError;
     state.warnings.push(
@@ -1423,10 +1957,10 @@ const captureWithFallback = async (
       + `${fallbackClient.provider} fallback was attempted: `
       + `${primaryError instanceof Error ? primaryError.message : 'unknown error'}`,
     );
-    const fallbackCapture = await capture(fallbackClient);
     return {
-      capture: await captureSelectedProvider(fallbackCapture, fallbackClient),
+      capture: await capture(fallbackClient),
       client: fallbackClient,
+      budget,
     };
   }
 };
@@ -1441,6 +1975,8 @@ const processCapturePage = async (
   fetchResource: typeof fetchBoundedPublicResource,
   state: IntakeRunSummary,
   captureScreenshot: boolean,
+  client: unknown = prisma,
+  evidenceOnly = false,
 ): Promise<{
   capture: AffiliateSourcePageCapture | null;
   artifacts: AffiliateHtmlArtifacts | null;
@@ -1452,14 +1988,16 @@ const processCapturePage = async (
   try {
     robots = await fetchResource(robotsUrl, { maxBytes: ROBOTS_MAX_BYTES, timeoutMs: robotsTimeoutMs() });
   } catch (error) {
-    await intakePrisma().pages.update({
-      where: { id: page.id },
-      data: {
-        robotsStatus: 'UNCLEAR',
-        robotsCheckedAt: new Date(),
-        robotsNotes: error instanceof Error ? error.message : 'Failed to retrieve robots.txt.',
-      },
-    });
+    if (!evidenceOnly) {
+      await intakePrisma(client).pages.update({
+        where: { id: page.id },
+        data: {
+          robotsStatus: 'UNCLEAR',
+          robotsCheckedAt: new Date(),
+          robotsNotes: error instanceof Error ? error.message : 'Failed to retrieve robots.txt.',
+        },
+      });
+    }
     state.failedPages.push({
       pageId: page.id,
       url: page.url,
@@ -1485,52 +2023,76 @@ const processCapturePage = async (
     ? robots.body.toString('utf8')
     : '';
   const decision = evaluateRobotsPath(robotsText, page.url);
-  await intakePrisma().pages.update({
-    where: { id: page.id },
-    data: {
-      robotsStatus: decision.status,
-      robotsCheckedAt: new Date(),
-      robotsNotes: decision.matchedRule ?? (robotsText ? 'No blocking rule matched.' : `robots.txt returned HTTP ${robots.statusCode}.`),
-    },
-  });
+  if (!evidenceOnly) {
+    await intakePrisma(client).pages.update({
+      where: { id: page.id },
+      data: {
+        robotsStatus: decision.status,
+        robotsCheckedAt: new Date(),
+        robotsNotes: decision.matchedRule ?? (robotsText ? 'No blocking rule matched.' : `robots.txt returned HTTP ${robots.statusCode}.`),
+      },
+    });
+  }
   if (decision.status === 'DISALLOWED') {
     state.blockedPages.push({ pageId: page.id, url: page.url, rule: decision.matchedRule });
     return { capture: null, artifacts: null, robotsText, providerJobId: null };
   }
 
   if (page.role === 'REGISTRATION') {
+    let accessResponse: BoundedPublicResource | null = null;
     try {
-      const accessResponse = await fetchResource(page.url, {
+      accessResponse = await fetchResource(page.url, {
         maxBytes: 256 * 1024,
         timeoutMs: robotsTimeoutMs(),
       });
-      if (accessResponse.statusCode === 401 || accessResponse.statusCode === 403) {
-        await persistCaptureArtifact({
-          intakeId: intake.id,
-          supplySourceId: page.supplySourceId ?? intake.supplySourceId ?? null,
-          pageId: page.id,
-          runId: run.id,
-          kind: 'PAGE_ACCESS_STATUS',
-          data: jsonBuffer({
-            statusCode: accessResponse.statusCode,
-            disposition: 'AUTHENTICATION_REQUIRED',
-          }),
-          sourceUrl: page.url,
-          finalUrl: accessResponse.finalUrl,
-          provider: 'DIRECT',
-          httpStatus: accessResponse.statusCode,
-          mimeType: 'application/json',
-        }, state);
-        state.restrictedPages.push({
-          pageId: page.id,
-          url: page.url,
-          statusCode: accessResponse.statusCode,
-        });
-        return { capture: null, artifacts: null, robotsText, providerJobId: null };
-      }
     } catch {
-      // Continue to the configured provider when a bounded direct preflight
-      // cannot establish that the public registration action is gated.
+      // Use the configured provider when the direct preflight cannot identify an access gate.
+    }
+    if (accessResponse && evidenceOnly
+      && canonicalizeAffiliateIntakeUrl(accessResponse.finalUrl) !== canonicalizeAffiliateIntakeUrl(page.canonicalUrl ?? page.url)) {
+      const message = `Registration preflight redirected away from the reviewed source identity: ${page.url} -> ${accessResponse.finalUrl}.`;
+      await persistCaptureArtifact({
+        intakeId: intake.id,
+        supplySourceId: page.supplySourceId ?? intake.supplySourceId ?? null,
+        pageId: page.id,
+        runId: run.id,
+        kind: 'PROVIDER_SCRAPE_RESPONSE_JSON',
+        data: jsonBuffer({
+          requestedUrl: page.url,
+          finalUrl: accessResponse.finalUrl,
+          statusCode: accessResponse.statusCode,
+          disposition: 'REDIRECT_IDENTITY_DRIFT',
+        }),
+        sourceUrl: page.url,
+        finalUrl: accessResponse.finalUrl,
+        provider: 'DIRECT',
+        httpStatus: accessResponse.statusCode,
+        mimeType: 'application/json',
+        metadata: { identityDrift: true },
+      }, state);
+      state.failedPages.push({ pageId: page.id, url: page.url, error: message });
+      state.warnings.push(message);
+      return { capture: null, artifacts: null, robotsText, providerJobId: null };
+    }
+    if (accessResponse && (accessResponse.statusCode === 401 || accessResponse.statusCode === 403)) {
+      await persistCaptureArtifact({
+        intakeId: intake.id,
+        supplySourceId: page.supplySourceId ?? intake.supplySourceId ?? null,
+        pageId: page.id,
+        runId: run.id,
+        kind: 'PAGE_ACCESS_STATUS',
+        data: jsonBuffer({
+          statusCode: accessResponse.statusCode,
+          disposition: 'AUTHENTICATION_REQUIRED',
+        }),
+        sourceUrl: page.url,
+        finalUrl: accessResponse.finalUrl,
+        provider: 'DIRECT',
+        httpStatus: accessResponse.statusCode,
+        mimeType: 'application/json',
+      }, state);
+      state.restrictedPages.push({ pageId: page.id, url: page.url, statusCode: accessResponse.statusCode });
+      return { capture: null, artifacts: null, robotsText, providerJobId: null };
     }
   }
 
@@ -1542,8 +2104,62 @@ const processCapturePage = async (
       { captureScreenshot },
       state,
     );
-    const { capture } = captured;
-    const capturedSupplySourceId = await reconcileCapturedAffiliateSupplySource(intake, page, capture);
+    let capture = captured.capture;
+    const requestedIdentity = canonicalizeAffiliateIntakeUrl(page.canonicalUrl ?? page.url);
+    let finalIdentity: string | null = null;
+    try {
+      finalIdentity = capture.finalUrl ? canonicalizeAffiliateIntakeUrl(capture.finalUrl) : null;
+    } catch {
+      finalIdentity = null;
+    }
+    if (evidenceOnly && finalIdentity !== requestedIdentity) {
+      const driftMessage = `Capture redirected away from the reviewed source identity: ${page.url} -> ${capture.finalUrl || 'unknown final URL'}.`;
+      const driftMetadata = {
+        captureUrl: capture.requestedUrl,
+        finalUrl: capture.finalUrl,
+        identityDrift: true,
+        requestedIdentity,
+        finalIdentity,
+        providerStatusCode: capture.providerStatusCode,
+      };
+      const driftBaseArtifact = {
+        intakeId: intake.id,
+        supplySourceId: page.supplySourceId ?? intake.supplySourceId ?? null,
+        pageId: page.id,
+        runId: run.id,
+        sourceUrl: page.url,
+        finalUrl: capture.finalUrl,
+        provider: capture.provider,
+        httpStatus: capture.targetStatusCode ?? capture.providerStatusCode,
+      };
+      await persistCaptureArtifact({
+        ...driftBaseArtifact,
+        kind: 'PROVIDER_SCRAPE_REQUEST_JSON',
+        data: jsonBuffer(capture.request),
+        mimeType: 'application/json',
+        metadata: driftMetadata,
+      }, state);
+      await persistCaptureArtifact({
+        ...driftBaseArtifact,
+        kind: 'PROVIDER_SCRAPE_RESPONSE_JSON',
+        data: jsonBuffer(capture.response),
+        mimeType: 'application/json',
+        metadata: driftMetadata,
+      }, state);
+      state.failedPages.push({ pageId: page.id, url: page.url, error: driftMessage });
+      state.warnings.push(driftMessage);
+      return { capture: null, artifacts: null, robotsText, providerJobId: capture.providerJobId ?? null };
+    }
+    capture = await captureWithDeferredScreenshot(
+      capture,
+      captured.client,
+      page.url,
+      { captureScreenshot },
+      captured.budget,
+    );
+    const capturedSupplySourceId = evidenceOnly
+      ? page.supplySourceId ?? intake.supplySourceId ?? null
+      : await reconcileCapturedAffiliateSupplySource(intake, page, capture, client);
     const artifacts = deriveAffiliateHtmlArtifacts(capture.rawHtml, capture.finalUrl || page.url);
     const provider = capture.provider;
     const artifactMetadata = {
@@ -1655,7 +2271,8 @@ const processCapturePage = async (
         );
       }
     }
-    for (const candidate of candidateLogoUrls(capture, artifacts)) {
+    if (!evidenceOnly) {
+      for (const candidate of candidateLogoUrls(capture, artifacts)) {
       try {
         const logo = await fetchResource(candidate.url, { maxBytes: 3 * 1024 * 1024 });
         if (!logo.contentType?.toLowerCase().startsWith('image/')) {
@@ -1676,6 +2293,7 @@ const processCapturePage = async (
       } catch (error) {
         state.warnings.push(`Logo candidate download failed for ${candidate.url}: ${error instanceof Error ? error.message : 'unknown error'}`);
       }
+    }
     }
     state.warnings.push(...capture.warnings);
     state.estimatedCredits += capture.estimatedCredits ?? 0;
@@ -1721,23 +2339,34 @@ const processCapturePage = async (
     return { capture: null, artifacts: null, robotsText, providerJobId: null };
   }
 };
-
 export const processNextAffiliateSourceIntakeRun = async (
-  options: { runId?: string; workerId?: string } = {},
+  options: {
+    runId?: string;
+    workerId?: string;
+    governedProcessIntent?: AffiliateSourceIntakeGovernedProcessIntent;
+  } = {},
   dependencies: AffiliateSourceIntakeProcessingDependencies = {},
 ) => {
   const now = dependencies.now?.() ?? new Date();
   const workerId = dependencies.workerId ?? options.workerId ?? `affiliate-intake-${process.pid}`;
-  const run = await claimQueuedRun(stringValue(options.runId) ?? undefined, workerId, now);
+  const databaseClient = dependencies.db ?? prisma;
+  const run = await claimQueuedRun(
+    stringValue(options.runId) ?? undefined,
+    workerId,
+    now,
+    databaseClient,
+    options.governedProcessIntent,
+  );
   if (!run) return null;
-  const { intakes, pages, runs, artifacts, mappingJobs } = intakePrisma();
+  const evidenceOnly = isExistingDataRepairEvidenceOnlyRun(run);
+  const { intakes, pages, runs, artifacts, mappingJobs } = intakePrisma(databaseClient);
   const intake = await intakes.findUnique({ where: { id: run.intakeId } });
   if (!intake) {
     const updated = await completeClaimedRun(run, workerId, {
       status: 'FAILED',
       finishedAt: now,
       errorMessage: 'Affiliate source intake not found.',
-    });
+    }, databaseClient);
     if (!updated) return { runId: run.id, status: 'LEASE_LOST', leaseLost: true };
     return { runId: run.id, status: 'FAILED', errorMessage: 'Affiliate source intake not found.' };
   }
@@ -1746,7 +2375,7 @@ export const processNextAffiliateSourceIntakeRun = async (
       status: 'BLOCKED',
       finishedAt: now,
       errorMessage: 'Source policy is not allowed.',
-    });
+    }, databaseClient);
     if (!updated) return { runId: run.id, status: 'LEASE_LOST', leaseLost: true };
     return { runId: run.id, status: 'BLOCKED', errorMessage: 'Source policy is not allowed.' };
   }
@@ -1760,9 +2389,61 @@ export const processNextAffiliateSourceIntakeRun = async (
       status: 'FAILED',
       finishedAt: now,
       errorMessage: 'No active intake pages were selected.',
-    });
+    }, databaseClient);
     if (!updated) return { runId: run.id, status: 'LEASE_LOST', leaseLost: true };
     return { runId: run.id, status: 'FAILED', errorMessage: 'No active intake pages were selected.' };
+  }
+  if (evidenceOnly) {
+    const marker = existingDataRepairEvidenceMarkerFrom(run.summary);
+    const markerMatches = marker
+      && options.governedProcessIntent?.markerSha256 === hashAffiliateAgentValue(marker)
+      && marker.operatorId === run.requestedByUserId
+      && marker.intakeId === intake.id
+      && marker.pageIds.length >= 1
+      && marker.pageIds.length <= 3
+      && sameStringArray(marker.pageIds, run.requestedPageIds)
+      && sameStringArray(marker.pageIds, selectedPages.map((page: { id: string }) => page.id))
+      && recordValue(marker.baseline).recordFingerprint === hashAffiliateAgentValue(
+        affiliateExistingRepairCaptureSnapshot(intake, selectedPages),
+      );
+    if (!markerMatches) {
+      const errorMessage = 'CAPTURE_INTENT_DRIFT: The reviewed intake or page scope changed before capture.';
+      const updated = await completeClaimedRun(run, workerId, {
+        status: 'FAILED',
+        finishedAt: now,
+        errorMessage,
+      }, databaseClient);
+      if (!updated) return { runId: run.id, status: 'LEASE_LOST', leaseLost: true };
+      return { run: updated, status: 'FAILED', errorMessage };
+    }
+    try {
+      await verifyExistingRepairCaptureAfterClaim(
+        databaseClient as Record<string, unknown>,
+        run as Record<string, unknown>,
+        intake as Record<string, unknown>,
+        selectedPages as Record<string, unknown>[],
+        marker as AffiliateExistingDataRepairEvidenceOnlyMarker,
+      );
+      if (options.governedProcessIntent?.verifyAfterClaim) {
+        await options.governedProcessIntent.verifyAfterClaim({
+          database: databaseClient,
+          run: run as Record<string, unknown>,
+          intake: intake as Record<string, unknown>,
+          pages: selectedPages as Record<string, unknown>[],
+        });
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error
+        ? error.message
+        : 'CAPTURE_INTENT_DRIFT: Reviewed capture authority changed after claim.';
+      const updated = await completeClaimedRun(run, workerId, {
+        status: 'FAILED',
+        finishedAt: now,
+        errorMessage,
+      }, databaseClient);
+      if (!updated) return { runId: run.id, status: 'LEASE_LOST', leaseLost: true };
+      return { run: updated, status: 'FAILED', errorMessage };
+    }
   }
 
   const queuedProvider = isProviderName(run.provider)
@@ -1802,11 +2483,14 @@ export const processNextAffiliateSourceIntakeRun = async (
       fetchResource,
       summary,
       screenshotMode === 'all' || screenshotMode === 'first',
+      databaseClient,
+      evidenceOnly,
     );
     if (firstPage.capture) {
       captures.push(firstPage.capture);
       if (firstPage.providerJobId) providerJobIds.push(firstPage.providerJobId);
-      try {
+      if (!evidenceOnly) {
+        try {
         const mapped = await discoverPages({
           sourceUrl: discoveryPage.url,
           robotsText: firstPage.robotsText,
@@ -1852,6 +2536,7 @@ export const processNextAffiliateSourceIntakeRun = async (
         summary.warnings.push(`URL discovery failed: ${error instanceof Error ? error.message : 'unknown error'}`);
       }
     }
+      }
 
     for (const page of selectedPages.slice(1, MAX_CAPTURE_PAGES)) {
       const processed = await processCapturePage(
@@ -1863,6 +2548,8 @@ export const processNextAffiliateSourceIntakeRun = async (
         fetchResource,
         summary,
         screenshotMode === 'all',
+        databaseClient,
+        evidenceOnly,
       );
       if (processed.capture) captures.push(processed.capture);
       if (processed.providerJobId) providerJobIds.push(processed.providerJobId);
@@ -1894,8 +2581,9 @@ export const processNextAffiliateSourceIntakeRun = async (
       capturedPageCount: summary.capturedPages.length,
       errorMessage: status === 'FAILED' ? summary.failedPages[0]?.error ?? 'No pages were captured.' : null,
       summary,
-    });
+    }, databaseClient);
     if (!updatedRun) return { runId: run.id, status: 'LEASE_LOST', leaseLost: true, summary };
+    if (evidenceOnly) return { run: updatedRun, summary };
     const hasMappingEvidence = ['SUCCEEDED', 'PARTIAL'].includes(status)
       && await artifacts.count({
         where: { intakeId: intake.id, runId: run.id, kind: { in: ['PAGE_HTML', 'PAGE_MARKDOWN'] } },
@@ -1950,9 +2638,11 @@ export const processNextAffiliateSourceIntakeRun = async (
       finishedAt,
       errorMessage: message,
       summary,
-    });
+    }, databaseClient);
     if (!failedRun) return { runId: run.id, status: 'LEASE_LOST', leaseLost: true, summary };
-    await intakes.update({ where: { id: intake.id }, data: { lastRunId: run.id, status: 'FAILED' } });
+    if (!evidenceOnly) {
+      await intakes.update({ where: { id: intake.id }, data: { lastRunId: run.id, status: 'FAILED' } });
+    }
     return { run: failedRun, summary };
   }
 };

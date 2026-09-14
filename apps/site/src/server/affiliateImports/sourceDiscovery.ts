@@ -24,6 +24,9 @@ import {
 } from './affiliateProviderFactory';
 import type { AffiliateFirecrawlClient } from './firecrawlClient';
 import {
+  AffiliateSourceIntakeQueueConflictError,
+  isAffiliateExistingDataRepairEvidenceOnlyRun,
+  assertOrdinaryAffiliateSourceIntakeQueueOwnership,
   processNextAffiliateSourceIntakeRun,
   queueAffiliateSourceIntakeRun,
   recoverStaleAffiliateSourceIntakeRuns,
@@ -426,17 +429,22 @@ const findSiteIntake = async (
     orderBy: { createdAt: 'asc' },
   });
 };
-
 const queueAllowedIntake = async (
   intakeId: string,
   userId: string,
   client: unknown = prisma,
 ): Promise<void> => {
   const intakeDb = db(client);
+  await assertOrdinaryAffiliateSourceIntakeQueueOwnership(intakeId, client);
   const active = await intakeDb.intakeRuns.findFirst({
-    where: { intakeId, status: { in: ['QUEUED', 'RUNNING'] } },
+    where: { intakeId, status: { in: ['QUEUED', 'RUNNING', 'CLAIMED'] } },
   });
-  if (active) return;
+  if (active) {
+    if (isAffiliateExistingDataRepairEvidenceOnlyRun(active)) {
+      throw new AffiliateSourceIntakeQueueConflictError('A governed capture owns this intake.');
+    }
+    return;
+  }
   const pages = await intakeDb.pages.findMany({
     where: { intakeId, status: 'ACTIVE' },
     orderBy: [{ role: 'asc' }, { createdAt: 'asc' }],

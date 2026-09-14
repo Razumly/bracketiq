@@ -28,6 +28,7 @@ const prismaMock = {
   },
   affiliateSourceDomainPolicies: {
     findUnique: jest.fn(),
+    findMany: jest.fn(),
     upsert: jest.fn(),
   },
   affiliateSourceDiscoveryResults: {
@@ -37,8 +38,19 @@ const prismaMock = {
     findFirst: jest.fn(),
     create: jest.fn(),
   },
+  affiliateScrapeSources: {
+    findMany: jest.fn(),
+  },
+  affiliateSupplySources: {
+    findMany: jest.fn(),
+  },
+  affiliateAgentGatewayJobs: {
+    findMany: jest.fn(),
+  },
+  affiliateAgentGatewayClaims: {
+    findMany: jest.fn(),
+  },
 };
-
 const persistArtifactMock = jest.fn();
 
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
@@ -50,6 +62,8 @@ jest.mock('@/server/affiliateImports/sourceIntakeArtifacts', () => ({
 }));
 
 import {
+  affiliateExistingRepairAuthoritySnapshot,
+  affiliateExistingRepairCaptureSnapshot,
   classifyAffiliateSourceEvidence,
   findStaleAffiliateSourceIntakeRuns,
   listAffiliateSourceIntakes,
@@ -58,6 +72,7 @@ import {
   recoverStaleAffiliateSourceIntakeRuns,
   reviewAffiliateSourceIntakePolicy,
 } from '@/server/affiliateImports/sourceIntake';
+import { hashAffiliateAgentValue } from '@/server/affiliateImports/agentGatewayContracts';
 
 describe('affiliate source intake service', () => {
   beforeEach(() => {
@@ -78,9 +93,85 @@ describe('affiliate source intake service', () => {
     prismaMock.affiliateSourceMappingJobs.findFirst.mockResolvedValue(null);
     prismaMock.affiliateSourceMappingJobs.create.mockResolvedValue({ id: 'mapping_job_1' });
     prismaMock.affiliateSourceDomainPolicies.findUnique.mockResolvedValue(null);
+    prismaMock.affiliateSourceDomainPolicies.findMany.mockResolvedValue([]);
     prismaMock.affiliateSourceDomainPolicies.upsert.mockResolvedValue({});
     prismaMock.affiliateSourceDiscoveryResults.updateMany.mockResolvedValue({ count: 0 });
+    prismaMock.affiliateScrapeSources.findMany.mockResolvedValue([]);
+    prismaMock.affiliateSupplySources.findMany.mockResolvedValue([]);
+    prismaMock.affiliateAgentGatewayJobs.findMany.mockResolvedValue([]);
+    prismaMock.affiliateAgentGatewayClaims.findMany.mockResolvedValue([]);
   });
+
+  const reviewedCaptureFixture = (role = 'LISTING', expiresAt: Date | null = null) => {
+    const intake = { id: 'intake_reviewed', sourceKey: 'reviewed', baseUrl: 'https://example.com', status: 'REVIEW_REQUIRED', complianceStatus: 'ALLOWED', supplySourceId: null };
+    const page = { id: 'page_reviewed', intakeId: intake.id, url: 'https://example.com/events', canonicalUrl: 'https://example.com/events', role, status: 'ACTIVE', supplySourceId: null };
+    const policy = { id: 'policy_reviewed', policyKey: 'example.com', status: 'ALLOWED', expiresAt };
+    const authoritySnapshot = affiliateExistingRepairAuthoritySnapshot(intake, [page], null, [], [policy]);
+    const marker = {
+      schemaVersion: 1, purpose: 'EXISTING_DATA_REPAIR_EVIDENCE_ONLY', requestHash: 'a'.repeat(64),
+      operatorId: 'operator_reviewed', intakeId: intake.id, pageIds: [page.id],
+      baseline: {
+        recordFingerprint: hashAffiliateAgentValue(affiliateExistingRepairCaptureSnapshot(intake, [page])),
+        authoritySnapshot, authorityFingerprint: hashAffiliateAgentValue(authoritySnapshot),
+      },
+    };
+    const queued = { id: 'run_reviewed', intakeId: intake.id, requestedByUserId: marker.operatorId, requestedPageIds: [page.id], status: 'QUEUED', provider: 'SCRAPINGDOG', summary: { existingDataRepairEvidenceOnly: marker } };
+    prismaMock.affiliateSourceIntakes.findUnique.mockResolvedValue(intake);
+    prismaMock.affiliateSourceIntakePages.findMany.mockResolvedValue([page]);
+    prismaMock.affiliateSourceIntakeRuns.findFirst.mockResolvedValue(queued);
+    prismaMock.affiliateSourceIntakeRuns.findUnique.mockResolvedValue({ ...queued, status: 'RUNNING', workerId: 'reviewed-worker' });
+    prismaMock.affiliateSourceIntakeRuns.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.affiliateSourceDomainPolicies.findMany.mockResolvedValue([policy]);
+    const intent = {
+      purpose: 'EXISTING_DATA_REPAIR_EVIDENCE_ONLY' as const,
+      operatorId: marker.operatorId, markerSha256: hashAffiliateAgentValue(marker),
+      verifyAfterClaim: async () => undefined,
+    };
+    return { intake, page, policy, queued, intent };
+  };
+
+  it('cannot replace mandatory post-claim policy checks with a no-op callback', async () => {
+    const fixture = reviewedCaptureFixture();
+    prismaMock.affiliateSourceIntakeRuns.updateMany.mockImplementationOnce(async () => {
+      prismaMock.affiliateSourceDomainPolicies.findMany.mockResolvedValue([{ ...fixture.policy, status: 'BLOCKED' }]);
+      return { count: 1 };
+    });
+    const captureSourcePage = jest.fn();
+    const fetchResource = jest.fn();
+    const result = await processNextAffiliateSourceIntakeRun({
+      runId: fixture.queued.id, workerId: 'reviewed-worker', governedProcessIntent: fixture.intent,
+    }, { captureClient: { provider: 'SCRAPINGDOG', captureSourcePage }, fetchResource });
+    expect(result).toMatchObject({ status: 'FAILED', errorMessage: expect.stringContaining('CAPTURE_INTENT_DRIFT') });
+    expect(fetchResource).not.toHaveBeenCalled();
+    expect(captureSourcePage).not.toHaveBeenCalled();
+  });
+
+  it('rejects a policy that expires without any row changing', async () => {
+    const fixture = reviewedCaptureFixture('LISTING', new Date('2099-01-01T00:00:00Z'));
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(Date.parse('2099-01-02T00:00:00Z'));
+    const captureSourcePage = jest.fn();
+    const fetchResource = jest.fn();
+    try {
+      const result = await processNextAffiliateSourceIntakeRun({
+        runId: fixture.queued.id, workerId: 'reviewed-worker', governedProcessIntent: fixture.intent,
+      }, { captureClient: { provider: 'SCRAPINGDOG', captureSourcePage }, fetchResource });
+      expect(result).toMatchObject({ status: 'FAILED', errorMessage: expect.stringContaining('CAPTURE_POLICY_NOT_ALLOWED') });
+      expect(fetchResource).not.toHaveBeenCalled();
+      expect(captureSourcePage).not.toHaveBeenCalled();
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('rejects governed ownership that appears between ordinary queue reads', async () => {
+    const fixture = reviewedCaptureFixture();
+    prismaMock.affiliateSourceIntakeRuns.findMany.mockResolvedValue([]);
+    await expect(queueAffiliateSourceIntakeRun(fixture.intake.id, [fixture.page.id], 'ordinary-operator'))
+      .rejects.toMatchObject({ code: 'GOVERNED_CAPTURE_OWNERSHIP_CONFLICT' });
+    expect(prismaMock.affiliateSourceIntakeRuns.create).not.toHaveBeenCalled();
+  });
+
+
 
   it('paginates intake rows and aggregates child counts in the database', async () => {
     prismaMock.affiliateSourceIntakes.count.mockResolvedValue(2);
@@ -141,6 +232,33 @@ describe('affiliate source intake service', () => {
     expect(prismaMock.affiliateSourceIntakeRuns.findFirst).not.toHaveBeenCalled();
     expect(prismaMock.affiliateSourceIntakeRuns.create).not.toHaveBeenCalled();
   });
+
+  it('rejects markerless queueing while a governed capture owns the intake', async () => {
+    prismaMock.affiliateSourceIntakes.findUnique.mockResolvedValue({
+      id: 'intake_1',
+      complianceStatus: 'ALLOWED',
+    });
+    prismaMock.affiliateSourceIntakePages.findMany.mockResolvedValue([{
+      id: 'page_1',
+      intakeId: 'intake_1',
+      status: 'ACTIVE',
+    }]);
+    prismaMock.affiliateSourceIntakeRuns.findMany.mockResolvedValue([{
+      id: 'governed_run',
+      intakeId: 'intake_1',
+      status: 'RUNNING',
+      summary: {
+        existingDataRepairEvidenceOnly: {
+          purpose: 'EXISTING_DATA_REPAIR_EVIDENCE_ONLY',
+        },
+      },
+    }]);
+
+    await expect(queueAffiliateSourceIntakeRun('intake_1', ['page_1'], 'operator'))
+      .rejects.toMatchObject({ code: 'GOVERNED_CAPTURE_OWNERSHIP_CONFLICT', status: 409 });
+    expect(prismaMock.affiliateSourceIntakeRuns.create).not.toHaveBeenCalled();
+  });
+
 
   it('does not queue an inspection until policy review allows the source', async () => {
     prismaMock.affiliateSourceIntakes.findUnique.mockResolvedValue({
@@ -207,6 +325,221 @@ describe('affiliate source intake service', () => {
       where: expect.objectContaining({ id: 'run_1', status: 'RUNNING', workerId: 'worker_1' }),
       data: expect.objectContaining({ status: 'BLOCKED' }),
     }));
+  });
+
+  it('does not let the generic intake worker claim an admitted evidence-only run', async () => {
+    prismaMock.affiliateSourceIntakeRuns.findFirst.mockResolvedValue({
+      id: 'run_repair',
+      intakeId: 'intake_1',
+      requestedPageIds: ['page_1'],
+      status: 'QUEUED',
+      summary: {
+        existingDataRepairEvidenceOnly: {
+          schemaVersion: 1,
+          purpose: 'EXISTING_DATA_REPAIR_EVIDENCE_ONLY',
+          requestHash: 'a'.repeat(64),
+          operatorId: 'operator_repair',
+          intakeId: 'intake_1',
+          pageIds: ['page_1'],
+          baseline: {},
+        },
+      },
+    });
+
+    await expect(processNextAffiliateSourceIntakeRun(
+      { runId: 'run_repair', workerId: 'generic-worker' },
+      { captureClient: { provider: 'SCRAPINGDOG', captureSourcePage: jest.fn() } },
+    )).resolves.toBeNull();
+    expect(prismaMock.affiliateSourceIntakeRuns.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('refreshes admitted evidence without discovering pages, relinking roots, or changing intake records', async () => {
+    const marker: any = {
+      schemaVersion: 1,
+      purpose: 'EXISTING_DATA_REPAIR_EVIDENCE_ONLY',
+      requestHash: 'a'.repeat(64),
+      operatorId: 'operator_repair',
+      intakeId: 'intake_1',
+      pageIds: ['page_1'],
+      baseline: { recordFingerprint: 'b'.repeat(64) },
+    };
+    const run = {
+      id: 'run_repair',
+      intakeId: 'intake_1',
+      requestedPageIds: ['page_1'],
+      requestedByUserId: 'operator_repair',
+      provider: 'SCRAPINGDOG',
+      status: 'QUEUED',
+      summary: { existingDataRepairEvidenceOnly: marker },
+    };
+    const intake = {
+      id: 'intake_1',
+      sourceKey: 'source-1',
+      affiliateSourceId: 'source_1',
+      baseUrl: 'https://example.com',
+      status: 'APPROVED',
+      complianceStatus: 'ALLOWED',
+      lastRunId: 'run_before',
+      suggestedClassification: { type: 'CLUB', confidence: 0.9, reasons: ['prior'] },
+      supplySourceId: 'supply_1',
+    };
+    const page = {
+      id: 'page_1',
+      intakeId: 'intake_1',
+      supplySourceId: 'supply_1',
+      url: 'https://example.com/events',
+      canonicalUrl: 'https://example.com/events',
+      role: 'LISTING',
+      status: 'ACTIVE',
+      createdAt: new Date(),
+    };
+    const source = {
+      id: 'source_1',
+      sourceKey: 'source-1',
+      baseUrl: 'https://example.com',
+      listUrl: 'https://example.com/events',
+      status: 'ACTIVE',
+      supplySourceId: 'supply_1',
+      metadata: {},
+    };
+    const root = {
+      id: 'supply_1',
+      canonicalUrl: 'https://example.com/events',
+      intakeId: 'intake_1',
+      liveSourceId: 'source_1',
+      derivedStage: 'PRE_MAPPED',
+      derivedOutcome: null,
+      isExcluded: false,
+      successorId: null,
+      invariantViolations: [],
+      metadata: {},
+    };
+    const policy = {
+      id: 'policy_1',
+      policyKey: 'example.com',
+      status: 'ALLOWED',
+      expiresAt: new Date('2027-01-01T00:00:00.000Z'),
+      reviewedAt: new Date('2026-01-01T00:00:00.000Z'),
+      termsUrl: 'https://example.com/terms',
+      evidence: {},
+      robotsSummary: 'Allowed',
+    };
+    prismaMock.affiliateScrapeSources.findMany.mockResolvedValue([source]);
+    prismaMock.affiliateSupplySources.findMany.mockResolvedValue([root]);
+    prismaMock.affiliateSourceDomainPolicies.findMany.mockResolvedValue([policy]);
+    prismaMock.affiliateAgentGatewayJobs.findMany.mockResolvedValue([]);
+    prismaMock.affiliateAgentGatewayClaims.findMany.mockResolvedValue([]);
+    const authoritySnapshot = affiliateExistingRepairAuthoritySnapshot(
+      intake,
+      [page],
+      source,
+      [root],
+      [policy],
+    );
+    marker.baseline.authoritySnapshot = authoritySnapshot;
+    marker.baseline.authorityFingerprint = hashAffiliateAgentValue(authoritySnapshot);
+    marker.baseline.recordFingerprint = hashAffiliateAgentValue(affiliateExistingRepairCaptureSnapshot(intake, [page]));
+    prismaMock.affiliateSourceIntakeRuns.findFirst.mockResolvedValue(run);
+    prismaMock.affiliateSourceIntakeRuns.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.affiliateSourceIntakeRuns.findUnique.mockResolvedValue({ ...run, status: 'RUNNING', workerId: 'worker_repair' });
+    prismaMock.affiliateSourceIntakes.findUnique.mockResolvedValue(intake);
+    prismaMock.affiliateSourceIntakePages.findMany.mockResolvedValue([page]);
+    prismaMock.affiliateSourceIntakes.update.mockImplementation(async ({ data }) => ({ ...intake, ...data }));
+    const discoverPages = jest.fn();
+    const fetchResource = jest.fn().mockResolvedValue({
+      url: 'https://example.com/robots.txt',
+      finalUrl: 'https://example.com/robots.txt',
+      statusCode: 200,
+      contentType: 'text/plain',
+      body: Buffer.from('User-agent: *\nAllow: /\n'),
+    });
+    const captureClient = {
+      provider: 'SCRAPINGDOG',
+      captureSourcePage: jest.fn().mockResolvedValue({
+        provider: 'SCRAPINGDOG',
+        request: { url: page.url },
+        response: { status: 200 },
+        requestedUrl: page.url,
+        finalUrl: 'https://example.com/events',
+        isRedirectVerified: true,
+        inferredCanonicalUrl: null,
+        providerStatusCode: 200,
+        targetStatusCode: 200,
+        rawHtml: '<html><body>Current events</body></html>',
+        renderMode: 'HTTP',
+        elapsedMs: 10,
+        estimatedCredits: 1,
+        warnings: [],
+        providerArtifacts: {
+          markdown: '# Current events',
+          links: [],
+          images: [],
+          branding: null,
+          screenshotUrl: null,
+          screenshotEvidence: null,
+          metadata: {},
+        },
+      }),
+    };
+
+    const result = await processNextAffiliateSourceIntakeRun(
+      {
+        runId: run.id,
+        workerId: 'worker_repair',
+        governedProcessIntent: {
+          purpose: 'EXISTING_DATA_REPAIR_EVIDENCE_ONLY',
+          operatorId: 'operator_repair',
+          markerSha256: hashAffiliateAgentValue(marker),
+        },
+      },
+      { captureClient, discoverPages, fetchResource },
+    );
+
+    expect(result).toEqual(expect.objectContaining({
+      summary: expect.objectContaining({
+        capturedPages: [expect.objectContaining({ pageId: page.id, finalUrl: page.url })],
+      }),
+    }));
+    expect(prismaMock.affiliateSourceIntakes.update).not.toHaveBeenCalled();
+    expect(persistArtifactMock).toHaveBeenCalledWith(expect.objectContaining({
+      intakeId: intake.id,
+      pageId: page.id,
+      runId: run.id,
+      finalUrl: page.url,
+    }));
+  });
+
+  it('rejects a changed reviewed page before a capture provider can run', async () => {
+    const intake = { id: 'intake_1', complianceStatus: 'ALLOWED', status: 'REVIEW_REQUIRED' };
+    const page = {
+      id: 'page_1', intakeId: intake.id, url: 'https://example.com/events',
+      canonicalUrl: 'https://example.com/events', status: 'ACTIVE', role: 'LISTING',
+    };
+    const marker = {
+      schemaVersion: 1, purpose: 'EXISTING_DATA_REPAIR_EVIDENCE_ONLY',
+      requestHash: 'a'.repeat(64), operatorId: 'operator_repair', intakeId: intake.id, pageIds: [page.id],
+      baseline: { recordFingerprint: hashAffiliateAgentValue(affiliateExistingRepairCaptureSnapshot(intake, [page])) },
+    };
+    const run = {
+      id: 'run_repair', intakeId: intake.id, requestedByUserId: marker.operatorId,
+      requestedPageIds: [page.id], status: 'QUEUED', summary: { existingDataRepairEvidenceOnly: marker },
+    };
+    prismaMock.affiliateSourceIntakeRuns.findFirst.mockResolvedValue(run);
+    prismaMock.affiliateSourceIntakeRuns.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.affiliateSourceIntakeRuns.findUnique.mockResolvedValue({ ...run, status: 'RUNNING', workerId: 'worker_repair' });
+    prismaMock.affiliateSourceIntakes.findUnique.mockResolvedValue(intake);
+    prismaMock.affiliateSourceIntakePages.findMany.mockResolvedValue([{ ...page, url: 'https://unreviewed.example/new' }]);
+    const captureSourcePage = jest.fn();
+    const result = await processNextAffiliateSourceIntakeRun({
+      runId: run.id, workerId: 'worker_repair',
+      governedProcessIntent: {
+        purpose: 'EXISTING_DATA_REPAIR_EVIDENCE_ONLY', operatorId: marker.operatorId,
+        markerSha256: hashAffiliateAgentValue(marker),
+      },
+    }, { captureClient: { provider: 'SCRAPINGDOG', captureSourcePage } });
+    expect(result).toMatchObject({ status: 'FAILED', errorMessage: expect.stringContaining('CAPTURE_INTENT_DRIFT') });
+    expect(captureSourcePage).not.toHaveBeenCalled();
+    expect(prismaMock.affiliateSourceIntakes.update).not.toHaveBeenCalled();
   });
 
   it('preserves an abandoned capture attempt and queues one fresh replacement', async () => {
@@ -616,7 +949,7 @@ describe('affiliate source intake service', () => {
       request: { url: page.url, endpoint: '/screenshot' },
       response: { statusCode: 200 },
       sourceUrl: page.url,
-      finalUrl: page.url,
+      finalUrl: 'https://unreviewed.example.test/final',
       data: Buffer.from('fallback-image'),
       mimeType: 'image/png',
       providerStatusCode: 200,
@@ -962,6 +1295,73 @@ describe('affiliate source intake service', () => {
     expect(result?.summary.classification.type).not.toBe('UNKNOWN');
   });
 
+  it('rejects incomplete governed authority before optional callbacks or providers', async () => {
+    const intake = {
+      id: 'intake_1',
+      complianceStatus: 'ALLOWED',
+      sourceKey: 'source-1',
+      baseUrl: 'https://example.com',
+    };
+    const page = {
+      id: 'page_postclaim',
+      intakeId: intake.id,
+      url: 'https://example.com/events',
+      canonicalUrl: 'https://example.com/events',
+      status: 'ACTIVE',
+      role: 'LISTING',
+    };
+    const marker: any = {
+      schemaVersion: 1,
+      purpose: 'EXISTING_DATA_REPAIR_EVIDENCE_ONLY',
+      requestHash: 'c'.repeat(64),
+      operatorId: 'operator_repair',
+      intakeId: intake.id,
+      pageIds: [page.id],
+      baseline: {
+        recordFingerprint: hashAffiliateAgentValue(affiliateExistingRepairCaptureSnapshot(intake, [page])),
+      },
+    };
+    const run = {
+      id: 'run_postclaim',
+      intakeId: intake.id,
+      requestedPageIds: [page.id],
+      requestedByUserId: marker.operatorId,
+      status: 'QUEUED',
+      summary: { existingDataRepairEvidenceOnly: marker },
+    };
+    prismaMock.affiliateSourceIntakeRuns.findFirst.mockResolvedValue(run);
+    prismaMock.affiliateSourceIntakeRuns.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.affiliateSourceIntakeRuns.findUnique.mockResolvedValue({ ...run, status: 'RUNNING' });
+    prismaMock.affiliateSourceIntakes.findUnique.mockResolvedValue(intake);
+    prismaMock.affiliateSourceIntakePages.findMany.mockResolvedValue([page]);
+    const captureSourcePage = jest.fn();
+    const verifyAfterClaim = jest.fn().mockRejectedValue(
+      new Error('CAPTURE_INTENT_DRIFT: reviewed policy changed after claim'),
+    );
+
+    const result = await processNextAffiliateSourceIntakeRun(
+      {
+        runId: run.id,
+        workerId: 'worker_postclaim',
+        governedProcessIntent: {
+          purpose: 'EXISTING_DATA_REPAIR_EVIDENCE_ONLY',
+          operatorId: marker.operatorId,
+          markerSha256: hashAffiliateAgentValue(marker),
+          verifyAfterClaim,
+        },
+      },
+      {
+        captureClient: { provider: 'SCRAPINGDOG', captureSourcePage },
+        fallbackCaptureClient: null,
+      },
+    );
+
+    expect(verifyAfterClaim).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      status: 'FAILED',
+    }));
+    expect(captureSourcePage).not.toHaveBeenCalled();
+  });
   it('keeps source classification advisory and evidence-based', () => {
     expect(classifyAffiliateSourceEvidence(
       'Competitive soccer academy tryouts and club teams',

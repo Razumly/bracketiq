@@ -16,6 +16,8 @@ import type {
   AffiliateAgentEvidenceManifest,
   AffiliateAgentExecutionClass,
   AffiliateAgentLegacySportRepairContext,
+  AffiliateAgentMappingRepairContext,
+  AffiliateAgentMappingRepairDirective,
   AffiliateAgentProducerClaimEnvelopeForHistoricalRead,
   AffiliateAgentRole,
   AffiliateAgentSchemaIssue,
@@ -27,6 +29,8 @@ import {
   parseAffiliateAgentProducerClaimEnvelopeForHistoricalRead,
   affiliateAgentDeclarativePackageSchema,
   affiliateAgentEvidenceManifestSchema,
+  affiliateAgentMappingRepairDirectiveSchema,
+  affiliateAgentTerminalResultEnvelopeSchema,
   affiliateAgentSportEvidenceSchema,
   canonicalizeAffiliateAgentValue,
   hashAffiliateAgentValue,
@@ -86,7 +90,15 @@ import {
   type AffiliateSportCompletionVerificationInput,
   type VerifiedAffiliateSportCompletion,
 } from "./affiliateSportDetermination";
+import {
+  captureAffiliateExistingRepairSourceState,
+  existingDataRepairContextForMetadata,
+  pendingMappingForMetadata,
+  pendingMappingFor,
+  type AffiliateExistingDataRepairPendingMapping,
+} from "./affiliateExistingDataRepairState";
 import { assertSafePublicUrl, type PublicUrlResolver } from "./sourceIntakeUrlSafety";
+import { tryLockAffiliateRepairWrites } from "./affiliateRepairActivityLease";
 import {
   affiliateSourceCaptureDeadlineAt,
   affiliateSourceCaptureTimeoutMs,
@@ -1159,20 +1171,19 @@ const packageValidationError = (safeMessage: string): AffiliateAgentGatewayError
     isRetryable: false,
     safeMessage,
   });
+
 const legacySportRepairContextFor = (
   claim: ProducerClaimEnvelopeForRead,
-): AffiliateAgentLegacySportRepairContext => {
-  if (claim.role === "MAPPING_PRODUCER") {
-    if (claim.subject.repairContext?.kind === "LEGACY_SPORT_REPAIR") {
-      return claim.subject.repairContext;
-    }
-  } else if (
-    claim.role === "SUPPLY_REVIEWER"
-    && claim.subject.repairContext?.kind === "LEGACY_SPORT_REPAIR"
-  ) {
-    return claim.subject.repairContext;
+): AffiliateAgentMappingRepairContext => {
+  const context = claim.role === "MAPPING_PRODUCER"
+    ? claim.subject.repairContext
+    : claim.role === "SUPPLY_REVIEWER"
+      ? claim.subject.repairContext
+      : undefined;
+  if (context?.kind === "LEGACY_SPORT_REPAIR" || context?.kind === "EXISTING_DATA_REPAIR") {
+    return context;
   }
-  throw new Error("Legacy sport evidence requires a legacy sport repair claim.");
+  throw new Error("Sport evidence requires a repair claim.");
 };
 
 const legacySportRepairArtifactFor = async (
@@ -1279,7 +1290,7 @@ const legacySportRepairArtifactFor = async (
 export const verifyAffiliateAgentLegacySportRepair = async (
   input: AffiliateAgentLegacySportRepairVerificationInput,
 ): Promise<VerifiedAffiliateSportCompletion> => {
-  let context: AffiliateAgentLegacySportRepairContext;
+  let context: AffiliateAgentMappingRepairContext;
   try {
     context = legacySportRepairContextFor(input.claim);
   } catch {
@@ -3168,13 +3179,13 @@ const assertLegacySportRepairApprovalFresh = async (
   const reviewerSubject = effectInput.claim.subject;
   if (
     reviewerSubject.type !== "SUPPLY_REVIEWER"
-    || reviewerSubject.repairContext?.kind !== "LEGACY_SPORT_REPAIR"
+    || !reviewerSubject.repairContext
   ) return;
   const producerClaimRow = await transaction.affiliateAgentGatewayClaims.findUnique({
     where: { id: reviewerSubject.producerClaimId },
   });
   if (!producerClaimRow) {
-    throw legacySportRepairEvidenceError("The producer claim for this legacy sport repair was not found.");
+    throw legacySportRepairEvidenceError("The producer claim for this mapping repair was not found.");
   }
   if (
     hashAffiliateAgentValue(producerClaimRow.claimEnvelopeJson) !== producerClaimRow.claimEnvelopeHash
@@ -3223,7 +3234,7 @@ const assertLegacySportRepairApprovalFresh = async (
   const listEvidence = await productionListingEvidence(input, producerEnvelope, committedPackage.listUrlRef);
   const extraction = extractProductionValidationCandidates(committedPackage, producerEnvelope, listEvidence);
   if (!committedPackage.sportEvidence) {
-    throw legacySportRepairEvidenceError("Legacy sport repair packages require sportEvidence.");
+    throw legacySportRepairEvidenceError("Mapping repair packages require sportEvidence.");
   }
   await verifyAffiliateAgentLegacySportRepair({
     prisma: transaction,
@@ -3233,6 +3244,92 @@ const assertLegacySportRepairApprovalFresh = async (
     resultKind: "REVIEW_REQUIRED",
     observedSportNames: extraction.observedSportNames,
   });
+};
+const assertExistingDataRepairApprovalFresh = async (
+  effectInput: AffiliateAgentTerminalEffectAdapterInput,
+  result: AffiliateAgentReviewerTerminalResult,
+  sourceId: string,
+  transaction: Prisma.TransactionClient,
+): Promise<void> => {
+  const reviewerSubject = effectInput.claim.subject;
+  if (
+    reviewerSubject.type !== "SUPPLY_REVIEWER"
+    || reviewerSubject.repairContext?.kind !== "EXISTING_DATA_REPAIR"
+  ) return;
+  const root = await transaction.affiliateSupplySources.findUnique({
+    where: { id: sourceId },
+  });
+  if (!root) throw packageValidationError("The existing-data repair Supply Source was not found.");
+  const source = root.liveSourceId
+    ? await transaction.affiliateScrapeSources.findUnique({ where: { id: root.liveSourceId } })
+    : await transaction.affiliateScrapeSources.findFirst({
+      where: { supplySourceId: sourceId },
+      orderBy: { createdAt: "asc" },
+    });
+  if (!source) throw packageValidationError("The existing-data repair live source was not found.");
+  const sourceContext = existingDataRepairContextForMetadata(source.metadata);
+  const rootContext = existingDataRepairContextForMetadata(root.metadata);
+  const sourcePending = pendingMappingForMetadata(source.metadata);
+  const rootPending = pendingMappingForMetadata(root.metadata);
+  if (
+    !sourceContext
+    || !rootContext
+    || canonicalizeAffiliateAgentValue(sourceContext)
+      !== canonicalizeAffiliateAgentValue(rootContext)
+    || canonicalizeAffiliateAgentValue(sourceContext)
+      !== canonicalizeAffiliateAgentValue(reviewerSubject.repairContext)
+    || !sourcePending
+    || !rootPending
+    || canonicalizeAffiliateAgentValue(sourcePending)
+      !== canonicalizeAffiliateAgentValue(rootPending)
+  ) {
+    throw packageValidationError("The existing-data repair metadata is not consistently bound.");
+  }
+  const pending = sourcePending;
+  if (pending.state !== "STAGED" && pending.state !== "APPROVED") {
+    throw packageValidationError("The existing-data repair pending mapping is not reviewable.");
+  }
+  const resultPayload = productionRecord(result.payload);
+  const committedPackageHash = productionString(resultPayload.committedPackageHash)
+    ?? reviewerSubject.committedPackageHash;
+  if (
+    pending.supplySourceId !== sourceId
+    || pending.sourceId !== source.id
+    || pending.mappingId !== (productionString(resultPayload.mappingId) ?? pending.mappingId)
+    || pending.packageHash !== committedPackageHash
+  ) {
+    throw packageValidationError("The existing-data repair approval is not bound to its pending mapping.");
+  }
+  const pendingMapping = await transaction.affiliateScrapeMappings.findUnique({
+    where: { id: pending.mappingId },
+  });
+  if (
+    !pendingMapping
+    || pendingMapping.sourceId !== source.id
+    || pendingMapping.supplySourceId !== root.id
+    || (
+      pending.mappingSha256 !== undefined
+      && (
+        pendingMapping.isActive !== false
+        || hashAffiliateAgentValue(pendingMapping.mapping) !== pending.mappingSha256
+      )
+    )
+  ) {
+    throw packageValidationError("The existing-data repair pending mapping content is not immutable.");
+  }
+  const sourceState = await captureAffiliateExistingRepairSourceState(
+    transaction,
+    source.id,
+  );
+  if (
+    sourceState.sourceStateSha256 !== pending.postCommitSourceStateSha256
+    || sourceState.workingMappingStateSha256 !== pending.postCommitWorkingMappingStateSha256
+    || sourceState.organizationStateSha256 !== pending.postCommitOrganizationStateSha256
+    || sourceState.workingMappingId !== pending.workingMappingId
+    || sourceState.isPublicReplacement !== pending.isPublicReplacement
+  ) {
+    throw packageValidationError("The existing-data repair working state changed after producer commit.");
+  }
 };
 
 
@@ -3252,6 +3349,15 @@ const productionLifecycleApprovalFollowUp = async (
     return {
       activationHeld: true,
       holdReason: "LEGACY_SPORT_REPAIR",
+    };
+  }
+  if (
+    effectInput.claim.subject.type === "SUPPLY_REVIEWER"
+    && effectInput.claim.subject.repairContext?.kind === "EXISTING_DATA_REPAIR"
+  ) {
+    return {
+      activationHeld: true,
+      holdReason: "EXISTING_DATA_REPAIR",
     };
   }
   return enqueueProductionApprovalActivation(
@@ -3275,12 +3381,17 @@ const productionLifecycleEffect = (
   const payload = productionRecord(result.payload);
   const isLegacyRepair = effectInput.claim.subject.type === "SUPPLY_REVIEWER"
     && effectInput.claim.subject.repairContext?.kind === "LEGACY_SPORT_REPAIR";
+  const isExistingDataRepair = effectInput.claim.subject.type === "SUPPLY_REVIEWER"
+    && effectInput.claim.subject.repairContext?.kind === "EXISTING_DATA_REPAIR";
   const isSourceExclusion = effectInput.claim.subject.type === "SOURCE_EXCLUSION_REVIEW";
   if (isSourceExclusion && command !== "EXCLUDE_SOURCE") {
     throw packageValidationError("A source-only reviewer cannot execute a package or target lifecycle command.");
   }
   if (command === "ACTIVATE" && isLegacyRepair) {
     throw legacySportRepairEvidenceError("Legacy sport repair cannot activate or publish.");
+  }
+  if ((command === "ACTIVATE" || command === "PUBLISH_TARGET") && isExistingDataRepair) {
+    throw packageValidationError("Existing-data repair mappings remain held for independent review.");
   }
   const sourceId = productionString(effectInput.claim.supplySourceId)
     ?? productionString(payload.supplySourceId);
@@ -3301,6 +3412,9 @@ const productionLifecycleEffect = (
       executingAgentId: result.invocationId,
       supplyContractVersion: result.supplyContractVersion,
       supplyContractHash: result.supplyContractHash,
+      reviewerPass: effectInput.claim.subject.type === "SUPPLY_REVIEWER"
+        ? effectInput.claim.subject.reviewPass
+        : undefined,
       db: affiliateSupplyDatabase(database),
       activationTargetWriter,
       now: input.clock?.now() ?? new Date(),
@@ -3315,9 +3429,12 @@ const productionLifecycleEffect = (
       ...(approvalFollowUp ?? {}),
     };
   };
-  if (command === "APPROVE" && isLegacyRepair) {
+  if (command === "APPROVE" && (isLegacyRepair || isExistingDataRepair)) {
     return input.prisma.$transaction(async (transaction) => {
       await assertLegacySportRepairApprovalFresh(input, effectInput, result, transaction);
+      if (isExistingDataRepair) {
+        await assertExistingDataRepairApprovalFresh(effectInput, result, sourceId, transaction);
+      }
       return execute(transaction);
     }, { isolationLevel: "Serializable", maxWait: 10_000, timeout: 120_000 });
   }
@@ -3503,12 +3620,27 @@ const enqueueProducerRepairJob = async (
 }> > => {
   const context = await productionProducerRepairContext(input, effectInput);
   const { reviewerSubject, producerEnvelope, mappingJobId } = context;
+  const reviewerResult = effectInput.result;
+  if (reviewerResult.role !== "SUPPLY_REVIEWER" || reviewerResult.disposition !== "PRODUCER_REPAIR_REQUIRED") {
+    throw new Error("A repair directive requires the accepted reviewer repair result.");
+  }
   const packageHash = productionString(
     productionRecord(effectInput.result.payload).committedPackageHash,
   ) ?? reviewerSubject.committedPackageHash;
   if (packageHash !== reviewerSubject.committedPackageHash) {
     throw new Error("The producer repair package hash is not bound to the reviewer claim.");
   }
+  const repairDirective: AffiliateAgentMappingRepairDirective | undefined =
+    reviewerSubject.repairContext?.kind === "EXISTING_DATA_REPAIR"
+      ? affiliateAgentMappingRepairDirectiveSchema.parse({
+          schemaVersion: 1,
+          reviewerClaimId: effectInput.claim.claimId,
+          reviewerResultHash: hashAffiliateAgentValue(reviewerResult),
+          committedPackageHash: packageHash,
+          repairIssues: reviewerResult.payload.repairIssues,
+          summary: reviewerResult.summary,
+        })
+      : undefined;
   const repairEvidenceManifest = productionRepairEvidenceManifestFor(
     producerEnvelope,
     effectInput.claim,
@@ -3524,6 +3656,7 @@ const enqueueProducerRepairJob = async (
     supplySourceId: reviewerSubject.supplySourceId,
     mappingJobId,
     pass: reviewerSubject.reviewPass,
+    ...(repairDirective ? { repairDirective } : {}),
     ...(reviewerSubject.repairContext
       ? { repairContext: reviewerSubject.repairContext }
       : {}),
@@ -3569,6 +3702,9 @@ const productionProducerRepairEffect = (
     : [];
   if (effectInput.claim.subject.type !== "SUPPLY_REVIEWER" || repairIssues.length === 0) {
     throw new Error("Producer repair effect requires a producer claim and repair issues.");
+  }
+  if (effectInput.claim.subject.reviewPass >= 3) {
+    throw new Error("The bounded producer repair budget is exhausted.");
   }
   const lifecycleResult = await productionLifecycleEffect(
     input,
@@ -3766,15 +3902,15 @@ const assertProductionMappingPackage: (
     throw packageValidationError("sourceSportScopeHash is not permitted without a source sport scope.");
   }
   if (!repairContext && candidatePackage.sportEvidence) {
-    throw packageValidationError("sportEvidence is permitted only for legacy sport repairs.");
+    throw packageValidationError("sportEvidence is permitted only for repair claims.");
   }
   if (!repairContext && constantSportValues.length > 0) {
-    throw packageValidationError("CONSTANT sportName or sportNames fields are permitted only for legacy sport repairs.");
+    throw packageValidationError("CONSTANT sportName or sportNames fields are permitted only for repair claims.");
   }
   if (repairContext) {
     const sportEvidence = candidatePackage.sportEvidence;
     if (!sportEvidence) {
-      throw packageValidationError("Legacy sport repair packages require sportEvidence.");
+      throw packageValidationError("Every repair package requires sportEvidence.");
     }
     if (sportEvidence.evidenceRunId !== repairContext.evidenceRunId) {
       throw packageValidationError("The package sport evidence run does not match the repair context.");
@@ -3809,7 +3945,7 @@ const assertProductionMappingPackage: (
         (entry) => entry.artifactId === citation.artifactId,
       );
       if (!manifestEntry || !packageEvidenceRefs.has(manifestEntry.evidenceRef)) {
-        throw packageValidationError("Legacy sport citations must be included in package evidenceRefs.");
+        throw packageValidationError("Repair sport citations must be included in package evidenceRefs.");
       }
     }
   }
@@ -3891,7 +4027,7 @@ const productionEvidenceRefsForPackage = (
         (value): value is string => typeof value === "string",
       )
     : [];
-  return Array.from(new Set([listUrlRef, ...packageEvidenceRefs]));
+  return Array.from(new Set([listUrlRef, ...packageEvidenceRefs])).sort();
 };
 
 const prepareProductionValidation = async (
@@ -3929,7 +4065,9 @@ const prepareProductionValidation = async (
     claim,
     listEvidence,
   );
-  const sportVerification = claim.subject.repairContext
+  const repairContext = claim.subject.repairContext;
+  const shouldVerifyRepairSportEvidence = repairContext !== undefined;
+  const sportVerification = shouldVerifyRepairSportEvidence
     ? await verifyProductionPackageSportRepair({
       prisma: transaction,
       artifacts: input.artifacts,
@@ -4236,20 +4374,35 @@ const assertProductionSourceKind = (
   source: Record<string, unknown>,
   candidatePackage: ProductionCandidatePackageRecord,
   expectedListingKind?: unknown,
+  allowExistingRepairKindCorrection = false,
 ): ProductionMappingKind => {
   const sourceKind = productionMappingKindFrom(source.targetKind);
   const packageKind = productionMappingKindFrom(candidatePackage.listingKind);
   const expectedKind = expectedListingKind === undefined
     ? null
     : productionMappingKindFrom(expectedListingKind);
+  const repairContext = existingDataRepairContextForMetadata(source.metadata);
+  const existingRepairContext = repairContext?.kind === "EXISTING_DATA_REPAIR"
+    ? repairContext
+    : null;
+  const hasExistingRepairKindAssessment = existingRepairContext?.sourceKindAssessment !== undefined;
+  const isUnclassifiedExistingRepair = existingRepairContext?.sourceKindAssessment?.state === "UNCLASSIFIED";
+  const canCorrectExistingRepairKind = allowExistingRepairKindCorrection
+    && hasExistingRepairKindAssessment
+    && existingRepairContext?.isPublicReplacement === false;
+  const allowedListingKinds = existingRepairContext?.sourceKindAssessment?.allowedListingKinds;
   if (
-    sourceKind === null
-    || packageKind === null
+    packageKind === null
     || (
       expectedListingKind !== undefined
       && (expectedKind === null || expectedKind !== packageKind)
     )
-    || sourceKind !== packageKind
+    || (allowedListingKinds && !allowedListingKinds.includes(packageKind))
+    || (
+      !isUnclassifiedExistingRepair
+      && !canCorrectExistingRepairKind
+      && (sourceKind === null || sourceKind !== packageKind)
+    )
   ) {
     throw productionSourceKindError();
   }
@@ -4354,6 +4507,7 @@ const buildProductionCommitMapping = async (
     source,
     parsedCandidatePackage,
     "listingKind" in claim.subject ? claim.subject.listingKind : undefined,
+    claim.subject.repairContext?.kind === "EXISTING_DATA_REPAIR" && claim.subject.pass > 1,
   );
   const mapping = productionMappingFor(parsedCandidatePackage, listUrl);
   const mappingFields = mapping.fields;
@@ -4366,15 +4520,13 @@ const buildProductionCommitMapping = async (
   if (evidenceEntries.some((entry) => !entry)) {
     throw new Error("The committed package references evidence outside the validation claim.");
   }
-  const evidenceKinds = Array.from(new Set(evidenceEntries.map((entry) => entry!.kind)));
-  const savedEvidenceKinds = Array.isArray(validationMetadata.evidenceKinds)
-    ? validationMetadata.evidenceKinds.filter((value): value is string => typeof value === "string")
-    : [];
-  if (productionHash(savedEvidenceKinds) !== productionHash(evidenceKinds)) {
-    throw new Error("The committed package evidence kinds are not bound to validation.");
-  }
+  const evidenceKinds = Array.from(new Set(
+    evidenceEntries.map((entry) => entry!.kind),
+  )).sort();
   let sportVerificationOutput: Readonly<Record<string, unknown>> | undefined;
-  if (claim.subject.repairContext) {
+  const repairContext = claim.subject.repairContext;
+  const shouldVerifyRepairSportEvidence = repairContext !== undefined;
+  if (shouldVerifyRepairSportEvidence) {
     const extraction = extractProductionValidationCandidates(
       parsedCandidatePackage,
       claim,
@@ -4384,13 +4536,16 @@ const buildProductionCommitMapping = async (
     if (
       productionString(savedValidationOutput.candidateHash) !== extraction.candidateHash
     ) {
-      throw new Error("The legacy sport repair evidence changed after validation.");
+      throw new Error("The repair sport evidence changed after validation.");
+    }
+    if (!parsedCandidatePackage.sportEvidence) {
+      throw new Error("Every repair package requires sportEvidence.");
     }
     const sportVerification = await verifyProductionPackageSportRepair({
       prisma: transaction,
       artifacts: input.artifacts,
       claim,
-      sportEvidence: parsedCandidatePackage.sportEvidence!,
+      sportEvidence: parsedCandidatePackage.sportEvidence,
       resultKind: "REVIEW_REQUIRED",
       observedSportNames: extraction.observedSportNames,
     });
@@ -4449,6 +4604,317 @@ const buildProductionCommitMapping = async (
   };
 };
 
+type ExistingRepairCommitLineage = Readonly<{
+  root: Record<string, unknown>;
+  pendingMapping: AffiliateExistingDataRepairPendingMapping | null;
+}>;
+
+const metadataOwnsRepairField = (metadata: unknown, key: string): boolean =>
+  Object.prototype.hasOwnProperty.call(productionRecord(metadata), key);
+
+const existingRepairCommitLineage = async (
+  transaction: Prisma.TransactionClient,
+  claim: ProductionMappingProducerClaim,
+  source: Record<string, unknown>,
+  sourceId: string,
+  repairContext: Extract<AffiliateAgentMappingRepairContext, { kind: "EXISTING_DATA_REPAIR" }>,
+): Promise<ExistingRepairCommitLineage> => {
+  const rootResult = await transaction.affiliateSupplySources.findUnique({
+    where: { id: claim.subject.supplySourceId },
+  });
+  const root = productionRecord(rootResult);
+  if (!rootResult) {
+    throw packageValidationError("The existing-data repair Supply Source was not found.");
+  }
+  const sourceMetadata = productionRecord(source.metadata);
+  const rootMetadata = productionRecord(root.metadata);
+  const sourceContext = existingDataRepairContextForMetadata(sourceMetadata);
+  const rootContext = existingDataRepairContextForMetadata(rootMetadata);
+  if (
+    !sourceContext
+    || !rootContext
+    || canonicalizeAffiliateAgentValue(sourceContext)
+      !== canonicalizeAffiliateAgentValue(rootContext)
+    || canonicalizeAffiliateAgentValue(sourceContext)
+      !== canonicalizeAffiliateAgentValue(repairContext)
+  ) {
+    throw packageValidationError("The existing-data repair context is not bound to its source and root.");
+  }
+  if (
+    sourceId !== repairContext.sourceId
+    || productionString(source.supplySourceId) !== root.id
+    || root.id !== claim.subject.supplySourceId
+    || productionString(root.identityKey) !== repairContext.sourceIdentityKey
+    || (
+      root.liveSourceId !== null
+      && root.liveSourceId !== undefined
+      && productionString(root.liveSourceId) !== sourceId
+    )
+  ) {
+    throw packageValidationError("The existing-data repair source and root lineage is not immutable.");
+  }
+  const sourcePending = pendingMappingForMetadata(sourceMetadata);
+  const rootPending = pendingMappingForMetadata(rootMetadata);
+  if (
+    (metadataOwnsRepairField(sourceMetadata, "pendingMapping") && !sourcePending)
+    || (metadataOwnsRepairField(rootMetadata, "pendingMapping") && !rootPending)
+    || (sourcePending === null) !== (rootPending === null)
+    || (
+      sourcePending
+      && rootPending
+      && canonicalizeAffiliateAgentValue(sourcePending)
+        !== canonicalizeAffiliateAgentValue(rootPending)
+    )
+  ) {
+    throw packageValidationError("The existing-data repair pending mapping is not a matching source/root proof.");
+  }
+  const pendingMapping = sourcePending ?? rootPending;
+  if (pendingMapping) {
+    if (
+      claim.subject.pass <= 1
+      || pendingMapping.state !== "STAGED"
+      || pendingMapping.mappingJobId !== claim.subject.mappingJobId
+      || pendingMapping.supplySourceId !== root.id
+      || pendingMapping.sourceId !== sourceId
+      || pendingMapping.sourceIdentityKey !== repairContext.sourceIdentityKey
+      || pendingMapping.admissionHash !== repairContext.admissionHash
+      || pendingMapping.workingMappingId !== repairContext.workingMappingId
+      || pendingMapping.isPublicReplacement !== repairContext.isPublicReplacement
+    ) {
+      throw packageValidationError("The existing-data repair pending mapping is not bound to this claim.");
+    }
+  }
+  return { root, pendingMapping };
+};
+
+const productionEvidenceKindsForManifestRefs = (
+  manifest: AffiliateAgentEvidenceManifest,
+  evidenceRefs: readonly string[],
+): readonly string[] => {
+  const refs = Array.from(new Set(evidenceRefs)).sort();
+  const entries = refs.map((evidenceRef) => (
+    manifest.entries.find((entry) => entry.evidenceRef === evidenceRef)
+  ));
+  if (entries.some((entry) => !entry)) {
+    throw packageValidationError("The pending mapping references evidence outside its producer manifest.");
+  }
+  return Array.from(new Set(entries.map((entry) => entry!.kind))).sort();
+};
+
+const productionPendingEvidenceHashFor = (
+  manifest: AffiliateAgentEvidenceManifest,
+  evidenceRefs: readonly string[],
+): string => {
+  const refs = Array.from(new Set(evidenceRefs)).sort();
+  const kinds = productionEvidenceKindsForManifestRefs(manifest, refs);
+  return hashAffiliateAgentValue({
+    manifestHash: manifest.hash,
+    refs,
+    kinds,
+  });
+};
+
+type ExistingRepairProducerLineage = Readonly<{
+  claim: Extract<AffiliateAgentProducerClaimEnvelopeForHistoricalRead, { role: "MAPPING_PRODUCER" }>;
+  job: Record<string, unknown>;
+  manifest: AffiliateAgentEvidenceManifest;
+}>;
+
+const completedExistingRepairProducerFor = async (
+  transaction: Prisma.TransactionClient,
+  pendingMapping: NonNullable<ExistingRepairCommitLineage["pendingMapping"]>,
+  claim: ProductionMappingProducerClaim,
+  repairContext: Extract<AffiliateAgentMappingRepairContext, { kind: "EXISTING_DATA_REPAIR" }>,
+): Promise<ExistingRepairProducerLineage> => {
+  const producerClaimId = pendingMapping.producerClaimId;
+  const producerJobId = pendingMapping.producerJobId;
+  if (
+    !producerClaimId
+    || !producerJobId
+    || producerClaimId === claim.claimId
+    || producerJobId === claim.jobId
+  ) {
+    throw packageValidationError("The existing-data repair commit would reuse its producer claim.");
+  }
+  const previousClaimResult = await transaction.affiliateAgentGatewayClaims.findUnique({
+    where: { id: producerClaimId },
+  });
+  const previousClaim = productionRecord(previousClaimResult);
+  const previousJobResult = await transaction.affiliateAgentGatewayJobs.findUnique({
+    where: { id: producerJobId },
+  });
+  const previousJob = productionRecord(previousJobResult);
+  if (
+    !previousClaimResult
+    || !previousJobResult
+    || previousClaim.status !== "COMPLETED"
+    || previousClaim.role !== "MAPPING_PRODUCER"
+    || previousClaim.jobId !== producerJobId
+    || previousClaim.terminalReceiptId === null
+    || previousClaim.terminalReceiptId === undefined
+    || previousJob.status !== "COMPLETED"
+    || previousJob.activeClaimId !== null
+    || previousJob.terminalReceiptId !== previousClaim.terminalReceiptId
+    || previousJob.subjectId !== pendingMapping.mappingJobId
+    || previousJob.parentClaimId !== pendingMapping.reviewerClaimId
+  ) {
+    throw packageValidationError("The existing-data repair pending producer is not completed and terminal.");
+  }
+  const previousEnvelope = parseAffiliateAgentProducerClaimEnvelopeForHistoricalRead(
+    previousClaim.claimEnvelopeJson,
+  );
+  if (
+    !previousEnvelope
+    || previousEnvelope.claimId !== producerClaimId
+    || previousEnvelope.jobId !== producerJobId
+    || previousEnvelope.role !== "MAPPING_PRODUCER"
+    || previousEnvelope.subject.type !== "MAPPING_PRODUCER"
+    || previousEnvelope.subject.mappingJobId !== pendingMapping.mappingJobId
+    || previousEnvelope.subject.pass + 1 !== claim.subject.pass
+    || previousEnvelope.subject.repairContext?.kind !== "EXISTING_DATA_REPAIR"
+    || canonicalizeAffiliateAgentValue(previousEnvelope.subject.repairContext)
+      !== canonicalizeAffiliateAgentValue(repairContext)
+    || canonicalizeAffiliateAgentValue(previousEnvelope.subject.repairContext)
+      !== canonicalizeAffiliateAgentValue(claim.subject.repairContext)
+    || hashAffiliateAgentValue(previousEnvelope) !== previousClaim.claimEnvelopeHash
+  ) {
+    throw packageValidationError("The existing-data repair pending producer envelope is not immutable.");
+  }
+  const manifestResult = affiliateAgentEvidenceManifestSchema.safeParse(
+    previousJob.evidenceManifestJson,
+  );
+  if (
+    !manifestResult.success
+    || canonicalizeAffiliateAgentValue(manifestResult.data)
+      !== canonicalizeAffiliateAgentValue(previousEnvelope.evidenceManifest)
+    || pendingMapping.evidenceHash
+      !== productionPendingEvidenceHashFor(manifestResult.data, pendingMapping.evidenceRefs)
+  ) {
+    throw packageValidationError("The existing-data repair pending evidence proof is not canonical.");
+  }
+  const terminalResult = affiliateAgentTerminalResultEnvelopeSchema.safeParse(
+    previousJob.resultJson,
+  );
+  if (!terminalResult.success) {
+    throw packageValidationError("The existing-data repair pending producer has no terminal result.");
+  }
+  const result = productionRecord(terminalResult.data);
+  const resultPayload = productionRecord(result.payload);
+  if (
+    result.role !== "MAPPING_PRODUCER"
+    || (result.disposition !== "PACKAGE_COMMITTED"
+      && result.disposition !== "BOUNDED_REPAIR_SUBMITTED")
+    || result.claimId !== producerClaimId
+    || result.jobId !== producerJobId
+    || result.claimGeneration !== previousEnvelope.claimGeneration
+    || resultPayload.packageHash !== pendingMapping.packageHash
+    || previousJob.resultHash !== hashAffiliateAgentValue(terminalResult.data)
+  ) {
+    throw packageValidationError("The existing-data repair pending producer result is not immutable.");
+  }
+  const previousMappingResult = await transaction.affiliateScrapeMappings.findUnique({
+    where: { id: pendingMapping.mappingId },
+  });
+  const previousMapping = productionRecord(previousMappingResult);
+  const previousMappingMetadata = productionRecord(
+    productionRecord(previousMapping.mapping).metadata,
+  );
+  const previousValidationOutput = productionRecord(previousMappingMetadata.validationOutput);
+  const previousEvidenceRefs = Array.isArray(previousMappingMetadata.evidenceRefs)
+    ? previousMappingMetadata.evidenceRefs
+      .filter((value): value is string => typeof value === "string")
+      .sort()
+    : [];
+  if (
+    !previousMappingResult
+    || previousMapping.sourceId !== pendingMapping.sourceId
+    || previousMapping.supplySourceId !== pendingMapping.supplySourceId
+    || (
+      pendingMapping.mappingSha256 !== undefined
+      && (
+        previousMapping.isActive !== false
+        || hashAffiliateAgentValue(previousMapping.mapping) !== pendingMapping.mappingSha256
+      )
+    )
+    || previousMappingMetadata.packageHash !== pendingMapping.packageHash
+    || previousValidationOutput.validatedPackageHash !== pendingMapping.candidatePackageHash
+    || previousValidationOutput.candidateHash !== pendingMapping.candidateHash
+    || canonicalizeAffiliateAgentValue(previousEvidenceRefs)
+      !== canonicalizeAffiliateAgentValue(pendingMapping.evidenceRefs)
+    || previousValidationOutput.validationReceiptId !== pendingMapping.validationReceiptId
+    || hashAffiliateAgentValue(previousValidationOutput) !== pendingMapping.validationHash
+  ) {
+    throw packageValidationError("The existing-data repair pending mapping package is not immutable.");
+  }
+  return {
+    claim: previousEnvelope,
+    job: previousJob,
+    manifest: manifestResult.data,
+  };
+};
+
+const assertExistingRepairClaimHasNotCommitted = async (
+  transaction: Prisma.TransactionClient,
+  sourceId: string,
+  claim: AffiliateAgentClaimEnvelope,
+): Promise<void> => {
+  const rows = await transaction.affiliateScrapeMappings.findMany({
+    where: { sourceId },
+  });
+  for (const row of rows) {
+    const mapping = productionRecord(row.mapping);
+    const metadata = productionRecord(mapping.metadata);
+    const validationOutput = productionRecord(metadata.validationOutput);
+    if (
+      validationOutput.claimId === claim.claimId
+      && Number(validationOutput.claimGeneration) === claim.claimGeneration
+    ) {
+      throw packageValidationError("The Mapping Producer claim has already committed a package.");
+    }
+  }
+};
+type ExistingRepairProducerManifestBinding = Readonly<{
+  manifest: AffiliateAgentEvidenceManifest;
+  reviewerClaimId: string | null;
+  reviewerJobId: string | null;
+}>;
+
+const producerManifestForClaim = async (
+  transaction: Prisma.TransactionClient,
+  claim: ProductionMappingProducerClaim,
+): Promise<ExistingRepairProducerManifestBinding> => {
+  const jobResult = await transaction.affiliateAgentGatewayJobs.findUnique({
+    where: { id: claim.jobId },
+  });
+  const job = productionRecord(jobResult);
+  const manifestResult = affiliateAgentEvidenceManifestSchema.safeParse(
+    job.evidenceManifestJson,
+  );
+  const reviewerClaimId = productionString(job.parentClaimId);
+  let reviewerJobId: string | null = null;
+  if (reviewerClaimId) {
+    const reviewerClaim = await transaction.affiliateAgentGatewayClaims.findUnique({
+      where: { id: reviewerClaimId },
+    });
+    reviewerJobId = productionString(productionRecord(reviewerClaim).jobId);
+  }
+  if (
+    !jobResult
+    || !manifestResult.success
+    || canonicalizeAffiliateAgentValue(manifestResult.data)
+      !== canonicalizeAffiliateAgentValue(claim.evidenceManifest)
+    || (claim.subject.pass > 1 && (!reviewerClaimId || !reviewerJobId))
+    || (claim.subject.pass === 1 && reviewerClaimId)
+  ) {
+    throw packageValidationError("The current producer claim is not bound to its evidence manifest.");
+  }
+  return {
+    manifest: manifestResult.data,
+    reviewerClaimId,
+    reviewerJobId,
+  };
+};
+
 const persistProductionCommit = async (
   input: ProductionAdapterInput,
   transaction: Prisma.TransactionClient,
@@ -4463,7 +4929,71 @@ const persistProductionCommit = async (
     claim,
     "Only a Mapping Producer claim may commit a declarative package.",
   );
+  const existingRepairContext = claim.subject.repairContext?.kind === "EXISTING_DATA_REPAIR"
+    ? claim.subject.repairContext
+    : null;
+  const isExistingDataRepair = existingRepairContext !== null;
   const sourceId = productionString(source.id);
+  if (isExistingDataRepair && !sourceId) {
+    throw packageValidationError("The existing-data repair claimed source has no identifier.");
+  }
+  const existingRepairSourceState = existingRepairContext
+    ? await captureAffiliateExistingRepairSourceState(
+      transaction,
+      sourceId as string,
+    )
+    : null;
+  const existingRepairLineage = existingRepairContext && sourceId
+    ? await existingRepairCommitLineage(
+      transaction,
+      claim,
+      source,
+      sourceId,
+      existingRepairContext,
+    )
+    : null;
+  const existingRepairProducerManifest = existingRepairContext
+    ? await producerManifestForClaim(transaction, claim)
+    : null;
+  const existingRepairPendingMapping = existingRepairLineage?.pendingMapping ?? null;
+  if (isExistingDataRepair) {
+    if (!existingRepairSourceState || !existingRepairContext || !existingRepairLineage) {
+      throw packageValidationError("The existing-data repair baseline is missing.");
+    }
+    const baselineMatches = existingRepairSourceState.sourceStateSha256
+      === existingRepairContext.sourceStateSha256
+      && existingRepairSourceState.workingMappingId === existingRepairContext.workingMappingId
+      && existingRepairSourceState.isPublicReplacement === existingRepairContext.isPublicReplacement;
+    if (!existingRepairPendingMapping) {
+      if (!baselineMatches) {
+        throw packageValidationError("The existing-data repair baseline is no longer bound to the source.");
+      }
+      await assertExistingRepairClaimHasNotCommitted(transaction, sourceId as string, claim);
+    } else {
+      const pending = existingRepairPendingMapping;
+      if (
+        existingRepairSourceState.sourceStateSha256 !== pending.postCommitSourceStateSha256
+        || existingRepairSourceState.workingMappingStateSha256
+          !== pending.workingMappingStateSha256
+        || existingRepairSourceState.workingMappingStateSha256
+          !== pending.postCommitWorkingMappingStateSha256
+        || existingRepairSourceState.organizationStateSha256
+          !== pending.organizationStateSha256
+        || existingRepairSourceState.organizationStateSha256
+          !== pending.postCommitOrganizationStateSha256
+        || existingRepairSourceState.workingMappingId !== pending.workingMappingId
+        || existingRepairSourceState.isPublicReplacement !== pending.isPublicReplacement
+      ) {
+        throw packageValidationError("The existing-data repair working state is stale.");
+      }
+      await completedExistingRepairProducerFor(
+        transaction,
+        pending,
+        claim,
+        existingRepairContext,
+      );
+    }
+  }
   const packageBytes = productionJsonBuffer(
     candidatePackage,
     "The committed package",
@@ -4498,10 +5028,12 @@ const persistProductionCommit = async (
       notes: `Committed by ${claim.workerId} through the governed Affiliate Agent Gateway.`,
     },
   });
-  await transaction.affiliateScrapeSources.update({
-    where: { id: sourceId },
-    data: { activeMappingId: mappingId, autoScrapeEnabled: false },
-  });
+  if (!isExistingDataRepair) {
+    await transaction.affiliateScrapeSources.update({
+      where: { id: sourceId },
+      data: { activeMappingId: mappingId, autoScrapeEnabled: false },
+    });
+  }
   const lifecycleResult = await executeAffiliateSupplyLifecycleCommand({
     supplySourceId: claim.subject.supplySourceId,
     command: "RECORD_MAPPING",
@@ -4527,6 +5059,142 @@ const persistProductionCommit = async (
   });
   if (!lifecycleResult.transition) {
     throw new Error("Recording the committed mapping did not produce a lifecycle transition.");
+  }
+  if (isExistingDataRepair) {
+    if (!existingRepairSourceState || !existingRepairContext || !sourceId) {
+      throw packageValidationError("The existing-data repair baseline is missing.");
+    }
+    const candidateHash = productionString(mapping.validationOutput.candidateHash)
+      ?? productionHash(candidatePackage);
+    if (!existingRepairProducerManifest) {
+      throw packageValidationError("The existing-data repair producer manifest is missing.");
+    }
+    const evidenceHash = productionPendingEvidenceHashFor(
+      existingRepairProducerManifest.manifest,
+      mapping.evidenceRefs,
+    );
+    const validationHash = productionHash(mapping.validationOutput);
+    const root = await transaction.affiliateSupplySources.findUnique({
+      where: { id: claim.subject.supplySourceId },
+    });
+    if (!root) throw packageValidationError("The existing-data repair Supply Source was not found.");
+    let sourceMetadata = productionRecord(source.metadata);
+    let rootMetadata = productionRecord(root.metadata);
+    const packageKind = productionMappingKindFrom(mapping.mapping && productionRecord(mapping.mapping).kind);
+    const sourceKindAssessment = existingRepairContext.sourceKindAssessment;
+    if (sourceKindAssessment) {
+      if (
+        packageKind === null
+        || !sourceKindAssessment.allowedListingKinds.includes(packageKind)
+      ) {
+        throw packageValidationError("The committed package kind is not allowed by the reviewed source-kind assessment.");
+      }
+      const sourceTargetKind = productionString(source.targetKind)?.toUpperCase();
+      const rootTargetKind = productionString(root.targetKind)?.toUpperCase();
+      if (
+        !sourceTargetKind
+        || !rootTargetKind
+        || sourceTargetKind !== rootTargetKind
+        || (
+          sourceTargetKind !== "UNCLASSIFIED"
+          && productionMappingKindFrom(sourceTargetKind) === null
+        )
+      ) {
+        throw packageValidationError("The private source kind is not a matching supported value.");
+      }
+      const classification = {
+        schemaVersion: 1,
+        kind: "EXISTING_DATA_REPAIR_CLASSIFICATION",
+        targetKind: packageKind,
+        packageHash: command.data.validatedPackageHash,
+        candidateHash,
+        evidenceHash,
+        validationHash,
+        mappingId,
+        mappingJobId: claim.subject.mappingJobId,
+        producerClaimId: claim.claimId,
+        admissionHash: existingRepairContext.admissionHash,
+        classifiedAt: (input.clock?.now() ?? new Date()).toISOString(),
+      };
+      if (sourceTargetKind !== "UNCLASSIFIED" && !existingRepairPendingMapping) {
+        throw packageValidationError("A private source kind correction requires a reviewer-created child commit.");
+      }
+      sourceMetadata = {
+        ...sourceMetadata,
+        existingDataRepairClassification: classification,
+      };
+      rootMetadata = {
+        ...rootMetadata,
+        existingDataRepairClassification: classification,
+      };
+      const sourceClassification = await transaction.affiliateScrapeSources.updateMany({
+        where: {
+          id: sourceId,
+          supplySourceId: claim.subject.supplySourceId,
+          targetKind: sourceTargetKind,
+        },
+        data: {
+          targetKind: packageKind,
+          metadata: productionJson(sourceMetadata),
+        },
+      });
+      const rootClassification = await transaction.affiliateSupplySources.updateMany({
+        where: {
+          id: root.id,
+          identityKey: existingRepairContext.sourceIdentityKey,
+          targetKind: rootTargetKind,
+        },
+        data: {
+          targetKind: packageKind,
+          metadata: productionJson(rootMetadata),
+        },
+      });
+      if (sourceClassification.count !== 1 || rootClassification.count !== 1) {
+        throw packageValidationError("The private source kind changed during package commit.");
+      }
+    }
+    const postCommitSourceState = await captureAffiliateExistingRepairSourceState(
+      transaction,
+      sourceId,
+    );
+    const pendingMapping = pendingMappingFor({
+      context: existingRepairContext,
+      sourceState: existingRepairSourceState,
+      postCommitSourceState,
+      mappingJobId: claim.subject.mappingJobId,
+      mappingId,
+      packageHash: command.data.validatedPackageHash,
+      mappingSha256: hashAffiliateAgentValue(mapping.mapping),
+      candidatePackageHash: command.data.validatedPackageHash,
+      candidateHash,
+      evidenceHash,
+      evidenceRefs: mapping.evidenceRefs,
+      validationHash,
+      validationReceiptId: command.data.validationReceiptId,
+      producerClaimId: claim.claimId,
+      producerJobId: claim.jobId,
+      reviewerClaimId: existingRepairProducerManifest.reviewerClaimId,
+      reviewerJobId: existingRepairProducerManifest.reviewerJobId,
+      now: input.clock?.now() ?? new Date(),
+    });
+    await transaction.affiliateScrapeSources.update({
+      where: { id: sourceId },
+      data: {
+        metadata: productionJson({
+          ...sourceMetadata,
+          pendingMapping,
+        }),
+      },
+    });
+    await transaction.affiliateSupplySources.update({
+      where: { id: claim.subject.supplySourceId },
+      data: {
+        metadata: productionJson({
+          ...rootMetadata,
+          pendingMapping,
+        }),
+      },
+    });
   }
   return { packageHash: command.data.validatedPackageHash };
 };
@@ -4559,6 +5227,7 @@ export const createProductionAffiliateAgentGatewayAdapters = (
             scrapeSource,
             candidatePackage,
             "listingKind" in claim.subject ? claim.subject.listingKind : undefined,
+            claim.subject.repairContext?.kind === "EXISTING_DATA_REPAIR" && claim.subject.pass > 1,
           );
           const validation = await prepareProductionValidation(
             input,
@@ -4586,6 +5255,17 @@ export const createProductionAffiliateAgentGatewayAdapters = (
             claim,
             "Only a Mapping Producer claim may commit a declarative package.",
           );
+          const isExistingDataRepair = claim.subject.repairContext?.kind === "EXISTING_DATA_REPAIR";
+          if (
+            isExistingDataRepair
+            && !await tryLockAffiliateRepairWrites(transaction)
+          ) {
+            throw new AffiliateAgentGatewayError({
+              code: "LIFECYCLE_TRANSITION_CONFLICT",
+              isRetryable: true,
+              safeMessage: "Existing-data repair commit is blocked while ordinary affiliate source activity is in progress.",
+            });
+          }
           const commitState = await readProductionCommitState(transaction, claim, command);
           const source = await findProductionCommitSource(
             transaction,

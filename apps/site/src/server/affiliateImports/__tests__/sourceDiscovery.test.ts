@@ -160,6 +160,7 @@ const prismaMock = {
 
 const createIntakeMock = jest.fn(async () => ({ id: 'intake_1' }));
 const addPageMock = jest.fn(async () => ({}));
+const assertQueueOwnershipMock = jest.fn(async () => undefined);
 const queueIntakeMock = jest.fn();
 const reviewPolicyMock = jest.fn();
 const processIntakeMock = jest.fn();
@@ -183,8 +184,10 @@ jest.mock('@/server/email', () => ({
   sendEmail: (...args: unknown[]) => sendEmailMock(...args),
 }));
 jest.mock('@/server/affiliateImports/sourceIntake', () => ({
+  ...jest.requireActual('@/server/affiliateImports/sourceIntake'),
   createAffiliateSourceIntake: (...args: any[]) => createIntakeMock(...args),
   addAffiliateSourceIntakePage: (...args: any[]) => addPageMock(...args),
+  assertOrdinaryAffiliateSourceIntakeQueueOwnership: (...args: any[]) => assertQueueOwnershipMock(...args),
   queueAffiliateSourceIntakeRun: (...args: any[]) => queueIntakeMock(...args),
   reviewAffiliateSourceIntakePolicy: (...args: any[]) => reviewPolicyMock(...args),
   processNextAffiliateSourceIntakeRun: (...args: any[]) => processIntakeMock(...args),
