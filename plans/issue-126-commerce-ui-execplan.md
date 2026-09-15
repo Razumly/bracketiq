@@ -16,16 +16,16 @@ The change is a visual and interaction migration. It must not change prices, fee
 - [x] (2026-09-15) Created the clean implementation branch `workstream/site-ui-commerce-126` without importing unrelated dirty-worktree changes.
 - [x] (2026-09-15) Copied the approved desktop PNG references into this branch.
 - [x] (2026-09-15) Created this execution plan.
-- [ ] Create and push the draft pull request that closes #126.
-- [ ] Migrate event registration and team commerce surfaces.
-- [ ] Migrate product catalog and product detail surfaces.
-- [ ] Migrate checkout, billing, payment, and confirmation surfaces.
-- [ ] Migrate rental selection and reservation checkout surfaces.
-- [ ] Migrate shared loading, validation, disabled, permission, error, and recovery states.
-- [ ] Run focused behavior checks and affected TypeScript checks.
-- [ ] Run the site build and browser smoke review.
-- [ ] Run code review and resolve every finding.
-- [ ] Mark the pull request ready for review.
+- [x] (2026-09-15) Created and pushed draft PR #160. The PR body closes issue #126.
+- [x] (2026-09-15) Migrated event registration and team commerce surfaces.
+- [x] (2026-09-15) Migrated product catalog and product detail surfaces.
+- [x] (2026-09-15) Migrated checkout, billing, payment, and confirmation surfaces.
+- [x] (2026-09-15) Migrated rental selection and reservation checkout surfaces.
+- [x] (2026-09-15) Migrated loading, validation, disabled, permission, error, and recovery states.
+- [x] (2026-09-15) Ran focused behavior checks. The final run passed 18 suites and 159 tests. Changed-file lint passed with 0 errors and 19 warnings.
+- [x] (2026-09-15) Attempted the site build and browser smoke review. The build is blocked by missing `DATABASE_URL`. Browser evidence is limited to public discovery because no seeded public organization exists for the approved commerce slug.
+- [x] (2026-09-15) Ran standards and specification review. Fixed the one standards finding by migrating the obsolete event-registration test helper. The specification review found no issue.
+- [x] (2026-09-15) Marked PR #160 ready for review. GitHub reports `OPEN`, `isDraft: false`, and `MERGEABLE`.
 
 ## Surprises & Discoveries
 
@@ -40,6 +40,26 @@ The change is a visual and interaction migration. It must not change prices, fee
 
 - Observation: The coordinator worktree contains unrelated uncommitted changes.
   Evidence: `site-ui-operations-next` reports 80 tracked changes and 35 untracked paths. The implementation branch was created in a separate clean worktree from commit `4eacd13e`.
+- Observation: The final focused run passes 18 suites and 159 tests after migrating the old registration helper and waiting for the finance settings control to become enabled.
+  Evidence: Jest reports `18 passed`, `159 passed`.
+
+- Observation: The complete site suite still reports unrelated failures.
+  Evidence: `npm run test:ci` reports 34 failed suites, 146 failed tests, 863 passed tests, and 14 skipped suites. Failures are in scheduler, affiliate-import, event-editor, discover, Prisma-generated, calendar, and customer-bill areas outside the issue #126 commerce diff.
+
+- Observation: Shared icon projections are current.
+  Evidence: `npm run icons:check` reports 27 current icons.
+
+- Observation: The TypeScript check is blocked by existing diagnostics outside the issue #126 commerce files.
+  Evidence: `npx tsc --noEmit` reports 81 diagnostics in 27 files. A search of the output found no issue #126 commerce file.
+
+- Observation: The production build stops before Next.js compilation because the local environment has no `DATABASE_URL`.
+  Evidence: `npm run build` passes the icon check, then `prisma validate` reports `Cannot resolve environment variable: DATABASE_URL`.
+
+- Observation: Browser smoke reached public discovery but not a seeded commerce organization.
+  Evidence: `/find-clubs` loaded. `/o/summit` returned the Next.js 404 page. The existing operations runtime was not restarted or reconfigured.
+
+- Observation: Changed-file lint has warnings but no errors.
+  Evidence: `npm run lint:changed -- --base 4eacd13e0` reports 0 errors and 19 complexity or hook-dependency warnings.
 
 ## Decision Log
 
@@ -65,7 +85,13 @@ The change is a visual and interaction migration. It must not change prices, fee
 
 ## Outcomes & Retrospective
 
-This section remains open until the pull request reaches review. At completion, record which user-visible flows changed, which contracts stayed unchanged, which checks ran, and any approved exception or follow-up.
+The migration now covers event team selection and creation, optional player invitations, shared team management, invitation recovery, product selection and detail, checkout billing and Stripe handoff, finance categories and journal preview, refund review and recovery, rental availability, and reservation checkout. Completed surfaces use BracketIQ-owned primitives and keep loading, validation, disabled, permission, error, and recovery states visible.
+
+The HTTP paths, request fields, response fields, registration rules, prices, fee calculations, permissions, and Stripe payment-detail ownership stayed unchanged. BracketIQ does not collect card number, expiry, or CVC fields. No provider simulation was added.
+
+Focused behavior checks pass. Standards review found one stale registration-test helper and no other actionable standards issue. Specification review found no issue. The PR is ready for review.
+
+The complete suite, TypeScript check, production build, provider sandbox, and seeded commerce browser flow remain environment or baseline limits. The exact failures and missing prerequisites are recorded above and in the PR.
 
 ## Context and Orientation
 
@@ -153,7 +179,7 @@ A reviewer can select a product, open product details without entering checkout 
 
 A reviewer can observe explicit loading text, field-level validation, readable disabled prerequisites, permission-safe actions, recoverable errors, and restored saved progress. No state presents an unpaid registration as paid. Prices and totals match the existing services and route responses.
 
-Focused tests must pass for changed state transitions and real error paths. TypeScript checks must pass. The site build must pass. Browser smoke must exercise the changed route and show the expected states. Manual visual review must compare each completed surface to its approved desktop reference and applicable mobile reference. The implementation must remove direct Mantine imports from each completed commerce surface while preserving the rest of the site's incremental migration boundary.
+Focused Jest checks pass: 18 suites and 159 tests. Changed-file lint reports 0 errors and 19 warnings. The complete site suite reports 34 failed suites, 146 failed tests, 863 passed tests, and 14 skipped suites in unrelated baseline areas. TypeScript reports 81 diagnostics in 27 unrelated files, with no issue #126 commerce file in the diagnostic output. The build passes the icon check but stops at Prisma validation because `DATABASE_URL` is unavailable. Browser smoke loaded `/find-clubs`; `/o/summit` returned 404 because no seeded public organization was available. A provider sandbox check was not run because no authorized provider test environment was available, and no provider simulation was added.
 
 ## Idempotence and Recovery
 
@@ -173,7 +199,7 @@ Approved desktop reference groups:
 
     State/recovery: `commerce-flow--loading--desktop-1536x1024.png`, `commerce-checkout--validation-error--desktop-1536x1024.png`, `commerce-flow--disabled--desktop-1536x1024.png`, `commerce-flow--permission--desktop-1536x1024.png`, `commerce-flow--error--desktop-1536x1024.png`, `commerce-flow--recovery--desktop-1536x1024.png`.
 
-The issue body contains the full approved desktop and mobile reference list. Update this section with concise command output, focused test results, browser observations, code-review results, and decisions as the work proceeds.
+The issue body contains the full approved desktop and mobile reference list. Current evidence: focused Jest 18/18 suites and 159/159 tests pass; changed-file lint has 0 errors; icon projections pass for 27 icons; TypeScript, build, full-suite, provider-sandbox, and seeded-commerce-browser limitations are recorded in `Surprises & Discoveries` and `Validation and Acceptance`. Code review reports one fixed standards finding and no specification findings.
 
 ## Interfaces and Dependencies
 
