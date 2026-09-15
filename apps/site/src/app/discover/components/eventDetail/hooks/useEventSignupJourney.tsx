@@ -20,6 +20,7 @@ export function useEventSignupJourney({ event, user, progress, selectedTeamId, o
     const [teamReload, setTeamReload] = useState(0);
     const [mode, setMode] = useState<'idle' | 'team' | 'players' | 'edit'>('idle');
     const [inviting, setInviting] = useState(false);
+    const [dialogProgressKey, setDialogProgressKey] = useState(progress.progressKey);
     const [managementTab, setManagementTab] = useState<TeamDetailPageTab>('roster');
     const onInvitesLoaded = useCallback(() => undefined, []);
     const eligibleIds = JSON.stringify(progress.state?.eligibleTeams.map((team) => team.id) ?? []);
@@ -37,10 +38,11 @@ export function useEventSignupJourney({ event, user, progress, selectedTeamId, o
         key: teamKey, teams: update(current?.key === teamKey ? current.teams : []), error: null,
     }));
     const selectedTeam = teams.find((team) => team.$id === selectedTeamId);
-    useEffect(() => {
+    if (dialogProgressKey !== progress.progressKey) {
+        setDialogProgressKey(progress.progressKey);
         setMode('idle');
         setInviting(false);
-    }, [progress.progressKey]);
+    }
     useEffect(() => {
         let cancelled = false;
         const ids: string[] = JSON.parse(eligibleIds);

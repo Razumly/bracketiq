@@ -27,11 +27,11 @@ jest.mock("@/lib/paymentService", () => ({ paymentService: {
   releaseRentalCheckoutLock: (...args: unknown[]) => releaseRentalCheckoutLockMock(...args),
 } }));
 // These are application composition boundaries. No Stripe widget or provider response is simulated.
-jest.mock("@/components/ui/BillingAddressModal", () => (props: typeof mockBillingProps) => {
+jest.mock("@/components/ui/BillingAddressModal", () => function MockBillingAddressModal(props: typeof mockBillingProps) {
   mockBillingProps = props;
   return props.opened ? <section aria-label="Billing context">{props.summary}</section> : null;
 });
-jest.mock("@/components/ui/PaymentModal", () => (props: typeof mockPaymentProps) => {
+jest.mock("@/components/ui/PaymentModal", () => function MockPaymentModal(props: typeof mockPaymentProps) {
   mockPaymentProps = props;
   return props.isOpen ? <section aria-label="Payment context">{props.summary}</section> : null;
 });
