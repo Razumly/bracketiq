@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type SetStateAction } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react';
 import {
   Alert,
   Autocomplete,
@@ -681,10 +681,13 @@ const downloadCsv = (filename: string, csv: string): void => {
   const link = document.createElement('a');
   link.href = url;
   link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  window.URL.revokeObjectURL(url);
+  try {
+    document.body.appendChild(link);
+    link.click();
+  } finally {
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  }
 };
 
 const messageForError = (error: unknown, fallback: string): string => {
@@ -719,7 +722,7 @@ function FinanceMetric({
     <Paper withBorder radius="md" p="md" className={`org-finance-metric ${toneClassName}`}>
       <Stack gap={4}>
         <Text size="sm" fw={500}>{label}</Text>
-        <Text size="xl" fw={800}><OrganizationLoadingValue>{value === undefined ? '—' : centsFromDollars(value)}</OrganizationLoadingValue></Text>
+        <Text size="xl" fw={800} className="tabular-nums"><OrganizationLoadingValue>{value === undefined ? 'Unavailable' : centsFromDollars(value)}</OrganizationLoadingValue></Text>
         <Text size="xs">{description}</Text>
       </Stack>
     </Paper>
@@ -828,6 +831,9 @@ export default function OrganizationFinancePanel({
   const [categoryAccountingMappings, setCategoryAccountingMappings] = useState<CategoryAccountingMapping[]>([]);
   const [loading, setLoading] = useState(isActive);
   const [error, setError] = useState<string | null>(null);
+  const [financePermissionDenied, setFinancePermissionDenied] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const financeLoadVersion = useRef(0);
   const [payRunTitle, setPayRunTitle] = useState('');
   const [payRunStart, setPayRunStart] = useState(monthStartValue);
   const [payRunEnd, setPayRunEnd] = useState(() => dateInputValue());
@@ -877,24 +883,31 @@ export default function OrganizationFinancePanel({
     if (!isActive) {
       return;
     }
+    const version = ++financeLoadVersion.current;
     setLoading(true);
     setError(null);
+    setFinancePermissionDenied(false);
+    setExportError(null);
     try {
       const response = await apiRequest<FinanceResponse>(financeRequestPath(organizationId, fromDate, toDate));
+      if (version !== financeLoadVersion.current) return;
       setFinance(response.finance);
       setPayRuns(response.payRuns ?? []);
       setLineItemCategories(response.lineItemCategories ?? []);
       setAccountingConnections(response.accountingConnections ?? []);
       setCategoryAccountingMappings(response.categoryAccountingMappings ?? []);
     } catch (loadError) {
+      if (version !== financeLoadVersion.current) return;
+      setFinancePermissionDenied(isApiRequestError(loadError) && loadError.status === 403);
       setError(messageForError(loadError, 'Failed to load organization finance.'));
     } finally {
-      setLoading(false);
+      if (version === financeLoadVersion.current) setLoading(false);
     }
   }, [fromDate, isActive, organizationId, toDate]);
 
   useEffect(() => {
     void loadFinance();
+    return () => { financeLoadVersion.current += 1; };
   }, [loadFinance]);
 
   const financeLineItems = finance?.lineItems;
@@ -1439,6 +1452,7 @@ export default function OrganizationFinancePanel({
   }, [loadFinance, organizationId]);
 
   const exportPayRunsCsv = useCallback(async (payRunsToExport: StaffPayRun[], filename = 'staff-pay-runs.csv') => {
+    if (loading || error) return;
     if (payRunsToExport.length === 0) {
       setPayrollError('No pay runs match the current export.');
       return;
@@ -1461,11 +1475,16 @@ export default function OrganizationFinancePanel({
         return;
       }
     }
-    downloadCsv(filename, buildPayRunCsv(payRunsToExport));
+    try {
+      downloadCsv(filename, buildPayRunCsv(payRunsToExport));
+    } catch (downloadError) {
+      setPayrollError(messageForError(downloadError, 'The payroll report could not be downloaded. Try exporting it again.'));
+      return;
+    }
     if (canManage) {
       await loadFinance();
     }
-  }, [canManage, loadFinance, organizationId]);
+  }, [canManage, error, loadFinance, loading, organizationId]);
 
   const openNewLineItem = useCallback(() => {
     setEditingLineItem(null);
@@ -1838,9 +1857,11 @@ export default function OrganizationFinancePanel({
 
   const renderSelectedPayRunActions = (payRun: StaffPayRun) => (
     <Group justify="flex-end">
+      {payrollError && <Text size="sm" c="red" role="alert" w="100%">{payrollError}</Text>}
       <Button
         variant="default"
         leftSection={<Download size={14} />}
+        disabled={loading || Boolean(error)}
         onClick={() => void exportPayRunsCsv([payRun], `${payRun.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-payroll.csv`)}
       >
         Export CSV
@@ -2266,6 +2287,7 @@ export default function OrganizationFinancePanel({
         size="xs"
         variant="default"
         leftSection={<Download size={12} />}
+        disabled={loading || Boolean(error)}
         onClick={(event) => {
           event.stopPropagation();
           void exportPayRunsCsv([payRun], `${payRun.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-payroll.csv`);
@@ -2367,7 +2389,7 @@ export default function OrganizationFinancePanel({
         <button
           type="button"
           aria-label={`Edit ${item.label}`}
-          className="block w-full border-0 bg-transparent p-0 text-left"
+          className="block min-h-11 w-full rounded-sm border-0 bg-transparent p-0 text-left focus-visible:outline-2 focus-visible:outline-ring"
           onClick={(event) => {
             event.stopPropagation();
             openEditLineItem(item);
@@ -2947,11 +2969,16 @@ export default function OrganizationFinancePanel({
           <Button onClick={() => void loadFinance()} loading={loading}>Apply</Button>
         </Stack>
       </Popover.Dropdown></Popover>
-      <Button variant="outline" leftSection={<Download size={16} />} disabled={!finance} onClick={() => {
-        if (!finance) return;
-        const rows = [['Date', 'Item', 'Category', 'Status', 'Amount (USD)'], ...finance.lineItems.map((item) => [item.serviceStartAt || '', item.label, item.category, item.status, String(item.amountCents / 100)])];
-        downloadCsv('organization-finance.csv', rows.map((row) => row.map(csvCell).join(',')).join('\n'));
-      }}>Export report</Button>
+      {!financePermissionDenied && <Button variant="outline" leftSection={<Download size={16} />} disabled={loading || Boolean(error) || !finance} onClick={() => {
+        if (loading || error || !finance) return;
+        setExportError(null);
+        try {
+          const rows = [['Date', 'Item', 'Category', 'Status', 'Amount (USD)'], ...finance.lineItems.map((item) => [item.serviceStartAt || '', item.label, item.category, item.status, String(item.amountCents / 100)])];
+          downloadCsv('organization-finance.csv', rows.map((row) => row.map(csvCell).join(',')).join('\n'));
+        } catch (downloadError) {
+          setExportError(messageForError(downloadError, 'The report could not be downloaded. Try exporting it again.'));
+        }
+      }}>Export report</Button>}
       <Button variant="subtle" onClick={() => void loadFinance()} loading={loading}>Refresh</Button>
     </OrganizationTabHeading>
   );
@@ -3316,11 +3343,13 @@ export default function OrganizationFinancePanel({
           size="xs"
           variant="default"
           leftSection={<Download size={14} />}
+          disabled={loading || Boolean(error) || !finance}
           onClick={() => void exportPayRunsCsv(filteredPayRuns)}
         >
           Export filtered CSV
         </Button>
       </Group>
+      {payrollError && <Text size="sm" c="red" fw={600} role="alert">{payrollError}</Text>}
 
       {canManage && (
         <Group align="end" gap="sm" mb="md">
@@ -3351,11 +3380,6 @@ export default function OrganizationFinancePanel({
           <Button onClick={() => void createPayRun()} loading={payRunSaving}>
             Create pay run
           </Button>
-          {payrollError && (
-            <Text size="sm" c="red" fw={600}>
-              {payrollError}
-            </Text>
-          )}
         </Group>
       )}
 
@@ -3488,20 +3512,33 @@ export default function OrganizationFinancePanel({
   );
 
   return (
+    error && !loading ? (
+      <Stack gap="md" className="org-section org-finance">
+        {renderFinanceHeading()}
+        <Alert color="red" title={financePermissionDenied ? 'Finance access required' : 'Finance unavailable'}>
+          <Text size="sm">{error}</Text>
+          <Text size="sm">{financePermissionDenied
+            ? 'Ask an organization owner to check your finance access, then refresh this page.'
+            : 'Refresh to load this date range again. Your draft values are kept. No report can be exported until the data loads.'}</Text>
+        </Alert>
+      </Stack>
+    ) : (
     <Stack gap="md" className="org-section org-finance">
-      {renderLineItemDialog()}
+      {canManage && renderLineItemDialog()}
 
       {renderPayRunDetailsDialog()}
 
-      {renderMarkPaidDialog()}
+      {canManage && renderMarkPaidDialog()}
 
-      {renderVoidDialog()}
+      {canManage && renderVoidDialog()}
 
-      {renderTransferDialog()}
+      {canManage && renderTransferDialog()}
 
       {renderFinanceHeading()}
 
-      {error && <Alert color="red">{error}</Alert>}
+      {exportError && <Alert color="red" title="Report export failed">{exportError}</Alert>}
+      {!canManage && <Text size="sm" c="dimmed" role="note">You have read-only access. You can review and export finance data, but you cannot change line items or pay runs.</Text>}
+      {loading && <Text size="sm" c="dimmed" role="status">Loading finance data. Report export is available when loading finishes.</Text>}
 
       <OrganizationDataLoadingProvider loading={loading}>
           {renderFinanceMetrics()}
@@ -3523,5 +3560,6 @@ export default function OrganizationFinancePanel({
           {renderPayrollHistory()}
       </OrganizationDataLoadingProvider>
     </Stack>
+    )
   );
 }

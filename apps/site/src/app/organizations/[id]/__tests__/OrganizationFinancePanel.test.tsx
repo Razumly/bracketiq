@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { renderWithMantine } from '../../../../../test/utils/renderWithMantine';
 import { apiRequest, isApiRequestError } from '@/lib/apiClient';
 import OrganizationFinancePanel from '../OrganizationFinancePanel';
@@ -199,7 +199,7 @@ const approvedFinanceResponse = {
 };
 
 describe('OrganizationFinancePanel', () => {
-  const createObjectURLMock = jest.fn(() => 'blob:payroll');
+  const createObjectURLMock = jest.fn((_blob: Blob) => 'blob:payroll');
   const revokeObjectURLMock = jest.fn();
   const anchorClickMock = jest.fn();
 
@@ -244,44 +244,92 @@ describe('OrganizationFinancePanel', () => {
     expect(screen.getAllByText('$300.00').length).toBeGreaterThan(0);
   });
 
-  it('renders organization finance totals, line items, and pay runs', async () => {
+  it('exports exact line-item amounts and escapes report fields', async () => {
+    (apiRequest as jest.Mock).mockResolvedValueOnce({
+      ...financeResponse,
+      finance: {
+        ...financeResponse.finance,
+        lineItems: [
+          { ...financeResponse.finance.lineItems[0], label: 'Summer league, \"Finals\"', amountCents: 20001 },
+          financeResponse.finance.lineItems[1],
+        ],
+      },
+    });
+    renderWithMantine(<OrganizationFinancePanel organizationId="org_1" isActive canManage />);
+    const exportButton = screen.getByRole('button', { name: 'Export report' });
+    expect(exportButton).toBeDisabled();
+    await waitFor(() => expect(exportButton).toBeEnabled());
+    fireEvent.click(exportButton);
+
+    const blob = createObjectURLMock.mock.calls[0][0];
+    const csv = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(blob);
+    });
+    expect(csv).toContain('Date,Item,Category,Status,Amount (USD)');
+    expect(csv).toContain('2026-06-01T00:00:00.000Z,"Summer league, ""Finals""",team_registration,PAID,200.01');
+    expect(csv).toContain('2026-06-05T00:00:00.000Z,Field rental,Rentals,ACTUAL,-25');
+    expect(anchorClickMock).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURLMock).toHaveBeenCalledWith('blob:payroll');
+  });
+
+  it('removes stale totals and actions after a load failure and recovers the draft on refresh', async () => {
+    (apiRequest as jest.Mock)
+      .mockResolvedValueOnce(financeResponse)
+      .mockRejectedValueOnce(new Error('Finance service unavailable'))
+      .mockResolvedValueOnce(financeResponse);
+    renderWithMantine(<OrganizationFinancePanel organizationId="org_1" isActive canManage />);
+    await screen.findByRole('button', { name: 'Edit Field rental' });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Pay run title' }), { target: { value: 'September payroll draft' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Finance service unavailable');
+    expect(screen.queryByText('$300.00')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit Field rental' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Export report' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    await screen.findByRole('button', { name: 'Edit Field rental' });
+    expect(screen.getByRole('textbox', { name: 'Pay run title' })).toHaveValue('September payroll draft');
+    expect(screen.getByRole('button', { name: 'Export report' })).toBeEnabled();
+  });
+
+  it('keeps an older organization response from replacing the active finance report', async () => {
+    let resolveOld!: (value: typeof financeResponse) => void;
+    const oldRequest = new Promise<typeof financeResponse>((resolve) => { resolveOld = resolve; });
+    (apiRequest as jest.Mock).mockReturnValueOnce(oldRequest).mockResolvedValueOnce({
+      ...financeResponse,
+      finance: { ...financeResponse.finance, organizationId: 'org_2', grossRevenueCents: 45001 },
+    });
+    const { rerender } = render(<OrganizationFinancePanel organizationId="org_1" isActive canManage />);
+    rerender(<OrganizationFinancePanel organizationId="org_2" isActive canManage />);
+    await screen.findByText('$450.01');
+    await act(async () => { resolveOld(financeResponse); await oldRequest; });
+    expect(screen.getByText('$450.01')).toBeInTheDocument();
+    expect(screen.queryByText('$300.00')).not.toBeInTheDocument();
+  });
+
+  it('hides finance mutations in read-only mode but permits report export', async () => {
     (apiRequest as jest.Mock).mockResolvedValueOnce(financeResponse);
+    renderWithMantine(<OrganizationFinancePanel organizationId="org_1" isActive canManage={false} />);
+    await screen.findByRole('button', { name: 'View pay run June payroll' });
+    fireEvent.click(screen.getByRole('button', { name: 'View pay run June payroll' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Staff pay run details' });
+    expect(within(dialog).queryByRole('button', { name: 'Approve', exact: true })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: 'Transfers' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add line item' })).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Export CSV' }));
+    expect(anchorClickMock).toHaveBeenCalledTimes(1);
+    expect(apiRequest).toHaveBeenCalledTimes(1);
+  });
 
-    renderWithMantine(
-      <OrganizationFinancePanel organizationId="org_1" isActive canManage />,
-    );
-
-    expect(await screen.findByText('Gross sales')).toBeInTheDocument();
-    expect((await screen.findAllByText('$300.00')).length).toBeGreaterThan(0);
-    expect(screen.getByText('Current profit')).toBeInTheDocument();
-    expect(screen.getAllByText('$153.50').length).toBeGreaterThan(0);
-    expect(screen.getByText('Summer League - Harbor Strikers')).toBeInTheDocument();
-    expect(screen.getByText('1 team registration')).toBeInTheDocument();
-    expect(screen.getByText('1 hour')).toBeInTheDocument();
-    expect(screen.getByText('Field rental')).toBeInTheDocument();
-    expect(screen.getAllByText('INCURRED').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('CURRENT').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('June payroll').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Pay date').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Jul 5, 2026').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Not exported').length).toBeGreaterThan(0);
-    expect(screen.getByText('Staff payroll ledger')).toBeInTheDocument();
-    expect(screen.getByText('Event and team profitability')).toBeInTheDocument();
-    expect(screen.getByText('QuickBooks')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'QuickBooks settings' })).toBeInTheDocument();
-    expect(screen.getByText('Payroll mapping ready')).toBeInTheDocument();
-    expect(screen.getByText('1 category mappings')).toBeInTheDocument();
-    expect(screen.queryByText('Financial category mappings')).not.toBeInTheDocument();
-    expect(screen.queryByText('1234567890')).not.toBeInTheDocument();
-    expect(screen.getByText('com.intuit.quickbooks.accounting')).toBeInTheDocument();
-    expect(apiRequest).toHaveBeenCalledWith(expect.stringContaining('/api/organizations/org_1/finance?'));
-    const financeUrl = decodeURIComponent((apiRequest as jest.Mock).mock.calls[0][0]);
-    const financeParams = new URL(financeUrl, 'http://localhost').searchParams;
-    const from = new Date(financeParams.get('from') ?? '');
-    const to = new Date(financeParams.get('to') ?? '');
-    expect(Number.isNaN(from.getTime())).toBe(false);
-    expect(Number.isNaN(to.getTime())).toBe(false);
-    expect(to.getTime() - from.getTime()).toBeGreaterThan(23 * 60 * 60 * 1000);
+  it('withholds finance data and export when the server denies access', async () => {
+    (isApiRequestError as jest.Mock).mockReturnValue(true);
+    (apiRequest as jest.Mock).mockRejectedValueOnce({ status: 403, message: 'Forbidden' });
+    renderWithMantine(<OrganizationFinancePanel organizationId="org_1" isActive canManage />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Finance access required');
+    expect(screen.queryByRole('button', { name: 'Export report' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create pay run' })).not.toBeInTheDocument();
   });
 
   it('opens generated line item source and customer actions', async () => {

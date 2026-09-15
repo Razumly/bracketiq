@@ -5,7 +5,6 @@ import {
   Badge,
   Button,
   Group,
-  Loader,
   Paper,
   Stack,
   Table,
@@ -15,6 +14,9 @@ import {
 import type { RefundRequest } from "@/types";
 import { formatDisplayDateTime } from "@/lib/dateUtils";
 import type { RefundReferences } from "./refundRequestReferences";
+import { RefreshCw } from "lucide-react";
+import { OrganizationDataPlaceholder } from "@/components/organization/OrganizationDataLoading";
+import { formatRefundMoney, refundApprovalUnavailableReason, refundRequestedAmount } from "./refundRequestPresentation";
 
 type DecisionHandler = (
   refund: RefundRequest,
@@ -36,20 +38,10 @@ type ViewProps = TableProps & {
   loading: boolean;
   error: string | null;
   actionError: string | null;
+  canManage: boolean;
+  onReload: () => void;
 };
 
-const formatRefundMoney = (amountCents: number, currency: string) => {
-  const normalizedCurrency = currency.trim().toUpperCase() || "USD";
-  const amount = Math.max(0, amountCents) / 100;
-  try {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: normalizedCurrency,
-    }).format(amount);
-  } catch {
-    return `${amount.toFixed(2)} ${normalizedCurrency}`;
-  }
-};
 
 const statusColor = (status?: string) => {
   switch (status) {
@@ -75,18 +67,16 @@ function ReferenceBadge({
     </Badge>
   ) : (
     <Text size="sm" c="dimmed">
-      —
+      Not applicable
     </Text>
   );
 }
 
-function RefundScope({
-  approvalPreview,
-}: {
-  approvalPreview: RefundRequest["approvalPreview"];
-}) {
+function RefundScope({ refund }: { refund: RefundRequest }) {
+  const approvalPreview = refund.approvalPreview;
   return (
     <>
+      <Text size="sm" fw={600}>Requested amount: {refundRequestedAmount(refund)}</Text>
       {approvalPreview?.isValid ? (
         <Stack gap={2} miw={220}>
           <Text size="sm" fw={500}>
@@ -141,18 +131,21 @@ function RefundDecisionActions({
   canTakeAction: boolean;
   handleStatusChange: DecisionHandler;
 }) {
+  const approvalError = refundApprovalUnavailableReason(refund.approvalPreview);
+  const isPending = (refund.status || "WAITING") === "WAITING";
   return (
     <>
       {canTakeAction ? (
-        <Group gap="xs">
+        <Stack gap="xs">
+          {isPending && approvalError && <Text size="sm" c="dimmed">{approvalError}</Text>}
+          {!isPending && <Text size="sm" c="dimmed">This request is already {refund.status === "APPROVED" ? "approved" : "denied"}.</Text>}
+          <Group gap="xs">
           <Button
             size="xs"
             color="green"
             variant="light"
             disabled={
-              (refund.status && refund.status !== "WAITING") ||
-              processingId === refund.$id ||
-              !refund.approvalPreview?.isValid
+              !isPending || Boolean(processingId) || Boolean(approvalError)
             }
             loading={processingId === refund.$id}
             onClick={() => handleStatusChange(refund, "APPROVED")}
@@ -164,18 +157,18 @@ function RefundDecisionActions({
             color="red"
             variant="light"
             disabled={
-              (refund.status && refund.status !== "WAITING") ||
-              processingId === refund.$id
+              !isPending || Boolean(processingId)
             }
             loading={processingId === refund.$id}
             onClick={() => handleStatusChange(refund, "REJECTED")}
           >
             Deny
           </Button>
-        </Group>
+          </Group>
+        </Stack>
       ) : (
         <Text size="sm" c="dimmed">
-          —
+          You do not have permission to decide this request.
         </Text>
       )}
     </>
@@ -222,7 +215,7 @@ function RefundRow({
         <ReferenceBadge name={organizationName} color="green" />
       </Table.Td>
       <Table.Td>
-        <RefundScope approvalPreview={refund.approvalPreview} />
+        <RefundScope refund={refund} />
       </Table.Td>
       <Table.Td>
         <Text size="sm">
@@ -298,7 +291,8 @@ function RefundTable({
 function RefundResults(
   props: TableProps & Pick<ViewProps, "loading" | "error">,
 ) {
-  if (props.loading || props.error) return null;
+  if (props.loading) return <OrganizationDataPlaceholder label="refund requests" />;
+  if (props.error) return null;
   if (!props.visibleRefunds.length)
     return (
       <Text size="sm" c="dimmed">
@@ -313,25 +307,21 @@ function RefundHeading({
   description,
   showHeader,
   loading,
-}: Pick<ViewProps, "title" | "description" | "showHeader" | "loading">) {
+  onReload,
+  processingId,
+}: Pick<ViewProps, "title" | "description" | "showHeader" | "loading" | "onReload" | "processingId">) {
   return (
-    <>
-      {showHeader ? (
-        <Group justify="space-between">
+    <Group justify="space-between">
+      {showHeader && (
           <div>
             <Title order={4}>{title}</Title>
             <Text size="sm" c="dimmed">
               {description}
             </Text>
           </div>
-          {loading && <Loader size="sm" />}
-        </Group>
-      ) : loading ? (
-        <Group justify="flex-end">
-          <Loader size="sm" />
-        </Group>
-      ) : null}
-    </>
+      )}
+      <Button variant="outline" leftSection={<RefreshCw size={16} aria-hidden="true" />} onClick={onReload} loading={loading} disabled={Boolean(processingId)}>Reload requests</Button>
+    </Group>
   );
 }
 
@@ -340,7 +330,7 @@ export default function RefundRequestListView(props: ViewProps) {
     <Stack gap="md">
       <RefundHeading {...props} />
       {props.error && (
-        <Alert color="red" data-testid="refund-error">
+        <Alert color="red" title="Refund requests unavailable" data-testid="refund-error">
           {props.error}
         </Alert>
       )}
@@ -349,7 +339,7 @@ export default function RefundRequestListView(props: ViewProps) {
           {props.actionError}
         </Alert>
       )}
-      <RefundResults {...props} />
+      <RefundResults {...props} isRequesterView={props.isRequesterView || !props.canManage} />
     </Stack>
   );
   if (!props.withContainer) return content;
