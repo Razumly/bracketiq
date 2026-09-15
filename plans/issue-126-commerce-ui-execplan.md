@@ -33,7 +33,7 @@ The change is a visual and interaction migration. It must not change prices, fee
 - [x] (2026-09-15) Re-ran the four focused event suites. They pass 28 tests. The isolated action preview covered 1536x1024 and 320x568, all 14 action states, no horizontal overflow, and clear controls at 200% text size.
 - [x] (2026-09-15) Prepared the isolated local PostgreSQL database `bracketiq_e2e_126_codex` on port 5433. All 235 migrations applied, Prisma reported the database is up to date, and the E2E seed created 33 users, 1 organization, 7 events, and 8 event teams.
 - [x] (2026-09-15) Ran the seeded checkout suites. They pass 4 suites and 28 tests.
-- [x] (2026-09-15) Ran the full site test command. It completed with 862 passed tests, 147 failed tests, 129 skipped tests, and 14 skipped suites. The failures are recorded below.
+- [x] (2026-09-15) Ran the full site test command. It completed with 862 passed suites, 35 failed suites, and 14 skipped suites; 6,745 passed tests, 147 failed tests, and 129 skipped tests. The failures are recorded below.
 - [x] (2026-09-15) Attempted the seeded event browser suite. Playwright stopped before the tests because the development build could not resolve existing discover imports and the `discoverStartOfToday` export.
 
 ## Surprises & Discoveries
@@ -53,7 +53,7 @@ The change is a visual and interaction migration. It must not change prices, fee
   Evidence: Jest reports `18 passed`, `159 passed`.
 
 - Observation: The complete site suite still reports unrelated failures.
-  Evidence: `npm run test:ci` reports 34 failed suites, 146 failed tests, 863 passed tests, and 14 skipped suites. Failures are in scheduler, affiliate-import, event-editor, discover, Prisma-generated, calendar, and customer-bill areas outside the issue #126 commerce diff.
+  Evidence: An earlier `npm run test:ci` run reported 34 failed suites and 14 skipped suites. Failures were in scheduler, affiliate-import, event-editor, discover, Prisma-generated, calendar, and customer-bill areas outside the issue #126 commerce diff.
 
 - Observation: Shared icon projections are current.
   Evidence: `npm run icons:check` reports 27 current icons.
@@ -69,7 +69,7 @@ The change is a visual and interaction migration. It must not change prices, fee
 - Observation: The isolated issue database is now seeded for this branch.
   Evidence: `bracketiq_e2e_126_codex` has 33 `AuthUser` rows, 1 `Organizations` row, 7 `Events` rows, and 8 `EventTeams` rows after `npm run seed:e2e`.
 - Observation: The full site suite remains red after database preparation.
-  Evidence: `npm run test:ci` reports 35 failed suites, 147 failed tests, 862 passed tests, 129 skipped tests, and 14 skipped suites. Failures include existing affiliate runner socket permissions, scheduler and event-editor expectations, organization UI expectations, generated-client drift, and missing discover imports.
+  Evidence: `npm run test:ci` reports 35 failed suites, 862 passed suites, and 14 skipped suites; 147 failed tests, 6,745 passed tests, and 129 skipped tests. Failures include existing affiliate runner socket permissions, scheduler and event-editor expectations, organization UI expectations, generated-client drift, and missing discover imports.
 - Observation: The seeded event browser suite cannot start from this branch.
   Evidence: `npx playwright test e2e/event-join.spec.ts` stops before tests because the development build cannot resolve `@/components/ui/SportCategoryMultiSelect`, `@/lib/sportCategoryFilters`, and the `discoverStartOfToday` export from `@/lib/discoverFilters`.
 
@@ -207,7 +207,7 @@ A reviewer can select a product, open product details without entering checkout 
 
 A reviewer can observe explicit loading text, field-level validation, readable disabled prerequisites, permission-safe actions, recoverable errors, and restored saved progress. No state presents an unpaid registration as paid. Prices and totals match the existing services and route responses.
 
-Focused Jest checks pass: 4 suites and 28 tests for the event checkout and registration paths after seeding. Changed-file lint reports 0 errors and 20 warnings; the warnings are complexity and hook-dependency findings. The full site test command reports 35 failed suites, 147 failed tests, 862 passed tests, 129 skipped tests, and 14 skipped suites. The failures include existing affiliate runner socket permissions, scheduler and event-editor expectations, organization UI expectations, generated-client drift, and missing discover imports. The isolated database `bracketiq_e2e_126_codex` is migration-complete and seeded with 33 users, 1 organization, 7 events, and 8 event teams. The seeded event browser suite stopped before tests because the development build could not resolve `@/components/ui/SportCategoryMultiSelect`, `@/lib/sportCategoryFilters`, and `discoverStartOfToday`. A provider sandbox check was not run because no authorized provider test environment was available, and no provider simulation was added.
+Focused Jest checks pass: 4 suites and 28 tests for the event checkout and registration paths after seeding. Changed-file lint reports 0 errors and 20 warnings; the warnings are complexity and hook-dependency findings. The full site test command reports 35 failed suites, 862 passed suites, and 14 skipped suites; 147 failed tests, 6,745 passed tests, and 129 skipped tests. The failures include existing affiliate runner socket permissions, scheduler and event-editor expectations, organization UI expectations, generated-client drift, and missing discover imports. The isolated database `bracketiq_e2e_126_codex` is migration-complete and seeded with 33 users, 1 organization, 7 events, and 8 event teams. The seeded event browser suite stopped before tests because the development build could not resolve `@/components/ui/SportCategoryMultiSelect`, `@/lib/sportCategoryFilters`, and `discoverStartOfToday`. A provider sandbox check was not run because no authorized provider test environment was available, and no provider simulation was added.
 
 
 ## Idempotence and Recovery
