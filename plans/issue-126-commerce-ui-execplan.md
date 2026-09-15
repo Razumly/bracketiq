@@ -36,6 +36,12 @@ The change is a visual and interaction migration. It must not change prices, fee
 - [x] (2026-09-15) Ran the full site test command. It completed with 862 passed suites, 35 failed suites, and 14 skipped suites; 6,745 passed tests, 147 failed tests, and 129 skipped tests. The failures are recorded below.
 - [x] (2026-09-15) Attempted the seeded event browser suite. Playwright stopped before the tests because the development build could not resolve existing discover imports and the `discoverStartOfToday` export.
 - [x] (2026-09-15) Attempted the production build with the seeded database. Prisma validation, generation, and the generated-client guard passed. Next.js Turbopack stopped on nine existing discover-module errors.
+- [x] (2026-09-15) Restored the missing discover sport-category modules and date helper. Added the SportCategories schema, migration, catalog route and service contract, and dependent type and component compatibility fixes.
+- [x] (2026-09-15) Applied migration `20260910000000_add_sport_categories` to `bracketiq_e2e_126_codex`. The database now has 236 applied migrations, 5 sport categories, 33 users, 1 organization, 7 events, and 8 event teams.
+- [x] (2026-09-15) Ran the focused catalog and discover checks. They pass 6 suites and 33 tests.
+- [x] (2026-09-15) Ran the production build with the isolated database. Prisma validation, generation, the generated-client guard, compilation, TypeScript, page data, and static page generation all pass.
+- [x] (2026-09-15) Updated the seeded browser fixture for server-managed DOB fields and the current registration, billing, and checkout flow. The seeded event browser suite passes 2 tests.
+- [x] (2026-09-15) Re-ran the full site suite. It reports 871 passed suites, 29 failed suites, and 14 skipped suites; 6,841 passed tests, 134 failed tests, and 129 skipped tests. The remaining failures are baseline scheduler, affiliate, event-editor, organization, discover control, and email-environment failures.
 
 ## Surprises & Discoveries
 
@@ -75,6 +81,14 @@ The change is a visual and interaction migration. It must not change prices, fee
   Evidence: `npx playwright test e2e/event-join.spec.ts` stops before tests because the development build cannot resolve `@/components/ui/SportCategoryMultiSelect`, `@/lib/sportCategoryFilters`, and the `discoverStartOfToday` export from `@/lib/discoverFilters`.
 - Observation: The production build reaches Next.js when the isolated database is configured, but the branch cannot produce a production bundle.
   Evidence: `npm run build` passes `prisma validate`, `prisma generate`, and `check-prisma-generated.mjs`, then fails because `@/components/ui/SportCategoryMultiSelect`, `@/lib/sportCategoryFilters`, and `discoverStartOfToday` from `@/lib/discoverFilters` are unavailable to the discover build.
+- Observation: The missing discover dependencies were partial branch infrastructure, not a new commerce contract.
+  Evidence: Restoring the category filter helpers, category-aware multi-select, default category seed, and `discoverStartOfToday` allowed the production build to compile and type-check.
+- Observation: The seeded browser helper used a server-managed DOB patch that the current user route correctly rejects.
+  Evidence: The route returned `403` with `Server-managed user fields cannot be updated directly`; the E2E seed now sets verified adult fixture users and the helper reads the protected field.
+- Observation: The current public event flow requires an explicit registration entry, review confirmation, billing address, and checkout preview before payment intent creation.
+  Evidence: The seeded browser test now follows `Register`, `Join Event`, `Confirm registration`, billing address, and `Checkout`, then verifies the `/api/billing/purchase-intent` payload.
+- Observation: The full site suite still has baseline failures after the discover repair.
+  Evidence: The latest `npm run test:ci` run reports 29 failed suites, 871 passed suites, and 14 skipped suites; 134 failed tests, 6,841 passed tests, and 129 skipped tests.
 
 - Observation: Changed-file lint has warnings but no errors.
   Evidence: `npm run lint:changed -- --base 4eacd13e0` reports 0 errors and 20 complexity or hook-dependency warnings.
@@ -115,13 +129,15 @@ The change is a visual and interaction migration. It must not change prices, fee
 
 ## Outcomes & Retrospective
 
+The isolated issue database is migration-complete and seeded. It has 236 applied migrations, 33 users, 1 organization, 7 events, 8 event teams, and 5 sport categories. The production build passes Prisma validation, generation, the generated-client guard, compilation, TypeScript, page data collection, and static page generation. The seeded event browser suite passes 2 tests with the provider-disabled environment.
+
 The migration now covers event team selection and creation, optional player invitations, shared team management, invitation recovery, product selection and detail, checkout billing and Stripe handoff, finance categories and journal preview, refund review and recovery, rental availability, and reservation checkout. The public event registration entry now uses a centered full-page shell with a responsive stepper, split registration and summary cards, teal selection states, and coral primary action styling. The registration summary owns the primary action beside the price on desktop and exposes the same action in a fixed bottom bar on mobile. Team creation and player invitation remain existing inner workflow dialogs. Completed surfaces use BracketIQ-owned primitives and keep loading, validation, disabled, permission, error, and recovery states visible.
 
 The HTTP paths, request fields, response fields, registration rules, prices, fee calculations, permissions, and Stripe payment-detail ownership stayed unchanged. BracketIQ does not collect card number, expiry, or CVC fields. No provider simulation was added.
 
 The focused event suites pass 4 suites and 28 tests. The isolated checkout preview passed at desktop and narrow mobile widths, and the action-placement preview covered 1536x1024 and 320x568 with all 14 action states, no horizontal overflow, and clear controls at 200% text size. Standards and specification review found no actionable issue in the latest correction. The public route and discover modal use the intended separate presentation modes.
 
-The complete suite, TypeScript check, production build, provider sandbox, and seeded commerce browser flow remain environment or baseline limits. The isolated issue database is now seeded and migration-complete. The production build passes the Prisma checks but remains blocked by the discover build errors recorded above. The seeded browser flow remains blocked before test execution by the same errors.
+The complete site suite remains red for baseline and environment failures outside the repair: scheduler assumptions, affiliate cutover and Windows socket or symlink limits, event-editor inventory expectations, organization control labels, discover control semantics, and missing Gmail configuration. The latest run reports 871 passed suites, 29 failed suites, and 14 skipped suites; 6,841 passed tests, 134 failed tests, and 129 skipped tests.
 
 
 ## Context and Orientation
@@ -204,13 +220,15 @@ Run commands from the stated directory.
 
 ## Validation and Acceptance
 
+Focused catalog, discover, route, service, and client-to-site integration checks pass 6 suites and 33 tests. The existing focused event suites pass 4 suites and 28 tests. Changed-file lint reports 0 errors and 20 warnings. The full site test command reports 29 failed suites, 871 passed suites, and 14 skipped suites; 134 failed tests, 6,841 passed tests, and 129 skipped tests. The isolated database `bracketiq_e2e_126_codex` has 236 applied migrations, 33 users, 1 organization, 7 events, 8 event teams, and 5 sport categories. The production build passes Prisma validation, generation, the generated-client guard, compilation, TypeScript, page data collection, and static page generation. The seeded event browser suite passes 2 tests with the provider-disabled environment.
+
 A reviewer can select a team from the event flow, create a team with the event sport locked, save the team, add or skip players, and reach review without losing the selected team. Existing team management can edit the same team and show roster and invitation history. A saved invitation remains visible when delivery fails and offers the correct recovery action without creating a duplicate.
 
 A reviewer can select a product, open product details without entering checkout prematurely, see the correct price and fee labels, and continue to checkout. Checkout retains billing values, shows the exact total, identifies Stripe as the payment-detail owner, and contains no BracketIQ card-number, expiry, or CVC input. Confirmation shows completed registration or payment only after the existing success path says it is complete. A reviewer can choose an available rental slot and continue through the same billing and Stripe handoff without losing the slot or creating a duplicate reservation.
 
 A reviewer can observe explicit loading text, field-level validation, readable disabled prerequisites, permission-safe actions, recoverable errors, and restored saved progress. No state presents an unpaid registration as paid. Prices and totals match the existing services and route responses.
 
-Focused Jest checks pass: 4 suites and 28 tests for the event checkout and registration paths after seeding. Changed-file lint reports 0 errors and 20 warnings; the warnings are complexity and hook-dependency findings. The full site test command reports 35 failed suites, 862 passed suites, and 14 skipped suites; 147 failed tests, 6,745 passed tests, and 129 skipped tests. The failures include existing affiliate runner socket permissions, scheduler and event-editor expectations, organization UI expectations, generated-client drift, and missing discover imports. The isolated database `bracketiq_e2e_126_codex` is migration-complete and seeded with 33 users, 1 organization, 7 events, and 8 event teams. The production build passes Prisma validation, generation, and the generated-client guard, then stops in Next.js Turbopack on missing discover modules. The seeded event browser suite stopped before tests for the same build errors. A provider sandbox check was not run because no authorized provider test environment was available, and no provider simulation was added.
+Focused catalog, discover, route, service, and client-to-site integration checks pass 6 suites and 33 tests. The existing focused event suites pass 4 suites and 28 tests. Changed-file lint reports 0 errors and 20 warnings; the warnings are complexity and hook-dependency findings. The full site test command reports 29 failed suites, 871 passed suites, and 14 skipped suites; 134 failed tests, 6,841 passed tests, and 129 skipped tests. The failures remain outside the repaired catalog and event checkout paths. The isolated database `bracketiq_e2e_126_codex` has 236 applied migrations, 33 users, 1 organization, 7 events, 8 event teams, and 5 sport categories. The production build passes Prisma validation, generation, the generated-client guard, compilation, TypeScript, page data collection, and static page generation. The seeded event browser suite passes 2 tests with the provider-disabled environment. No provider sandbox was run.
 
 
 ## Idempotence and Recovery
@@ -223,7 +241,7 @@ Keep the coordinator worktree untouched. If the implementation worktree becomes 
 
 ## Artifacts and Notes
 
-Approved desktop reference groups:
+The issue body contains the full approved desktop and mobile reference list. Current evidence: the isolated database is migration-complete and seeded; focused catalog and discover checks pass 6/6 suites and 33/33 tests; the existing event checkout checks pass 4/4 suites and 28/28 tests; changed-file lint reports 0 errors; icon projections pass for 27 icons; the production build passes; and the seeded event browser suite passes 2/2 tests. The full site test command remains red with the baseline failures recorded above. Provider-disabled browser evidence verifies the payment-intent request payload and preserves the unpaid checkout error state.
 
     Registration/team: `commerce-registration--team-selection--desktop-1536x1024.png`, `commerce-registration--team-creation--desktop-1536x1024.png`, `commerce-registration--team-invites--desktop-1536x1024.png`, `commerce-registration--team-management--desktop-1536x1024.png`, `commerce-registration--invitation-history--desktop-1536x1024.png`.
 

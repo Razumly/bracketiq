@@ -181,6 +181,7 @@ export const ModelName = {
   EventTemplateRentalResourceHints: 'EventTemplateRentalResourceHints',
   EventTemplateLeagueScoringConfigs: 'EventTemplateLeagueScoringConfigs',
   Sports: 'Sports',
+  SportCategories: 'SportCategories',
   DocumentRequirements: 'DocumentRequirements',
   TemplateDocuments: 'TemplateDocuments',
   TemplateProviderQuarantines: 'TemplateProviderQuarantines',
@@ -3343,6 +3344,18 @@ export const SportsScalarFieldEnum = {
 } as const
 
 export type SportsScalarFieldEnum = (typeof SportsScalarFieldEnum)[keyof typeof SportsScalarFieldEnum]
+
+
+export const SportCategoriesScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt',
+  name: 'name',
+  sportIds: 'sportIds',
+  displayOrder: 'displayOrder'
+} as const
+
+export type SportCategoriesScalarFieldEnum = (typeof SportCategoriesScalarFieldEnum)[keyof typeof SportCategoriesScalarFieldEnum]
 
 
 export const DocumentRequirementsScalarFieldEnum = {

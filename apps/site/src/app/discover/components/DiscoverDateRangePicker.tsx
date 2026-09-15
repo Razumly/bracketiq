@@ -193,11 +193,6 @@ export default function DiscoverDateRangePicker({
         </PopoverTrigger>
         <PopoverContent
           align="center"
-          collisionAvoidance={{
-            side: 'shift',
-            align: 'shift',
-            fallbackAxisSide: 'none',
-          }}
           aria-label="Choose dates"
           hidden={!searchExpanded}
           inert={!searchExpanded || undefined}

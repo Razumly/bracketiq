@@ -131,6 +131,11 @@ export const discoverDateParamToDate = (value: string | null | undefined): Date 
   return new Date(year, month - 1, day);
 };
 
+export const discoverStartOfToday = (): Date => {
+  const today = new Date();
+  return new Date(today.getFullYear(), today.getMonth(), today.getDate());
+};
+
 export const parseDiscoverPreset = (searchParams: SearchParamsLike): DiscoverPreset => {
   const requestedTab = searchParams.get('tab');
   const tab: DiscoverTabValue = requestedTab === 'organizations'

@@ -8241,6 +8241,11 @@ function EventScheduleContent() {
       <>
         <CreateEventScheduleView
           termsModal={contentTermsModal}
+          pendingChangesOpen={isPendingChangesPopoverOpen}
+          pendingSaveChanges={pendingSaveChanges}
+          onPendingChangesOpenChange={setIsPendingChangesPopoverOpen}
+          hasPendingUnsavedChanges={hasPendingUnsavedChanges}
+          onDiscardChanges={handleDiscardChanges}
           publishing={publishing}
           reschedulingMatches={reschedulingMatches}
           cancelling={cancelling}

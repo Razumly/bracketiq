@@ -4,6 +4,7 @@ export interface LocationCoordinates {
 }
 
 export interface LocationInfo extends LocationCoordinates {
+  source?: 'approximate' | 'exact' | 'manual';
   city?: string;
   state?: string;
   country?: string;
@@ -211,6 +212,32 @@ class LocationService {
         options
       );
     });
+  }
+
+  async getApproximateLocation(signal?: AbortSignal): Promise<LocationInfo> {
+    const response = await fetch('/api/location/approximate', {
+      method: 'GET',
+      cache: 'no-store',
+      signal,
+    });
+    if (!response.ok) {
+      throw new Error('Approximate location is unavailable. Enter a location or use your current location.');
+    }
+
+    const info: LocationInfo | null = await response.json();
+    if (
+      !info
+      || typeof info.lat !== 'number'
+      || typeof info.lng !== 'number'
+      || !Number.isFinite(info.lat)
+      || !Number.isFinite(info.lng)
+      || Math.abs(info.lat) > 90
+      || Math.abs(info.lng) > 180
+    ) {
+      throw new Error('Approximate location returned invalid coordinates.');
+    }
+
+    return { ...info, source: 'approximate' };
   }
 
   private async geocodeWithMaps(

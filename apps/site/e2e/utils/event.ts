@@ -52,24 +52,32 @@ export const seedLocationStorage = async (
   }, payload);
 };
 
+type DobVerificationResponse = {
+  user?: {
+    dobVerified?: unknown;
+  };
+};
+
 export const ensureDobVerified = async (
   request: APIRequestContext,
   userId = SEED_USERS.participant.id,
 ) => {
-  const patchDobVerified = async (headers?: Record<string, string>) =>
-    request.patch(`/api/users/${userId}`, {
-      data: {
-        data: {
-          dobVerified: true,
-          dobVerifiedAt: new Date().toISOString(),
-        },
-      },
-      headers,
-    });
+  const readDobVerification = async (headers?: Record<string, string>) => {
+    const response = await request.get(`/api/users/${userId}`, { headers });
+    const body = await response.text().catch(() => "");
+    let dobVerified = false;
+    try {
+      const payload = JSON.parse(body) as DobVerificationResponse;
+      dobVerified = payload.user?.dobVerified === true;
+    } catch {
+      // Keep the response body for the assertion below.
+    }
+    return { body, dobVerified, response };
+  };
 
-  let response = await patchDobVerified();
+  let result = await readDobVerification();
 
-  if (!response.ok()) {
+  if (!result.dobVerified) {
     const seedUser = SEED_USER_BY_ID.get(userId);
     if (seedUser) {
       const loginResponse = await request.post("/api/auth/login", {
@@ -84,7 +92,7 @@ export const ensureDobVerified = async (
           token?: string;
         };
         if (typeof payload.token === "string" && payload.token.length > 0) {
-          response = await patchDobVerified({
+          result = await readDobVerification({
             Authorization: `Bearer ${payload.token}`,
           });
         }
@@ -92,10 +100,9 @@ export const ensureDobVerified = async (
     }
   }
 
-  const responseBody = await response.text().catch(() => "");
   expect(
-    response.ok(),
-    `DOB verification failed for ${userId} (${response.status()}): ${responseBody}`,
+    result.response.ok() && result.dobVerified,
+    `DOB verification failed for ${userId} (${result.response.status()}): ${result.body}`,
   ).toBeTruthy();
 };
 
@@ -104,7 +111,7 @@ export const openEventFromDiscover = async (
   eventName: string,
   options?: { eventId?: string },
 ) => {
-  await page.getByLabel("Search events").fill(eventName);
+  await page.getByPlaceholder("Search events").fill(eventName);
   await page.waitForTimeout(600);
 
   const cardHeading = page.getByRole("heading", { name: eventName }).first();
