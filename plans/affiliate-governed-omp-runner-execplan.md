@@ -3097,3 +3097,168 @@ This source work made no production changes or provider requests.
 The version-10 image publication, deployment, and bounded producer/reviewer
 execution still require separate current authorization. Discovery remains
 outside the repair scope.
+
+## Authorized first existing-data repair batch
+
+On 2026-09-14, the user selected `First 20 jobs`. This authorizes publication
+and deployment of version-10 images, followed by at most 20 existing mapping
+jobs and their bounded producer/reviewer repair passes. The reviewed source is
+`ef097891a2fe6134b251bf96c54a2f3496707a70`. It passed the source gate in the
+workstream and canonical `main` worktrees. It is now pushed for the required
+Site CI gate. Do not publish images until that exact CI run succeeds.
+
+The authorized runtime set is:
+
+- `site`, which is service `app` in project `bracketiq-production`;
+- `affiliate-model-auth-broker`;
+- `affiliate-model-gateway`;
+- `affiliate-gateway`;
+- `affiliate-agent-runner`;
+- `mapping-producer-1`;
+- `supply-reviewer-1`.
+
+The six affiliate services remain in project `bracketiq-affiliate-governed`.
+Do not expand the fleet. Preserve the five dormant governed containers,
+retired legacy containers, PostgreSQL, Redis, Caddy, and unrelated timers.
+No database migration is part of this source change.
+
+Keep claim admission closed during preparation and deployment. Compile
+role/prompt 10 into deployment contract 10. Keep the active Supply Contract,
+model routing, account identities, credentials, mounts, and security profiles
+unchanged. Use a new protected workload environment and new evidence folder.
+Do not overwrite a canonical or previous workload environment.
+
+Use current allowed policy and exact stored evidence before admission.
+Refresh only existing intake/page URLs when needed. Do not discover or enqueue
+new sources. Select eligible human-review mapping jobs first. Do not bypass
+identity, policy, evidence, public-state, or active-owner holds to fill the
+20-job limit. Count bounded child repair passes under their original job.
+
+Independent review can approve the staged pending mapping. It must not
+activate working mappings, publish listings, or enable automation. Preserve
+current public and working data. After this batch, close claim admission and
+stop `mapping-producer-1`, `supply-reviewer-1`, and `affiliate-agent-runner`.
+Leave the site and control/model services in their deployed state.
+
+### Version-10 production deployment and first-batch admission
+
+Site CI run `34859085776` passed for
+`ef097891a2fe6134b251bf96c54a2f3496707a70`. Governed image publication run
+`34860487770` and site image publication run `34860488082` passed under the
+user's production authorization.
+
+The deployed immutable images are:
+
+- Worker/model:
+  `ghcr.io/razumly/bracketiq-affiliate-governed@sha256:1d55608f1b12dbbe3d07c79aee6b69fe8ceaab5969e9464c082db1cc491319f1`.
+- Gateway:
+  `ghcr.io/razumly/bracketiq-affiliate-gateway@sha256:a5a06595871b987308ab8d02d3a913e3db7acb838a7b9fbd680510a2611e3765`.
+- Site:
+  `ghcr.io/razumly/bracketiq-site@sha256:3f4bb677ebbcf310911de936ece139df0006196757773e2c5770534fc21999a3`.
+
+Both governed images exported the exact reviewed role/prompt objects. The
+deployment contract is version 10 with hash
+`e5f92758ad708e415ffd86f03b1400373813100690b45f053db52962e0e2fa36`.
+The active Supply Contract remains version 1 with hash
+`c808492a7d60741b508978987441a0a31f59602a5e5321789d9865823f6098cf`.
+
+The new protected workload is
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v10-existing-repair-first20-ef097891a`.
+The private helper and evidence directory is
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v10-repair-tools-ef097891a`.
+Only image references, deployment contract, and preflight report changed in
+the workload environment. Other environment values, routing, mounts, and
+security settings matched the prior configuration.
+
+The six affiliate containers were recreated without starting writers. Both
+model services became healthy. The two model-account identity hashes stayed
+unchanged, both access credentials were fresh, and broker refresh stayed
+enabled. The site update replaced only `bracketiq-production/app`.
+Internal and public database-readiness checks passed. The homepage and
+onboarding surface rendered. The raw application icon loaded; its optimized
+onboarding image did not load in the browser smoke check.
+
+All 219 migration names were applied, with no unfinished migration. Twenty-three
+historical checksums differ from the repository. Their files match the already
+deployed Gateway, and the version-9 to version-10 source has no Prisma change.
+No migration or migration-ledger change was performed.
+
+The user paused after the site/model deployment. Gateway, runner, and repair
+supervisors stayed stopped. The user then requested continuation. Fresh
+preflight passed with no findings. Gateway started with admission closed.
+Producer and reviewer containment probes passed with disposable workspaces.
+Only the selected runner and two supervisors started and passed scoped
+readiness. Unselected runtime identities and disabled legacy timers stayed
+unchanged.
+
+The initial human-review selection needed explicit existing page/run bindings.
+Forty such jobs produced 28 eligible PREVIEW rows. Twenty were selected for
+known-source refresh. The capture admission created exactly 20 marked runs.
+The 15-minute preflight window expired after four requests. The remaining
+16 runs stayed queued. Stopped-fleet evidence was renewed before processing
+them. No safety check was weakened.
+
+Refresh ended with seven SUCCEEDED, twelve PARTIAL, and one FAILED run.
+Eighteen runs had the required fresh HTML/Markdown pair. Queensborough CC
+(January Sessions) failed the rendered-content quality gate. The Austin Labor
+Day Cup URL returned HTTP 404. Those two mapping jobs stayed held.
+
+Capture preservation checks matched all selected intake, page, and mapping-job
+hashes. All 2,821 published candidate rows and the empty Supply Target set
+also matched. The Gateway then admitted the 18 freshly supported mapping jobs.
+An exact-root controller runs only their producer/reviewer descendants with
+one bounded lease per claim. It closes admission and stops the three repair
+worker services when the batch ends.
+
+The batch produced fourteen independently approved pending mappings. One
+basketball description was rejected because it contained only a time range.
+The producer repaired it in a bounded child claim, and the new reviewer
+approved the corrected source description. One Hockey Camp reviewer process
+ended without an accepted terminal result. The Gateway retained PROCESS_CRASH
+and RETRY_WAIT. A fresh invocation on that same job succeeded under the
+server's existing retry policy. The failed claim remains in the audit.
+
+### Data-quality stop and correction boundary
+
+An operator spot check found one false approval. Mapping job
+`c4798a36-2a90-4b1b-b47c-1b8a3392d6f2` produced a CLUB candidate titled
+`California, Georgia Tech, LBSU, and UCLA Add Flag Football Club Teams`.
+Its description is a news article about four separate schools. Its action
+URL is another article about Rutgers and Valparaiso, not an official club
+action. It is not a valid single-club package.
+
+The source is `e158d6c6-4a22-4d37-b424-126ffb166160`. Its pending mapping is
+`agw-artifact-712b3c7d-fa6e-4f00-ab01-07f8cc659f05`. The completed reviewer
+approval was not rewritten. The mapping remains inactive. An operator quality
+hold is stored in `quality-hold-article.json` in the protected helper directory
+and in `first20-batch.json`. The controller now refuses startup while that hold
+exists. This is an operator hold, not a fabricated database review decision.
+
+The controller drained the active review, closed admission, and stopped the
+producer, reviewer, and runner. The current first-20 outcome is:
+
+- Fourteen pending mappings are agent-approved and inactive. This count includes
+  the invalid article package; do not treat all fourteen as accepted data.
+- Football & Cheer Registration is human-held. Its producer reported an
+  unsupported official-logo repair field and a locality extraction gap.
+- Athletics, Buffs Bash, and the Play Big League Sports Ultimate Frisbee job
+  remain admitted but unprocessed.
+- Queensborough CC and Austin Labor Day Cup remain held after refresh.
+
+The read-only preservation proof passed for all eighteen admitted source/root
+pairs. Current source state matches the stored post-commit proof. Working
+mapping and organization hashes are unchanged. Both protected public
+replacements retain their working state. The 2,821 published candidate rows
+retain hash `858274b7dec7d070f8d2f1665e672b22`, and there are still no Supply
+Targets. Active claims and active job pointers are zero.
+
+Current Gateway routes cannot correct the false approval safely. Existing-data
+admission returns PENDING_REPAIR_PRESENT for the approved pending package.
+Source-exclusion admission returns PARENT_RESULT_INVALID because that route
+requires a supported producer-gap parent, not this completed package.
+Do not bypass these gates or change production rows directly.
+
+Further execution is blocked on a stronger entity/action review contract and
+an audited post-approval correction path. The site, Gateway, and model services
+remain deployed. Repair workers remain stopped. No listing was published and
+no new-source discovery ran.
