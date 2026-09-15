@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 
 import { renderWithMantine } from '../../../../../test/utils/renderWithMantine';
 import { buildEvent, buildTeam, buildUser } from '../../../../../test/factories';
@@ -126,10 +126,11 @@ import { familyService } from '@/lib/familyService';
 import { paymentService } from '@/lib/paymentService';
 import { teamService } from '@/lib/teamService';
 import { userService } from '@/lib/userService';
+import type { Team } from '@/types';
 
 let draftState: EventRegistrationDraftState;
 
-function selectEligibleTeam(team: ReturnType<typeof buildTeam>) {
+function selectEligibleTeam(team: Team) {
   draftState = {
     ...draftState,
     eligibleTeams: [{ id: team.$id, name: team.name, sport: team.sport ?? null }],
@@ -146,11 +147,19 @@ async function confirmJoin() {
   fireEvent.click(confirmButton);
 }
 
-async function reviewAndConfirmJoin() {
-  const joinButton = await screen.findByRole('button', { name: /Join for/i });
-  await waitFor(() => expect(joinButton).toBeEnabled());
-  fireEvent.click(joinButton);
-  await confirmJoin();
+async function continueToReview(team: Team) {
+  const registration = within(await screen.findByRole('dialog', { name: /^Team registration$/i }));
+  const continueButton = await registration.findByRole('button', {
+    name: /^(Continue with this team|Continue registration)$/i,
+  });
+  await waitFor(() => expect(continueButton).toBeEnabled());
+  fireEvent.click(continueButton);
+
+  const players = within(await screen.findByRole('dialog', { name: /^Add players \(optional\)$/i }));
+  expect(await players.findByRole('heading', { name: team.name })).toBeInTheDocument();
+  const reviewButton = players.getByRole('button', { name: /^Continue to review$/i });
+  await waitFor(() => expect(reviewButton).toBeEnabled());
+  await act(async () => { fireEvent.click(reviewButton); });
 }
 
 const completeBillingAddressProfile = {
@@ -166,19 +175,15 @@ const completeBillingAddressProfile = {
   },
 };
 
-async function findDivisionButton(name: RegExp) {
+async function openTeamRegistration(team: Team) {
   fireEvent.click(await screen.findByRole('button', { name: /^(Register|Continue registration)$/i }));
-  try {
-    const buttons = await screen.findAllByRole('button', { name });
-    expect(buttons.length).toBeGreaterThan(0);
-    return buttons[0];
-  } catch (error) {
-    const buttonLabels = screen
-      .queryAllByRole('button', { hidden: true })
-      .map((button) => button.textContent?.replace(/\s+/g, ' ').trim())
-      .filter(Boolean);
-    throw new Error(`Unable to find division button ${name}. Available buttons: ${buttonLabels.join(' | ')}`);
-  }
+
+  const registration = within(await screen.findByRole('dialog', { name: /^Team registration$/i }));
+  const teamOption = await registration.findByRole('radio', { name: team.name });
+  await waitFor(() => expect(teamOption).toBeEnabled());
+  fireEvent.click(teamOption);
+  expect(teamOption).toBeChecked();
+  return registration;
 }
 
 describe('EventDetailSheet payment-plan team join', () => {
@@ -400,11 +405,9 @@ describe('EventDetailSheet payment-plan team join', () => {
       <EventDetailSheet event={event} isOpen={true} onClose={jest.fn()} renderInline={true} />,
     );
 
-    fireEvent.click(await findDivisionButton(/Premier 18\+/i));
-
-    const joinButton = await screen.findByRole('button', { name: /Join for/i });
-    await waitFor(() => expect(joinButton).toBeEnabled());
-    fireEvent.click(joinButton);
+    fireEvent.click(await screen.findByRole('button', { name: /Premier 18\+/i }));
+    await openTeamRegistration(team);
+    await continueToReview(team);
     expect(await screen.findByText(/Payment plan preview/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Continue with Payment Plan/i }));
     await confirmJoin();
@@ -522,16 +525,12 @@ describe('EventDetailSheet payment-plan team join', () => {
       <EventDetailSheet event={event} isOpen={true} onClose={jest.fn()} renderInline={true} />,
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: /^(Register|Continue registration)$/i }));
-    const joinAsTeamButton = await screen.findByRole('button', { name: /Change team/i });
-    fireEvent.click(joinAsTeamButton);
-
-    const teamSelect = await screen.findByPlaceholderText(/Choose a team/i);
-    fireEvent.click(teamSelect);
-    const teamOption = await screen.findByRole('option', { name: /Camka Team/i });
-    expect(teamOption.textContent).toBe('Camka Team');
-    expect(teamOption.textContent).not.toContain('c_skill_open_age_18plus');
-    fireEvent.keyDown(teamSelect, { key: 'Escape' });
+    const registration = await openTeamRegistration(managedTeam);
+    const teamOption = registration.getByRole('radio', { name: /Camka Team/i });
+    expect(teamOption).toHaveAccessibleName('Camka Team');
+    expect(registration.getByRole('radiogroup', { name: /Eligible teams/i }))
+      .not.toHaveTextContent('c_skill_open_age_18plus');
+    expect(registration.getByRole('button', { name: /^Manage team$/i })).toBeEnabled();
 
     const disabledJoinButton = await screen.findByRole('button', { name: /Already in Event/i });
     expect(disabledJoinButton).toBeDisabled();
@@ -594,9 +593,11 @@ describe('EventDetailSheet payment-plan team join', () => {
       <EventDetailSheet event={event} isOpen={true} onClose={jest.fn()} renderInline={true} />,
     );
 
-    fireEvent.click(await findDivisionButton(/Open/i));
+    fireEvent.click(await screen.findByRole('button', { name: /^Open\b/i }));
+    await openTeamRegistration(team);
 
-    await reviewAndConfirmJoin();
+    await continueToReview(team);
+    await confirmJoin();
     fireEvent.click(await screen.findByRole('button', { name: /^Checkout$/i }));
 
     await waitFor(() => {
@@ -691,11 +692,13 @@ describe('EventDetailSheet payment-plan team join', () => {
       <EventDetailSheet event={event} isOpen={true} onClose={jest.fn()} renderInline={true} />,
     );
 
-    fireEvent.click(await findDivisionButton(/Open/i));
+    fireEvent.click(await screen.findByRole('button', { name: /^Open\b/i }));
+    await openTeamRegistration(team);
 
     const baselineEventFetchCount = eventFetchCount;
 
-    await reviewAndConfirmJoin();
+    await continueToReview(team);
+    await confirmJoin();
     fireEvent.click(await screen.findByRole('button', { name: /^Checkout$/i }));
     fireEvent.click(await screen.findByRole('button', { name: /Complete Mock Payment/i }));
 
