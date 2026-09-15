@@ -1079,7 +1079,7 @@ describe('OrganizationFinancePanel', () => {
       <OrganizationFinancePanel organizationId="org_1" isActive canManage />,
     );
 
-    await screen.findByText('QuickBooks');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'QuickBooks settings' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'QuickBooks settings' }));
     await screen.findByText('Financial category mappings');
     await waitFor(() => {
@@ -1219,7 +1219,7 @@ describe('OrganizationFinancePanel', () => {
       <OrganizationFinancePanel organizationId="org_1" isActive canManage />,
     );
 
-    await screen.findByText('QuickBooks');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'QuickBooks settings' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'QuickBooks settings' }));
     await screen.findByText('Journal entry preview');
     fireEvent.click(screen.getByRole('button', { name: 'Preview journal entry' }));
