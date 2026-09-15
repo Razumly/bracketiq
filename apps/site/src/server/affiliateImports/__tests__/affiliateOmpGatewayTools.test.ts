@@ -358,6 +358,56 @@ it("keeps a parser limit repairable while preserving raw artifact access", async
   expect(textValue(await tools.execute("read_artifact", { evidenceRef: "evidence-1", limit: 3 })).text).toBe("<b>");
 });
 
+it("returns repairable status feedback for a known sport falsely reported as unsupported", async () => {
+  const fixture = legacyRepairFixture("<p>Pickleball tournament for senior players.</p>");
+  if (fixture.claim.subject.type !== "MAPPING_PRODUCER" || !fixture.claim.subject.repairContext) {
+    throw new Error("Expected a mapping repair claim.");
+  }
+  const catalog = buildAffiliateSportsCatalogSnapshot([
+    { id: "Pickleball", name: "Pickleball" },
+  ], "2026-09-15T00:00:00.000Z");
+  fixture.claim.subject.repairContext.sportsCatalog = catalog;
+  fixture.draft.payload.sportEvidence.sportsCatalogSha256 = catalog.sha256;
+  fixture.draft.reasonCodes = ["CONTRACT_REQUIREMENT_MISSING", "SPORT_NOT_IN_CATALOG"];
+  const determination = fixture.draft.payload.sportEvidence.sportDeterminations[0];
+  determination.sourceLabels = ["Pickleball"];
+  determination.status = "UNSUPPORTED";
+  determination.canonicalSportNames = [];
+  determination.rationale = "The producer incorrectly reported that Pickleball was absent.";
+  determination.evidence[0].excerpt = "Pickleball tournament for senior players.";
+  const submittedResults: unknown[] = [];
+  const perform = jest.fn();
+  perform.mockImplementation(async (operation: AffiliateAgentClaimOperation) => {
+    if (operation.kind === "READ_ARTIFACT") return fixture.artifact;
+    if (operation.kind === "SUBMIT_RESULT") {
+      submittedResults.push(operation.result);
+      return { ...accepted(operation), disposition: "CONTRACT_GAP" as const };
+    }
+    throw new Error("Draft correction must not execute another command.");
+  });
+  const tools = createAffiliateOmpGatewayTools({
+    claim: fixture.claim, token: "private-claim-token", gateway: { perform }, onTerminal: jest.fn(),
+  });
+  expect(textValue(await tools.execute("submit_result", fixture.draft))).toMatchObject({
+    kind: "DRAFT_INVALID",
+    issues: [{ path: ["payload", "sportEvidence", "sportDeterminations", 0, "status"] }],
+  });
+  expect(submittedResults).toEqual([]);
+  expect(tools.isClosed).toBe(false);
+
+  determination.status = "RESOLVED";
+  determination.canonicalSportNames = ["Pickleball"];
+  determination.rationale = "The source identifies Pickleball, which is in the injected catalog.";
+  fixture.draft.reasonCodes = ["CONTRACT_REQUIREMENT_MISSING"];
+  expect(textValue(await tools.execute("check_result", fixture.draft))).toMatchObject({
+    kind: "DRAFT_VALID", issues: [],
+  });
+  expect(textValue(await tools.execute("submit_result", fixture.draft))).toMatchObject({
+    kind: "TERMINAL_ACCEPTED",
+  });
+  expect(submittedResults).toHaveLength(1);
+});
+
 it("repairs a draft from claim citation text before one terminal submission", async () => {
   const fixture = legacyRepairFixture();
   const perform = jest.fn(async (operation: AffiliateAgentClaimOperation) => {

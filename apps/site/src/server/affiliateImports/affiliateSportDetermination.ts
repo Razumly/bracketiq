@@ -592,9 +592,10 @@ export const assertAffiliateSportCompletionReady = ({
   const catalogNames = new Set(
     isCatalogSnapshot(catalog) ? catalog.sports.map((sport) => sport.name) : catalog,
   );
+  let permittedCatalogLabels: Set<string> | undefined;
   const hashes = new Set<string>();
   // Historical determination envelopes remain parseable and hashable. Apply
-  // blacklist status policy only at the current completion boundary.
+  // current catalog and blacklist rules only at the completion boundary.
   for (let index = 0; index < parsedDeterminations.length; index += 1) {
     const parsed = parsedDeterminations[index];
     const hash = affiliateSportDeterminationSha256(parsed);
@@ -626,6 +627,24 @@ export const assertAffiliateSportCompletionReady = ({
         ['sportDeterminations', index, 'sourceLabels'],
         'BLACKLISTED determinations cannot mix blacklisted and non-blacklisted source labels; split the determinations.',
       );
+    }
+    if (parsed.status === 'UNSUPPORTED') {
+      if (!permittedCatalogLabels) {
+        permittedCatalogLabels = new Set<string>();
+        for (const name of catalogNames) {
+          if (!isAffiliateSportBlacklisted(name)) {
+            permittedCatalogLabels.add(normalizeAffiliateSportLabel(name));
+          }
+        }
+      }
+      for (const label of parsed.sourceLabels) {
+        if (permittedCatalogLabels.has(normalizeAffiliateSportLabel(label))) {
+          throw new AffiliateSportVerificationError(
+            ['sportDeterminations', index, 'status'],
+            'The source label matches a permitted catalog sport. Recheck its evidence and status; do not report SPORT_NOT_IN_CATALOG.',
+          );
+        }
+      }
     }
   }
   const userDecisionIndex = parsedDeterminations.findIndex(

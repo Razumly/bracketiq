@@ -3677,3 +3677,54 @@ root. Local evidence is available at `local://v11-final-verification.json`,
 `local://v11-final-preservation.json`. The application image/source revision
 remains `0a0311bcfe5259b64c9bb5d02288bd11021ec96c`; later plan-only checkpoint
 commits do not imply another deployment.
+
+## Source-only catalog contradiction fix
+
+
+The user selected `Fix and verify only`. This authorizes the catalog validation
+fix and local verification. It does not authorize deployment, a production
+retry, or a larger batch. Use workstream
+`workstream/existing-repair-catalog-check` from checkpoint
+`b1e2c26703810b961752ff1c83ee00a595916e81`.
+
+The exact Pickleball claim includes Pickleball in its injected catalog, but its
+UNSUPPORTED determination passed the shared sport-completion validator. The
+local draft check also returned DRAFT_VALID. Add the missing contradiction
+check to `assertAffiliateSportCompletionReady`, which both the draft and
+authoritative completion paths already use.
+
+Compare source labels with current catalog names through the existing
+`normalizeAffiliateSportLabel` rule. Reject an UNSUPPORTED determination when
+one label matches a permitted catalog entry. Keep blacklist checks first.
+Do not change historical parsing, infer aliases, resolve generic variants,
+rewrite the determination, or change the catalog.
+
+Prove the rejection before the fix. Verify that correction feedback identifies
+the determination status and leaves the claim available for a corrected draft.
+Use the saved claim and stored source citation for a local replay. Preserve
+genuine unsupported activities, unresolved variants, and blacklist precedence.
+
+The source fix and local verification are complete. Three new assertions failed
+before the fix: exact catalog contradiction, normalized catalog contradiction,
+and terminal acceptance of the false hold. All passed after the shared check
+was added. The final affected gate passed twelve suites with 352 tests.
+Source TypeScript and targeted ESLint passed.
+
+The exact saved Pickleball claim and Markdown citation were replayed locally.
+The false result now returns DRAFT_INVALID at
+`payload.sportEvidence.sportDeterminations[0].status`. The shared authoritative
+evidence verifier also rejects it. The same evidence passes with the
+determination corrected to RESOLVED and canonical name Pickleball. This is
+sport-evidence verification, not approval of a complete mapping package.
+Historical input bytes remain unchanged.
+
+The two changed test files have ten pre-existing TypeScript diagnostics in
+the broader Jest type configuration. A focused comparison against unchanged
+main found the same ten diagnostics and no additions. Do not report that
+optional test type configuration as clean. The normal source type gate passed.
+
+The temporary replay script and focused type configurations are removed.
+Evidence is stored at `local://pickleball-catalog-fix-verification.json`.
+No provider calls, production writes, runtime changes, deployment, or live
+job retry occurred. The deployed version-11 code and stopped-worker state
+remain unchanged. Keep this source-only fix on its workstream branch.

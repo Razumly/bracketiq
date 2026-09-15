@@ -251,6 +251,75 @@ describe('affiliate sport determinations', () => {
     }));
   });
 
+  it('rejects a known sport reported as unsupported without changing its historical envelope', () => {
+    const unsupported = {
+      ...unresolved,
+      sourceLabels: ['Pickleball'],
+      status: 'UNSUPPORTED' as const,
+      rationale: 'The producer incorrectly reported that Pickleball was absent.',
+    };
+    const originalHash = affiliateSportDeterminationSha256(unsupported);
+    const currentCatalog = buildAffiliateSportsCatalogSnapshot([
+      { id: 'Pickleball', name: 'Pickleball' },
+    ], '2026-09-15T00:00:00.000Z');
+
+    expect(() => assertAffiliateSportCompletionReady({
+      determinations: [unsupported],
+      catalog: currentCatalog,
+      resultKind: 'HUMAN_REVIEW_REQUIRED',
+      reasonCodes: ['SPORT_NOT_IN_CATALOG'],
+    })).toThrow(expect.objectContaining({
+      name: 'AffiliateSportVerificationError',
+      path: ['sportDeterminations', 0, 'status'],
+    }));
+    expect(affiliateSportDeterminationSchema.parse(unsupported)).toEqual(unsupported);
+    expect(affiliateSportDeterminationSha256(unsupported)).toBe(originalHash);
+  });
+
+  it('uses the existing Unicode, whitespace, and case normalization for catalog contradictions', () => {
+    expect(() => assertAffiliateSportCompletionReady({
+      determinations: [{
+        ...unresolved,
+        sourceLabels: ['ＩＮＤＯＯＲ\u00a0  ＶＯＬＬＥＹＢＡＬＬ'],
+        status: 'UNSUPPORTED',
+      }],
+      catalog: ['Indoor Volleyball'],
+      resultKind: 'HUMAN_REVIEW_REQUIRED',
+      reasonCodes: ['SPORT_NOT_IN_CATALOG'],
+    })).toThrow(expect.objectContaining({
+      path: ['sportDeterminations', 0, 'status'],
+    }));
+  });
+
+  it('keeps unmatched labels and generic variants held without guessing catalog aliases', () => {
+    const determinations = sortAffiliateSportDeterminations([
+      unresolved,
+      { ...unresolved, sourceLabels: ['Padel'], status: 'UNSUPPORTED' },
+      { ...unresolved, sourceLabels: ['Pickleball coaching'], status: 'UNSUPPORTED' },
+    ]);
+    expect(isAffiliateSportCompletionReady({
+      determinations,
+      catalog: ['Grass Soccer', 'Indoor Soccer', 'Pickleball'],
+      resultKind: 'HUMAN_REVIEW_REQUIRED',
+      reasonCodes: ['SPORT_NOT_IN_CATALOG', 'SPORT_VARIANT_UNRESOLVED'],
+    })).toBe(true);
+    expect(isAffiliateSportCompletionReady({
+      determinations,
+      catalog: ['Grass Soccer', 'Indoor Soccer', 'Pickleball'],
+      resultKind: 'REVIEW_REQUIRED',
+      reasonCodes: ['SPORT_NOT_IN_CATALOG', 'SPORT_VARIANT_UNRESOLVED'],
+    })).toBe(false);
+  });
+
+  it('keeps blacklist rejection ahead of catalog membership feedback', () => {
+    expect(() => assertAffiliateSportCompletionReady({
+      determinations: [{ ...unresolved, sourceLabels: ['Golf'], status: 'UNSUPPORTED' }],
+      catalog: ['Golf'],
+      resultKind: 'HUMAN_REVIEW_REQUIRED',
+      reasonCodes: ['SPORT_NOT_IN_CATALOG'],
+    })).toThrow(/must use BLACKLISTED/i);
+  });
+
   it('requires consumed metadata only for consumed human resolutions and caps rationale', () => {
     const pending = {
       schemaVersion: 1 as const,
