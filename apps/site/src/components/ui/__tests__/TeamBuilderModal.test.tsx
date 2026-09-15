@@ -214,6 +214,11 @@ describe('TeamBuilderModal', () => {
     await waitFor(() => expect(teamServiceMock.createTeamMemberInvite).toHaveBeenCalledTimes(2));
     expect(teamServiceMock.createTeamMemberInvite).toHaveBeenNthCalledWith(1, 'created_team_1', { userId: 'search_match_1', role: 'player' });
     expect(teamServiceMock.createTeamMemberInvite).toHaveBeenNthCalledWith(2, 'created_team_1', { userId: 'search_match_1', role: 'team_manager' });
+    const copyButtons = await screen.findAllByRole('button', { name: 'Copy link' });
+    await user.click(copyButtons[0]);
+    expect(await screen.findByRole('button', { name: 'Link copied' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Copy link' })).toBeVisible();
+    expect(await navigator.clipboard.readText()).toBe('http://localhost/i/invite_link_1?v=1&e=2&s=signed');
   });
 
   it('shows a saved delivery failure for an existing Account without recreating the Team', async () => {

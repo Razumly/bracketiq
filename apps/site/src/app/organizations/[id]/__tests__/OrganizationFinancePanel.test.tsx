@@ -563,8 +563,9 @@ describe('OrganizationFinancePanel', () => {
         method: 'POST',
       }));
     });
-    expect(await screen.findByText('No unpaid staff labor was found for this pay period.')).toBeInTheDocument();
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    const error = await screen.findByRole('alert');
+    expect(error).toHaveTextContent('No unpaid staff labor was found for this pay period.');
+    expect(error).toBeVisible();
   });
 
   it('approves a draft pay run', async () => {

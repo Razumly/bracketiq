@@ -84,6 +84,8 @@ it('ignores an invitation refresh that finishes after a different Event has load
     fireEvent.click(await screen.findByRole('button', { name: 'Save invitation' }));
     rerender(<Harness scope="second" />);
     await waitFor(() => expect(screen.getByTestId('loaded-teams')).toHaveTextContent('Second Team'));
+    expect(screen.queryByRole('button', { name: 'Save invitation' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Add players (optional)' })).not.toBeInTheDocument();
     await act(async () => { finishRefresh(first); });
     expect(screen.getByTestId('loaded-teams')).toHaveTextContent('Second Team');
 });

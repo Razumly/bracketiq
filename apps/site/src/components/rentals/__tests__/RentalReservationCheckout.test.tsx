@@ -67,11 +67,13 @@ function renderCheckout({ signedIn = true, total = 0 } = {}) {
 }
 
 function expectSelectedTime(region: HTMLElement, price: string) {
-  expect(within(region).getByText("Main court")).toBeInTheDocument();
-  expect(within(region).getByText("06/22/2030")).toBeInTheDocument();
-  expect(within(region).getByText("09:00 AM – 10:30 AM")).toBeInTheDocument();
-  expect(within(region).getByText("90 minutes · 1 resource")).toBeInTheDocument();
-  expect(within(region).getByText(price)).toBeInTheDocument();
+  expect(within(region).getByText("River City Sports")).toBeVisible();
+  expect(within(region).getByText("Main court")).toBeVisible();
+  expect(within(region).getByText("06/22/2030")).toBeVisible();
+  expect(within(region).getByText("09:00 AM – 10:30 AM")).toBeVisible();
+  expect(within(region).getByText("90 minutes · 1 resource")).toBeVisible();
+  expect(within(region).getByText("Rental total")).toBeVisible();
+  expect(within(region).getByText(price)).toBeVisible();
 }
 
 describe("RentalReservationCheckout", () => {
@@ -88,7 +90,7 @@ describe("RentalReservationCheckout", () => {
     renderCheckout();
     await user.click(screen.getByRole("button", { name: "Reserve resources" }));
     await user.dblClick(screen.getByRole("button", { name: "Confirm reservation" }));
-    expectSelectedTime(screen.getByRole("region", { name: "Reservation summary" }), "$0.00");
+    expectSelectedTime(screen.getByRole("region", { name: "Reservation summary" }), "Free");
     expect(screen.getByRole("button", { name: "Confirm reservation" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Change selection" })).toBeDisabled();
     expect(apiRequestMock).toHaveBeenCalledTimes(1);
@@ -106,7 +108,7 @@ describe("RentalReservationCheckout", () => {
     await user.click(screen.getByRole("button", { name: "Reserve resources" }));
     await user.click(screen.getByRole("button", { name: "Confirm reservation" }));
     await screen.findByText("Reservation is temporarily unavailable");
-    expectSelectedTime(screen.getByRole("region", { name: "Reservation summary" }), "$0.00");
+    expectSelectedTime(screen.getByRole("region", { name: "Reservation summary" }), "Free");
     await user.click(screen.getByRole("button", { name: "Confirm reservation" }));
     await user.click(await screen.findByRole("button", { name: "Create event now" }));
     expect(apiRequestMock).toHaveBeenCalledTimes(2);

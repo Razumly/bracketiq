@@ -329,7 +329,7 @@ describe("OrganizationRefundsTabContent", () => {
     render(<OrganizationRefundsTabContent organizationId="org-1" />);
     expect(await screen.findByRole("alert")).toHaveTextContent("You do not have permission");
     expect(screen.queryByRole("button", { name: "Deny" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^Approve/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Approve\b/ })).not.toBeInTheDocument();
     expect(screen.queryByText("Duplicate registration")).not.toBeInTheDocument();
     expect(refundRequestService.updateRefundStatus).not.toHaveBeenCalled();
   });

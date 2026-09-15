@@ -193,8 +193,8 @@ it("exports the existing CSV column order, quoted text, zero values, and payout 
   ]);
   expect(csv).toBe(
     [
-      '"Pay Run","Pay Run Status","Payout Status","Period Start","Period End","Scheduled Pay Date","Exported At","Export Count","Export Format","Staff","User ID","Staff Member ID","Source Type","Event ID","Team ID","Event Team ID","Service Start","Service End","Wage Type","Rate","Paid Minutes","Amount","Payout Provider","Batch Reference","Transfer Reference","Item Status","Item Payout Status","Notes"',
-      '"June, ""final""","DRAFT","NOT_STARTED","2026-06-01T00:00:00.000","2026-06-30T23:59:59.999","","","0","","Alex ""Ace"" Rivera","user-1","staff-1","Event labor","event-1","team-1","event-team-1","","","HOURLY","12.34","0","-0.50","Bank","batch-1","transfer-1","DRAFT","NOT_STARTED","Run note"',
+      'Pay Run,Pay Run Status,Payout Status,Period Start,Period End,Scheduled Pay Date,Exported At,Export Count,Export Format,Staff,User ID,Staff Member ID,Source Type,Event ID,Team ID,Event Team ID,Service Start,Service End,Wage Type,Rate,Paid Minutes,Amount,Payout Provider,Batch Reference,Transfer Reference,Item Status,Item Payout Status,Notes',
+      '"June, ""final""",DRAFT,NOT_STARTED,2026-06-01T00:00:00.000,2026-06-30T23:59:59.999,,,0,,"Alex ""Ace"" Rivera",user-1,staff-1,Event labor,event-1,team-1,event-team-1,,,HOURLY,12.34,0,-0.50,Bank,batch-1,transfer-1,DRAFT,NOT_STARTED,Run note',
     ].join("\n"),
   );
 });
@@ -206,6 +206,7 @@ it("retains explicit empty payout values and multiline notes in CSV", () => {
       notes: "Parent note",
       items: [
         item({
+          label: "Alex\rRivera",
           payoutProvider: "",
           notes: "First line\nSecond line",
           rateCents: NaN,
@@ -216,7 +217,8 @@ it("retains explicit empty payout values and multiline notes in CSV", () => {
   expect(csv).not.toContain("Parent bank");
   expect(csv).not.toContain("Parent note");
   expect(csv).toContain('"First line\nSecond line"');
-  expect(csv).toContain('"Staff labor"');
+  expect(csv).toContain('"Alex\rRivera"');
+  expect(csv).toContain(",Staff labor,");
   expect(csv).not.toContain("NaN");
   expect(buildPayRunCsv([]).split("\n")).toHaveLength(1);
 });

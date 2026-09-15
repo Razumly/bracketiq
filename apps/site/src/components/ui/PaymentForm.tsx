@@ -73,13 +73,14 @@ export default function PaymentForm({
       if (error) {
         onError(error.message || "Payment failed");
       } else if (confirmedPaymentIntent?.status === "processing") {
-        onPending?.();
+        if (onPending) onPending();
+        else onError("Payment is processing. Wait for confirmation before trying another payment.");
       } else if (confirmedPaymentIntent?.status === "succeeded") {
         onSuccess();
       } else {
         onError("Payment is not complete. Review the Stripe form before trying again.");
       }
-    } catch (err) {
+    } catch {
       onError("An unexpected error occurred");
     } finally {
       setLoading(false);
