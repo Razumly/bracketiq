@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Alert, Button, Group, Loader, Paper, Select, Stack, Text } from '@mantine/core';
+import { Alert, Button, Group, Loader, Paper, Select, Stack, Text } from '@/components/organization/organization-operation-ui';
 
 import ResponsiveCardGrid from '@/components/ui/ResponsiveCardGrid';
 import type { EventParticipantDivisionWarning } from '@/lib/eventService';
@@ -217,14 +217,14 @@ export default function ParticipantsPanel({
               const filledColumnTeamsCount = columnTeams.filter((team) => !isPlaceholderParticipantTeam(team)).length;
               const columnWarnings = participantDivisionWarningsByDivisionId.get(column.id.toLowerCase()) ?? [];
               return (
-                <Paper key={column.id} withBorder radius="md" p="md" miw={320}>
+                <Paper key={column.id} withBorder radius="md" p="md" style={{ minWidth: 320 }}>
                   <Stack gap="sm">
                     <Group justify="space-between" align="center">
                       <Text fw={600}>{column.label}</Text>
                       <Text size="xs" c="dimmed">{filledColumnTeamsCount}</Text>
                     </Group>
                     {columnWarnings.map((warning) => (
-                      <Alert key={`${column.id}:${warning.code}`} color="yellow" radius="md" py="xs">
+                      <Alert key={`${column.id}:${warning.code}`} color="yellow" radius="md" p="xs">
                         <Text size="xs">{warning.message}</Text>
                       </Alert>
                     ))}
@@ -286,7 +286,7 @@ export default function ParticipantsPanel({
               );
             })}
             {canManageEvent && (
-              <Paper withBorder radius="md" p="md" miw={320}>
+              <Paper withBorder radius="md" p="md" style={{ minWidth: 320 }}>
                 <Stack gap="sm">
                   <Group justify="space-between" align="center">
                     <Text fw={600}>Unassigned</Text>

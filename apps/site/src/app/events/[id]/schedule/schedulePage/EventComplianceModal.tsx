@@ -9,7 +9,7 @@ import {
   Stack,
   Table,
   Text,
-} from '@mantine/core';
+} from '@/components/organization/organization-operation-ui';
 
 import { formatBillPaidInFullSummary, formatBillPaidProgress, formatBillTotalBreakdown } from '@/lib/billDisplay';
 import type { TeamComplianceSummary } from '@/lib/eventTeamCompliance';

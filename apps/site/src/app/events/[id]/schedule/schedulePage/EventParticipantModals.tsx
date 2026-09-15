@@ -11,7 +11,7 @@ import {
   Stack,
   Text,
   TextInput,
-} from '@mantine/core';
+} from '@/components/organization/organization-operation-ui';
 
 import TeamDetailModal from '@/components/ui/TeamDetailModal';
 import UserCard from '@/components/ui/UserCard';

@@ -16,7 +16,6 @@ import {
   usePathname,
 } from "next/navigation";
 import {
-  Container,
   Text,
   Group,
   Button,
@@ -40,6 +39,7 @@ import { DatePickerInput } from "@mantine/dates";
 import { useMediaQuery } from "@mantine/hooks";
 import type { View } from "react-big-calendar";
 
+import { Container as OperationContainer } from "@/components/organization/organization-operation-ui";
 import Navigation from "@/components/layout/Navigation";
 import { TermsConsentModal } from "@/components/moderation/TermsConsentModal";
 import Loading from "@/components/ui/Loading";
@@ -8915,7 +8915,11 @@ function EventScheduleContent() {
           </Stack>
         ) : null}
       </Modal>
-      <Container fluid pt="xl" pb={0}>
+      <OperationContainer
+        size="xl"
+        fluid={isCreateMode || isEditingEvent}
+        className="pt-8 pb-0"
+      >
         <Stack gap="lg">
           <EventScheduleHeader
             eventId={activeEvent.$id}
@@ -9309,7 +9313,7 @@ function EventScheduleContent() {
             />
           </Tabs>
         </Stack>
-      </Container>
+      </OperationContainer>
       <Modal
         opened={isNotificationModalOpen}
         onClose={handleCloseNotificationModal}

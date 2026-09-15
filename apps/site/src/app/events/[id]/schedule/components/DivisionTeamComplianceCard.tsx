@@ -1,4 +1,4 @@
-import { Badge, Group, Paper, Stack, Text } from '@mantine/core';
+import { Badge, Group, Paper, Stack, Text } from '@/components/organization/organization-operation-ui';
 import type { Team } from '@/types';
 import { formatBillPaidInFullSummary, formatBillPaidProgress, formatBillTotalBreakdown } from '@/lib/billDisplay';
 import type { TeamComplianceSummary } from '@/lib/eventTeamCompliance';
