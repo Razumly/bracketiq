@@ -190,6 +190,9 @@ export function EventTeamRegistrationPanel({
                                             || selectedTeamIsRegistered
                                         }
                                         color={selectedTeamIsRegistered ? 'gray' : 'green'}
+                                        className={isPage && !selectedTeamIsRegistered
+                                            ? 'bg-[var(--bq-action)] text-[var(--bq-on-action)] hover:bg-[var(--bq-action-hover)]'
+                                            : undefined}
                                         size={isPage ? 'lg' : 'md'}
                                     >
                                         {eventHasStarted
