@@ -1,187 +1,97 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MantineProvider } from '@mantine/core';
+import type { PublicOrganizationSummary } from '@/server/publicOrganizationCatalog';
+import PublicProductGrid from '../PublicProductGrid';
 
 const pushMock = jest.fn();
-const createProductPaymentIntentMock = jest.fn();
-const createSubscriptionCheckoutMock = jest.fn();
-const showNotificationMock = jest.fn();
-const oauthLoginWithGoogleMock = jest.fn();
 const loginMock = jest.fn();
 const createAccountMock = jest.fn();
-const resendVerificationMock = jest.fn();
 const mockUseApp = jest.fn();
 
-jest.mock('@mantine/core', () => {
-  const actual = jest.requireActual('@mantine/core');
-  return {
-    ...actual,
-    Modal: ({ opened, title, children }: any) => (opened ? (
-      <div>
-        <div>{title}</div>
-        {children}
-      </div>
-    ) : null),
-  };
-});
-
-jest.mock('next/navigation', () => ({
-  useRouter: () => ({ push: pushMock }),
-}));
-
-jest.mock('../PublicOrganizationPage.module.css', () => new Proxy({}, {
-  get: (_target, property) => String(property),
-}));
-
-jest.mock('@/app/providers', () => ({
-  useApp: () => mockUseApp(),
-}));
-
-jest.mock('@/components/ui/BillingAddressModal', () => () => null);
-jest.mock('@/components/ui/PaymentModal', () => ({
-  __esModule: true,
-  default: ({ isOpen }: { isOpen: boolean }) => (isOpen ? <div>Payment modal</div> : null),
-}));
-
-jest.mock('@mantine/notifications', () => ({
-  notifications: {
-    show: (...args: any[]) => showNotificationMock(...args),
-  },
-}));
-
-jest.mock('@/lib/paymentService', () => ({
-  paymentService: {
-    createProductPaymentIntent: (...args: any[]) => createProductPaymentIntentMock(...args),
-  },
-}));
-
-jest.mock('@/lib/productService', () => ({
-  productService: {
-    createSubscriptionCheckout: (...args: any[]) => createSubscriptionCheckoutMock(...args),
-  },
-}));
-
+jest.mock('next/navigation', () => ({ useRouter: () => ({ push: pushMock }) }));
+jest.mock('@/app/providers', () => ({ useApp: () => mockUseApp() }));
 jest.mock('@/lib/auth', () => {
   const actual = jest.requireActual('@/lib/auth');
   return {
     ...actual,
     authService: {
       ...actual.authService,
-      oauthLoginWithGoogle: (...args: any[]) => oauthLoginWithGoogleMock(...args),
-      login: (...args: any[]) => loginMock(...args),
-      createAccount: (...args: any[]) => createAccountMock(...args),
-      resendVerification: (...args: any[]) => resendVerificationMock(...args),
+      login: (...args: unknown[]) => loginMock(...args),
+      createAccount: (...args: unknown[]) => createAccountMock(...args),
     },
   };
 });
 
-import PublicProductGrid from '../PublicProductGrid';
-
-const organization = {
-  id: 'org_1',
-  slug: 'summit',
-  name: 'Summit Indoor Volleyball Facility',
-  description: null,
-  location: 'Seattle',
-  website: null,
-  logoUrl: '/logo.png',
-  sports: ['Indoor Volleyball'],
-  brandPrimaryColor: '#0f766e',
-  brandAccentColor: '#f59e0b',
-  publicHeadline: 'Play here',
-  publicIntroText: 'Welcome',
-  publicPageEnabled: true,
-  publicWidgetsEnabled: true,
+const organization: PublicOrganizationSummary = {
+  id: 'org_1', slug: 'summit', name: 'Summit Sports Club', description: null,
+  location: 'Seattle', website: null, logoUrl: '/logo.png', sports: [],
+  brandPrimaryColor: '#0f766e', brandAccentColor: '#f59e0b', publicHeadline: 'Play here',
+  publicIntroText: 'Welcome', publicPageEnabled: true, publicWidgetsEnabled: true,
   publicCompletionRedirectUrl: null,
-} as const;
-
-const membershipProduct = {
-  id: 'prod_membership',
-  name: 'Monthly Membership',
-  description: 'Access every week.',
-  priceCents: 4900,
-  period: 'month',
-  detailsUrl: '/o/summit/products/prod_membership',
 };
+const products = [
+  { id: 'membership', name: 'Monthly membership', description: 'Weekly court access.', priceCents: 4900, period: 'month', detailsUrl: '/o/summit/products/membership' },
+  { id: 'shirt', name: 'Training shirt', description: 'Club training shirt.', priceCents: 2850, period: 'single', detailsUrl: '/o/summit/products/shirt' },
+];
+const renderCatalog = () => render(<PublicProductGrid slug="summit" organization={organization} products={products} />);
 
 describe('PublicProductGrid', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
-    mockUseApp.mockReturnValue({
-      user: null,
-      authUser: null,
-      loading: false,
-      setUser: jest.fn(),
-      setAuthUser: jest.fn(),
-      updateUser: jest.fn(),
-      refreshUser: jest.fn(),
-      refreshSession: jest.fn(),
-      isGuest: false,
-      isAuthenticated: false,
-      requiresProfileCompletion: false,
-      missingProfileFields: [],
-    });
-    createProductPaymentIntentMock.mockResolvedValue({ paymentIntent: 'pi_single' });
-    createSubscriptionCheckoutMock.mockResolvedValue({ paymentIntent: 'pi_subscription' });
+    jest.resetAllMocks();
+    window.sessionStorage.clear();
+    mockUseApp.mockReturnValue({ user: { $id: 'user_1' }, loading: false, setUser: jest.fn(), setAuthUser: jest.fn() });
   });
 
-  it('shows registration required for guests and opens the auth modal from the public page', async () => {
+  it('keeps selection and product details separate from checkout and carries the chosen product forward', async () => {
     const user = userEvent.setup();
-
-    render(
-      <MantineProvider>
-        <PublicProductGrid
-          slug="summit"
-          organization={organization}
-          products={[membershipProduct]}
-        />
-      </MantineProvider>,
-    );
-
-    await user.click(screen.getByRole('button', { name: 'Registration required' }));
-
-    expect(screen.getByText('Create account to purchase')).toBeInTheDocument();
-    expect(createSubscriptionCheckoutMock).not.toHaveBeenCalled();
+    renderCatalog();
+    const continueButton = screen.getByRole('button', { name: 'Continue to checkout' });
+    expect(continueButton).toBeDisabled();
+    await user.click(screen.getByRole('radio', { name: /Training shirt/ }));
+    const summary = screen.getByRole('region', { name: 'Order summary' });
+    expect(within(summary).getByText('Training shirt')).toBeInTheDocument();
+    expect(within(summary).getByText('$28.50')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'View details for Monthly membership' }));
+    const detail = screen.getByRole('dialog');
+    expect(within(detail).getByText('Weekly court access.')).toBeInTheDocument();
+    expect(within(summary).getByText('Training shirt')).toBeInTheDocument();
     expect(pushMock).not.toHaveBeenCalled();
+    await user.click(within(detail).getByRole('button', { name: 'Select product' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(within(summary).getByText('$49.00 · month')).toBeInTheDocument();
+    await user.click(continueButton);
+    expect(pushMock).toHaveBeenCalledWith('/o/summit/products/membership');
   });
 
-  it('starts checkout immediately for signed-in users instead of redirecting to a product page', async () => {
+  it('retains the selected product through a failed sign-in and continues after authentication succeeds', async () => {
     const user = userEvent.setup();
-    mockUseApp.mockReturnValue({
-      user: { $id: 'user_1', firstName: 'Sam', lastName: 'User' },
-      authUser: { $id: 'user_1', email: 'sam@example.com' },
-      loading: false,
-      setUser: jest.fn(),
-      setAuthUser: jest.fn(),
-      updateUser: jest.fn(),
-      refreshUser: jest.fn(),
-      refreshSession: jest.fn(),
-      isGuest: false,
-      isAuthenticated: true,
-      requiresProfileCompletion: false,
-      missingProfileFields: [],
-    });
-
-    render(
-      <MantineProvider>
-        <PublicProductGrid
-          slug="summit"
-          organization={organization}
-          products={[membershipProduct]}
-        />
-      </MantineProvider>,
-    );
-
-    await user.click(screen.getByRole('button', { name: 'Buy now' }));
-
-    await waitFor(() => {
-      expect(createSubscriptionCheckoutMock).toHaveBeenCalledWith({
-        productId: 'prod_membership',
-        billingAddress: undefined,
-        discountCode: null,
-      });
-    });
-    expect(screen.getByText('Payment modal')).toBeInTheDocument();
+    const setUser = jest.fn();
+    mockUseApp.mockReturnValue({ user: null, loading: false, setUser, setAuthUser: jest.fn() });
+    loginMock.mockRejectedValueOnce(new Error('Check your email and password.'));
+    loginMock.mockResolvedValueOnce({ user: { $id: 'user_1' }, profile: { $id: 'user_1' } });
+    renderCatalog();
+    await user.click(screen.getByRole('radio', { name: /Training shirt/ }));
+    await user.click(screen.getByRole('button', { name: 'Continue to checkout' }));
+    await user.click(screen.getByRole('button', { name: 'Already have an account? Sign in' }));
+    await user.type(screen.getByLabelText('Email address', { exact: false }), 'sam@example.com');
+    await user.type(screen.getByLabelText('Password', { exact: false }), 'password123');
+    await user.click(screen.getByRole('button', { name: 'Sign in', exact: true }));
+    expect(await screen.findByText('Check your email and password.')).toBeInTheDocument();
     expect(pushMock).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Sign in', exact: true }));
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith('/o/summit/products/shirt'));
+    expect(setUser).toHaveBeenCalledWith({ $id: 'user_1' });
+  });
+
+  it('allows selection while the session loads but blocks checkout until it is ready', async () => {
+    const user = userEvent.setup();
+    mockUseApp.mockReturnValue({ user: null, loading: true, setUser: jest.fn(), setAuthUser: jest.fn() });
+    const { rerender } = renderCatalog();
+    await user.click(screen.getByRole('radio', { name: /Training shirt/ }));
+    expect(screen.getByRole('button', { name: 'Continue to checkout' })).toBeDisabled();
+    mockUseApp.mockReturnValue({ user: { $id: 'user_1' }, loading: false, setUser: jest.fn(), setAuthUser: jest.fn() });
+    rerender(<PublicProductGrid slug="summit" organization={organization} products={products} />);
+    await user.click(screen.getByRole('button', { name: 'Continue to checkout' }));
+    expect(pushMock).toHaveBeenCalledWith('/o/summit/products/shirt');
   });
 });

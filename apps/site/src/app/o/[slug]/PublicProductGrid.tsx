@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { ArrowRight, Check, ShieldCheck } from 'lucide-react';
 import {
   Alert,
   Button,
@@ -11,21 +12,16 @@ import {
   Stack,
   Text,
   TextInput,
-} from '@mantine/core';
-import { notifications } from '@mantine/notifications';
+  Badge,
+  Paper,
+} from '@/components/organization/organization-operation-ui';
 import { useApp } from '@/app/providers';
-import BillingAddressModal from '@/components/ui/BillingAddressModal';
-import PaymentModal from '@/components/ui/PaymentModal';
-import { isApiRequestError } from '@/lib/apiClient';
 import { ApiError, authService } from '@/lib/auth';
-import { paymentService } from '@/lib/paymentService';
-import { navigateToPublicCompletion } from '@/lib/publicCompletionRedirect';
-import { productService } from '@/lib/productService';
 import type {
   PublicOrganizationProductCard,
   PublicOrganizationSummary,
 } from '@/server/publicOrganizationCatalog';
-import type { BillingAddress, PaymentIntent, Product, ProductPeriod, UserData } from '@/types';
+import type { UserData } from '@/types';
 import { formatPrice } from '@/types';
 import styles from './PublicOrganizationPage.module.css';
 
@@ -59,34 +55,6 @@ const EMPTY_AUTH_MODAL_FORM: AuthModalForm = {
 
 const isSinglePurchasePeriod = (period: string | null | undefined): boolean =>
   String(period ?? '').trim().toLowerCase() === 'single';
-
-const normalizeProductPeriod = (value: unknown): ProductPeriod => {
-  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
-  if (normalized === 'single' || normalized === 'single_purchase' || normalized === 'one-time' || normalized === 'one_time') {
-    return 'single';
-  }
-  if (normalized === 'weekly') return 'week';
-  if (normalized === 'monthly') return 'month';
-  if (normalized === 'yearly') return 'year';
-  if (normalized === 'week' || normalized === 'month' || normalized === 'year') {
-    return normalized as ProductPeriod;
-  }
-  return 'month';
-};
-
-const buildCheckoutProduct = (
-  product: PublicOrganizationProductCard,
-  organizationId: string,
-): Product => ({
-  $id: product.id,
-  organizationId,
-  name: product.name,
-  description: product.description ?? undefined,
-  priceCents: product.priceCents,
-  period: normalizeProductPeriod(product.period),
-  taxCategory: isSinglePurchasePeriod(product.period) ? 'ONE_TIME_PRODUCT' : 'SUBSCRIPTION',
-  isActive: true,
-});
 
 const getProductPriceLabel = (product: PublicOrganizationProductCard): string => (
   isSinglePurchasePeriod(product.period)
@@ -124,10 +92,7 @@ export default function PublicProductGrid({
   const router = useRouter();
   const { user, loading: authLoading, setAuthUser, setUser } = useApp();
   const [activeProduct, setActiveProduct] = useState<PublicOrganizationProductCard | null>(null);
-  const [startingProductId, setStartingProductId] = useState<string | null>(null);
-  const [paymentData, setPaymentData] = useState<PaymentIntent | null>(null);
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [showBillingAddressModal, setShowBillingAddressModal] = useState(false);
+  const [detailProduct, setDetailProduct] = useState<PublicOrganizationProductCard | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authModalMode, setAuthModalMode] = useState<AuthModalMode>('signup');
   const [authModalForm, setAuthModalForm] = useState<AuthModalForm>(EMPTY_AUTH_MODAL_FORM);
@@ -137,7 +102,6 @@ export default function PublicProductGrid({
   const [authVerificationMessage, setAuthVerificationMessage] = useState('');
   const [authVerificationMessageType, setAuthVerificationMessageType] = useState<'info' | 'success'>('info');
   const [authResendingVerification, setAuthResendingVerification] = useState(false);
-  const [discountCodesByProductId, setDiscountCodesByProductId] = useState<Record<string, string>>({});
 
   const today = useMemo(() => new Date(), []);
   const maxAuthDob = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
@@ -164,58 +128,17 @@ export default function PublicProductGrid({
     resetAuthModalFeedback();
   }, [resetAuthModalFeedback]);
 
-  const startProductCheckout = useCallback(async (
+  const continueToCheckout = useCallback((
     product: PublicOrganizationProductCard,
     purchaser?: UserData | null,
-    billingAddress?: BillingAddress,
-    discountCode?: string | null,
   ) => {
-    const resolvedUser = purchaser ?? user;
-    if (!resolvedUser) {
+    if (!(purchaser ?? user)) {
       openAuthModal(product);
       return;
     }
-
-    setStartingProductId(product.id);
-    setActiveProduct(product);
-    try {
-      const intent = isSinglePurchasePeriod(product.period)
-        ? await paymentService.createProductPaymentIntent(
-            resolvedUser,
-            buildCheckoutProduct(product, organization.id),
-            { $id: organization.id, name: organization.name },
-            billingAddress,
-            (discountCode ?? discountCodesByProductId[product.id] ?? '').trim() || null,
-          )
-        : await productService.createSubscriptionCheckout({
-            productId: product.id,
-            billingAddress,
-            discountCode: (discountCode ?? discountCodesByProductId[product.id] ?? '').trim() || null,
-          });
-      clearPendingCheckoutProductId();
-      setPaymentData(intent);
-      setShowBillingAddressModal(false);
-      setShowPaymentModal(true);
-      setShowAuthModal(false);
-    } catch (error) {
-      if (
-        isApiRequestError(error)
-        && error.data
-        && typeof error.data === 'object'
-        && 'billingAddressRequired' in error.data
-        && Boolean((error.data as { billingAddressRequired?: boolean }).billingAddressRequired)
-      ) {
-        setShowBillingAddressModal(true);
-        return;
-      }
-      notifications.show({
-        color: 'red',
-        message: error instanceof Error ? error.message : 'Unable to start checkout.',
-      });
-    } finally {
-      setStartingProductId(null);
-    }
-  }, [discountCodesByProductId, openAuthModal, organization.id, organization.name, user]);
+    clearPendingCheckoutProductId();
+    router.push(`/o/${encodeURIComponent(slug)}/products/${encodeURIComponent(product.id)}`);
+  }, [openAuthModal, router, slug, user]);
 
   const handleAuthModalInputChange = useCallback((field: keyof AuthModalForm, value: string) => {
     setAuthModalForm((current) => ({ ...current, [field]: value }));
@@ -273,7 +196,7 @@ export default function PublicProductGrid({
       setAuthUser(authResult.user);
       setUser(authResult.profile);
       setShowAuthModal(false);
-      await startProductCheckout(activeProduct, authResult.profile, undefined, discountCodesByProductId[activeProduct.id]);
+      continueToCheckout(activeProduct, authResult.profile);
     } catch (error) {
       if (error instanceof ApiError && error.code === 'EMAIL_NOT_VERIFIED') {
         const pendingEmail = error.email || authModalForm.email.trim().toLowerCase();
@@ -287,7 +210,7 @@ export default function PublicProductGrid({
     } finally {
       setAuthModalLoading(false);
     }
-  }, [activeProduct, authModalForm, authModalMode, discountCodesByProductId, resetAuthModalFeedback, setAuthUser, setUser, startProductCheckout]);
+  }, [activeProduct, authModalForm, authModalMode, continueToCheckout, resetAuthModalFeedback, setAuthUser, setUser]);
 
   useEffect(() => {
     if (authLoading || !user) {
@@ -302,53 +225,108 @@ export default function PublicProductGrid({
       clearPendingCheckoutProductId();
       return;
     }
-    void startProductCheckout(pendingProduct, user);
-  }, [authLoading, products, startProductCheckout, user]);
+    continueToCheckout(pendingProduct, user);
+  }, [authLoading, continueToCheckout, products, user]);
 
   return (
     <>
-      <div className={styles.grid}>
-        {products.map((product) => {
-          const isStarting = startingProductId === product.id;
-          const actionLabel = authLoading
-            ? 'Checking session...'
-            : user
-              ? 'Buy now'
-              : 'Registration required';
-
-          return (
-            <div key={product.id} className={styles.item}>
-              <div className={styles.itemBody}>
-                <h3 className={styles.itemTitle}>{product.name}</h3>
-                {product.description ? <p className={styles.itemMeta}>{product.description}</p> : null}
-                <p className={styles.itemMeta}>{getProductPriceLabel(product)}</p>
-                <TextInput
-                  label="Discount code"
-                  placeholder="Enter code"
-                  size="xs"
-                  value={discountCodesByProductId[product.id] ?? ''}
-                  onChange={(event) => {
-                    const value = event.currentTarget.value;
-                    setDiscountCodesByProductId((current) => ({
-                      ...current,
-                      [product.id]: value,
-                    }));
-                  }}
-                  disabled={authLoading || isStarting}
-                />
-                <button
-                  type="button"
-                  className={styles.itemButton}
-                  disabled={authLoading || isStarting}
-                  onClick={() => { void startProductCheckout(product); }}
-                >
-                  {isStarting ? 'Opening payment...' : actionLabel}
-                </button>
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
+        <fieldset className="min-w-0 space-y-3">
+          <legend className="mb-4 text-xl font-semibold text-foreground">Choose a product</legend>
+          {products.map((product) => {
+            const selected = activeProduct?.id === product.id;
+            return (
+              <div
+                key={product.id}
+                className={`org-radius-surface border p-4 sm:p-5 ${selected ? 'border-ring bg-secondary' : 'border-border bg-card'}`}
+              >
+                <label className="flex min-h-11 cursor-pointer items-start gap-3">
+                  <input
+                    type="radio"
+                    name="public-product"
+                    value={product.id}
+                    checked={selected}
+                    onChange={() => setActiveProduct(product)}
+                    className="mt-1 size-5 shrink-0 accent-[var(--ring)]"
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex flex-wrap items-start justify-between gap-2 font-semibold text-foreground">
+                      <span className="text-lg">{product.name}</span>
+                      <span className="text-lg tabular-nums">{getProductPriceLabel(product)}</span>
+                    </span>
+                    {product.description && <span className="mt-1 block text-sm text-muted-foreground">{product.description}</span>}
+                  </span>
+                </label>
+                <div className="ml-8 mt-2 flex flex-wrap items-center gap-3">
+                  <Badge>{isSinglePurchasePeriod(product.period) ? 'One-time purchase' : 'Recurring'}</Badge>
+                  <Button
+                    variant="subtle"
+                    onClick={() => setDetailProduct(product)}
+                    aria-label={`View details for ${product.name}`}
+                    rightSection={<ArrowRight aria-hidden="true" className="size-4" />}
+                  >
+                    View details
+                  </Button>
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+          <p className="text-sm text-muted-foreground">Choose one product. Review its details before checkout.</p>
+        </fieldset>
+
+        <Paper withBorder p="lg" className="space-y-5 lg:sticky lg:top-6" role="region" aria-label="Order summary">
+          <h3 className="text-xl font-semibold">Order summary</h3>
+          {activeProduct ? (
+            <>
+              <div className="space-y-2">
+                <p className="text-lg font-semibold">{activeProduct.name}</p>
+                {activeProduct.description && <p className="text-sm text-muted-foreground">{activeProduct.description}</p>}
+                <Badge><Check aria-hidden="true" className="mr-1 size-3" /> Selected</Badge>
+              </div>
+              <dl className="space-y-3 border-y border-border py-4 text-sm">
+                <div className="flex justify-between gap-4"><dt className="text-muted-foreground">Quantity</dt><dd>1</dd></div>
+                <div className="flex justify-between gap-4"><dt className="text-muted-foreground">Product price</dt><dd className="font-semibold tabular-nums">{getProductPriceLabel(activeProduct)}</dd></div>
+                <div className="flex justify-between gap-4"><dt className="text-muted-foreground">Tax</dt><dd>Calculated at checkout</dd></div>
+              </dl>
+            </>
+          ) : <p className="text-sm text-muted-foreground">No product selected.</p>}
+          <Button
+            fullWidth
+            disabled={authLoading || !activeProduct}
+            aria-describedby="product-checkout-prerequisite"
+            onClick={() => { if (activeProduct) continueToCheckout(activeProduct); }}
+            rightSection={<ArrowRight aria-hidden="true" className="size-4" />}
+          >
+            Continue to checkout
+          </Button>
+          <p id="product-checkout-prerequisite" className="text-sm text-muted-foreground">
+            {authLoading ? 'Checking your session.' : !activeProduct ? 'Select a product to continue.' : !user ? 'Sign in or create an account to purchase this product.' : 'Review billing, discounts, and your exact total before payment.'}
+          </p>
+          <p className="flex items-start gap-2 border-t border-border pt-4 text-sm text-muted-foreground">
+            <ShieldCheck aria-hidden="true" className="size-4 shrink-0" />
+            Processing fees are included in the online price. Stripe collects payment details.
+          </p>
+        </Paper>
       </div>
+
+      <Modal opened={Boolean(detailProduct)} onClose={() => setDetailProduct(null)} title={detailProduct?.name} size="lg">
+        {detailProduct && <Stack gap="lg">
+          <Text c="dimmed">{organization.name}</Text>
+          <section className="space-y-3">
+            <h3 className="text-lg font-semibold">Product overview</h3>
+            {detailProduct.description && <p className="whitespace-pre-line text-muted-foreground">{detailProduct.description}</p>}
+            <dl className="space-y-3 border-y border-border py-4 text-sm">
+              <div className="flex justify-between gap-4"><dt>Product price</dt><dd className="font-semibold tabular-nums">{getProductPriceLabel(detailProduct)}</dd></div>
+              <div className="flex justify-between gap-4"><dt>Payment frequency</dt><dd>{isSinglePurchasePeriod(detailProduct.period) ? 'One time' : `Every ${detailProduct.period}`}</dd></div>
+              <div className="flex justify-between gap-4"><dt>Tax</dt><dd>Calculated at checkout</dd></div>
+            </dl>
+            <p className="text-sm text-muted-foreground">Processing fees are included in the online price. Selecting this product does not take payment.</p>
+          </section>
+          <Button onClick={() => { setActiveProduct(detailProduct); setDetailProduct(null); }}>
+            Select product
+          </Button>
+        </Stack>}
+      </Modal>
 
       <Modal
         opened={showAuthModal}
@@ -462,52 +440,6 @@ export default function PublicProductGrid({
         </form>
       </Modal>
 
-      <BillingAddressModal
-        opened={showBillingAddressModal}
-        onClose={() => setShowBillingAddressModal(false)}
-        onSaved={async (billingAddress) => {
-          if (activeProduct) {
-            await startProductCheckout(
-              activeProduct,
-              user,
-              billingAddress,
-              discountCodesByProductId[activeProduct.id],
-            );
-          }
-        }}
-        title="Billing address required"
-        description="Enter your billing address so tax can be calculated before checkout."
-      />
-
-      <PaymentModal
-        isOpen={showPaymentModal && Boolean(paymentData) && Boolean(activeProduct)}
-        onClose={() => {
-          setShowPaymentModal(false);
-          setPaymentData(null);
-        }}
-        event={{
-          name: activeProduct?.name ?? 'Product purchase',
-          location: organization.name,
-          eventType: 'EVENT',
-          price: activeProduct?.priceCents ?? 0,
-        }}
-        paymentData={paymentData}
-        onPaymentSuccess={() => {
-          const completedProduct = activeProduct;
-          notifications.show({
-            color: 'green',
-            message: completedProduct ? `Purchase completed for ${completedProduct.name}.` : 'Purchase completed.',
-          });
-          setShowPaymentModal(false);
-          setPaymentData(null);
-          navigateToPublicCompletion({
-            router,
-            slug,
-            kind: 'product',
-            redirectUrl: organization.publicCompletionRedirectUrl,
-          });
-        }}
-      />
     </>
   );
 }

@@ -1,4 +1,6 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, render, renderHook, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { PaymentResultView } from "../PaymentResultView";
 import { usePaymentDialogState } from "../usePaymentDialogState";
 import { billingAddressService } from "@/lib/billingAddressService";
 import type { PaymentIntent } from "@/types";
@@ -105,6 +107,40 @@ describe("Payment dialog state", () => {
     });
     expect(result.current.view).toBe("pending");
     expect(onPaymentSuccess).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the exact paid amount only after success, not while payment is pending", async () => {
+    const user = userEvent.setup();
+    const onPaymentSuccess = jest.fn();
+    const onPaymentPending = jest.fn();
+    const onClose = jest.fn();
+    const { result } = renderHook(() =>
+      usePaymentDialogState({ isOpen: true, paymentData, onPaymentSuccess, onPaymentPending }),
+    );
+    const renderResult = () => result.current.view === "payment" ? null : (
+      <PaymentResultView
+        view={result.current.view}
+        reloading={result.current.reloading}
+        copy={result.current.copy}
+        feeBreakdown={paymentData.feeBreakdown}
+        orderName="Training shirt"
+        onClose={onClose}
+      />
+    );
+    const { rerender } = render(renderResult());
+    expect(screen.queryByText("Paid today")).not.toBeInTheDocument();
+    await act(async () => { await result.current.handlePending(); });
+    rerender(renderResult());
+    expect(screen.getByText("$16.00")).toBeInTheDocument();
+    expect(screen.queryByText("Paid today")).not.toBeInTheDocument();
+    expect(onPaymentSuccess).not.toHaveBeenCalled();
+    await act(async () => { await result.current.handleSuccess(); });
+    rerender(renderResult());
+    expect(screen.getByText("Paid today")).toBeInTheDocument();
+    expect(screen.getByText("$16.00")).toBeInTheDocument();
+    expect(onPaymentSuccess).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("ignores billing-profile results after the dialog closes", async () => {
