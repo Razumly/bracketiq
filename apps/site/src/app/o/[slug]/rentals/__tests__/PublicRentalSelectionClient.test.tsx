@@ -69,7 +69,10 @@ it("keeps booked times unavailable and retains the selected slot during a failed
   const user = setup();
   expect(await screen.findByRole("button", { name: /09:00 AM – 10:00 AM Court 1.*Unavailable/ })).toBeDisabled();
   await user.click(screen.getByRole("button", { name: /10:00 AM – 11:00 AM Court 1/ }));
-  await user.click(screen.getByRole("button", { name: /Sun, Jun 23/ }));
+  const dates = within(screen.getByRole("group", { name: "Rental dates" }));
+  await user.click(dates.getByRole("button", { name: "Sun, Jun 23" }));
+  expect(dates.getByRole("button", { name: "Sun, Jun 23", pressed: true })).toBeVisible();
+  expect(dates.getByRole("button", { name: "Sat, Jun 22", pressed: false })).toBeVisible();
   await screen.findByText(/Unable to check availability for this date/);
   const summary = screen.getByRole("complementary", { name: "Selected rental times" });
   expect(within(summary).getByText("06/22/2030")).toBeInTheDocument();
@@ -79,6 +82,10 @@ it("keeps booked times unavailable and retains the selected slot during a failed
   await user.click(screen.getByRole("button", { name: "Retry availability" }));
   await waitFor(() => expect(screen.queryByText(/Unable to check availability for this date/)).not.toBeInTheDocument());
   expect(within(summary).getByText("10:00 AM – 11:00 AM")).toBeInTheDocument();
+  await user.click(dates.getByRole("button", { name: "Sat, Jun 22" }));
+  expect(dates.getByRole("button", { name: "Sat, Jun 22", pressed: true })).toBeVisible();
+  expect(dates.getByRole("button", { name: "Sun, Jun 23", pressed: false })).toBeVisible();
+  expect(await screen.findByRole("button", { name: /10:00 AM – 11:00 AM Court 1.*Selected/ })).toBeEnabled();
 });
 
 it("blocks checkout during conflict checks and rechecks the same selected time after a conflict", async () => {

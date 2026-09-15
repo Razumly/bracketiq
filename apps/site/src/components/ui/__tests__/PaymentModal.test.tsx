@@ -97,7 +97,7 @@ describe("Payment dialog state", () => {
     expect(onPaymentSuccess).not.toHaveBeenCalled();
   });
 
-  it("preserves the success-callback fallback for pending payments", async () => {
+  it("keeps payments pending without reporting success when no pending callback is provided", async () => {
     const onPaymentSuccess = jest.fn();
     const { result } = renderHook(() =>
       usePaymentDialogState({ isOpen: true, paymentData, onPaymentSuccess }),
@@ -106,16 +106,15 @@ describe("Payment dialog state", () => {
       await result.current.handlePending();
     });
     expect(result.current.view).toBe("pending");
-    expect(onPaymentSuccess).toHaveBeenCalledTimes(1);
+    expect(onPaymentSuccess).not.toHaveBeenCalled();
   });
 
   it("shows the exact paid amount only after success, not while payment is pending", async () => {
     const user = userEvent.setup();
     const onPaymentSuccess = jest.fn();
-    const onPaymentPending = jest.fn();
     const onClose = jest.fn();
     const { result } = renderHook(() =>
-      usePaymentDialogState({ isOpen: true, paymentData, onPaymentSuccess, onPaymentPending }),
+      usePaymentDialogState({ isOpen: true, paymentData, onPaymentSuccess }),
     );
     const renderResult = () => result.current.view === "payment" ? null : (
       <PaymentResultView

@@ -103,6 +103,8 @@ export default function PublicRentalAvailability({ organization, currentUser, au
   const [facilityId, setFacilityId] = useState("all");
   const facilityFields = useMemo(() => facilityId === "all" ? fields : fields.filter((field) => (field.facilityId ?? (typeof field.facility === "string" ? field.facility : field.facility?.$id)) === facilityId), [fields, facilityId]);
   const [date, setDate] = useState(() => rentalListings[0]?.nextOccurrence ?? new Date());
+  const [dateChoicesStart, setDateChoicesStart] = useState(date);
+  const activeDateKey = formatLocalDateTime(date).slice(0, 10);
   const [duration, setDuration] = useState<number | string>(60);
   const [addingTime, setAddingTime] = useState(false);
   const durationMinutes = Number(duration);
@@ -113,10 +115,10 @@ export default function PublicRentalAvailability({ organization, currentUser, au
   const selection = usePublicRentalSelections({ canManage: false, currentUser, fields, facilityFilteredFields: facilityFields, rentalListings: NO_PRESELECTED_RENTALS, selectionContextKey: organization.$id, compareRanges });
   const checkoutIdentity = useRef<{ signature: string; eventId: string } | null>(null);
   const days = useMemo(() => Array.from({ length: 4 }, (_, index) => {
-    const day = new Date(date);
+    const day = new Date(dateChoicesStart);
     day.setDate(day.getDate() + index);
     return day;
-  }), [date]);
+  }), [dateChoicesStart]);
 
   const chooseTime = (option: RentalTimeOption) => {
     if (option.unavailable || !durationValid) return;
@@ -167,11 +169,15 @@ export default function PublicRentalAvailability({ organization, currentUser, au
         <section aria-labelledby="rental-date-title" className="space-y-4">
           <h2 id="rental-date-title" className="text-xl font-semibold">Choose a date</h2>
           <div className="grid gap-4 sm:grid-cols-2">
-            <DatePickerInput label="Rental date" value={date} onChange={(value) => { if (value) setDate(value); }} minDate={new Date()} />
+            <DatePickerInput label="Rental date" value={date} onChange={(value) => { if (value) { setDate(value); setDateChoicesStart(value); } }} minDate={new Date()} />
             <NumberInput label="Duration in minutes" value={duration} onChange={setDuration} min={60} step={30} allowDecimal={false} clampBehavior="none" error={durationValid ? undefined : "Choose at least 60 minutes."} />
           </div>
           <div role="group" aria-label="Rental dates" className="grid grid-cols-4 gap-2">
-            {days.map((day, index) => <Button key={formatLocalDateTime(day)} variant="default" aria-pressed={index === 0} className={cn("h-auto min-h-16 whitespace-normal", index === 0 && "border-[var(--bq-brand-strong)] bg-[var(--bq-surface-muted)] text-[var(--bq-brand-strong)]")} onClick={() => setDate(day)}>{day.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}</Button>)}
+            {days.map((day) => {
+              const dayKey = formatLocalDateTime(day).slice(0, 10);
+              const selected = dayKey === activeDateKey;
+              return <Button key={dayKey} variant="default" aria-pressed={selected} className={cn("h-auto min-h-16 whitespace-normal", selected && "border-[var(--bq-brand-strong)] bg-[var(--bq-surface-muted)] text-[var(--bq-brand-strong)]")} onClick={() => setDate(day)}>{day.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}</Button>;
+            })}
           </div>
           {facilities.length > 1 && <Select label="Venue" data={[{ value: "all", label: "All venues" }, ...facilities.map((facility) => ({ value: facility.$id, label: facility.name }))]} value={facilityId} onChange={(value) => setFacilityId(value ?? "all")} allowDeselect={false} />}
         </section>

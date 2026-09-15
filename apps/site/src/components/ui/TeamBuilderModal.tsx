@@ -583,7 +583,7 @@ export default function TeamBuilderModal({
       const links = results.flatMap((result, index): CreatedInviteLink[] => {
         if (result.status !== 'fulfilled' || typeof result.value !== 'object' || !result.value?.shareUrl) return [];
         return [{
-          id: result.value.invite?.$id ?? result.value.invite?.id ?? `${team.$id}-${index}`,
+          id: `${result.value.invite?.$id ?? result.value.invite?.id ?? team.$id}-${index}`,
           name: inviteJobs[index].name,
           role: inviteJobs[index].role,
           shareUrl: result.value.shareUrl,
@@ -826,7 +826,7 @@ export default function TeamBuilderModal({
               maxLength={50}
               size="md"
             />
-            <Group grow align="start">
+            <Group grow align="flex-start">
               <NumberInput
                 label="Team size"
                 value={teamSize}
@@ -1110,7 +1110,7 @@ export default function TeamBuilderModal({
         {activeStep === 'review' ? (
           <Stack gap="sm">
             <Paper withBorder radius="md" p="md">
-              <Group justify="space-between" align="start">
+              <Group justify="space-between" align="flex-start">
                 <div>
                   <Text size="lg" fw={700}>{teamName.trim()}</Text>
                   <Text size="sm" c="dimmed">{sport} · {resolvedTeamSize} players</Text>

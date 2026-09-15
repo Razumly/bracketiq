@@ -75,13 +75,13 @@ export function usePaymentDialogState({
 
   async function showResult(
     nextView: "success" | "pending",
-    refresh: () => Promise<void> | void,
+    refresh?: () => Promise<void> | void,
   ) {
     setError(null);
     setView(nextView);
-    setReloading(true);
+    setReloading(Boolean(refresh));
     try {
-      await refresh();
+      await refresh?.();
     } catch {
       if (mounted.current) setError(copy.refreshFailureMessage);
     } finally {
@@ -110,7 +110,6 @@ export function usePaymentDialogState({
     reset,
     updateFees,
     handleSuccess: () => showResult("success", onPaymentSuccess),
-    handlePending: () =>
-      showResult("pending", onPaymentPending ?? onPaymentSuccess),
+    handlePending: () => showResult("pending", onPaymentPending),
   };
 }

@@ -3,7 +3,7 @@ import { sourceLabelForPayRunItem } from "./organizationPayrollModel";
 
 export const csvCell = (value: string | number | null | undefined): string => {
   const raw = value == null ? "" : String(value);
-  return `"${raw.replace(/"/g, '""')}"`;
+  return /[",\r\n]/.test(raw) ? `"${raw.replace(/"/g, '""')}"` : raw;
 };
 
 const centsToCsvDollars = (amountCents?: number | null): string =>
