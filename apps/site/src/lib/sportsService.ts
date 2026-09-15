@@ -1,14 +1,19 @@
 import { apiRequest } from '@/lib/apiClient';
 import { getSportResourceLabels } from '@/lib/sportResourceLabels';
-import type { MatchRulesConfig, Sport, SportOfficialPositionTemplate } from '@/types';
+import type { MatchRulesConfig, Sport, SportCategory, SportOfficialPositionTemplate } from '@/types';
 
-const CACHE_KEY = 'sports-cache-v5';
+const CACHE_KEY = 'sports-cache-v6';
 // Sports rarely change; keep cache long-lived and refresh opportunistically.
 const CACHE_DURATION_MS = 1000 * 60 * 60 * 24; // 24h
 
-let cachedSports: Sport[] | null = null;
+export type SportCatalog = {
+  sports: Sport[];
+  categories: SportCategory[];
+};
+
+let cachedCatalog: SportCatalog | null = null;
 let cachedAt: number | null = null;
-let inflightPromise: Promise<Sport[]> | null = null;
+let inflightPromise: Promise<SportCatalog> | null = null;
 
 const normalizeClientSportName = (value: unknown): string =>
   String(value ?? '').trim().toLowerCase();
@@ -69,19 +74,18 @@ const dedupeClientSportRows = <T extends { name?: unknown }>(rows: readonly T[])
     .map(({ row }) => row);
 };
 
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-);
-
 const normalizeOfficialPositionTemplates = (value: unknown): SportOfficialPositionTemplate[] => (
   Array.isArray(value)
     ? value.flatMap((entry) => {
-      if (!isRecord(entry)) {
+      if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
         return [];
       }
 
-      const name = String(entry.name ?? '').trim();
-      const numericCount = typeof entry.count === 'number' ? entry.count : Number(entry.count);
+      const entryRecord = entry as { name?: unknown; count?: unknown };
+      const name = String(entryRecord.name ?? '').trim();
+      const numericCount = typeof entryRecord.count === 'number'
+        ? entryRecord.count
+        : Number(entryRecord.count);
       const count = Number.isFinite(numericCount) ? Math.max(1, Math.trunc(numericCount)) : 1;
 
       return name ? [{ name, count }] : [];
@@ -90,7 +94,9 @@ const normalizeOfficialPositionTemplates = (value: unknown): SportOfficialPositi
 );
 
 const normalizeMatchRulesTemplate = (value: unknown): MatchRulesConfig | null => (
-  isRecord(value) ? { ...(value as MatchRulesConfig) } : null
+  value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? { ...(value as MatchRulesConfig) }
+    : null
 );
 
 const mapRowToSport = (row: any): Sport => {
@@ -154,8 +160,48 @@ const mapRowToSport = (row: any): Sport => {
   };
 };
 
+const mapRowToSportCategory = (row: any): SportCategory | null => {
+  const id = String(row?.id ?? row?.$id ?? '').trim();
+  const name = String(row?.name ?? '').trim();
+  if (!id || !name) return null;
+  const sportIds: string[] = Array.isArray(row?.sportIds)
+    ? Array.from(new Set(
+      row.sportIds
+        .filter((sportId: unknown): sportId is string => typeof sportId === 'string')
+        .map((sportId: string) => sportId.trim())
+        .filter(Boolean),
+    ))
+    : [];
+  const numericDisplayOrder = Number(row?.displayOrder);
+  return {
+    $id: id,
+    name,
+    sportIds,
+    displayOrder: Number.isInteger(numericDisplayOrder) && numericDisplayOrder >= 0
+      ? numericDisplayOrder
+      : 0,
+    $createdAt: String(row?.createdAt ?? row?.$createdAt ?? ''),
+    $updatedAt: String(row?.updatedAt ?? row?.$updatedAt ?? ''),
+  };
+};
+
+const mapResponseToCatalog = (response: { sports?: any[]; categories?: any[] }): SportCatalog => {
+  const sports = dedupeClientSportRows(response.sports || []).map(mapRowToSport);
+  const validSportIds = new Set(sports.map((sport) => sport.$id));
+  const categories = (Array.isArray(response.categories) ? response.categories : [])
+    .flatMap((row) => {
+      const category = mapRowToSportCategory(row);
+      if (!category) return [];
+      return [{
+        ...category,
+        sportIds: category.sportIds.filter((sportId) => validSportIds.has(sportId)),
+      }];
+    });
+  return { sports, categories };
+};
+
 const loadFromStorage = (options?: { allowStale?: boolean }) => {
-  if (typeof window === 'undefined' || cachedSports) {
+  if (typeof window === 'undefined' || cachedCatalog) {
     return;
   }
 
@@ -165,29 +211,34 @@ const loadFromStorage = (options?: { allowStale?: boolean }) => {
     const raw = window.localStorage.getItem(CACHE_KEY);
     if (!raw) return;
 
-    const parsed = JSON.parse(raw) as { timestamp: number; items: Sport[] };
-    if (!parsed || typeof parsed.timestamp !== 'number' || !Array.isArray(parsed.items)) {
+    const parsed = JSON.parse(raw) as { timestamp: number; sports: any[]; categories: any[] };
+    if (
+      !parsed
+      || typeof parsed.timestamp !== 'number'
+      || !Array.isArray(parsed.sports)
+      || !Array.isArray(parsed.categories)
+    ) {
       return;
     }
 
     const isExpired = Date.now() - parsed.timestamp > CACHE_DURATION_MS;
     if (isExpired && !allowStale) return;
 
-    cachedSports = dedupeClientSportRows(parsed.items).map((item) => mapRowToSport(item));
+    cachedCatalog = mapResponseToCatalog(parsed);
     cachedAt = parsed.timestamp;
   } catch {
     // Ignore storage parsing errors
   }
 };
 
-const saveToStorage = (sports: Sport[]) => {
+const saveToStorage = (catalog: SportCatalog) => {
   if (typeof window === 'undefined') {
     return;
   }
   try {
     window.localStorage.setItem(
       CACHE_KEY,
-      JSON.stringify({ timestamp: Date.now(), items: sports })
+      JSON.stringify({ timestamp: Date.now(), ...catalog }),
     );
   } catch {
     // Ignore quota/storage errors
@@ -195,31 +246,34 @@ const saveToStorage = (sports: Sport[]) => {
 };
 
 const shouldUseCache = () => {
-  if (!cachedSports || cachedAt === null) {
+  if (!cachedCatalog || cachedAt === null) {
     return false;
   }
   return Date.now() - cachedAt < CACHE_DURATION_MS;
 };
 
-const fetchSportsFromApi = async (): Promise<Sport[]> => {
-  const response = await apiRequest<{ sports?: any[] }>('/api/sports');
-  const sports = dedupeClientSportRows(response.sports || []).map(mapRowToSport);
-  return sports;
+const fetchCatalogFromApi = async (): Promise<SportCatalog> => {
+  const response = await apiRequest<{ sports?: any[]; categories?: any[] }>('/api/sports');
+  return mapResponseToCatalog(response);
 };
 
 export const sportsService = {
   getCached(options?: { allowStale?: boolean }): Sport[] | null {
     loadFromStorage({ allowStale: options?.allowStale });
-    return cachedSports;
+    return cachedCatalog?.sports ?? null;
   },
-  async getAll(forceRefresh: boolean = false): Promise<Sport[]> {
+  getCachedCatalog(options?: { allowStale?: boolean }): SportCatalog | null {
+    loadFromStorage({ allowStale: options?.allowStale });
+    return cachedCatalog;
+  },
+  async getCatalog(forceRefresh: boolean = false): Promise<SportCatalog> {
     if (!forceRefresh) {
       if (shouldUseCache()) {
-        return cachedSports as Sport[];
+        return cachedCatalog as SportCatalog;
       }
       loadFromStorage();
       if (shouldUseCache()) {
-        return cachedSports as Sport[];
+        return cachedCatalog as SportCatalog;
       }
     }
 
@@ -227,17 +281,21 @@ export const sportsService = {
       return inflightPromise;
     }
 
-    inflightPromise = fetchSportsFromApi()
-      .then((sports) => {
-        cachedSports = sports;
+    inflightPromise = fetchCatalogFromApi()
+      .then((catalog) => {
+        cachedCatalog = catalog;
         cachedAt = Date.now();
-        saveToStorage(sports);
-        return sports;
+        saveToStorage(catalog);
+        return catalog;
       })
       .finally(() => {
         inflightPromise = null;
       });
 
     return inflightPromise;
+  },
+  async getAll(forceRefresh: boolean = false): Promise<Sport[]> {
+    const catalog = await this.getCatalog(forceRefresh);
+    return catalog.sports;
   },
 };

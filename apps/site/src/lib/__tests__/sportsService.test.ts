@@ -79,9 +79,9 @@ describe('sportsService', () => {
   });
 
   it('hydrates cached sports with preserved match rules templates', async () => {
-    localStorage.setItem('sports-cache-v5', JSON.stringify({
+    localStorage.setItem('sports-cache-v6', JSON.stringify({
       timestamp: Date.now(),
-      items: [
+      sports: [
         {
           $id: 'Hockey',
           name: 'Hockey',
@@ -101,6 +101,7 @@ describe('sportsService', () => {
           },
         },
       ],
+      categories: [],
     }));
 
     const { sportsService } = await loadSportsService();
@@ -118,6 +119,37 @@ describe('sportsService', () => {
     expect(sport.officialPositionTemplates).toEqual([
       { name: 'Scorekeeper', count: 1 },
     ]);
+  });
+
+  it('maps categories in the catalog while preserving the getAll sport contract', async () => {
+    const { sportsService, apiRequestMock } = await loadSportsService();
+    apiRequestMock.mockResolvedValue({
+      sports: [
+        { id: 'Indoor Soccer', name: 'Indoor Soccer', resourceLabelSingular: 'Field', resourceLabelPlural: 'Fields' },
+        { id: 'Futsal', name: 'Futsal', resourceLabelSingular: 'Field', resourceLabelPlural: 'Fields' },
+      ],
+      categories: [
+        {
+          id: 'soccer',
+          name: 'Soccer',
+          sportIds: ['Indoor Soccer', 'Futsal', 'missing-sport'],
+          displayOrder: 10,
+        },
+      ],
+    });
+
+    const catalog = await sportsService.getCatalog(true);
+    const sports = await sportsService.getAll();
+
+    expect(catalog.categories).toEqual([
+      expect.objectContaining({
+        $id: 'soccer',
+        name: 'Soccer',
+        sportIds: ['Indoor Soccer', 'Futsal'],
+        displayOrder: 10,
+      }),
+    ]);
+    expect(sports).toEqual(catalog.sports);
   });
 
   it('deduplicates case and whitespace variants from the sports API', async () => {
@@ -170,9 +202,9 @@ describe('sportsService', () => {
   });
 
   it('deduplicates a current-version local-storage payload before returning it', async () => {
-    localStorage.setItem('sports-cache-v5', JSON.stringify({
+    localStorage.setItem('sports-cache-v6', JSON.stringify({
       timestamp: Date.now(),
-      items: [
+      sports: [
         {
           $id: 'sport_indoor_soccer_duplicate',
           name: ' INDOOR SOCCER ',
@@ -188,6 +220,7 @@ describe('sportsService', () => {
           matchRulesTemplate: null,
         },
       ],
+      categories: [],
     }));
 
     const { sportsService } = await loadSportsService();

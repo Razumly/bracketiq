@@ -18,6 +18,7 @@ test("joins the seeded free event via self registration", async ({ page }) => {
     eventId: SEED_EVENTS.free.id,
   });
 
+  await page.getByRole("button", { name: /^Register$/ }).click();
   const registrationRequestPromise = page.waitForRequest(
     (req) =>
       req
@@ -34,6 +35,7 @@ test("joins the seeded free event via self registration", async ({ page }) => {
   );
 
   await page.getByRole("button", { name: /^Join Event$/ }).click();
+  await page.getByRole("button", { name: "Confirm registration" }).click();
 
   const registrationRequest = await registrationRequestPromise;
   const registrationResponse = await registrationResponsePromise;
@@ -76,26 +78,40 @@ test("joins the seeded paid event and asserts payment intent payload", async ({
     eventId: SEED_EVENTS.paid.id,
   });
 
-  const registrationRequestPromise = page.waitForRequest(
-    (req) =>
-      req
-        .url()
-        .includes(`/api/events/${SEED_EVENTS.paid.id}/registrations/self`) &&
-      req.method() === "POST",
-  );
+  await page.getByRole("button", { name: /^Register$/ }).click();
+  await page.getByRole("button", { name: /Join Event -/ }).click();
+  await page.getByRole("button", { name: "Confirm registration" }).click();
+
+  const billingAddressModal = page.getByRole("dialog", {
+    name: "Billing Address Required",
+  });
+  await expect(billingAddressModal).toBeVisible();
+  await billingAddressModal
+    .getByRole("textbox", { name: "Address line 1" })
+    .fill("1 Market Street");
+  await billingAddressModal
+    .getByRole("textbox", { name: "City" })
+    .fill("San Francisco");
+  await billingAddressModal
+    .getByRole("combobox", { name: "State" })
+    .click();
+  await page.getByRole("option", { name: "California", exact: true }).click();
+  await billingAddressModal
+    .getByRole("textbox", { name: "ZIP code" })
+    .fill("94105");
+  await billingAddressModal
+    .getByRole("button", { name: "Save billing address" })
+    .click();
+
+  const checkoutPreview = page.getByRole("dialog", { name: "Checkout preview" });
+  await expect(checkoutPreview).toBeVisible();
+
   const purchaseRequestPromise = page.waitForRequest(
     (req) =>
       req.url().includes("/api/billing/purchase-intent") &&
       req.method() === "POST",
   );
-
-  await page.getByRole("button", { name: /Join Event -/ }).click();
-
-  const registrationRequest = await registrationRequestPromise;
-  const registrationPayload = registrationRequest.postDataJSON() as {
-    eventId?: string;
-  };
-  expect(registrationPayload.eventId).toBe(SEED_EVENTS.paid.id);
+  await checkoutPreview.getByRole("button", { name: "Checkout" }).click();
 
   const purchaseRequest = await purchaseRequestPromise;
   const purchasePayload = purchaseRequest.postDataJSON() as {
@@ -108,20 +124,19 @@ test("joins the seeded paid event and asserts payment intent payload", async ({
   expect(purchaseUserId).toBe(SEED_USERS.participant.id);
   expect(purchaseEventId).toBe(SEED_EVENTS.paid.id);
 
-  const paymentModal = page.getByRole("dialog");
-  await expect(paymentModal).toBeVisible();
-
-  const hasConfirm = await paymentModal
+  const checkoutDialogAfterAttempt = page.getByRole("dialog");
+  await expect(checkoutDialogAfterAttempt).toBeVisible();
+  const hasConfirm = await checkoutDialogAfterAttempt
     .getByText("Confirm Payment")
     .isVisible()
     .catch(() => false);
-  const hasConfigError = await paymentModal
+  const hasConfigError = await checkoutDialogAfterAttempt
     .getByText("Configuration Error")
     .isVisible()
     .catch(() => false);
-  const hasBillingAddress = await paymentModal
-    .getByText("Billing Address Required")
+  const hasProviderUnavailable = await checkoutDialogAfterAttempt
+    .getByText("Payment processing is temporarily unavailable. Please try again later.")
     .isVisible()
     .catch(() => false);
-  expect(hasConfirm || hasConfigError || hasBillingAddress).toBeTruthy();
+  expect(hasConfirm || hasConfigError || hasProviderUnavailable).toBeTruthy();
 });

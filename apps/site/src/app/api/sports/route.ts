@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { ensureDefaultSports } from '@/server/defaultSports';
+import { ensureDefaultSportCategories } from '@/server/defaultSportCategories';
 import { dedupeCanonicalSports, normalizeCanonicalSportName } from '@/server/canonicalSports';
 import { getSportResourceLabels } from '@/lib/sportResourceLabels';
 
@@ -131,5 +132,11 @@ export async function GET(_req: NextRequest) {
       resourceLabelPlural: labels.plural,
     };
   });
-  return NextResponse.json({ sports: payloadSports }, { status: 200 });
+  const sportIds = new Set(payloadSports.map((sport) => sport.id));
+  const categories = await ensureDefaultSportCategories(prisma, payloadSports);
+  const payloadCategories = categories.map((category) => ({
+    ...category,
+    sportIds: (category.sportIds ?? []).filter((sportId) => sportIds.has(sportId)),
+  }));
+  return NextResponse.json({ sports: payloadSports, categories: payloadCategories }, { status: 200 });
 }
