@@ -27,6 +27,9 @@ The change is a visual and interaction migration. It must not change prices, fee
 - [x] (2026-09-15) Ran standards and specification review. Fixed the one standards finding by migrating the obsolete event-registration test helper. The specification review found no issue.
 - [x] (2026-09-15) Marked PR #160 ready for review. GitHub reports `OPEN`, `isDraft: false`, and `MERGEABLE`.
 
+- [x] (2026-09-15) Corrected the event registration presentation after visual review. The public event route now uses a full-page reference layout. Discover callers keep the modal presentation.
+- [x] (2026-09-15) Re-ran the four focused event suites. They pass 24 tests. The isolated checkout preview passed at 1536x1024, 390x844, and 320x740 with no horizontal overflow.
+
 ## Surprises & Discoveries
 
 - Observation: Issue #126 had no GitHub sub-issues, so it has no separate ticket frontier.
@@ -59,7 +62,10 @@ The change is a visual and interaction migration. It must not change prices, fee
   Evidence: `/find-clubs` loaded. `/o/summit` returned the Next.js 404 page. The existing operations runtime was not restarted or reconfigured.
 
 - Observation: Changed-file lint has warnings but no errors.
-  Evidence: `npm run lint:changed -- --base 4eacd13e0` reports 0 errors and 19 complexity or hook-dependency warnings.
+  Evidence: `npm run lint:changed -- --base 4eacd13e0` reports 0 errors and 20 complexity or hook-dependency warnings.
+
+- Observation: The approved event-registration references are full-page checkout surfaces, but the first implementation still presented the public registration state in a modal.
+  Evidence: `commerce-registration--team-selection--desktop-1536x1024.png` shows a page header, stepper, split cards, and a sticky summary. The visual review found the modal did not match this hierarchy.
 
 ## Decision Log
 
@@ -82,16 +88,21 @@ The change is a visual and interaction migration. It must not change prices, fee
 - Decision: Do not add application-owned card inputs or simulated provider tests.
   Rationale: Stripe controls payment details. The repository rules prohibit simulating provider integrations and require manual or sandbox checks for provider behavior.
   Date/Author: 2026-09-15 / implementation coordinator
+- Decision: Use a page presentation for the public event registration client and keep `EventCheckoutModal` as the default for discover and other existing callers.
+  Rationale: The public route can match the approved references without changing event, registration, payment, or recovery contracts. Existing modal callers keep their established interaction model.
+  Date/Author: 2026-09-15 / implementation coordinator
+
 
 ## Outcomes & Retrospective
 
-The migration now covers event team selection and creation, optional player invitations, shared team management, invitation recovery, product selection and detail, checkout billing and Stripe handoff, finance categories and journal preview, refund review and recovery, rental availability, and reservation checkout. Completed surfaces use BracketIQ-owned primitives and keep loading, validation, disabled, permission, error, and recovery states visible.
+The migration now covers event team selection and creation, optional player invitations, shared team management, invitation recovery, product selection and detail, checkout billing and Stripe handoff, finance categories and journal preview, refund review and recovery, rental availability, and reservation checkout. The public event registration entry now uses a centered full-page shell with a responsive stepper, split registration and summary cards, teal selection states, and coral primary action styling. Completed surfaces use BracketIQ-owned primitives and keep loading, validation, disabled, permission, error, and recovery states visible.
 
 The HTTP paths, request fields, response fields, registration rules, prices, fee calculations, permissions, and Stripe payment-detail ownership stayed unchanged. BracketIQ does not collect card number, expiry, or CVC fields. No provider simulation was added.
 
-Focused behavior checks pass. Standards review found one stale registration-test helper and no other actionable standards issue. Specification review found no issue. The PR is ready for review.
+The focused event suites pass. The isolated checkout preview passed at desktop and narrow mobile widths. Standards review found one stale registration-test helper and no other actionable standards issue. Specification review found no issue. The public route and discover modal now use the intended separate presentation modes.
 
 The complete suite, TypeScript check, production build, provider sandbox, and seeded commerce browser flow remain environment or baseline limits. The exact failures and missing prerequisites are recorded above and in the PR.
+
 
 ## Context and Orientation
 
@@ -179,7 +190,8 @@ A reviewer can select a product, open product details without entering checkout 
 
 A reviewer can observe explicit loading text, field-level validation, readable disabled prerequisites, permission-safe actions, recoverable errors, and restored saved progress. No state presents an unpaid registration as paid. Prices and totals match the existing services and route responses.
 
-Focused Jest checks pass: 18 suites and 159 tests. Changed-file lint reports 0 errors and 19 warnings. The complete site suite reports 34 failed suites, 146 failed tests, 863 passed tests, and 14 skipped suites in unrelated baseline areas. TypeScript reports 81 diagnostics in 27 unrelated files, with no issue #126 commerce file in the diagnostic output. The build passes the icon check but stops at Prisma validation because `DATABASE_URL` is unavailable. Browser smoke loaded `/find-clubs`; `/o/summit` returned 404 because no seeded public organization was available. A provider sandbox check was not run because no authorized provider test environment was available, and no provider simulation was added.
+Focused Jest checks pass: 4 suites and 24 tests for the event checkout and registration paths. Changed-file lint reports 0 errors and 20 warnings; the warnings are the existing complexity and hook-dependency findings plus the new checkout layout complexity warning. The complete site suite reports 34 failed suites, 146 failed tests, 863 passed tests, and 14 skipped suites in unrelated baseline areas. TypeScript reports 81 diagnostics in 27 unrelated files, with no issue #126 commerce file in the diagnostic output. The build passes the icon check but stops at Prisma validation because `DATABASE_URL` is unavailable. The isolated checkout preview covered 1536x1024, 390x844, and 320x740. It did not exercise the full public route, backend, payment provider, or seeded commerce data. A provider sandbox check was not run because no authorized provider test environment was available, and no provider simulation was added.
+
 
 ## Idempotence and Recovery
 
@@ -199,7 +211,7 @@ Approved desktop reference groups:
 
     State/recovery: `commerce-flow--loading--desktop-1536x1024.png`, `commerce-checkout--validation-error--desktop-1536x1024.png`, `commerce-flow--disabled--desktop-1536x1024.png`, `commerce-flow--permission--desktop-1536x1024.png`, `commerce-flow--error--desktop-1536x1024.png`, `commerce-flow--recovery--desktop-1536x1024.png`.
 
-The issue body contains the full approved desktop and mobile reference list. Current evidence: focused Jest 18/18 suites and 159/159 tests pass; changed-file lint has 0 errors; icon projections pass for 27 icons; TypeScript, build, full-suite, provider-sandbox, and seeded-commerce-browser limitations are recorded in `Surprises & Discoveries` and `Validation and Acceptance`. Code review reports one fixed standards finding and no specification findings.
+The issue body contains the full approved desktop and mobile reference list. Current evidence: focused event Jest checks pass 4/4 suites and 24/24 tests; changed-file lint has 0 errors; icon projections pass for 27 icons; and the isolated checkout preview passes at desktop and narrow mobile widths. TypeScript, build, full-suite, provider-sandbox, and seeded-commerce-browser limitations are recorded in `Surprises & Discoveries` and `Validation and Acceptance`. Code review reports one fixed standards finding and no specification findings.
 
 ## Interfaces and Dependencies
 
