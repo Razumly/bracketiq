@@ -501,8 +501,10 @@ export default function EventDetailSheet({
         setJoinError,
         setJoinNotice,
     });
-    const registrationSteps = (
-        <Stack gap="sm">
+    const registrationNotices = <>
+        {isLoadingEvent ? <Text role="status" size="sm" c="dimmed">Loading event details...</Text> : null}
+        {joinError ? <Alert color="red">{joinError}</Alert> : null}
+        {joinNotice ? <Alert color="blue">{joinNotice}</Alert> : null}
         {!currentEvent.teamSignup && childrenLoading ? <Text size="sm" c="dimmed">Checking linked children...</Text> : null}
         {!currentEvent.teamSignup && childrenError ? <Alert color="red">{childrenError}</Alert> : null}
         {checkoutController.progress.error || signupJourney.error ? <Alert color="red">
@@ -511,11 +513,18 @@ export default function EventDetailSheet({
         </Alert> : null}
         {checkoutController.progress.state?.unavailableReason ? <Alert color="yellow">{checkoutController.progress.state.unavailableReason}</Alert> : null}
         {checkoutController.progress.state?.invalidations.map((message) => <Alert key={message} color="yellow">{message}</Alert>)}
+    </>;
+    const registrationSteps = (
         <EventDetailRegistrationPanels
             childrenError={childrenError}
             childrenLoading={childrenLoading}
             currentEvent={currentEvent}
             checkoutPresentation={checkoutPresentation}
+            renderPage={(panels, summaryAction) => (
+                <EventCheckoutPage onBack={() => setCheckoutOpened(false)} summaryAction={summaryAction}>
+                    <Stack gap="sm">{registrationNotices}{panels}</Stack>
+                </EventCheckoutPage>
+            )}
             currentUserPaymentFailed={currentUserPaymentFailed}
             divisionModel={divisionRegistrationModel}
             eventTeams={teams}
@@ -561,7 +570,6 @@ export default function EventDetailSheet({
             userTeams={userTeams}
             weeklyModel={weeklyModel}
         />
-        </Stack>
     );
     const registrationDialogs = <>
         {signupJourney.dialogs}
@@ -640,12 +648,6 @@ export default function EventDetailSheet({
         />
     );
 
-    const checkoutContent = <>
-        {isLoadingEvent ? <Text role="status" size="sm" c="dimmed">Loading event details...</Text> : null}
-        {joinError ? <Alert color="red">{joinError}</Alert> : null}
-        {joinNotice ? <Alert color="blue">{joinNotice}</Alert> : null}
-        {registrationSteps}
-    </>;
     const selectedCheckoutTeam = checkoutIntent?.mode === 'user_free_agent'
         ? undefined : userTeams.find((team) => team.$id === selectedTeamId);
 
@@ -667,14 +669,10 @@ export default function EventDetailSheet({
                     : [user?.firstName, user?.lastName].filter(Boolean).join(' '),
             priceCents: checkoutIntent?.mode === 'user_free_agent' ? 0 : selectedDivisionBilling.priceCents,
         }}>
-            {checkoutOpened && checkoutPresentation === 'page' ? (
-                <EventCheckoutPage onBack={() => setCheckoutOpened(false)}>
-                    {checkoutContent}
-                </EventCheckoutPage>
-            ) : content}
+            {checkoutOpened && checkoutPresentation === 'page' ? registrationSteps : content}
             {checkoutOpened && checkoutPresentation === 'modal' ? <EventCheckoutModal opened={!workflowStepOpened && !finalReview && !signupJourney.dialogOpened}
                 onClose={() => setCheckoutOpened(false)} title={isTeamSignup ? 'Team registration' : 'Event checkout'} step="Entry" centered zIndex={1700}>
-                {checkoutContent}
+                <Stack gap="sm">{registrationNotices}{registrationSteps}</Stack>
             </EventCheckoutModal> : null}
             {registrationDialogs}
             <EventDetailOverlays

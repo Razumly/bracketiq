@@ -273,11 +273,14 @@ describe('EventDetailSheet payment-plan team join', () => {
     const selectedOption = await within(page).findByRole('radio', { name: 'North Loop' });
     await waitFor(() => expect(selectedOption).toBeEnabled());
     fireEvent.click(selectedOption);
-    await waitFor(() => expect(within(page).getByRole('button', { name: 'Continue registration' })).toBeEnabled());
+    const summary = within(within(page).getByRole('complementary', { name: 'Registration summary' }));
+    await waitFor(() => expect(summary.getByRole('button', { name: 'Continue registration' })).toBeEnabled());
     expect(selectedOption).toBeChecked();
-    expect(within(within(page).getByRole('complementary', { name: 'Registration summary' })).getByText('North Loop')).toBeInTheDocument();
+    expect(summary.getByText('North Loop')).toBeInTheDocument();
 
-    fireEvent.click(within(page).getByRole('button', { name: 'Continue registration' }));
+    const continueAction = summary.getByRole('button', { name: 'Continue registration' });
+    expect(within(page).getByRole('button', { name: 'Continue registration' })).toBe(continueAction);
+    fireEvent.click(continueAction);
     const players = await screen.findByRole('dialog', { name: 'Add players (optional)' });
     expect(within(players).getByRole('heading', { name: 'North Loop' })).toBeInTheDocument();
     fireEvent.click(within(players).getByRole('button', { name: 'Back to teams' }));

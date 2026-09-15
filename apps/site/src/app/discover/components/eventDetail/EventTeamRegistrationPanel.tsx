@@ -4,13 +4,14 @@ import { Alert, Avatar, Badge, Button, Paper, Radio, Text } from '@/components/o
 import type { Team } from '@/types';
 import { getTeamAvatarUrl } from '@/types';
 import { cn } from '@/lib/utils';
-import type { EventCheckoutPresentation } from './EventCheckoutLayout';
+import type { EventCheckoutPageRenderer, EventCheckoutPresentation } from './EventCheckoutLayout';
 import styles from './EventCheckoutLayout.module.css';
 
 type EventTeamRegistrationPanelProps = {
     eventHasStarted: boolean;
     eventName: string;
     checkoutPresentation?: EventCheckoutPresentation;
+    renderPage?: EventCheckoutPageRenderer;
     selectedWeeklySession: boolean;
     showTeamJoinOptions: boolean;
     isLoadingTeams: boolean;
@@ -55,6 +56,7 @@ export function EventTeamRegistrationPanel({
     eventHasStarted,
     eventName,
     checkoutPresentation = 'modal',
+    renderPage,
     selectedWeeklySession,
     showTeamJoinOptions,
     isLoadingTeams,
@@ -97,12 +99,69 @@ export function EventTeamRegistrationPanel({
     const selectionId = useId();
     const isPage = checkoutPresentation === 'page';
     const selectedTeam = userTeams.find((team) => team.$id === selectedTeamId);
+    const hasSelectedTeam = Boolean(isPage ? selectedTeam : selectedTeamId);
     const selectionDisabled = joining || confirmingPurchase || eventHasStarted || weeklySelectionRequired;
     const selectionReason = weeklySelectionRequired
         ? 'Select a weekly session before choosing a team.'
         : !selectedTeam ? 'Choose a team or create one to continue.'
             : isDivisionSelectionMissing ? 'Select a division before continuing registration.' : null;
-    return (
+    const teamAction = showTeamJoinOptions && !isLoadingTeams && userTeams.length > 0 ? (
+        showTeamWaitlistActions ? (
+            <Button
+                onClick={onJoinTeamWaitlist}
+                disabled={
+                    joining
+                    || eventHasStarted
+                    || weeklySelectionRequired
+                    || !hasSelectedTeam
+                    || (!selectedTeamIsWaitlisted && isDivisionSelectionMissing)
+                }
+                color="orange"
+            >
+                {eventHasStarted
+                    ? 'Unavailable'
+                    : joining
+                        ? 'Updating...'
+                        : (selectedTeamIsWaitlisted
+                            ? 'Leave Waitlist'
+                            : 'Join Waitlist')}
+            </Button>
+        ) : (
+            <Button
+                onClick={onJoinAsTeam}
+                disabled={
+                    joining
+                    || eventHasStarted
+                    || weeklySelectionRequired
+                    || !hasSelectedTeam
+                    || confirmingPurchase
+                    || isDivisionSelectionMissing
+                    || selectedTeamIsRegistered
+                }
+                color={selectedTeamIsRegistered ? 'gray' : 'green'}
+                className={isPage && !selectedTeamIsRegistered
+                    ? 'bg-[var(--bq-action)] text-[var(--bq-on-action)] hover:bg-[var(--bq-action-hover)]'
+                    : undefined}
+                size={isPage ? 'lg' : 'md'}
+                aria-describedby={`${selectionId}-help`}
+            >
+                {eventHasStarted
+                    ? 'Unavailable'
+                    : selectedTeamIsRegistered
+                        ? 'Already in Event'
+                        : confirmingPurchase
+                            ? 'Confirming purchase...'
+                            : joining
+                                ? 'Joining...'
+                                : !hasSelectedTeam
+                                    ? 'Choose a team'
+                                    : selectedTeamPaymentFailed
+                                        ? 'Complete payment'
+                                        : hasDraft ? 'Continue registration' : 'Continue with this team'}
+            </Button>
+        )
+    ) : null;
+    const content = (
         <div className="space-y-6">
             {eventHasStarted ? (
                 <Alert color="yellow" variant="light">
@@ -156,60 +215,8 @@ export function EventTeamRegistrationPanel({
                             <Text id={`${selectionId}-help`} size="sm" c="dimmed" className={isPage ? styles.teamHelp : undefined}>
                                 {selectionReason ?? 'Players are optional. Invitations remain pending until each person accepts.'}
                             </Text>
-                            <div className="flex flex-col items-stretch gap-2 pt-2 sm:items-end">
-                                {showTeamWaitlistActions ? (
-                                    <Button
-                                        onClick={onJoinTeamWaitlist}
-                                        disabled={
-                                            joining
-                                            || eventHasStarted
-                                            || weeklySelectionRequired
-                                            || !selectedTeamId
-                                            || (!selectedTeamIsWaitlisted && isDivisionSelectionMissing)
-                                        }
-                                        color="orange"
-                                    >
-                                        {eventHasStarted
-                                            ? 'Unavailable'
-                                            : joining
-                                                ? 'Updating...'
-                                                : (selectedTeamIsWaitlisted
-                                                    ? 'Leave Waitlist'
-                                                    : 'Join Waitlist')}
-                                    </Button>
-                                ) : (
-                                    <Button
-                                        onClick={onJoinAsTeam}
-                                        disabled={
-                                            joining
-                                            || eventHasStarted
-                                            || weeklySelectionRequired
-                                            || !selectedTeamId
-                                            || confirmingPurchase
-                                            || isDivisionSelectionMissing
-                                            || selectedTeamIsRegistered
-                                        }
-                                        color={selectedTeamIsRegistered ? 'gray' : 'green'}
-                                        className={isPage && !selectedTeamIsRegistered
-                                            ? 'bg-[var(--bq-action)] text-[var(--bq-on-action)] hover:bg-[var(--bq-action-hover)]'
-                                            : undefined}
-                                        size={isPage ? 'lg' : 'md'}
-                                    >
-                                        {eventHasStarted
-                                            ? 'Unavailable'
-                                            : selectedTeamIsRegistered
-                                                ? 'Already in Event'
-                                                : confirmingPurchase
-                                                    ? 'Confirming purchase...'
-                                                    : joining
-                                                        ? 'Joining...'
-                                                        : !selectedTeamId
-                                                            ? 'Choose a team'
-                                                            : selectedTeamPaymentFailed
-                                                                ? 'Complete payment'
-                                                                : hasDraft ? 'Continue registration' : 'Continue with this team'}
-                                    </Button>
-                                )}
+                            {!isPage || !renderPage || selectedTeamIsRegistered ? <div className="flex flex-col items-stretch gap-2 pt-2 sm:items-end">
+                                {!isPage || !renderPage ? teamAction : null}
                                 {selectedTeamIsRegistered ? (
                                     <Button
                                         onClick={onWithdrawTeam}
@@ -225,7 +232,7 @@ export function EventTeamRegistrationPanel({
                                         {joining ? 'Withdrawing...' : 'Withdraw Team'}
                                     </Button>
                                 ) : null}
-                            </div>
+                            </div> : null}
                         </div>
                     ) : (
                         <div className="space-y-3 text-center">
@@ -311,4 +318,5 @@ export function EventTeamRegistrationPanel({
             ) : null}
         </div>
     );
+    return isPage && renderPage ? renderPage(content, teamAction) : content;
 }

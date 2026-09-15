@@ -6,6 +6,7 @@ import { formatPrice } from '@/types';
 import styles from './EventCheckoutLayout.module.css';
 
 export type EventCheckoutPresentation = 'modal' | 'page';
+export type EventCheckoutPageRenderer = (content: ReactNode, summaryAction?: ReactNode) => ReactNode;
 
 type CheckoutSummary = {
     eventName: string;
@@ -23,8 +24,8 @@ type CheckoutSummary = {
 export const EventCheckoutContext = createContext<CheckoutSummary | null>(null);
 type CheckoutStep = 'Entry' | 'Team setup' | 'Players' | 'Requirements' | 'Review and pay';
 
-export function EventCheckoutLayout({ children, step = 'Entry', presentation = 'modal' }: {
-    children: ReactNode; step?: CheckoutStep; presentation?: EventCheckoutPresentation;
+export function EventCheckoutLayout({ children, step = 'Entry', presentation = 'modal', summaryAction }: {
+    children: ReactNode; step?: CheckoutStep; presentation?: EventCheckoutPresentation; summaryAction?: ReactNode;
 }) {
     const summary = useContext(EventCheckoutContext);
     const isPage = presentation === 'page';
@@ -68,19 +69,35 @@ export function EventCheckoutLayout({ children, step = 'Entry', presentation = '
                         {isPage ? <ShieldCheck size={18} aria-hidden="true" /> : null}
                         <Text size="sm" c={isPage ? undefined : 'dimmed'}>Stripe securely collects payment details. This saved progress does not confirm registration or payment.</Text>
                     </div>
+                    {isPage ? summaryAction : null}
                 </Stack>
             </Paper>
         </div>
     </Stack>;
 }
 
-export function EventCheckoutPage({ children, onBack }: { children: ReactNode; onBack: () => void }) {
+export function EventCheckoutPage({ children, onBack, summaryAction }: {
+    children: ReactNode; onBack: () => void; summaryAction?: ReactNode;
+}) {
     const summary = useContext(EventCheckoutContext);
     const headingId = useId();
     const headingRef = useRef<HTMLHeadingElement>(null);
+    const pageRef = useRef<HTMLElement>(null);
+    const actionRef = useRef<HTMLDivElement>(null);
+    const hasSummaryAction = Boolean(summary && summaryAction);
     useEffect(() => { headingRef.current?.focus(); }, []);
+    useEffect(() => {
+        const page = pageRef.current;
+        const action = actionRef.current;
+        if (!page || !action) return;
+        const observer = new ResizeObserver(([entry]) => {
+            page.style.setProperty('--checkout-action-height', `${entry.borderBoxSize[0].blockSize}px`);
+        });
+        observer.observe(action);
+        return () => observer.disconnect();
+    }, [hasSummaryAction]);
     return (
-        <section className={styles.page} aria-labelledby={headingId}>
+        <section ref={pageRef} className={cn(styles.page, hasSummaryAction && styles.pageWithAction)} aria-labelledby={headingId}>
             <Button variant="subtle" onClick={onBack} className={styles.back} leftSection={<ArrowLeft size={18} aria-hidden="true" />}>
                 Back to {summary?.eventName}
             </Button>
@@ -102,7 +119,15 @@ export function EventCheckoutPage({ children, onBack }: { children: ReactNode; o
                     </div>
                 </div> : null}
             </header>
-            <EventCheckoutLayout presentation="page">{children}</EventCheckoutLayout>
+            <EventCheckoutLayout presentation="page" summaryAction={summary && summaryAction ? (
+                <div ref={actionRef} className={styles.summaryAction}>
+                    <div className={styles.mobileTotal}>
+                        <Text size="sm" c="dimmed">Registration price</Text>
+                        <Text fw={700} className={styles.price}>{formatPrice(summary.priceCents)}</Text>
+                    </div>
+                    {summaryAction}
+                </div>
+            ) : null}>{children}</EventCheckoutLayout>
         </section>
     );
 }

@@ -16,7 +16,7 @@ import type { useWeeklyEventSelectionModel } from './hooks/useWeeklyEventSelecti
 import { ChildRegistrationPanel } from './ChildRegistrationPanel';
 import { EventIndividualRegistrationPanel } from './EventIndividualRegistrationPanel';
 import { EventTeamRegistrationPanel } from './EventTeamRegistrationPanel';
-import type { EventCheckoutPresentation } from './EventCheckoutLayout';
+import type { EventCheckoutPageRenderer, EventCheckoutPresentation } from './EventCheckoutLayout';
 
 const SHEET_POPOVER_Z_INDEX = 1800;
 const sharedComboboxProps = { withinPortal: true, zIndex: SHEET_POPOVER_Z_INDEX };
@@ -26,6 +26,7 @@ type EventDetailRegistrationPanelsProps = {
     childrenLoading: boolean;
     currentEvent: Event;
     checkoutPresentation?: EventCheckoutPresentation;
+    renderPage?: EventCheckoutPageRenderer;
     currentUserPaymentFailed: boolean;
     divisionModel: ReturnType<typeof useEventDivisionRegistrationModel>;
     eventTeams: Team[];
@@ -87,6 +88,7 @@ export const EventDetailRegistrationPanels = ({
     childrenLoading,
     currentEvent,
     checkoutPresentation = 'modal',
+    renderPage,
     currentUserPaymentFailed,
     divisionModel,
     eventTeams,
@@ -200,6 +202,7 @@ export const EventDetailRegistrationPanels = ({
                 eventHasStarted={divisionModel.eventHasStarted}
                 eventName={currentEvent.name}
                 checkoutPresentation={checkoutPresentation}
+                renderPage={renderPage}
                 selectedWeeklySession={Boolean(weeklyModel.isWeeklyParentEvent && weeklyModel.selectedWeeklyOccurrenceOption)}
                 showTeamJoinOptions={true}
                 isLoadingTeams={isLoadingTeams}
@@ -244,7 +247,7 @@ export const EventDetailRegistrationPanels = ({
         );
     }
 
-    return (
+    const content = (
         <EventIndividualRegistrationPanel
             canChooseChild={participantModel.shouldShowChildRegistrationPanel && participantModel.childOptions.length > 0}
             onChooseSelf={() => onSelectedChildChange('')}
@@ -268,4 +271,5 @@ export const EventDetailRegistrationPanels = ({
             onJoinEvent={() => { void joinActions.handleJoinEvent(); }}
         />
     );
+    return checkoutPresentation === 'page' && renderPage ? renderPage(content) : content;
 };
