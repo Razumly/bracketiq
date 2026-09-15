@@ -1,8 +1,7 @@
-import { act, fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import BillingAddressModal from '../BillingAddressModal';
-import { renderWithMantine } from '../../../../test/utils/renderWithMantine';
 
 const getBillingAddressProfileMock = jest.fn();
 const saveBillingAddressMock = jest.fn();
@@ -48,7 +47,7 @@ describe('BillingAddressModal', () => {
   it('keeps fields visible but disabled until the address loads', async () => {
     let finishLoad!: (profile: { billingAddress: null }) => void;
     getBillingAddressProfileMock.mockReturnValue(new Promise((resolve) => { finishLoad = resolve; }));
-    renderWithMantine(<BillingAddressModal opened onClose={jest.fn()} onSaved={jest.fn()} />);
+    render(<BillingAddressModal opened onClose={jest.fn()} onSaved={jest.fn()} />);
     expect(screen.getByLabelText(/Address line 1/i)).toBeDisabled();
     expect(screen.getByRole('button', { name: /Save billing address/i })).toBeDisabled();
     await act(async () => { finishLoad({ billingAddress: null }); });
@@ -60,12 +59,33 @@ describe('BillingAddressModal', () => {
     const user = userEvent.setup();
     const log = jest.spyOn(console, 'error').mockImplementation(() => {});
     getBillingAddressProfileMock.mockRejectedValueOnce(new Error('Unavailable'));
-    renderWithMantine(<BillingAddressModal opened onClose={jest.fn()} onSaved={jest.fn()} />);
+    render(<BillingAddressModal opened onClose={jest.fn()} onSaved={jest.fn()} />);
     await user.click(await screen.findByRole('button', { name: 'Retry' }));
     await waitFor(() => expect(screen.getByLabelText(/Address line 1/i)).toBeEnabled());
     expect(getBillingAddressProfileMock).toHaveBeenCalledTimes(2);
     expect(saveBillingAddressMock).not.toHaveBeenCalled();
     log.mockRestore();
+  });
+
+  it('marks the invalid field, focuses it, and saves the corrected address before continuing', async () => {
+    const user = userEvent.setup();
+    const onSaved = jest.fn();
+    getBillingAddressProfileMock.mockResolvedValue({ billingAddress: {
+      line1: '120 Park Street', line2: '', city: 'Austin', state: 'TX', postalCode: '', countryCode: 'US',
+    } });
+    render(<BillingAddressModal opened onClose={jest.fn()} onSaved={onSaved} />);
+    await screen.findByDisplayValue('120 Park Street');
+    await user.click(screen.getByRole('button', { name: /Save billing address/i }));
+    const postalCode = screen.getByLabelText(/ZIP code/i);
+    expect(postalCode).toHaveAttribute('aria-invalid', 'true');
+    expect(postalCode).toHaveAccessibleDescription('ZIP code is required.');
+    await waitFor(() => expect(postalCode).toHaveFocus());
+    expect(saveBillingAddressMock).not.toHaveBeenCalled();
+    expect(onSaved).not.toHaveBeenCalled();
+    await user.type(postalCode, '78701');
+    await user.click(screen.getByRole('button', { name: /Save billing address/i }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ postalCode: '78701', line1: '120 Park Street' })));
+    expect(saveBillingAddressMock).toHaveBeenCalledTimes(1);
   });
 
   it('blocks editing and dismissal during save, then keeps the draft on failure', async () => {
@@ -76,7 +96,7 @@ describe('BillingAddressModal', () => {
       line1: '1 Test Street', line2: '', city: 'Austin', state: 'TX', postalCode: '78701', countryCode: 'US',
     } });
     saveBillingAddressMock.mockReturnValue(new Promise((_resolve, reject) => { failSave = reject; }));
-    renderWithMantine(<BillingAddressModal opened onClose={onClose} onSaved={jest.fn()} />);
+    render(<BillingAddressModal opened onClose={onClose} onSaved={jest.fn()} />);
     await screen.findByDisplayValue('1 Test Street');
     await user.click(screen.getByRole('button', { name: /Save billing address/i }));
     expect(screen.getByLabelText(/Address line 1/i)).toBeDisabled();
@@ -108,13 +128,11 @@ describe('BillingAddressModal', () => {
       country: 'US',
     });
 
-    renderWithMantine(
-      <BillingAddressModal
-        opened
-        onClose={() => {}}
-        onSaved={onSaved}
-      />,
-    );
+    render(<BillingAddressModal
+      opened
+      onClose={() => {}}
+      onSaved={onSaved}
+    />,);
 
     const line1Input = await screen.findByLabelText(/Address line 1/i);
     await waitFor(() => expect(line1Input).toBeEnabled());
@@ -167,13 +185,11 @@ describe('BillingAddressModal', () => {
       email: 'payer@example.com',
     });
 
-    renderWithMantine(
-      <BillingAddressModal
-        opened
-        onClose={() => {}}
-        onSaved={() => {}}
-      />,
-    );
+    render(<BillingAddressModal
+      opened
+      onClose={() => {}}
+      onSaved={() => {}}
+    />,);
 
     await screen.findByDisplayValue('1 Test Street');
     await user.click(screen.getByRole('button', { name: /Save billing address/i }));

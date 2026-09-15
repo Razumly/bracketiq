@@ -19,11 +19,14 @@ const BILLING_ADDRESS_PREDICTION_OPTIONS: PlacePredictionOptions = {
   componentRestrictions: { country: 'us' },
 };
 
+export type BillingAddressFieldErrors = Partial<Record<keyof BillingAddress, string>>;
+
 type BillingAddressFieldsProps = {
   value: BillingAddress;
   onChange: (value: BillingAddress) => void;
   onValidationMessage?: (message: string | null) => void;
   disabled?: boolean;
+  errors?: BillingAddressFieldErrors;
 };
 
 function addressFromPlace(
@@ -57,6 +60,7 @@ export default function BillingAddressFields({
   onChange,
   onValidationMessage,
   disabled = false,
+  errors = {},
 }: BillingAddressFieldsProps) {
   const [addressSearchFocused, setAddressSearchFocused] = useState(false);
   const [addressPredictions, setAddressPredictions] = useState<PlacePrediction[]>([]);
@@ -146,6 +150,7 @@ export default function BillingAddressFields({
     <>
       <TextInput
         label="Address line 1"
+        error={errors.line1}
         value={value.line1}
         onFocus={startAddressSession}
         onBlur={() => {
@@ -190,6 +195,7 @@ export default function BillingAddressFields({
       ) : null}
       <TextInput
         label="Address line 2"
+        error={errors.line2}
         value={value.line2 ?? ''}
         onChange={(event) => updateField('line2', event.currentTarget.value)}
         disabled={disabled}
@@ -197,6 +203,7 @@ export default function BillingAddressFields({
       <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
         <TextInput
           label="City"
+          error={errors.city}
           value={value.city}
           onChange={(event) => updateField('city', event.currentTarget.value)}
           disabled={disabled}
@@ -204,6 +211,7 @@ export default function BillingAddressFields({
         />
         <Select
           label="State"
+          error={errors.state}
           data={US_STATE_OPTIONS}
           value={normalizeUsStateCode(value.state) || null}
           onChange={(nextValue) => updateField('state', nextValue ?? '')}
@@ -215,6 +223,7 @@ export default function BillingAddressFields({
       <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
         <TextInput
           label="ZIP code"
+          error={errors.postalCode}
           value={value.postalCode}
           onChange={(event) => updateField('postalCode', event.currentTarget.value)}
           disabled={disabled}
@@ -222,6 +231,7 @@ export default function BillingAddressFields({
         />
         <Select
           label="Country"
+          error={errors.countryCode}
           data={BILLING_COUNTRY_OPTIONS}
           value={normalizeBillingCountryCode(value.countryCode) || 'US'}
           onChange={(nextValue) => updateField('countryCode', nextValue ?? 'US')}

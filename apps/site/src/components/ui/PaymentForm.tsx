@@ -1,4 +1,6 @@
-import React, { useEffect, useState } from "react";
+"use client";
+
+import React, { useState } from "react";
 import {
   useStripe,
   useElements,
@@ -7,6 +9,8 @@ import {
 import type { BillingAddress, FeeBreakdown } from "@/types";
 import { formatPrice } from "@/types";
 import { Button } from "@/components/organization/organization-operation-ui";
+import { LockKeyhole, ShieldCheck } from "lucide-react";
+import { PaymentOrderSummary } from "./PaymentResultView";
 
 interface PaymentFormProps {
   onSuccess: () => void;
@@ -18,49 +22,36 @@ interface PaymentFormProps {
   billingAddress?: BillingAddress | null;
   billingEmail?: string | null;
   billingName?: string | null;
+  originalPrice?: number;
+  onBusyChange?: (busy: boolean) => void;
   onFeeBreakdownChange?: (feeBreakdown: FeeBreakdown) => void;
 }
-
-const normalizeCents = (value: unknown): number =>
-  typeof value === "number" && Number.isFinite(value)
-    ? Math.max(0, Math.round(value))
-    : 0;
-
-const getVisibleTaxAmount = (feeBreakdown: FeeBreakdown): number => {
-  const taxAmount = normalizeCents(feeBreakdown.taxAmount);
-  return taxAmount > 0 ? taxAmount : 0;
-};
-
-const getVisibleTotalCharge = (feeBreakdown: FeeBreakdown): number =>
-  normalizeCents(feeBreakdown.eventPrice) + getVisibleTaxAmount(feeBreakdown);
 
 export default function PaymentForm({
   onSuccess,
   onPending,
   onError,
   eventName,
-  feeBreakdown: initialFeeBreakdown,
+  feeBreakdown,
   paymentIntent,
   billingAddress,
   billingEmail,
   billingName,
+  originalPrice,
+  onBusyChange,
 }: PaymentFormProps) {
   const stripe = useStripe();
   const elements = useElements();
   const [loading, setLoading] = useState(false);
-  const [feeBreakdown, setFeeBreakdown] = useState(initialFeeBreakdown);
-  const amount = getVisibleTotalCharge(feeBreakdown);
-  const reportPending = () => (onPending ?? onSuccess)();
-
-  useEffect(() => {
-    setFeeBreakdown(initialFeeBreakdown);
-  }, [initialFeeBreakdown, paymentIntent]);
+  const [elementReady, setElementReady] = useState(false);
+  const amount = feeBreakdown.totalCharge;
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
 
-    if (!stripe || !elements) return;
+    if (!stripe || !elements || !elementReady || loading) return;
     setLoading(true);
+    onBusyChange?.(true);
 
     try {
       const { error: submitError } = await elements.submit();
@@ -82,27 +73,32 @@ export default function PaymentForm({
       if (error) {
         onError(error.message || "Payment failed");
       } else if (confirmedPaymentIntent?.status === "processing") {
-        reportPending();
-      } else {
+        onPending?.();
+      } else if (confirmedPaymentIntent?.status === "succeeded") {
         onSuccess();
+      } else {
+        onError("Payment is not complete. Review the Stripe form before trying again.");
       }
     } catch (err) {
       onError("An unexpected error occurred");
     } finally {
       setLoading(false);
+      onBusyChange?.(false);
     }
   };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       <div>
-        <h3 className="text-foreground mb-2 font-medium">Payment Details</h3>
-        <p className="text-muted-foreground mb-4 text-sm">
-          Paying for <strong>{eventName}</strong>
-        </p>
+        <h3 className="text-foreground mb-2 flex items-center gap-2 font-semibold">
+          <ShieldCheck aria-hidden="true" className="size-5" /> Pay securely with Stripe
+        </h3>
+        <p className="text-muted-foreground text-sm">Paying for <strong>{eventName}</strong>. Stripe collects and protects your payment details.</p>
       </div>
 
       <PaymentElement
+        onReady={() => setElementReady(true)}
+        onLoadError={() => onError("The Stripe payment form could not load. Close payment and try again. Your order is kept.")}
         options={{
           layout: {
             type: "tabs",
@@ -127,19 +123,17 @@ export default function PaymentForm({
         }}
       />
 
-      <div className="border-border border-t pt-4">
-        <div className="border-border bg-muted text-muted-foreground org-radius-surface mb-3 border px-3 py-2 text-sm">
-          <span>Processing fees are included in the online price.</span>
-        </div>
-        <div className="mb-4 flex items-center justify-between text-lg font-semibold">
-          <span>Total:</span>
-          <span>{formatPrice(amount)}</span>
-        </div>
-
+      <div className="border-border space-y-4 border-t pt-4">
+        <PaymentOrderSummary feeBreakdown={feeBreakdown} originalPrice={originalPrice} />
+        <p id="stripe-payment-readiness" role="status" className="text-sm text-muted-foreground">
+          {loading ? "Processing payment. Keep this window open." : !stripe || !elements || !elementReady ? "Loading the secure Stripe payment form. Wait before paying." : "Payment details stay with Stripe, not BracketIQ."}
+        </p>
         <Button
           type="submit"
-          disabled={!stripe || !elements}
+          disabled={!stripe || !elements || !elementReady}
           loading={loading}
+          aria-describedby="stripe-payment-readiness"
+          leftSection={<LockKeyhole aria-hidden="true" className="size-4" />}
           fullWidth
         >
           {loading ? "Processing..." : `Pay ${formatPrice(amount)}`}
