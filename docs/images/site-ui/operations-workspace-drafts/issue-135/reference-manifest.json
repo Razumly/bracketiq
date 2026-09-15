@@ -1,0 +1,46 @@
+{
+  "issue": 135,
+  "status": "draft",
+  "layoutFamily": "Operations workspace",
+  "viewport": {
+    "width": 853,
+    "height": 1844,
+    "kind": "mobile reference"
+  },
+  "approval": {
+    "releaseOwnerApproved": false,
+    "canonicalDirectory": "docs/images/site-ui/operations-workspace/"
+  },
+  "references": [
+    {
+      "file": "operations-workspace--schedule-calendar--mobile-853x1844.png",
+      "surface": "Schedule and calendar navigation",
+      "state": "Selected day, agenda view, active filters"
+    },
+    {
+      "file": "operations-workspace--dense-controls--mobile-853x1844.png",
+      "surface": "Dense operational controls",
+      "state": "Selected date, division, resource, status, and view"
+    },
+    {
+      "file": "operations-workspace--match-bracket-standings-score--mobile-853x1844.png",
+      "surface": "Match, bracket, standings, and score presentation",
+      "state": "Live score, advancing bracket, completed standings"
+    },
+    {
+      "file": "operations-workspace--selection-detail-panels--mobile-853x1844.png",
+      "surface": "Selection and detail panels",
+      "state": "Selected match with open detail sheet"
+    },
+    {
+      "file": "operations-workspace--operational-states--mobile-853x1844.png",
+      "surface": "Operational states",
+      "state": "Loading, empty, conflict, and network error"
+    },
+    {
+      "file": "operations-workspace--day-of-actions--mobile-853x1844.png",
+      "surface": "Primary day-of-operation actions",
+      "state": "Live event dashboard with check-in, score, staffing, and conflict actions"
+    }
+  ]
+}
