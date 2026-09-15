@@ -48,15 +48,15 @@ export function StripePaymentCheckout({
           Payment system is not properly configured. Please contact support.
         </Alert>
         <Button fullWidth onClick={onClose}>
-          Close
+          Back to checkout
         </Button>
       </>
     );
   if (!isStripePaymentIntentClientSecret(paymentIntent) || !feeBreakdown) {
     return (
       <Alert color="red">
-        Checkout could not be initialized. Please close this dialog and try
-        again.
+        <p>Checkout could not be initialized. Close payment and try again. Your selection is kept.</p>
+        <Button variant="default" className="mt-3" onClick={onClose}>Back to checkout</Button>
       </Alert>
     );
   }
