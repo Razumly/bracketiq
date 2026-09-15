@@ -62,7 +62,7 @@
       "tab": "Schedule",
       "mode": "manage",
       "surface": "Schedule rescheduling workspace with dense controls",
-      "state": "Manage view with drag-to-reschedule calendar, conflict, loading, empty, and error examples",
+      "state": "Manage view with day-specific segmented time ranges, resource availability gaps, drag-to-reschedule calendar, conflict, loading, empty, and error examples",
       "viewport": "mobile"
     },
     {
@@ -70,7 +70,7 @@
       "tab": "Schedule",
       "mode": "manage",
       "surface": "Schedule rescheduling workspace with dense controls",
-      "state": "Manage view with drag-to-reschedule calendar, conflict, loading, empty, and error examples",
+      "state": "Manage view with day-specific segmented time ranges, resource availability gaps, drag-to-reschedule calendar, conflict, loading, empty, and error examples",
       "viewport": "desktop"
     },
     {
@@ -173,7 +173,7 @@
     "Mobile references are the Issue #135 deliverable.",
     "Desktop companions support the approved desktop-reference requirement in Issue #125.",
     "Normal Bracket view stays clean and opens match details in a modal. Host-only statistics remain in Manage view.",
-    "Manage Schedule view uses a bounded By court calendar with draggable match cards, visible-hour controls, lock controls, and a drop target.",
+    "Manage Schedule view uses day-specific time ranges instead of a visible-hour slider. Breaks and greyed unavailable resource ranges show where a match cannot be moved.",
     "All references use one shared six-tab shell. They remain draft assets outside the canonical directory."
   ]
 }
