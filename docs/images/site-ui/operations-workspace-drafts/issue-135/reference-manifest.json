@@ -28,85 +28,97 @@
     {
       "file": "event-operations--details--mobile-853x1844.png",
       "tab": "Details",
+      "mode": "manage",
       "surface": "Event details and primary day-of actions",
-      "state": "Published event summary, readiness, milestones, and conflict notice",
+      "state": "Manage view with published summary, readiness, milestones, and conflict notice",
       "viewport": "mobile"
     },
     {
       "file": "event-operations--details--desktop-1536x1024.png",
       "tab": "Details",
+      "mode": "manage",
       "surface": "Event details and primary day-of actions",
-      "state": "Published event summary, readiness, milestones, and conflict notice",
+      "state": "Manage view with published summary, readiness, milestones, and conflict notice",
       "viewport": "desktop"
     },
     {
       "file": "event-operations--participants--mobile-853x1844.png",
       "tab": "Participants",
+      "mode": "manage",
       "surface": "Participants and registration management",
-      "state": "Selected registration detail with empty-registration example",
+      "state": "Manage view with selected registration detail and empty-registration example",
       "viewport": "mobile"
     },
     {
       "file": "event-operations--participants--desktop-1536x1024.png",
       "tab": "Participants",
+      "mode": "manage",
       "surface": "Participants and registration management",
-      "state": "Selected registration detail with empty-registration example",
+      "state": "Manage view with selected registration detail and empty-registration example",
       "viewport": "desktop"
     },
     {
       "file": "event-operations--schedule--mobile-853x1844.png",
       "tab": "Schedule",
-      "surface": "Schedule and calendar navigation with dense controls",
-      "state": "Selected date, filters, conflict, loading, empty, and error examples",
+      "mode": "manage",
+      "surface": "Schedule rescheduling workspace with dense controls",
+      "state": "Manage view with drag-to-reschedule calendar, conflict, loading, empty, and error examples",
       "viewport": "mobile"
     },
     {
       "file": "event-operations--schedule--desktop-1536x1024.png",
       "tab": "Schedule",
-      "surface": "Schedule and calendar navigation with dense controls",
-      "state": "Selected date, filters, conflict, loading, empty, and error examples",
+      "mode": "manage",
+      "surface": "Schedule rescheduling workspace with dense controls",
+      "state": "Manage view with drag-to-reschedule calendar, conflict, loading, empty, and error examples",
       "viewport": "desktop"
     },
     {
       "file": "event-operations--standings--mobile-853x1844.png",
       "tab": "Standings",
+      "mode": "manage",
       "surface": "Standings and score presentation",
-      "state": "Complete pool results with selected team adjustment and confirmation",
+      "state": "Manage view with complete pool results, selected team adjustment, and confirmation",
       "viewport": "mobile"
     },
     {
       "file": "event-operations--standings--desktop-1536x1024.png",
       "tab": "Standings",
+      "mode": "manage",
       "surface": "Standings and score presentation",
-      "state": "Complete pool results with selected team adjustment and confirmation",
+      "state": "Manage view with complete pool results, selected team adjustment, and confirmation",
       "viewport": "desktop"
     },
     {
       "file": "event-operations--bracket--mobile-853x1844.png",
       "tab": "Bracket",
-      "surface": "Match, bracket, score, and selection detail",
-      "state": "Advancing semifinal winners with selected live final",
+      "mode": "normal",
+      "surface": "Normal bracket with match-details modal",
+      "state": "Normal view with clean bracket cards and selected match-details modal; host statistics hidden",
       "viewport": "mobile"
     },
     {
       "file": "event-operations--bracket--desktop-1536x1024.png",
       "tab": "Bracket",
-      "surface": "Match, bracket, score, and selection detail",
-      "state": "Advancing semifinal winners with selected live final",
+      "mode": "normal",
+      "surface": "Normal bracket with match-details modal",
+      "state": "Normal view with clean bracket cards and selected match-details modal; host statistics hidden",
       "viewport": "desktop"
     },
     {
       "file": "event-operations--finance--mobile-853x1844.png",
       "tab": "Finance",
+      "mode": "manage",
       "surface": "Event finance, billing, and day-of staffing readiness",
-      "state": "Payment review error with recoverable action",
+      "state": "Manage view with payment review error and recoverable action",
       "viewport": "mobile"
     },
     {
       "file": "event-operations--finance--desktop-1536x1024.png",
       "tab": "Finance",
+      "mode": "manage",
       "surface": "Event finance, billing, and day-of staffing readiness",
-      "state": "Payment review error with recoverable action",
+      "state": "Manage view with payment review error and recoverable action",
       "viewport": "desktop"
     }
   ],
@@ -160,6 +172,8 @@
   "notes": [
     "Mobile references are the Issue #135 deliverable.",
     "Desktop companions support the approved desktop-reference requirement in Issue #125.",
+    "Normal Bracket view stays clean and opens match details in a modal. Host-only statistics remain in Manage view.",
+    "Manage Schedule view uses a bounded By court calendar with draggable match cards, visible-hour controls, lock controls, and a drop target.",
     "All references use one shared six-tab shell. They remain draft assets outside the canonical directory."
   ]
 }
