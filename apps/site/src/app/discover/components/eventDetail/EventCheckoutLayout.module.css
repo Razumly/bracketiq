@@ -1,0 +1,346 @@
+.page {
+  min-width: 0;
+  color: var(--bq-ink);
+  overflow-wrap: anywhere;
+}
+
+.back {
+  max-width: 100%;
+  justify-content: flex-start;
+  padding-inline: 0;
+  color: var(--bq-teal);
+  white-space: normal;
+  text-align: left;
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1.5rem;
+  margin-block: 1rem 2rem;
+}
+
+.header > div {
+  min-width: 0;
+}
+
+.heading {
+  margin: 0;
+  font-family: var(--font-landing-heading), var(--font-roboto-flex), sans-serif;
+  font-size: clamp(2rem, 3vw, 2.5rem);
+  font-weight: 750;
+  line-height: 1.2;
+  letter-spacing: -0.035em;
+  scroll-margin-top: 6rem;
+}
+
+.heading:focus {
+  outline: none;
+}
+
+.subtitle {
+  margin-top: 0.5rem;
+  color: var(--bq-ink-muted);
+  line-height: 1.5;
+}
+
+.eventContext {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  max-width: 26rem;
+}
+
+.eventIcon {
+  display: grid;
+  flex-shrink: 0;
+  width: 2.75rem;
+  height: 2.75rem;
+  place-items: center;
+  border-radius: var(--bq-radius-control);
+  background: color-mix(in srgb, var(--bq-brand) 10%, var(--bq-surface));
+  color: var(--bq-action);
+}
+
+.location {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+  color: var(--bq-ink-muted);
+  font-size: 0.8125rem;
+}
+
+.location svg {
+  flex-shrink: 0;
+  margin-top: 0.2rem;
+}
+
+.steps {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.step {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+  color: var(--bq-ink-muted);
+  font-size: 0.875rem;
+}
+
+.step:not(:last-child)::after {
+  content: '';
+  flex: 1;
+  min-width: 0.5rem;
+  height: 1px;
+  margin-inline: 0.35rem;
+  background: var(--bq-border);
+}
+
+.step:last-child {
+  flex: 0 1 auto;
+}
+
+.stepNumber {
+  display: grid;
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border: 1px solid var(--bq-border);
+  border-radius: 50%;
+  background: var(--bq-surface);
+  font-weight: 650;
+}
+
+.step[aria-current='step'] {
+  color: var(--bq-teal);
+  font-weight: 650;
+}
+
+.step[aria-current='step'] .stepNumber {
+  border-color: var(--bq-teal);
+  background: var(--bq-teal);
+  color: var(--bq-on-action);
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 22.5rem;
+  align-items: start;
+  gap: 1.5rem;
+}
+
+.content,
+.summary {
+  border-color: var(--bq-border);
+  background: var(--bq-surface);
+  color: var(--bq-ink);
+  box-shadow: 0 3px 12px color-mix(in srgb, var(--bq-ink) 4%, transparent);
+}
+
+.summary {
+  position: sticky;
+  top: 5.5rem;
+}
+
+.summaryTitle {
+  font-size: 1.25rem;
+}
+
+.eventImage {
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: var(--bq-radius-control);
+}
+
+.summaryDetails {
+  display: grid;
+  gap: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--bq-border);
+  font-size: 0.875rem;
+}
+
+.summaryDetails > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.35rem 1rem;
+}
+
+.summaryDetails dt {
+  color: var(--bq-ink-muted);
+}
+
+.summaryDetails dd {
+  margin-left: auto;
+  max-width: 100%;
+  font-weight: 650;
+  text-align: right;
+}
+
+.price {
+  font-size: 1.75rem;
+  line-height: 1.2;
+}
+
+.paymentNote {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.85rem;
+  border-radius: var(--bq-radius-control);
+  background: color-mix(in srgb, var(--bq-teal) 9%, var(--bq-surface));
+  color: var(--bq-teal);
+}
+
+.paymentNote svg {
+  flex-shrink: 0;
+  margin-top: 0.15rem;
+}
+
+.teamPanel {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.teamHeading {
+  margin: -1.5rem -1.5rem 0;
+  padding: 1.5rem;
+  border-bottom: 1px solid var(--bq-border);
+}
+
+.teamOption {
+  display: grid;
+  grid-template-columns: 1.25rem 3rem minmax(0, 1fr) auto;
+  gap: 1rem;
+  border-radius: var(--bq-radius-control);
+}
+
+.teamOption:has(input:checked) {
+  border-color: var(--bq-teal);
+  background: color-mix(in srgb, var(--bq-teal) 8%, var(--bq-surface));
+  box-shadow: inset 0 0 0 1px var(--bq-teal);
+}
+
+.teamOption:has(input:enabled):hover {
+  border-color: var(--bq-teal);
+}
+
+.teamOption input {
+  accent-color: var(--bq-teal);
+}
+
+.teamAvatar {
+  width: 3rem;
+  height: 3rem;
+  border-radius: var(--bq-radius-control);
+  background: var(--bq-ink);
+  color: var(--bq-on-action);
+}
+
+.selectedBadge {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--bq-teal) 12%, var(--bq-surface));
+  color: var(--bq-teal);
+}
+
+.teamHelp {
+  padding: 0.85rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--bq-teal) 20%, var(--bq-border));
+  border-radius: var(--bq-radius-control);
+  background: color-mix(in srgb, var(--bq-teal) 5%, var(--bq-surface));
+  color: var(--bq-teal);
+}
+
+.secondaryAction {
+  border: 1px solid var(--bq-control-outline);
+  background: var(--bq-surface);
+  color: var(--bq-teal);
+}
+
+.secondaryAction:enabled:hover {
+  background: var(--bq-surface-muted);
+}
+
+@media (max-width: 1023px) {
+  .columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .summary {
+    position: static;
+  }
+}
+
+@media (max-width: 639px) {
+  .header {
+    align-items: stretch;
+  }
+
+  .eventContext {
+    width: 100%;
+    max-width: none;
+    padding: 1rem;
+    border: 1px solid var(--bq-border);
+    border-radius: var(--bq-radius-surface);
+    background: var(--bq-surface);
+  }
+
+  .steps {
+    gap: 0.5rem;
+  }
+
+  .step,
+  .step:last-child {
+    position: relative;
+    flex: 1;
+    flex-direction: column;
+    gap: 0.5rem;
+    text-align: center;
+    font-size: 0.75rem;
+  }
+
+  .step:not(:last-child)::after {
+    position: absolute;
+    top: 1rem;
+    left: calc(50% + 1.35rem);
+    width: calc(100% - 2.2rem);
+    min-width: 0;
+    margin: 0;
+  }
+
+  .content,
+  .summary {
+    padding: 1rem;
+  }
+
+  .teamHeading {
+    margin: -1rem -1rem 0;
+    padding: 1rem;
+  }
+
+  .teamOption {
+    grid-template-columns: 1rem 2.5rem minmax(0, 1fr);
+    gap: 0.6rem;
+    padding: 0.75rem;
+  }
+
+  .teamAvatar {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+
+  .selectedBadge {
+    grid-column: 3;
+  }
+}

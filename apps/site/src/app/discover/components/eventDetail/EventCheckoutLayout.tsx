@@ -1,7 +1,11 @@
-import { createContext, useContext, type ReactNode, type ComponentProps } from 'react';
-import { Avatar, Divider, Group, Modal, Paper, Stack, Text } from '@/components/organization/organization-operation-ui';
+import { createContext, useContext, useEffect, useId, useRef, type ReactNode, type ComponentProps } from 'react';
+import { ArrowLeft, CalendarDays, MapPin, ShieldCheck } from 'lucide-react';
+import { Avatar, Button, Divider, Group, Modal, Paper, Stack, Text } from '@/components/organization/organization-operation-ui';
 import { cn } from '@/lib/utils';
 import { formatPrice } from '@/types';
+import styles from './EventCheckoutLayout.module.css';
+
+export type EventCheckoutPresentation = 'modal' | 'page';
 
 type CheckoutSummary = {
     eventName: string;
@@ -9,51 +13,98 @@ type CheckoutSummary = {
     imageUrl?: string;
     divisionName?: string;
     registrantName?: string;
+    sportLabel?: string;
+    scheduleLabel?: string;
+    locationLabel?: string;
+    rosterLabel?: string;
     priceCents: number;
 };
 
 export const EventCheckoutContext = createContext<CheckoutSummary | null>(null);
 type CheckoutStep = 'Entry' | 'Team setup' | 'Players' | 'Requirements' | 'Review and pay';
 
-export function EventCheckoutLayout({ children, step = 'Entry' }: {
-    children: ReactNode; step?: CheckoutStep;
+export function EventCheckoutLayout({ children, step = 'Entry', presentation = 'modal' }: {
+    children: ReactNode; step?: CheckoutStep; presentation?: EventCheckoutPresentation;
 }) {
     const summary = useContext(EventCheckoutContext);
+    const isPage = presentation === 'page';
     if (!summary) return <>{children}</>;
     const steps: CheckoutStep[] = summary.isTeamRegistration
         ? ['Entry', 'Team setup', 'Players', 'Review and pay']
         : ['Entry', 'Requirements', 'Review and pay'];
     const activeStep = summary.isTeamRegistration && step === 'Requirements' ? 'Review and pay' : step;
     return <Stack gap="xl">
-        <ol className="flex flex-wrap gap-3" aria-label="Registration steps">
+        <ol className={isPage ? styles.steps : 'flex flex-wrap gap-3'} aria-label="Registration steps">
             {steps.map((label, index) => (
                 <li key={label} aria-current={label === activeStep ? 'step' : undefined}
-                    className={cn('flex items-center gap-2 text-sm', label === activeStep ? 'font-semibold text-foreground' : 'text-muted-foreground')}>
-                    <span className={cn('flex size-8 items-center justify-center rounded-full border', label === activeStep ? 'border-primary bg-primary text-primary-foreground' : 'border-border')}>{index + 1}</span>
-                    {summary.isTeamRegistration && label === 'Entry' ? 'Choose team' : label}
+                    className={isPage ? styles.step : cn('flex items-center gap-2 text-sm', label === activeStep ? 'font-semibold text-foreground' : 'text-muted-foreground')}>
+                    <span className={isPage ? styles.stepNumber : cn('flex size-8 items-center justify-center rounded-full border', label === activeStep ? 'border-primary bg-primary text-primary-foreground' : 'border-border')}>{index + 1}</span>
+                    <span>{summary.isTeamRegistration && label === 'Entry' ? 'Choose team' : label}</span>
                 </li>
             ))}
         </ol>
-        <div className="grid items-start gap-8 md:grid-cols-[minmax(0,1fr)_300px]">
-            <div className="min-w-0">{children}</div>
-            <Paper component="aside" aria-label="Registration summary" withBorder radius="lg" p="lg" className="md:sticky md:top-4">
+        <div className={isPage ? styles.columns : 'grid items-start gap-8 md:grid-cols-[minmax(0,1fr)_300px]'}>
+            {isPage ? <Paper withBorder p="lg" radius="lg" className={styles.content}>{children}</Paper> : <div className="min-w-0">{children}</div>}
+            <Paper component="aside" aria-label="Registration summary" withBorder radius="lg" p="lg" className={isPage ? styles.summary : 'md:sticky md:top-4'}>
                 <Stack gap="md">
-                    <Text component="h3" fw={700}>Registration summary</Text>
+                    <Text component={isPage ? 'h2' : 'h3'} fw={700} className={isPage ? styles.summaryTitle : undefined}>Registration summary</Text>
                     <Group wrap="nowrap" align="flex-start">
-                        <Avatar src={summary.imageUrl} alt="" size={64} radius="md" />
-                        <div><Text fw={700}>{summary.eventName}</Text>
+                        <Avatar src={summary.imageUrl} alt="" size={64} radius="md" className={isPage ? styles.eventImage : undefined} />
+                        <div className="min-w-0 break-words"><Text fw={700}>{summary.eventName}</Text>
+                            {isPage && summary.sportLabel ? <Text size="sm" c="dimmed">{summary.sportLabel}</Text> : null}
+                            {isPage && summary.scheduleLabel ? <Text size="sm" c="dimmed">{summary.scheduleLabel}</Text> : null}
                             {summary.divisionName ? <Text size="sm" c="dimmed">{summary.divisionName}</Text> : null}
                         </div>
                     </Group>
-                    {summary.registrantName ? <Group justify="space-between"><Text c="dimmed">{summary.isTeamRegistration ? 'Team' : 'Registering'}</Text><Text fw={600}>{summary.registrantName}</Text></Group> : null}
+                    <dl className={isPage ? styles.summaryDetails : 'space-y-4'}>
+                        {isPage ? <div><dt>Registration type</dt><dd>{summary.isTeamRegistration ? 'Team registration' : 'Individual registration'}</dd></div> : null}
+                        {summary.registrantName ? <div className={isPage ? undefined : 'flex flex-wrap justify-between gap-2'}><dt className="text-muted-foreground">{summary.isTeamRegistration ? 'Team' : 'Registering'}</dt><dd className="font-semibold">{summary.registrantName}</dd></div> : null}
+                        {isPage && summary.rosterLabel ? <div><dt>Roster</dt><dd>{summary.rosterLabel}</dd></div> : null}
+                    </dl>
                     <Divider />
-                    <Group justify="space-between"><Text>Registration price</Text><Text fw={700}>{formatPrice(summary.priceCents)}</Text></Group>
+                    <Group justify="space-between"><Text>Registration price</Text><Text fw={700} className={isPage ? styles.price : undefined}>{formatPrice(summary.priceCents)}</Text></Group>
                     <Text size="sm" c="dimmed">Any discounts, payment schedule, and applicable fees are shown before payment.</Text>
-                    <Text size="sm" c="dimmed">Stripe securely collects payment details. This saved progress does not confirm registration or payment.</Text>
+                    <div className={isPage ? styles.paymentNote : undefined}>
+                        {isPage ? <ShieldCheck size={18} aria-hidden="true" /> : null}
+                        <Text size="sm" c={isPage ? undefined : 'dimmed'}>Stripe securely collects payment details. This saved progress does not confirm registration or payment.</Text>
+                    </div>
                 </Stack>
             </Paper>
         </div>
     </Stack>;
+}
+
+export function EventCheckoutPage({ children, onBack }: { children: ReactNode; onBack: () => void }) {
+    const summary = useContext(EventCheckoutContext);
+    const headingId = useId();
+    const headingRef = useRef<HTMLHeadingElement>(null);
+    useEffect(() => { headingRef.current?.focus(); }, []);
+    return (
+        <section className={styles.page} aria-labelledby={headingId}>
+            <Button variant="subtle" onClick={onBack} className={styles.back} leftSection={<ArrowLeft size={18} aria-hidden="true" />}>
+                Back to {summary?.eventName}
+            </Button>
+            <header className={styles.header}>
+                <div>
+                    <h1 id={headingId} ref={headingRef} tabIndex={-1} className={styles.heading}>
+                        {summary?.isTeamRegistration ? 'Choose a team' : 'Choose registration'}
+                    </h1>
+                    <p className={styles.subtitle}>
+                        {summary?.isTeamRegistration ? 'Select a team to continue registration for this event.' : 'Choose how you would like to register for this event.'}
+                    </p>
+                </div>
+                {summary ? <div className={styles.eventContext}>
+                    <span className={styles.eventIcon}><CalendarDays size={22} aria-hidden="true" /></span>
+                    <div>
+                        <Text fw={700}>{summary.eventName}</Text>
+                        <Text size="sm" c="dimmed">{summary.sportLabel}{summary.sportLabel ? ' · ' : ''}{summary.isTeamRegistration ? 'Team registration' : 'Individual registration'}</Text>
+                        {summary.locationLabel ? <p className={styles.location}><MapPin size={14} aria-hidden="true" />{summary.locationLabel}</p> : null}
+                    </div>
+                </div> : null}
+            </header>
+            <EventCheckoutLayout presentation="page">{children}</EventCheckoutLayout>
+        </section>
+    );
 }
 
 export function EventCheckoutModal({ children, step = 'Requirements', zIndex, ...props }: ComponentProps<typeof Modal> & {
