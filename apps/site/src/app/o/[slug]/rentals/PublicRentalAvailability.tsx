@@ -26,31 +26,26 @@ const EMPTY_FIELDS: Field[] = [];
 const NO_PRESELECTED_RENTALS: [] = [];
 
 function useRentalBookingAccount(currentUser: UserData | null) {
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
-  const [value, setValue] = useState("self");
   const userId = currentUser?.$id;
+  const requestKey = useMemo(() => ({ userId, attempt }), [userId, attempt]);
+  const [result, setResult] = useState<{ key: typeof requestKey; organizations: Organization[]; error: string | null } | null>(null);
+  const [selection, setSelection] = useState<{ key: typeof requestKey; value: string } | null>(null);
+  const organizations = result?.key === requestKey ? result.organizations : [];
+  const error = result?.key === requestKey ? result.error : null;
+  const loading = Boolean(userId) && result?.key !== requestKey;
+  const value = selection?.key === requestKey ? selection.value : "self";
+  const setValue = (value: string) => setSelection({ key: requestKey, value });
   useEffect(() => {
     let cancelled = false;
-    setOrganizations([]);
-    setValue("self");
-    setError(null);
-    if (!userId) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    organizationService.getOrganizationsByOwner(userId).then((result) => {
-      if (!cancelled) setOrganizations(result);
+    if (!requestKey.userId) return;
+    organizationService.getOrganizationsByOwner(requestKey.userId).then((organizations) => {
+      if (!cancelled) setResult({ key: requestKey, organizations, error: null });
     }).catch(() => {
-      if (!cancelled) setError("Unable to load your organizations. You can book with your personal account or try again.");
-    }).finally(() => {
-      if (!cancelled) setLoading(false);
+      if (!cancelled) setResult({ key: requestKey, organizations: [], error: "Unable to load your organizations. You can book with your personal account or try again." });
     });
     return () => { cancelled = true; };
-  }, [userId, attempt]);
+  }, [requestKey]);
   return { value, setValue, loading, error, retry: () => setAttempt((previous) => previous + 1), options: [{ value: "self", label: "My personal account" }, ...organizations.map((organization) => ({ value: organization.$id, label: organization.name }))] };
 }
 
