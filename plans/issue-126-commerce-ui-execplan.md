@@ -35,6 +35,7 @@ The change is a visual and interaction migration. It must not change prices, fee
 - [x] (2026-09-15) Ran the seeded checkout suites. They pass 4 suites and 28 tests.
 - [x] (2026-09-15) Ran the full site test command. It completed with 862 passed suites, 35 failed suites, and 14 skipped suites; 6,745 passed tests, 147 failed tests, and 129 skipped tests. The failures are recorded below.
 - [x] (2026-09-15) Attempted the seeded event browser suite. Playwright stopped before the tests because the development build could not resolve existing discover imports and the `discoverStartOfToday` export.
+- [x] (2026-09-15) Attempted the production build with the seeded database. Prisma validation, generation, and the generated-client guard passed. Next.js Turbopack stopped on nine existing discover-module errors.
 
 ## Surprises & Discoveries
 
@@ -72,6 +73,8 @@ The change is a visual and interaction migration. It must not change prices, fee
   Evidence: `npm run test:ci` reports 35 failed suites, 862 passed suites, and 14 skipped suites; 147 failed tests, 6,745 passed tests, and 129 skipped tests. Failures include existing affiliate runner socket permissions, scheduler and event-editor expectations, organization UI expectations, generated-client drift, and missing discover imports.
 - Observation: The seeded event browser suite cannot start from this branch.
   Evidence: `npx playwright test e2e/event-join.spec.ts` stops before tests because the development build cannot resolve `@/components/ui/SportCategoryMultiSelect`, `@/lib/sportCategoryFilters`, and the `discoverStartOfToday` export from `@/lib/discoverFilters`.
+- Observation: The production build reaches Next.js when the isolated database is configured, but the branch cannot produce a production bundle.
+  Evidence: `npm run build` passes `prisma validate`, `prisma generate`, and `check-prisma-generated.mjs`, then fails because `@/components/ui/SportCategoryMultiSelect`, `@/lib/sportCategoryFilters`, and `discoverStartOfToday` from `@/lib/discoverFilters` are unavailable to the discover build.
 
 - Observation: Changed-file lint has warnings but no errors.
   Evidence: `npm run lint:changed -- --base 4eacd13e0` reports 0 errors and 20 complexity or hook-dependency warnings.
@@ -118,7 +121,7 @@ The HTTP paths, request fields, response fields, registration rules, prices, fee
 
 The focused event suites pass 4 suites and 28 tests. The isolated checkout preview passed at desktop and narrow mobile widths, and the action-placement preview covered 1536x1024 and 320x568 with all 14 action states, no horizontal overflow, and clear controls at 200% text size. Standards and specification review found no actionable issue in the latest correction. The public route and discover modal use the intended separate presentation modes.
 
-The complete suite, TypeScript check, production build, provider sandbox, and seeded commerce browser flow remain environment or baseline limits. The isolated issue database is now seeded and migration-complete. The seeded browser flow remains blocked before test execution by the discover build errors recorded above.
+The complete suite, TypeScript check, production build, provider sandbox, and seeded commerce browser flow remain environment or baseline limits. The isolated issue database is now seeded and migration-complete. The production build passes the Prisma checks but remains blocked by the discover build errors recorded above. The seeded browser flow remains blocked before test execution by the same errors.
 
 
 ## Context and Orientation
@@ -207,7 +210,7 @@ A reviewer can select a product, open product details without entering checkout 
 
 A reviewer can observe explicit loading text, field-level validation, readable disabled prerequisites, permission-safe actions, recoverable errors, and restored saved progress. No state presents an unpaid registration as paid. Prices and totals match the existing services and route responses.
 
-Focused Jest checks pass: 4 suites and 28 tests for the event checkout and registration paths after seeding. Changed-file lint reports 0 errors and 20 warnings; the warnings are complexity and hook-dependency findings. The full site test command reports 35 failed suites, 862 passed suites, and 14 skipped suites; 147 failed tests, 6,745 passed tests, and 129 skipped tests. The failures include existing affiliate runner socket permissions, scheduler and event-editor expectations, organization UI expectations, generated-client drift, and missing discover imports. The isolated database `bracketiq_e2e_126_codex` is migration-complete and seeded with 33 users, 1 organization, 7 events, and 8 event teams. The seeded event browser suite stopped before tests because the development build could not resolve `@/components/ui/SportCategoryMultiSelect`, `@/lib/sportCategoryFilters`, and `discoverStartOfToday`. A provider sandbox check was not run because no authorized provider test environment was available, and no provider simulation was added.
+Focused Jest checks pass: 4 suites and 28 tests for the event checkout and registration paths after seeding. Changed-file lint reports 0 errors and 20 warnings; the warnings are complexity and hook-dependency findings. The full site test command reports 35 failed suites, 862 passed suites, and 14 skipped suites; 147 failed tests, 6,745 passed tests, and 129 skipped tests. The failures include existing affiliate runner socket permissions, scheduler and event-editor expectations, organization UI expectations, generated-client drift, and missing discover imports. The isolated database `bracketiq_e2e_126_codex` is migration-complete and seeded with 33 users, 1 organization, 7 events, and 8 event teams. The production build passes Prisma validation, generation, and the generated-client guard, then stops in Next.js Turbopack on missing discover modules. The seeded event browser suite stopped before tests for the same build errors. A provider sandbox check was not run because no authorized provider test environment was available, and no provider simulation was added.
 
 
 ## Idempotence and Recovery
@@ -228,7 +231,7 @@ Approved desktop reference groups:
 
     State/recovery: `commerce-flow--loading--desktop-1536x1024.png`, `commerce-checkout--validation-error--desktop-1536x1024.png`, `commerce-flow--disabled--desktop-1536x1024.png`, `commerce-flow--permission--desktop-1536x1024.png`, `commerce-flow--error--desktop-1536x1024.png`, `commerce-flow--recovery--desktop-1536x1024.png`.
 
-The issue body contains the full approved desktop and mobile reference list. Current evidence: the isolated database is migration-complete and seeded; focused event Jest checks pass 4/4 suites and 28/28 tests; changed-file lint has 0 errors; icon projections pass for 27 icons; and the isolated checkout previews pass at desktop and narrow mobile widths. The full site test command still reports the baseline failures recorded above. The seeded browser suite is blocked before test execution by discover build errors. Standards and specification review found no actionable issue in the latest correction.
+The issue body contains the full approved desktop and mobile reference list. Current evidence: the isolated database is migration-complete and seeded; focused event Jest checks pass 4/4 suites and 28/28 tests; changed-file lint has 0 errors; icon projections pass for 27 icons; and the isolated checkout previews pass at desktop and narrow mobile widths. The full site test command still reports the baseline failures recorded above. The production build passes the Prisma checks but stops on discover build errors, which also block the seeded browser suite before test execution. Standards and specification review found no actionable issue in the latest correction.
 
 ## Interfaces and Dependencies
 
