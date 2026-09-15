@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Alert } from "@/components/organization/organization-operation-ui";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { refundRequestService } from "@/lib/refundRequestService";
+import { isApiRequestError } from "@/lib/apiClient";
 import type { RefundRequest } from "@/types";
 import RefundRequestListView from "./RefundRequestListView";
 import {
@@ -11,6 +11,7 @@ import {
   type RefundReferences,
 } from "./refundRequestReferences";
 import OrganizationRefundsView from "@/components/organization/OrganizationRefundsView";
+import { refundApprovalUnavailableReason } from "./refundRequestPresentation";
 
 type RefundRequestsListProps = {
   organizationId?: string;
@@ -18,6 +19,7 @@ type RefundRequestsListProps = {
   hostId?: string;
   showHeader?: boolean;
   withContainer?: boolean;
+  canManage?: boolean;
 };
 
 export default function RefundRequestsList({
@@ -26,12 +28,15 @@ export default function RefundRequestsList({
   hostId,
   showHeader = true,
   withContainer = true,
+  canManage = true,
 }: RefundRequestsListProps) {
   const [refunds, setRefunds] = useState<RefundRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [reloadVersion, setReloadVersion] = useState(0);
+  const requestVersion = useRef(0);
   const [references, setReferences] = useState<RefundReferences>({
     events: {},
     users: {},
@@ -50,6 +55,9 @@ export default function RefundRequestsList({
 
   useEffect(() => {
     let isMounted = true;
+    requestVersion.current += 1;
+    setActionError(null);
+    setProcessingId(null);
 
     const loadRefunds = async () => {
       if (!hasFilter) {
@@ -78,8 +86,9 @@ export default function RefundRequestsList({
         setReferences(names);
         setRefunds(scopedRefunds);
       } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Failed to load refund requests";
+        const message = isApiRequestError(err) && err.status === 403
+          ? "You do not have permission to view these refund requests. Ask the organization owner or event host to check your access, then reload."
+          : err instanceof Error ? err.message : "Failed to load refund requests";
         if (isMounted) {
           setError(message);
         }
@@ -94,8 +103,9 @@ export default function RefundRequestsList({
 
     return () => {
       isMounted = false;
+      requestVersion.current += 1;
     };
-  }, [organizationId, userId, hostId, hasFilter]);
+  }, [organizationId, userId, hostId, hasFilter, reloadVersion]);
 
   const title = useMemo(() => {
     if (organizationId) return "Organization Refund Requests";
@@ -122,22 +132,27 @@ export default function RefundRequestsList({
     refund: RefundRequest,
     status: "APPROVED" | "REJECTED",
   ) => {
+    if (!canManage || isRequesterView || loading || error || processingId) return;
+    if ((refund.status || "WAITING") !== "WAITING") return;
+    if (!visibleRefunds.some((item) => item.$id === refund.$id)) return;
+    if (!organizationId && refund.hostId !== hostId) return;
     const refundId = refund.$id;
     setActionError(null);
-    if (status === "APPROVED" && !refund.approvalPreview?.isValid) {
-      setActionError(
-        "This refund request does not have a current immutable approval preview. Reload it or ask the customer to submit a new request.",
-      );
+    const approvalError = refundApprovalUnavailableReason(refund.approvalPreview);
+    if (status === "APPROVED" && approvalError) {
+      setActionError(approvalError);
       return;
     }
 
     setProcessingId(refundId);
+    const version = requestVersion.current;
     try {
       const updated = await refundRequestService.updateRefundStatus(
         refundId,
         status,
         status === "APPROVED" ? refund.approvalPreview : undefined,
       );
+      if (version !== requestVersion.current) return;
       setRefunds((prev) =>
         prev.map((refund) =>
           refund.$id === refundId
@@ -146,43 +161,37 @@ export default function RefundRequestsList({
         ),
       );
     } catch (err) {
+      if (version !== requestVersion.current) return;
       const message =
         err instanceof Error ? err.message : "Failed to update refund request";
       setActionError(message);
     } finally {
-      setProcessingId(null);
+      if (version === requestVersion.current) setProcessingId(null);
     }
   };
 
   if (organizationId) {
     return (
-      <>
-        {error && (
-          <Alert color="red" data-testid="refund-error">
-            {error}
-          </Alert>
-        )}
-        {actionError && (
-          <Alert color="red" data-testid="refund-action-error">
-            {actionError}
-          </Alert>
-        )}
-        <OrganizationRefundsView
-          loading={loading}
-          error={error}
-          refunds={visibleRefunds}
-          events={references.events}
-          users={references.users}
-          teams={references.teams}
-          processingId={processingId}
-          onDecision={handleStatusChange}
-        />
-      </>
+      <OrganizationRefundsView
+        loading={loading}
+        error={error}
+        actionError={actionError}
+        canManage={canManage}
+        refunds={visibleRefunds}
+        events={references.events}
+        users={references.users}
+        teams={references.teams}
+        processingId={processingId}
+        onDecision={handleStatusChange}
+        onReload={() => setReloadVersion((version) => version + 1)}
+      />
     );
   }
 
   return (
     <RefundRequestListView
+      canManage={canManage}
+      onReload={() => setReloadVersion((version) => version + 1)}
       title={title}
       description={description}
       loading={loading}

@@ -3,7 +3,9 @@
 import { OrganizationDataRegion } from '@/components/organization/OrganizationDataLoading';
 
 type RevenueItem = { id: string; classification: string; amountCents: number; category: string; serviceStartAt?: string | null };
-const money = (cents: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(cents / 100);
+const moneyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+const axisMoneyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+const money = (cents: number) => moneyFormatter.format(cents / 100);
 
 export function summarizeRevenue(items: RevenueItem[]) {
   const dates = new Map<string, number>();
@@ -28,12 +30,12 @@ function RevenueTrend({ dates }: { dates: ReturnType<typeof summarizeRevenue>['d
   const points = dates.map((point, index) => ({ ...point, x: 65 + index * 610 / Math.max(dates.length - 1, 1), y: 178 - point.amount / max * 140 }));
   return <>
     <svg viewBox="0 0 720 215" role="img" aria-label="Revenue by service date. Exact amounts are in the table below.">
-      {[0, .5, 1].map((fraction) => <g key={fraction}><line x1="65" x2="690" y1={178 - fraction * 140} y2={178 - fraction * 140} stroke="var(--bq-border)" strokeDasharray="4 4" /><text x="2" y={182 - fraction * 140} fontSize="11" fill="currentColor">{money(max * fraction)}</text></g>)}
+      {[0, .5, 1].map((fraction) => <g key={fraction}><line x1="65" x2="690" y1={178 - fraction * 140} y2={178 - fraction * 140} stroke="var(--bq-border)" strokeDasharray="4 4" /><text x="2" y={182 - fraction * 140} fontSize="11" fill="currentColor">{axisMoneyFormatter.format(max * fraction / 100)}</text></g>)}
       <polyline points={points.map((point) => `${point.x},${point.y}`).join(' ')} fill="none" stroke="var(--primary)" strokeWidth="2.5" />
       {points.map((point) => <circle key={point.date} cx={point.x} cy={point.y} r="4" fill="var(--primary)"><title>{point.date}: {money(point.amount)}</title></circle>)}
       <text x="65" y="205" fontSize="11" fill="currentColor">{dates[0].date}</text><text x="690" y="205" textAnchor="end" fontSize="11" fill="currentColor">{dates[dates.length - 1].date}</text>
     </svg>
-    <details className="org-chart-data"><summary>View revenue data</summary><table><thead><tr><th>Service date</th><th>Revenue</th></tr></thead><tbody>{dates.map((point) => <tr key={point.date}><td>{point.date}</td><td>{money(point.amount)}</td></tr>)}</tbody></table></details>
+    <details className="org-chart-data"><summary className="min-h-11 focus-visible:outline-2 focus-visible:outline-ring">View revenue data</summary><table><caption className="sr-only">Exact revenue by service date</caption><thead><tr><th scope="col">Service date</th><th scope="col">Revenue</th></tr></thead><tbody>{dates.map((point) => <tr key={point.date}><td>{point.date}</td><td className="tabular-nums">{money(point.amount)}</td></tr>)}</tbody></table></details>
   </>;
 }
 
@@ -41,14 +43,14 @@ export default function OrganizationFinanceCharts({ items, unavailable = false }
   const { dates, categories } = summarizeRevenue(items);
   const total = categories.reduce((sum, category) => sum + category.amount, 0);
   return <div className="org-finance-charts">
-    <section className="org-reference-card"><h3>Revenue by service date</h3><OrganizationDataRegion label="revenue trend" layout="detail">{!unavailable && <RevenueTrend dates={dates} />}</OrganizationDataRegion></section>
+    <section className="org-reference-card"><h3>Revenue by service date</h3><OrganizationDataRegion label="revenue trend" layout="detail">{unavailable ? <p className="org-empty-copy">Revenue data is unavailable. Reload finance to try again.</p> : <RevenueTrend dates={dates} />}</OrganizationDataRegion></section>
     <section className="org-reference-card"><h3>Revenue breakdown</h3>
       <OrganizationDataRegion label="revenue breakdown" layout="detail">
-      {categories.length ? <div className="org-revenue-categories">{categories.map((category) => <div key={category.name}>
+      {unavailable ? <p className="org-empty-copy">Revenue data is unavailable. Reload finance to try again.</p> : categories.length ? <div className="org-revenue-categories">{categories.map((category) => <div key={category.name}>
         <div><span>{category.name}</span><strong>{money(category.amount)}</strong></div>
         <meter min={0} max={total} value={category.amount} aria-label={`${category.name} revenue`} />
         <small>{Math.round(category.amount / total * 100)}% of revenue</small>
-      </div>)}</div> : !unavailable && <p className="org-empty-copy">No revenue in this range.</p>}
+      </div>)}</div> : <p className="org-empty-copy">No revenue in this range.</p>}
       </OrganizationDataRegion>
     </section>
   </div>;

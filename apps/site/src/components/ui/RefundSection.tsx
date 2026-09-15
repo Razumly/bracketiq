@@ -1,5 +1,7 @@
+'use client';
+
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Paper, Text, Button, Alert, Textarea, Group, Select } from '@mantine/core';
+import { Paper, Text, Button, Alert, Textarea, Group, Select } from '@/components/organization/organization-operation-ui';
 import { Event } from '@/types';
 import { paymentService } from '@/lib/paymentService';
 import { eventService, type WeeklyOccurrenceSelection } from '@/lib/eventService';
@@ -267,6 +269,7 @@ export default function RefundSection({
   };
 
   const handleRefund = async () => {
+    if (loading) return;
     if (!canAutoRefund && !refundReason.trim()) {
       setError('Please provide a reason for the refund request');
       return;
@@ -341,6 +344,7 @@ export default function RefundSection({
   };
 
   const handleLeaveAction = async () => {
+    if (loading) return;
     setLoading(true);
     setError(null);
     try {
@@ -359,14 +363,15 @@ export default function RefundSection({
     : 'Registration';
 
   return (
-    <Paper withBorder p="md" radius="md">
-      <Text fw={600} mb={8}>{sectionTitle}</Text>
+    <Paper withBorder p="md" radius="md" className="space-y-3" aria-busy={loading}>
+      <Text component="h3" size="lg" fw={700} mb={8}>{sectionTitle}</Text>
 
       {targets.length > 1 && (
         <Select
           label="Withdraw profile"
           value={selectedTarget.id}
           onChange={(value) => setSelectedTargetId(value)}
+          disabled={loading}
           data={targets.map((target) => ({
             value: target.id,
             label: `${target.label} (${stateLabel(target.state)})`,
@@ -380,8 +385,9 @@ export default function RefundSection({
       </Text>
 
       {error && (
-        <Alert color="red" variant="light" mb="sm">{error}</Alert>
+        <Alert color="red" title="Request not completed" variant="light" mb="sm">{error}</Alert>
       )}
+      {loading && <Text role="status" size="sm">Processing this registration. Keep this page open until the request completes.</Text>}
 
       {selectedTarget.state === 'free_agent' ? (
         <div className="space-y-2">
@@ -446,7 +452,7 @@ export default function RefundSection({
         </div>
       ) : canAutoRefund ? (
         <div className="space-y-2">
-          <Text size="sm" c="dimmed">You can get a full refund until {formatDisplayDateTime(refundDeadline)}</Text>
+          <Alert color="teal" role="note">You can get a full refund until {formatDisplayDateTime(refundDeadline)}. Stripe processes the refund to the original payment method.</Alert>
           <Button fullWidth color="green" onClick={() => { void handleRefund(); }} loading={loading}>
             Withdraw and Get Refund
           </Button>
@@ -464,14 +470,18 @@ export default function RefundSection({
           ) : (
             <div className="space-y-3">
               <Textarea
-                label="Reason for refund request *"
+                label="Reason for refund request"
+                required
+                autoFocus
+                disabled={loading}
+                description="Enter a reason before you send the request. The host will review it."
                 value={refundReason}
                 onChange={(eventValue) => setRefundReason(eventValue.currentTarget.value)}
                 placeholder="Please explain why you need a refund..."
                 minRows={3}
               />
               <Group grow>
-                <Button variant="default" onClick={() => setShowReasonInput(false)}>Cancel</Button>
+                <Button variant="default" disabled={loading} onClick={() => setShowReasonInput(false)}>Cancel</Button>
                 <Button color="orange" onClick={() => { void handleRefund(); }} disabled={!refundReason.trim()} loading={loading}>
                   Send Request
                 </Button>

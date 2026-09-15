@@ -4,10 +4,12 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 
 import OrganizationRefundsTabContent from "../OrganizationRefundsTabContent";
 import type { RefundRequest } from "@/types";
+import { ApiRequestError } from "@/lib/apiClient";
 
 jest.mock("@/lib/refundRequestService", () => ({
   __esModule: true,
@@ -184,6 +186,11 @@ describe("OrganizationRefundsTabContent", () => {
       screen.queryByRole("button", { name: "Deny" }),
     ).not.toBeInTheDocument();
     expect(refundRequestService.updateRefundStatus).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Reload requests" }));
+    expect(await screen.findByRole("button", { name: "Test User", exact: true })).toBeEnabled();
+    expect(screen.getByRole("textbox", { name: "Search refund requests" })).toHaveValue("Test");
+    expect(screen.getByRole("button", { name: "Deny" })).toBeEnabled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("rejects a missing display name instead of displaying a user identifier", async () => {
@@ -313,5 +320,66 @@ describe("OrganizationRefundsTabContent", () => {
       ["team-1", "team-2"],
       true,
     );
+  });
+
+  it("shows a permission failure without request data or decision controls", async () => {
+    refundRequestService.listRefundRequests.mockRejectedValueOnce(
+      new ApiRequestError("Forbidden", 403, {}),
+    );
+    render(<OrganizationRefundsTabContent organizationId="org-1" />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("You do not have permission");
+    expect(screen.queryByRole("button", { name: "Deny" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Approve/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("Duplicate registration")).not.toBeInTheDocument();
+    expect(refundRequestService.updateRefundStatus).not.toHaveBeenCalled();
+  });
+
+  it("approves the one-cent immutable scope and closes the pending decision", async () => {
+    const refund: RefundRequest = {
+      ...pendingRefund,
+      requestedAmountCents: 1,
+      currency: "usd",
+      approvalPreview: {
+        paymentScope: [{ paymentId: "payment-1", billId: "bill-1", refundableAmountCents: 1, currency: "usd" }],
+        paymentCount: 1,
+        billIds: ["bill-1"],
+        paymentIds: ["payment-1"],
+        refundableAmountCents: 1,
+        currency: "usd",
+        occurrence: { slotId: null, occurrenceDate: null },
+        policyDecision: "HOST_REVIEW_REQUIRED",
+        scopeVersion: 2,
+        scopeHash: "one-cent-scope",
+        isValid: true,
+      },
+    };
+    refundRequestService.listRefundRequests.mockResolvedValueOnce([refund]);
+    refundRequestService.updateRefundStatus.mockResolvedValueOnce({ ...refund, status: "APPROVED" });
+    render(<OrganizationRefundsTabContent organizationId="org-1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Approve $0.01", exact: true }));
+    const details = within(screen.getByRole("complementary", { name: "Refund request details" }));
+    expect(await details.findByText("Approved", { exact: true })).toBeInTheDocument();
+    expect(details.getByRole("button", { name: "Approve $0.01", exact: true })).toBeDisabled();
+    expect(refundRequestService.updateRefundStatus).toHaveBeenCalledWith("refund-1", "APPROVED", refund.approvalPreview);
+    fireEvent.click(screen.getByRole("button", { name: /^Pending/ }));
+    expect(screen.queryByText("Duplicate registration")).not.toBeInTheDocument();
+  });
+
+  it("prevents another decision while a request is processing", async () => {
+    const decision = deferred<RefundRequest>();
+    refundRequestService.listRefundRequests.mockResolvedValueOnce([
+      pendingRefund,
+      { ...pendingRefund, $id: "refund-2", userId: "host-1", reason: "Second request" },
+    ]);
+    refundRequestService.updateRefundStatus.mockReturnValueOnce(decision.promise);
+    render(<OrganizationRefundsTabContent organizationId="org-1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Deny" }));
+    fireEvent.click(screen.getByRole("button", { name: "Host User", exact: true }));
+    expect(screen.getByRole("button", { name: "Deny" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Reload requests" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Deny" }));
+    expect(refundRequestService.updateRefundStatus).toHaveBeenCalledTimes(1);
+    await act(async () => { decision.resolve({ ...pendingRefund, status: "REJECTED" }); });
+    expect(screen.getByRole("button", { name: "Deny" })).toBeEnabled();
   });
 });

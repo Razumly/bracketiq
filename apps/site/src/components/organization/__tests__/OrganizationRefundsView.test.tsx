@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { RefundRequest } from '@/types';
 import OrganizationRefundsView from '../OrganizationRefundsView';
@@ -21,4 +21,48 @@ it('filters requests locally and prevents approval without a valid payment previ
   expect(screen.queryByRole('button', { name: 'Sam' })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Lee' })).toBeVisible();
   expect(screen.getByRole('button', { name: 'Deny' })).toBeDisabled();
+});
+
+it('keeps the requested amount visible but blocks approval when no refundable amount remains', async () => {
+  const user = userEvent.setup();
+  const onDecision = jest.fn();
+  const refund: RefundRequest = {
+    $id: 'request',
+    eventId: 'event',
+    userId: 'sam',
+    reason: 'Duplicate registration',
+    requestedAmountCents: 1251,
+    currency: 'usd',
+    approvalPreview: {
+      paymentScope: [], paymentCount: 0, billIds: [], paymentIds: [],
+      refundableAmountCents: 0, currency: 'usd',
+      occurrence: { slotId: null, occurrenceDate: null },
+      policyDecision: 'HOST_REVIEW_REQUIRED',
+      scopeVersion: 2, scopeHash: 'scope', isValid: true,
+    },
+  };
+  render(<OrganizationRefundsView refunds={[refund]} events={{ event: 'Summer league' }} users={{ sam: 'Sam' }} teams={{}} processingId={null} onDecision={onDecision} />);
+  const details = within(screen.getByRole('complementary', { name: 'Refund request details' }));
+  expect(details.getByText('$12.51')).toBeInTheDocument();
+  await user.click(details.getByRole('button', { name: 'Approve', exact: true }));
+  expect(onDecision).not.toHaveBeenCalled();
+  expect(details.getByRole('status')).toHaveTextContent('No refundable amount');
+  await user.click(details.getByRole('button', { name: 'Deny' }));
+  expect(onDecision).toHaveBeenCalledWith(refund, 'REJECTED');
+});
+
+it('allows a read-only user to select a request without exposing decision controls', async () => {
+  const user = userEvent.setup();
+  const onDecision = jest.fn();
+  const refunds: RefundRequest[] = [
+    { $id: 'sam-request', eventId: 'event', userId: 'sam', reason: 'Schedule conflict' },
+    { $id: 'lee-request', eventId: 'event', userId: 'lee', reason: 'Medical issue' },
+  ];
+  render(<OrganizationRefundsView canManage={false} refunds={refunds} events={{ event: 'Summer league' }} users={{ sam: 'Sam', lee: 'Lee' }} teams={{}} processingId={null} onDecision={onDecision} />);
+  await user.click(screen.getByRole('button', { name: 'Lee', exact: true }));
+  const details = within(screen.getByRole('complementary', { name: 'Refund request details' }));
+  expect(details.getByText('Medical issue')).toBeInTheDocument();
+  expect(details.queryByRole('button', { name: /^Approve/ })).not.toBeInTheDocument();
+  expect(details.queryByRole('button', { name: 'Deny' })).not.toBeInTheDocument();
+  expect(onDecision).not.toHaveBeenCalled();
 });

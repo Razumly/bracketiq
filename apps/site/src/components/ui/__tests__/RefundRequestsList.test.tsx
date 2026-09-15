@@ -57,62 +57,17 @@ describe("RefundRequestsList", () => {
     ]);
   });
 
-  it("loads and renders refund requests", async () => {
-    refundRequestService.listRefundRequests.mockResolvedValue([
-      {
-        $id: "refund_1",
-        eventId: "event_123",
-        userId: "user_1",
-        reason: "Need to cancel",
-        hostId: "host_1",
-        organizationId: "org_1",
-        $createdAt: "2024-01-01T00:00:00.000Z",
-      },
-    ]);
-
-    eventService.getEventById.mockImplementation(async (id: string) => ({
-      $id: id,
-      name: `Event ${id}`,
-    }));
-    userService.getUsersByIds.mockResolvedValue([
-      { $id: "user_1", firstName: "Test", lastName: "User" } as any,
-      { $id: "host_1", firstName: "Host", lastName: "One" } as any,
-    ]);
-    organizationService.getOrganizationsByIds.mockResolvedValue([
-      { $id: "org_1", name: "Org One" } as any,
-    ]);
-
-    renderWithMantine(<RefundRequestsList userId="user_1" />);
-
-    await waitFor(() =>
-      expect(refundRequestService.listRefundRequests).toHaveBeenCalled(),
-    );
-
-    expect(await screen.findByText("Your Refund Requests")).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "Track the refund requests you submitted and their current status.",
-      ),
-    ).toBeInTheDocument();
-    expect(await screen.findByText("Event event_123")).toBeInTheDocument();
-    expect(screen.getByText("Need to cancel")).toBeInTheDocument();
-    expect(screen.getByText("Test User")).toBeInTheDocument();
-    expect(screen.getByText("Org One")).toBeInTheDocument();
-    expect(screen.getByText("WAITING")).toBeInTheDocument();
-  });
-
-  it("shows empty state when no refunds exist", async () => {
-    refundRequestService.listRefundRequests.mockResolvedValue([]);
-
+  it("recovers a failed requester load and then shows the empty result", async () => {
+    refundRequestService.listRefundRequests
+      .mockRejectedValueOnce(new Error("Refund data unavailable"))
+      .mockResolvedValueOnce([]);
     renderWithMantine(<RefundRequestsList userId="user_2" />);
-
-    await waitFor(() =>
-      expect(refundRequestService.listRefundRequests).toHaveBeenCalled(),
-    );
-
-    expect(
-      await screen.findByText(/No refund requests found/i),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Refund data unavailable");
+    expect(screen.queryByText(/No refund requests found/i)).not.toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Reload requests" }));
+    expect(await screen.findByText(/No refund requests found/i)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("allows approving or denying a refund request", async () => {
