@@ -2,45 +2,164 @@
   "issue": 135,
   "status": "draft",
   "layoutFamily": "Operations workspace",
+  "scope": "One reference per existing Event operations tab",
   "viewport": {
     "width": 853,
     "height": 1844,
     "kind": "mobile reference"
   },
+  "viewports": [
+    {
+      "width": 853,
+      "height": 1844,
+      "kind": "mobile reference"
+    },
+    {
+      "width": 1536,
+      "height": 1024,
+      "kind": "desktop reference"
+    }
+  ],
   "approval": {
     "releaseOwnerApproved": false,
     "canonicalDirectory": "docs/images/site-ui/operations-workspace/"
   },
   "references": [
     {
-      "file": "operations-workspace--schedule-calendar--mobile-853x1844.png",
-      "surface": "Schedule and calendar navigation",
-      "state": "Selected day, agenda view, active filters"
+      "file": "event-operations--details--mobile-853x1844.png",
+      "tab": "Details",
+      "surface": "Event details and primary day-of actions",
+      "state": "Published event summary, readiness, milestones, and conflict notice",
+      "viewport": "mobile"
     },
     {
-      "file": "operations-workspace--dense-controls--mobile-853x1844.png",
-      "surface": "Dense operational controls",
-      "state": "Selected date, division, resource, status, and view"
+      "file": "event-operations--details--desktop-1536x1024.png",
+      "tab": "Details",
+      "surface": "Event details and primary day-of actions",
+      "state": "Published event summary, readiness, milestones, and conflict notice",
+      "viewport": "desktop"
     },
     {
-      "file": "operations-workspace--match-bracket-standings-score--mobile-853x1844.png",
-      "surface": "Match, bracket, standings, and score presentation",
-      "state": "Live score, advancing bracket, completed standings"
+      "file": "event-operations--participants--mobile-853x1844.png",
+      "tab": "Participants",
+      "surface": "Participants and registration management",
+      "state": "Selected registration detail with empty-registration example",
+      "viewport": "mobile"
     },
     {
-      "file": "operations-workspace--selection-detail-panels--mobile-853x1844.png",
-      "surface": "Selection and detail panels",
-      "state": "Selected match with open detail sheet"
+      "file": "event-operations--participants--desktop-1536x1024.png",
+      "tab": "Participants",
+      "surface": "Participants and registration management",
+      "state": "Selected registration detail with empty-registration example",
+      "viewport": "desktop"
     },
     {
-      "file": "operations-workspace--operational-states--mobile-853x1844.png",
-      "surface": "Operational states",
-      "state": "Loading, empty, conflict, and network error"
+      "file": "event-operations--schedule--mobile-853x1844.png",
+      "tab": "Schedule",
+      "surface": "Schedule and calendar navigation with dense controls",
+      "state": "Selected date, filters, conflict, loading, empty, and error examples",
+      "viewport": "mobile"
     },
     {
-      "file": "operations-workspace--day-of-actions--mobile-853x1844.png",
-      "surface": "Primary day-of-operation actions",
-      "state": "Live event dashboard with check-in, score, staffing, and conflict actions"
+      "file": "event-operations--schedule--desktop-1536x1024.png",
+      "tab": "Schedule",
+      "surface": "Schedule and calendar navigation with dense controls",
+      "state": "Selected date, filters, conflict, loading, empty, and error examples",
+      "viewport": "desktop"
+    },
+    {
+      "file": "event-operations--standings--mobile-853x1844.png",
+      "tab": "Standings",
+      "surface": "Standings and score presentation",
+      "state": "Complete pool results with selected team adjustment and confirmation",
+      "viewport": "mobile"
+    },
+    {
+      "file": "event-operations--standings--desktop-1536x1024.png",
+      "tab": "Standings",
+      "surface": "Standings and score presentation",
+      "state": "Complete pool results with selected team adjustment and confirmation",
+      "viewport": "desktop"
+    },
+    {
+      "file": "event-operations--bracket--mobile-853x1844.png",
+      "tab": "Bracket",
+      "surface": "Match, bracket, score, and selection detail",
+      "state": "Advancing semifinal winners with selected live final",
+      "viewport": "mobile"
+    },
+    {
+      "file": "event-operations--bracket--desktop-1536x1024.png",
+      "tab": "Bracket",
+      "surface": "Match, bracket, score, and selection detail",
+      "state": "Advancing semifinal winners with selected live final",
+      "viewport": "desktop"
+    },
+    {
+      "file": "event-operations--finance--mobile-853x1844.png",
+      "tab": "Finance",
+      "surface": "Event finance, billing, and day-of staffing readiness",
+      "state": "Payment review error with recoverable action",
+      "viewport": "mobile"
+    },
+    {
+      "file": "event-operations--finance--desktop-1536x1024.png",
+      "tab": "Finance",
+      "surface": "Event finance, billing, and day-of staffing readiness",
+      "state": "Payment review error with recoverable action",
+      "viewport": "desktop"
     }
+  ],
+  "coverage": [
+    {
+      "requirement": "Schedule and calendar navigation",
+      "tabs": [
+        "Schedule"
+      ]
+    },
+    {
+      "requirement": "Dense operational controls",
+      "tabs": [
+        "Schedule",
+        "Participants"
+      ]
+    },
+    {
+      "requirement": "Match, bracket, standings, and score presentation",
+      "tabs": [
+        "Standings",
+        "Bracket"
+      ]
+    },
+    {
+      "requirement": "Selection and detail panels",
+      "tabs": [
+        "Participants",
+        "Bracket"
+      ]
+    },
+    {
+      "requirement": "Conflict, loading, empty, and error states",
+      "tabs": [
+        "Schedule",
+        "Participants",
+        "Finance"
+      ]
+    },
+    {
+      "requirement": "Primary day-of-operation actions",
+      "tabs": [
+        "Details",
+        "Schedule",
+        "Standings",
+        "Bracket",
+        "Finance"
+      ]
+    }
+  ],
+  "notes": [
+    "Mobile references are the Issue #135 deliverable.",
+    "Desktop companions support the approved desktop-reference requirement in Issue #125.",
+    "All references use one shared six-tab shell. They remain draft assets outside the canonical directory."
   ]
 }
