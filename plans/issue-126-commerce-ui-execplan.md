@@ -31,6 +31,10 @@ The change is a visual and interaction migration. It must not change prices, fee
 - [x] (2026-09-15) Re-ran the four focused event suites. They pass 24 tests. The isolated checkout preview passed at 1536x1024, 390x844, and 320x740 with no horizontal overflow.
 - [x] (2026-09-15) Corrected the event registration action placement after visual specification review. The page summary now owns the existing primary action beside the registration price on desktop and in a fixed bottom action bar on mobile. Modal callers remain unchanged.
 - [x] (2026-09-15) Re-ran the four focused event suites. They pass 28 tests. The isolated action preview covered 1536x1024 and 320x568, all 14 action states, no horizontal overflow, and clear controls at 200% text size.
+- [x] (2026-09-15) Prepared the isolated local PostgreSQL database `bracketiq_e2e_126_codex` on port 5433. All 235 migrations applied, Prisma reported the database is up to date, and the E2E seed created 33 users, 1 organization, 7 events, and 8 event teams.
+- [x] (2026-09-15) Ran the seeded checkout suites. They pass 4 suites and 28 tests.
+- [x] (2026-09-15) Ran the full site test command. It completed with 862 passed tests, 147 failed tests, 129 skipped tests, and 14 skipped suites. The failures are recorded below.
+- [x] (2026-09-15) Attempted the seeded event browser suite. Playwright stopped before the tests because the development build could not resolve existing discover imports and the `discoverStartOfToday` export.
 
 ## Surprises & Discoveries
 
@@ -62,6 +66,12 @@ The change is a visual and interaction migration. It must not change prices, fee
 
 - Observation: Browser smoke reached public discovery but not a seeded commerce organization.
   Evidence: `/find-clubs` loaded. `/o/summit` returned the Next.js 404 page. The existing operations runtime was not restarted or reconfigured.
+- Observation: The isolated issue database is now seeded for this branch.
+  Evidence: `bracketiq_e2e_126_codex` has 33 `AuthUser` rows, 1 `Organizations` row, 7 `Events` rows, and 8 `EventTeams` rows after `npm run seed:e2e`.
+- Observation: The full site suite remains red after database preparation.
+  Evidence: `npm run test:ci` reports 35 failed suites, 147 failed tests, 862 passed tests, 129 skipped tests, and 14 skipped suites. Failures include existing affiliate runner socket permissions, scheduler and event-editor expectations, organization UI expectations, generated-client drift, and missing discover imports.
+- Observation: The seeded event browser suite cannot start from this branch.
+  Evidence: `npx playwright test e2e/event-join.spec.ts` stops before tests because the development build cannot resolve `@/components/ui/SportCategoryMultiSelect`, `@/lib/sportCategoryFilters`, and the `discoverStartOfToday` export from `@/lib/discoverFilters`.
 
 - Observation: Changed-file lint has warnings but no errors.
   Evidence: `npm run lint:changed -- --base 4eacd13e0` reports 0 errors and 20 complexity or hook-dependency warnings.
@@ -108,7 +118,7 @@ The HTTP paths, request fields, response fields, registration rules, prices, fee
 
 The focused event suites pass 4 suites and 28 tests. The isolated checkout preview passed at desktop and narrow mobile widths, and the action-placement preview covered 1536x1024 and 320x568 with all 14 action states, no horizontal overflow, and clear controls at 200% text size. Standards and specification review found no actionable issue in the latest correction. The public route and discover modal use the intended separate presentation modes.
 
-The complete suite, TypeScript check, production build, provider sandbox, and seeded commerce browser flow remain environment or baseline limits. The exact failures and missing prerequisites are recorded above and in the PR.
+The complete suite, TypeScript check, production build, provider sandbox, and seeded commerce browser flow remain environment or baseline limits. The isolated issue database is now seeded and migration-complete. The seeded browser flow remains blocked before test execution by the discover build errors recorded above.
 
 
 ## Context and Orientation
@@ -197,7 +207,7 @@ A reviewer can select a product, open product details without entering checkout 
 
 A reviewer can observe explicit loading text, field-level validation, readable disabled prerequisites, permission-safe actions, recoverable errors, and restored saved progress. No state presents an unpaid registration as paid. Prices and totals match the existing services and route responses.
 
-Focused Jest checks pass: 4 suites and 28 tests for the event checkout and registration paths. Changed-file lint reports 0 errors and 20 warnings; the warnings are complexity and hook-dependency findings. The complete site suite reports 34 failed suites, 146 failed tests, 863 passed tests, and 14 skipped suites in unrelated baseline areas. TypeScript reports 81 diagnostics in 27 unrelated files, with no issue #126 commerce file in the diagnostic output. The build passes the icon check but stops at Prisma validation because `DATABASE_URL` is unavailable. The isolated checkout preview covered 1536x1024, 390x844, and 320x740. The action-placement preview covered 1536x1024 and 320x568, exercised 14 action states, showed no horizontal overflow, and kept controls clear at 200% text size. It did not exercise the full public route, backend, payment provider, or seeded commerce data. A provider sandbox check was not run because no authorized provider test environment was available, and no provider simulation was added.
+Focused Jest checks pass: 4 suites and 28 tests for the event checkout and registration paths after seeding. Changed-file lint reports 0 errors and 20 warnings; the warnings are complexity and hook-dependency findings. The full site test command reports 35 failed suites, 147 failed tests, 862 passed tests, 129 skipped tests, and 14 skipped suites. The failures include existing affiliate runner socket permissions, scheduler and event-editor expectations, organization UI expectations, generated-client drift, and missing discover imports. The isolated database `bracketiq_e2e_126_codex` is migration-complete and seeded with 33 users, 1 organization, 7 events, and 8 event teams. The seeded event browser suite stopped before tests because the development build could not resolve `@/components/ui/SportCategoryMultiSelect`, `@/lib/sportCategoryFilters`, and `discoverStartOfToday`. A provider sandbox check was not run because no authorized provider test environment was available, and no provider simulation was added.
 
 
 ## Idempotence and Recovery
@@ -218,7 +228,7 @@ Approved desktop reference groups:
 
     State/recovery: `commerce-flow--loading--desktop-1536x1024.png`, `commerce-checkout--validation-error--desktop-1536x1024.png`, `commerce-flow--disabled--desktop-1536x1024.png`, `commerce-flow--permission--desktop-1536x1024.png`, `commerce-flow--error--desktop-1536x1024.png`, `commerce-flow--recovery--desktop-1536x1024.png`.
 
-The issue body contains the full approved desktop and mobile reference list. Current evidence: focused event Jest checks pass 4/4 suites and 28/28 tests; changed-file lint has 0 errors; icon projections pass for 27 icons; and the isolated checkout previews pass at desktop and narrow mobile widths. The action-placement preview covers the desktop summary action and mobile fixed action bar across 14 states with no horizontal overflow. TypeScript, build, full-suite, provider-sandbox, and seeded-commerce-browser limitations are recorded in `Surprises & Discoveries` and `Validation and Acceptance`. Standards and specification review found no actionable issue in the latest correction.
+The issue body contains the full approved desktop and mobile reference list. Current evidence: the isolated database is migration-complete and seeded; focused event Jest checks pass 4/4 suites and 28/28 tests; changed-file lint has 0 errors; icon projections pass for 27 icons; and the isolated checkout previews pass at desktop and narrow mobile widths. The full site test command still reports the baseline failures recorded above. The seeded browser suite is blocked before test execution by discover build errors. Standards and specification review found no actionable issue in the latest correction.
 
 ## Interfaces and Dependencies
 
