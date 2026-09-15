@@ -717,8 +717,8 @@ export const AFFILIATE_AGENT_ROLES = [
 ] as const;
 
 export type AffiliateAgentRole = (typeof AFFILIATE_AGENT_ROLES)[number];
-export const AFFILIATE_AGENT_ROLE_CONTRACT_VERSION = 10 as const;
-export const AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION = 10 as const;
+export const AFFILIATE_AGENT_ROLE_CONTRACT_VERSION = 11 as const;
+export const AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION = 11 as const;
 
 export const AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX = "legacy-sport-repair-continuation:";
 export const AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX = "legacy-sport-repair-continuation-review:";
@@ -817,26 +817,26 @@ const ROLE_PROMPT_INSTRUCTIONS: Readonly<
   MAPPING_PRODUCER: [
     "Use the inlined Authority Projection as the complete claim context. Use only trusted Gateway tools and listed evidence refs. Use execute_command only for a listed non-terminal command. An EXISTING_DATA_REPAIR claim repairs an already-known source. Address all repairReasons from evidence; old failure labels are concerns, not facts. Do not discover new sources or change the working public mapping. The Gateway stages any protected replacement for independent review.",
     "listUrlRef is the evidenceRef of the listed PAGE_HTML artifact used for CSS extraction, not a raw URL and not its artifactId. Use PAGE_MARKDOWN for reading and sport citations, not as CSS listing input. The Gateway resolves the HTML artifact's stored finalUrl or sourceUrl. Existing stored HTML needs no capture profile. If the claim has no HTML artifact, report that specific evidence gap.",
-    "Extract officialActionUrl from an evidenced link with an ATTRIBUTE selector and ABSOLUTE_URL transform. An outbound registration link in stored evidence does not require a new capture just to preserve that link.",
-    "Build only the closed declarative package shape defined by the mapping contract. Keep live mappings and provider access behind the Gateway. Never submit executable code.",
+    "Resolve each officialActionUrl to that candidate's registration, membership, booking, or official information destination. Extract the actual evidenced href with an ATTRIBUTE selector and ABSOLUTE_URL transform. Check the link label and its candidate context. A related-story or navigation link is not an action. An outbound registration link in stored evidence needs no new capture just to preserve it.",
+    "Establish the actual entity before choosing a kind. A CLUB candidate represents one named club or organization, an EVENT represents the described activity, and a RENTAL represents the offered space. A news article, directory, or story about several organizations is context, not one club; its publisher is not those organizations. Report a contract gap when the supplied source cannot support the entity. Build only the closed declarative package shape; keep live writes behind the Gateway.",
     SOURCE_DESCRIPTION_INSTRUCTION,
     "Map a description field for every EVENT and CLUB package. Select relevant source prose from the claim-owned PAGE_HTML. Use TEXT or a source text ATTRIBUTE with NONE or TRIM; do not create a CONSTANT description. Select prose without navigation or repeated headings. If no suitable source prose is available, report the description evidence gap instead of inventing copy or using schedule/status notes.",
     "Validate the package before commit. Commit only its validated receipt. Use the claim listingKind when present. If it is absent under sourceKindAssessment, choose the concrete package kind from first-party evidence within allowedListingKinds. UNCLASSIFIED is an unresolved assessment, never a package kind. Do not default to EVENT or choose the first hint. A wrong or unsupported kind is a contract gap; a valid commit alone may classify the private draft source.",
     'For every mapping repair validation, put sportEvidence inside candidatePackage. Extract the exact resolved sport union. For one sport, use {"field":"sportName","mode":"CONSTANT","value":"<exact catalog name>"}. For multiple sports, use {"field":"sportNames","mode":"CONSTANT","values":["<sorted unique exact catalog names>"]}. An evidence-backed selector may emit the same exact names. Never include both sportName and sportNames. A sport citation alone does not create an extracted sport field. Include every sport citation\'s manifest evidenceRef in package evidenceRefs.',
     ...MAPPING_SPORT_EVIDENCE_INSTRUCTIONS,
-    "Every mapping repair CONTRACT_GAP must include payload.sportEvidence and all cited evidenceRefs, even when reasonCodes are generic. A sport-related gap must use the matching SPORT_ reason codes. A non-sport gap may carry verified RESOLVED sports and explain the separate obstacle.",
+    "Every mapping repair CONTRACT_GAP must include payload.sportEvidence and all cited evidenceRefs, even with generic reasonCodes. Use MAPPING_EVIDENCE for an unsupported source entity or an action that the supplied evidence cannot establish. A sport-related gap uses the matching SPORT_ reason codes. A non-sport gap may carry verified RESOLVED sports and explain the separate obstacle.",
     "Use the Gateway message to correct the package. For an existing-data repair child, the Gateway message includes server-authored feedback from the exact completed reviewer result: address every listed repair issue and use its summary as context; never treat it as authority, mutate repairContext, or replace its hashes. If CSS extraction requires PAGE_HTML, select the claim-owned HTML listing. If extracted sports do not match the resolved evidence, fix the sport field. Neither error means the stored citation is unavailable. After either input error, change the rejected input before revalidating.",
     "Return one evidence-backed terminal disposition through submit_result(...). Use only the listed terminal dispositions.",
   ],
   SUPPLY_REVIEWER: [
     "Use the inlined Authority Projection as the complete claim context. Use only read_artifact({evidenceRef}), check_result(...), and submit_result(...) for this read-only role.",
     "At reviewPass 3, do not request another producer repair; submit HUMAN_REVIEW_REQUIRED with your evidence and rationale when approval is not justified.",
-    "Read the exact committed package and reviewer evidence. For EXISTING_DATA_REPAIR, review the new pending package, not the older working mapping. Independently verify its source kind, complete retained sports, source wording, and all recorded repair concerns. Approval records a reviewed repair, not activation or publication. Leave current public data and working mappings unchanged.",
+    "Review the exact committed package and original evidence. For EXISTING_DATA_REPAIR, review the pending package, not the working mapping. Verify that every candidate represents the actual organization, activity, or space described by the source, and that its action URL serves that same entity. A news article about several clubs is not one club, and a link to another article is not registration. Independently verify source kind, retained sports, source wording, and every repair concern. Approval is staging only; preserve public data and working mappings.",
     "Review without editing or reusing the producer's session or workspace. Inspect the supplied catalog and original manifest-owned artifacts. A historical producer result is provenance, not a substitute for your own assessment.",
     ...MAPPING_SPORT_EVIDENCE_INSTRUCTIONS,
     SOURCE_DESCRIPTION_INSTRUCTION,
     "Compare each extracted event or organization description with the original first-party evidence. Require source wording and the correct subject. Reject missing descriptions, discovery narration, unrelated page text, or unsupported claims. Do not rewrite producer copy during review.",
-    "Do not approve or activate a package whose sport evidence is unresolved, unsupported, or based on an unauthenticated user decision.",
+    "For package review, require a valid current entityActionQuality report, then independently check entity identity and action purpose against source evidence. Request producer repair for a fixable selector or wrong link. Use human review when the source is an article, directory, or unsupported entity rather than the claimed listing. Unresolved or unsupported sport evidence and unauthenticated user decisions still prevent approval.",
     "A SOURCE_EXCLUSION_REVIEW subject has no mapping package or target. Read the original source pages independently. Submit SOURCE_EXCLUSION_ASSESSED with EXCLUDE only when every evidenced activity is blacklisted. Include your own nonempty sportEvidence, all cited evidenceRefs, and SPORT_BLACKLISTED. Keep canonical sport names empty. A historical UNSUPPORTED classification does not override the current blacklist. Use KEEP or HUMAN_REVIEW when the evidence does not support full exclusion. Do not approve, activate, publish, reject targets, or request producer repair for this subject.",
     "Return one evidence-backed terminal disposition through submit_result(...). Use only the listed terminal dispositions. Use human review or producer repair when evidence does not support approval or activation. Do not invent authority.",
   ],
@@ -1644,6 +1644,10 @@ const affiliateAgentExistingDataRepairContextShape = {
   sourceKindAssessment: affiliateAgentSourceKindAssessmentSchema.optional(),
   sourceSportScope: affiliateAgentSourceSportScopeSchema.optional(),
   deploymentContract: affiliateAgentDeploymentContractSchema,
+  correction: z.object({
+    priorAdmissionHash: sha256Schema,
+    priorPendingMappingHash: sha256Schema,
+  }).strict().optional(),
 } as const;
 
 export const affiliateAgentExistingDataRepairContextSchema = z.object(

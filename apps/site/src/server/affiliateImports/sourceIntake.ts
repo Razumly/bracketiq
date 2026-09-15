@@ -50,8 +50,13 @@ import {
   type BoundedPublicResource,
 } from './sourceIntakeUrlSafety';
 import {
+  hasAffiliateExistingDataRepairCorrectionHold,
   pendingMappingForMetadata,
 } from './affiliateExistingDataRepairState';
+import {
+  AffiliateRepairActivityIntakeBusyError,
+  withAffiliateRepairActivityLeaseForIntake,
+} from './affiliateRepairActivityLease';
 import { affiliateDiscoveryPolicyKeyForUrl } from './sourceDiscoveryRules';
 import {
   discoverAffiliateSourcePages,
@@ -307,7 +312,7 @@ const linkAffiliateIntakeEvidence = async (input: Readonly<{
   return linkedSupplySourceId;
 };
 
-const ensureAffiliateIntakeSupplySource = async (input: Readonly<{
+export const ensureAffiliateIntakeSupplySource = async (input: Readonly<{
   intakeId: string;
   pageId: string;
   existingSupplySourceId?: string | null;
@@ -316,83 +321,92 @@ const ensureAffiliateIntakeSupplySource = async (input: Readonly<{
   targetKindHints?: string[] | null;
   isIntakeLinkPending?: boolean;
   isRedirectVerified?: boolean;
-  db?: any;
+  db?: unknown;
 }>): Promise<string | null> => {
-  const database = affiliateSupplyDatabase(input.db ?? prisma);
-  if (!database.supplySources?.findUnique || !database.supplySources?.create) return null;
+  const client = (input.db ?? prisma) as Parameters<typeof affiliateSupplyDatabase>[0];
+  const initialDatabase = affiliateSupplyDatabase(client);
+  if (!initialDatabase.supplySources?.findUnique || !initialDatabase.supplySources?.create) return null;
 
-  const canonicalUrl = canonicalizeAffiliateIntakeUrl(input.pageUrl);
-  const operatorDomain = new URL(canonicalUrl).hostname;
-  const isIntakeLinkPending = input.isIntakeLinkPending === true;
-  let supplySource;
-  if (input.existingSupplySourceId) {
-    const existing = await database.supplySources.findUnique({
-      where: { id: input.existingSupplySourceId },
-    });
-    if (existing) {
-      const identity = normalizeAffiliateSupplyIdentity({
-        requestedUrl: input.pageUrl,
-        resolvedCanonicalUrl: canonicalUrl,
-        isRedirectVerified: input.isRedirectVerified === true,
-        operatorDomain,
-        prior: {
-          canonicalUrl: existing.canonicalUrl,
-          operatorDomain: existing.operatorDomain,
-          identityKey: existing.identityKey,
-        },
+  return withAffiliateIntakeTransaction(client, async (transactionClient) => {
+    const database = affiliateSupplyDatabase(transactionClient);
+    await assertAffiliateSourceIntakeCorrectionHoldClear(
+      input.intakeId,
+      transactionClient,
+      undefined,
+      [input.pageUrl],
+    );
+    const canonicalUrl = canonicalizeAffiliateIntakeUrl(input.pageUrl);
+    const operatorDomain = new URL(canonicalUrl).hostname;
+    const isIntakeLinkPending = input.isIntakeLinkPending === true;
+    let supplySource;
+    if (input.existingSupplySourceId) {
+      const existing = await database.supplySources.findUnique({
+        where: { id: input.existingSupplySourceId },
       });
-      if (
-        identity.rootDecision === 'SAME_ROOT'
-        && !identity.isRevalidationRequired
-        && identity.canonicalUrl === canonicalizeAffiliateIntakeUrl(String(existing.canonicalUrl))
-      ) {
-        supplySource = existing;
-      } else {
-        const successor = await ensureAffiliateSupplySource({
+      if (existing) {
+        const identity = normalizeAffiliateSupplyIdentity({
           requestedUrl: input.pageUrl,
           resolvedCanonicalUrl: canonicalUrl,
           isRedirectVerified: input.isRedirectVerified === true,
           operatorDomain,
-          targetKind: input.targetKindHints?.[0] ?? 'EVENT',
-          intakeId: isIntakeLinkPending ? input.intakeId : null,
-          expectedIntakeSupplySourceId: isIntakeLinkPending
-            ? input.expectedIntakeSupplySourceId
-            : undefined,
-          priorSupplySourceId: existing.id,
-          metadata: { sourceKey: affiliateIntakeUrlKey(canonicalUrl) },
-          db: database,
+          prior: {
+            canonicalUrl: existing.canonicalUrl,
+            operatorDomain: existing.operatorDomain,
+            identityKey: existing.identityKey,
+          },
         });
-        supplySource = successor.supplySource;
+        if (
+          identity.rootDecision === 'SAME_ROOT'
+          && !identity.isRevalidationRequired
+          && identity.canonicalUrl === canonicalizeAffiliateIntakeUrl(String(existing.canonicalUrl))
+        ) {
+          supplySource = existing;
+        } else {
+          const successor = await ensureAffiliateSupplySource({
+            requestedUrl: input.pageUrl,
+            resolvedCanonicalUrl: canonicalUrl,
+            isRedirectVerified: input.isRedirectVerified === true,
+            operatorDomain,
+            targetKind: input.targetKindHints?.[0] ?? 'EVENT',
+            intakeId: isIntakeLinkPending ? input.intakeId : null,
+            expectedIntakeSupplySourceId: isIntakeLinkPending
+              ? input.expectedIntakeSupplySourceId
+              : undefined,
+            priorSupplySourceId: existing.id,
+            db: database,
+          });
+          supplySource = successor.supplySource;
+        }
       }
     }
-  }
-  if (!supplySource) {
-    const created = await ensureAffiliateSupplySource({
-      requestedUrl: input.pageUrl,
-      resolvedCanonicalUrl: canonicalUrl,
-      isRedirectVerified: input.isRedirectVerified === true,
-      operatorDomain,
-      targetKind: input.targetKindHints?.[0] ?? 'EVENT',
-      intakeId: isIntakeLinkPending ? input.intakeId : null,
-      expectedIntakeSupplySourceId: isIntakeLinkPending
+    if (!supplySource) {
+      const created = await ensureAffiliateSupplySource({
+        requestedUrl: input.pageUrl,
+        resolvedCanonicalUrl: canonicalUrl,
+        isRedirectVerified: input.isRedirectVerified === true,
+        operatorDomain,
+        targetKind: input.targetKindHints?.[0] ?? 'EVENT',
+        intakeId: isIntakeLinkPending ? input.intakeId : null,
+        expectedIntakeSupplySourceId: isIntakeLinkPending
+          ? input.expectedIntakeSupplySourceId
+          : undefined,
+        metadata: { sourceKey: affiliateIntakeUrlKey(canonicalUrl) },
+        db: database,
+      });
+      supplySource = created.supplySource;
+    }
+    const linkedSupplySourceId = await linkAffiliateIntakeEvidence({
+      intakeId: input.intakeId,
+      pageId: input.pageId,
+      supplySourceId: supplySource.id,
+      expectedSupplySourceId: isIntakeLinkPending
         ? input.expectedIntakeSupplySourceId
         : undefined,
-      metadata: { sourceKey: affiliateIntakeUrlKey(canonicalUrl) },
-      db: database,
+      isIntakeLinkPending,
+      client: transactionClient,
     });
-    supplySource = created.supplySource;
-  }
-  const linkedSupplySourceId = await linkAffiliateIntakeEvidence({
-    intakeId: input.intakeId,
-    pageId: input.pageId,
-    supplySourceId: supplySource.id,
-    expectedSupplySourceId: isIntakeLinkPending
-      ? input.expectedIntakeSupplySourceId
-      : undefined,
-    isIntakeLinkPending,
-    client: input.db ?? prisma,
+    return linkedSupplySourceId;
   });
-  return linkedSupplySourceId;
 };
 const reconcileCapturedAffiliateSupplySource = async (
   intake: Record<string, unknown>,
@@ -1298,10 +1312,163 @@ export const getAffiliateSourceIntakeContext = async (intakeId: string, runId?: 
     relatedDiscoveryResults,
   };
 };
+type AffiliateIntakeRowsDelegate = Readonly<{
+  findMany?: (args: unknown) => Promise<unknown>;
+}>;
+
+const normalizedAffiliateSupplyIdentityForUrl = (
+  value: unknown,
+): Readonly<{ canonicalUrl: string; identityKey: string; pathKey: string }> | null => {
+  const url = stringValue(value);
+  if (!url) return null;
+  const identity = normalizeAffiliateSupplyIdentity({ requestedUrl: url });
+  return {
+    canonicalUrl: identity.canonicalUrl,
+    identityKey: identity.identityKey,
+    pathKey: identity.pathKey,
+  };
+};
+
+const readAffiliateIntakeRowsByIds = async (
+  delegate: AffiliateIntakeRowsDelegate,
+  ids: readonly string[],
+): Promise<Readonly<Record<string, unknown>>[]> => {
+  const uniqueIds = Array.from(new Set(ids));
+  if (!uniqueIds.length) return [];
+  const batchRows = typeof delegate.findMany === 'function'
+    ? await delegate.findMany({ where: { id: { in: uniqueIds } } })
+    : [];
+  const rows = Array.isArray(batchRows)
+    ? batchRows.filter((row): row is Readonly<Record<string, unknown>> => (
+      Boolean(row && typeof row === 'object' && !Array.isArray(row))
+    ))
+    : [];
+  return rows;
+};
+
+const readAffiliateIntakeSupplyRowsByIdentity = async (
+  delegate: AffiliateIntakeRowsDelegate,
+  identities: readonly Readonly<{ canonicalUrl: string; identityKey: string; pathKey: string }>[],
+): Promise<Readonly<Record<string, unknown>>[]> => {
+  const uniqueIdentities = Array.from(
+    new Map(identities.map((identity) => [identity.identityKey, identity])).values(),
+  );
+  if (!uniqueIdentities.length) return [];
+  const batchRows = typeof delegate.findMany === 'function'
+    ? await delegate.findMany({
+      where: {
+        OR: [
+          { identityKey: { in: uniqueIdentities.map((identity) => identity.identityKey) } },
+          { canonicalUrl: { in: uniqueIdentities.map((identity) => identity.canonicalUrl) } },
+          { pathKey: { in: uniqueIdentities.map((identity) => identity.pathKey) } },
+        ],
+      },
+    })
+    : [];
+  const rows = Array.isArray(batchRows)
+    ? batchRows.filter((row): row is Readonly<Record<string, unknown>> => (
+      Boolean(row && typeof row === 'object' && !Array.isArray(row))
+    ))
+    : [];
+  return rows;
+};
+
+const readAffiliateIntakeSourceRows = async (
+  delegate: AffiliateIntakeRowsDelegate,
+  sourceIds: readonly string[],
+  rootIds: readonly string[],
+): Promise<Readonly<Record<string, unknown>>[]> => {
+  const uniqueSourceIds = Array.from(new Set(sourceIds));
+  const uniqueRootIds = Array.from(new Set(rootIds));
+  if (!uniqueSourceIds.length && !uniqueRootIds.length) return [];
+  const clauses: Record<string, unknown>[] = [];
+  if (uniqueSourceIds.length) clauses.push({ id: { in: uniqueSourceIds } });
+  if (uniqueRootIds.length) clauses.push({ supplySourceId: { in: uniqueRootIds } });
+  const batchRows = typeof delegate.findMany === 'function'
+    ? await delegate.findMany({ where: { OR: clauses } })
+    : [];
+  const rows = Array.isArray(batchRows)
+    ? batchRows.filter((row): row is Readonly<Record<string, unknown>> => (
+      Boolean(row && typeof row === 'object' && !Array.isArray(row))
+    ))
+    : [];
+  return rows;
+};
+
+
+const assertAffiliateSourceIntakeCorrectionHoldClear = async (
+  intakeId: string,
+  database: unknown,
+  selectedPages?: readonly Readonly<Record<string, unknown>>[],
+  additionalIdentityUrls: readonly string[] = [],
+): Promise<void> => {
+  const { intakes, pages, sources, supplySources } = intakePrisma(database);
+  const sourceDelegate = (sources ?? {}) as AffiliateIntakeRowsDelegate;
+  const supplySourceDelegate = (supplySources ?? {}) as AffiliateIntakeRowsDelegate;
+  const intake = await intakes.findUnique({ where: { id: intakeId } });
+  if (!intake) return;
+  const directSourceId = stringValue(intake.affiliateSourceId);
+  const directSourceRows = await readAffiliateIntakeRowsByIds(
+    sourceDelegate,
+    directSourceId ? [directSourceId] : [],
+  );
+  const directSource = directSourceRows.find((row) => row.id === directSourceId) ?? null;
+  const pageRows: readonly Readonly<Record<string, unknown>>[] = selectedPages ?? (
+    typeof pages?.findMany === 'function'
+      ? await pages.findMany({ where: { intakeId, status: 'ACTIVE' } })
+      : []
+  );
+  const rootIds = Array.from(new Set([
+    stringValue(intake.supplySourceId),
+    stringValue(directSource?.supplySourceId),
+    ...pageRows.map((page) => stringValue(page.supplySourceId)),
+  ].filter((id): id is string => Boolean(id))));
+  const pageIdentityUrls = pageRows.flatMap((page) => [
+    stringValue(page.url),
+    stringValue(page.canonicalUrl),
+  ].filter((url): url is string => Boolean(url)));
+  const identityRows = await readAffiliateIntakeSupplyRowsByIdentity(
+    supplySourceDelegate,
+    [...pageIdentityUrls, ...additionalIdentityUrls]
+      .map((url) => normalizedAffiliateSupplyIdentityForUrl(url))
+      .filter((identity): identity is Readonly<{ canonicalUrl: string; identityKey: string; pathKey: string }> => Boolean(identity)),
+  );
+  const allRootIds = Array.from(new Set([
+    ...rootIds,
+    ...identityRows.map((row) => stringValue(row.id)),
+  ].filter((id): id is string => Boolean(id))));
+  const rootRowsById = new Map<string, Readonly<Record<string, unknown>>>();
+  for (const row of [...await readAffiliateIntakeRowsByIds(supplySourceDelegate, allRootIds), ...identityRows]) {
+    const id = stringValue(row.id);
+    if (id) rootRowsById.set(id, row);
+  }
+  const rootRows = Array.from(rootRowsById.values());
+  const sourceIds = Array.from(new Set([
+    directSourceId,
+    ...rootRows.map((root) => stringValue(root.liveSourceId)),
+  ].filter((id): id is string => Boolean(id))));
+  const sourceRows = await readAffiliateIntakeSourceRows(
+    sourceDelegate,
+    sourceIds,
+    allRootIds,
+  );
+  if (
+    [...rootRows, ...directSourceRows, ...sourceRows].some((row) => (
+      hasAffiliateExistingDataRepairCorrectionHold(row.metadata)
+    ))
+  ) {
+    throw new AffiliateSourceIntakeQueueConflictError(
+      'An existing-data repair correction owns this source. Ordinary source activity is paused.',
+    );
+  }
+};
+
 export const assertOrdinaryAffiliateSourceIntakeQueueOwnership = async (
   intakeId: string,
   database: unknown = prisma,
+  selectedPages?: readonly Readonly<Record<string, unknown>>[],
 ): Promise<void> => {
+  await assertAffiliateSourceIntakeCorrectionHoldClear(intakeId, database, selectedPages);
   const runs = intakePrisma(database).runs;
   const activeRuns = typeof runs.findMany === 'function'
     ? await runs.findMany({
@@ -1339,6 +1506,7 @@ export const queueAffiliateSourceIntakeRun = async (
       where: { id: { in: pageIds }, intakeId, status: 'ACTIVE' },
     });
     if (selectedPages.length !== pageIds.length) throw new Error('One or more selected pages do not belong to this intake.');
+    await assertAffiliateSourceIntakeCorrectionHoldClear(intakeId, transactionClient, selectedPages);
 
     const marker = options.existingDataRepairEvidenceOnly;
     if (marker) {
@@ -1382,7 +1550,7 @@ export const queueAffiliateSourceIntakeRun = async (
         );
       }
     } else {
-      await assertOrdinaryAffiliateSourceIntakeQueueOwnership(intakeId, transactionClient);
+      await assertOrdinaryAffiliateSourceIntakeQueueOwnership(intakeId, transactionClient, selectedPages);
       const activeRun = await runs.findFirst({
         where: { intakeId, status: { in: ['QUEUED', 'RUNNING', 'CLAIMED'] } },
         orderBy: { queuedAt: 'asc' },
@@ -2105,6 +2273,17 @@ const processCapturePage = async (
       state,
     );
     let capture = captured.capture;
+    const verifiedFinalUrl = capture.isRedirectVerified === true
+      ? stringValue(capture.finalUrl)
+      : null;
+    if (verifiedFinalUrl) {
+      await assertAffiliateSourceIntakeCorrectionHoldClear(
+        intake.id,
+        client,
+        [page],
+        [verifiedFinalUrl],
+      );
+    }
     const requestedIdentity = canonicalizeAffiliateIntakeUrl(page.canonicalUrl ?? page.url);
     let finalIdentity: string | null = null;
     try {
@@ -2331,6 +2510,7 @@ const processCapturePage = async (
       providerJobId: capture.providerJobId ?? null,
     };
   } catch (error) {
+    if (error instanceof AffiliateSourceIntakeQueueConflictError) throw error;
     state.failedPages.push({
       pageId: page.id,
       url: page.url,
@@ -2358,10 +2538,12 @@ export const processNextAffiliateSourceIntakeRun = async (
     options.governedProcessIntent,
   );
   if (!run) return null;
-  const evidenceOnly = isExistingDataRepairEvidenceOnlyRun(run);
-  const { intakes, pages, runs, artifacts, mappingJobs } = intakePrisma(databaseClient);
+  const { intakes, pages, artifacts, mappingJobs } = intakePrisma(databaseClient);
+  try {
+    return await withAffiliateRepairActivityLeaseForIntake(run.intakeId, async () => {
+    const evidenceOnly = isExistingDataRepairEvidenceOnlyRun(run);
   const intake = await intakes.findUnique({ where: { id: run.intakeId } });
-  if (!intake) {
+    if (!intake) {
     const updated = await completeClaimedRun(run, workerId, {
       status: 'FAILED',
       finishedAt: now,
@@ -2392,6 +2574,18 @@ export const processNextAffiliateSourceIntakeRun = async (
     }, databaseClient);
     if (!updated) return { runId: run.id, status: 'LEASE_LOST', leaseLost: true };
     return { runId: run.id, status: 'FAILED', errorMessage: 'No active intake pages were selected.' };
+  }
+  try {
+    await assertAffiliateSourceIntakeCorrectionHoldClear(intake.id, databaseClient, selectedPages);
+  } catch (error) {
+    if (!(error instanceof AffiliateSourceIntakeQueueConflictError)) throw error;
+    const updated = await completeClaimedRun(run, workerId, {
+      status: 'BLOCKED',
+      finishedAt: now,
+      errorMessage: error.message,
+    }, databaseClient);
+    if (!updated) return { runId: run.id, status: 'LEASE_LOST', leaseLost: true };
+    return { runId: run.id, status: 'BLOCKED', errorMessage: error.message };
   }
   if (evidenceOnly) {
     const marker = existingDataRepairEvidenceMarkerFrom(run.summary);
@@ -2632,18 +2826,32 @@ export const processNextAffiliateSourceIntakeRun = async (
     return { run: updatedRun, summary };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown intake processing error';
+    const isCorrectionHoldConflict = error instanceof AffiliateSourceIntakeQueueConflictError;
     const finishedAt = dependencies.now?.() ?? new Date();
     const failedRun = await completeClaimedRun(run, workerId, {
-      status: 'FAILED',
+      status: isCorrectionHoldConflict ? 'BLOCKED' : 'FAILED',
       finishedAt,
       errorMessage: message,
       summary,
     }, databaseClient);
     if (!failedRun) return { runId: run.id, status: 'LEASE_LOST', leaseLost: true, summary };
-    if (!evidenceOnly) {
+    if (!evidenceOnly && !isCorrectionHoldConflict) {
       await intakes.update({ where: { id: intake.id }, data: { lastRunId: run.id, status: 'FAILED' } });
     }
-    return { run: failedRun, summary };
+    return isCorrectionHoldConflict
+      ? { run: failedRun, status: 'BLOCKED', errorMessage: message, summary }
+      : { run: failedRun, summary };
+  }
+    });
+  } catch (error) {
+    if (!(error instanceof AffiliateRepairActivityIntakeBusyError)) throw error;
+    const updated = await completeClaimedRun(run, workerId, {
+      status: 'BLOCKED',
+      finishedAt: dependencies.now?.() ?? new Date(),
+      errorMessage: error.message,
+    }, databaseClient);
+    if (!updated) return { runId: run.id, status: 'LEASE_LOST', leaseLost: true };
+    return { run: updated, status: 'BLOCKED', errorMessage: error.message };
   }
 };
 

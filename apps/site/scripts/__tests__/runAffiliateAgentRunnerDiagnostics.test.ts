@@ -102,6 +102,22 @@ describe("affiliate agent runner child diagnostics", () => {
     expect(untrusted).toMatchObject({ reasonCode: "UNKNOWN" });
     expect(JSON.stringify(untrusted)).not.toContain("private-source-value");
   });
+  it("keeps entity and action failures finite without retaining source text", () => {
+    const diagnosticFor = (safeMessage: string) => gatewayCommandRejectionDiagnosticFor({
+      command: { type: "VALIDATE_DECLARATIVE_PACKAGE", data: {} },
+      errorCode: "COMMAND_SCHEMA_INVALID",
+      safeMessage,
+      isRetryable: false,
+    });
+    const message = "The source document does not represent the declared listing entity.";
+    expect(diagnosticFor(message)).toMatchObject({
+      reasonCode: "PACKAGE_ENTITY_ACTION_INVALID",
+      isRetryable: false,
+    });
+    const untrusted = diagnosticFor(`${message} private-source-value`);
+    expect(untrusted).toMatchObject({ reasonCode: "UNKNOWN" });
+    expect(JSON.stringify(untrusted)).not.toContain("private-source-value");
+  });
   it.each([
     ["COMMAND_SCHEMA_INVALID", "Declarative CSS extraction requires PAGE_HTML listing evidence.", "PAGE_HTML_REQUIRED"],
     ["COMMAND_SCHEMA_INVALID", "Legacy sport repair packages require sportEvidence.", "PACKAGE_SPORT_EVIDENCE_REQUIRED"],

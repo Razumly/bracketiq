@@ -65,7 +65,7 @@ const UNSUPPORTED_EXTENSIONS = /\.(?:pdf|docx?|xlsx?|pptx?|zip|rar|7z|dmg|exe)(?
 const CLOSED_OR_ENDED_PATTERN = /\b(?:registration\s+(?:is\s+)?closed|registration\s+ended|event\s+is\s+over|event\s+over|sold\s+out|no\s+longer\s+accepting)\b/i;
 const EDITORIAL_PATTERN = /\b(?:news|press[\s-]+releases?|blog|article|recap|guide|local resources?|top 10|best of)\b/i;
 const NON_PARTICIPATION_PATTERN = /\b(?:box office|broadcast live|buy tickets?|concert|tickets? (?:available|on sale)|watch live)\b/i;
-const PUBLIC_ACTION_PATTERN = /\b(?:register|registration|book|booking|reserve|reservation|tryout|sign[\s-]?up|join)\b/i;
+export const AFFILIATE_PUBLIC_ACTION_PATTERN = /\b(?:register|registration|book|booking|reserve|reservation|tryout|sign[\s-]?up|join)\b/i;
 const ORGANIZATION_PATTERN = /\b(?:club|academy|association|league|organizer|operator|host|competition|sports|athletics|recreation|facility|center|centre|park district)\b/i;
 
 const STATE_ABBREVIATIONS: Record<string, string> = {
@@ -338,7 +338,7 @@ const profileActionAligned = (
     return /\b(?:tryout|evaluation|register|registration|sign[\s-]?up)\b/i.test(text);
   }
   return sourceTypeHints.some((type) => profileTypes.includes(type))
-    && PUBLIC_ACTION_PATTERN.test(text);
+    && AFFILIATE_PUBLIC_ACTION_PATTERN.test(text);
 };
 
 const monthNumber: Record<string, number> = {
@@ -493,7 +493,7 @@ export const evaluateAffiliateSourceDiscoveryResult = (
     addReason(reasonCodes, reasons, 'NO_OPPORTUNITY_TYPE', 'The result does not contain a supported opportunity type.');
   }
 
-  const publicAction = PUBLIC_ACTION_PATTERN.test(text);
+  const publicAction = AFFILIATE_PUBLIC_ACTION_PATTERN.test(text);
   if (publicAction) {
     score += 10;
     addReason(reasonCodes, reasons, 'PUBLIC_ACTION', 'The result appears to expose a public action or inventory page.');

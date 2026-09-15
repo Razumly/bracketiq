@@ -3262,3 +3262,254 @@ Further execution is blocked on a stronger entity/action review contract and
 an audited post-approval correction path. The site, Gateway, and model services
 remain deployed. Repair workers remain stopped. No listing was published and
 no new-source discovery ran.
+
+## Authorized version-11 quality correction
+
+
+### Purpose and current state
+
+
+The user selected `Fix gate and resume batch`. This authorizes a new reviewed
+contract version, image publication, and deployment to the same seven named
+runtimes. It also authorizes re-review of the fourteen staged packages and
+completion of the three unprocessed jobs in the same first-20 selection.
+Discovery, activation, and listing publication remain prohibited. Keep the
+repair workers stopped until the version-11 source and deployment gates pass.
+
+The code base is commit `7e4d9685b` on local main. The application source in
+production is `ef097891a2fe6134b251bf96c54a2f3496707a70`. Use workstream
+`workstream/existing-data-repair-quality`. Current pending mappings and review
+results must remain immutable historical evidence; do not rewrite an old
+approval to make it look as if the reviewer rejected it.
+
+### Progress
+
+
+- [x] Capture the invalid article package and its exact stored HTML.
+- [x] Stop workers, close admission, and verify public/working preservation.
+- [x] Obtain authorization for the revised contract and same-batch correction.
+- [x] Add deterministic entity/action quality analysis and regression coverage.
+- [x] Add audited operator correction admission and a protected correction hold.
+- [x] Integrate validation, commit, approval, and version-11 role instructions.
+- [x] Pass source tests and both independent code-review axes.
+- [ ] Publish and deploy the revised images with fresh stopped-fleet evidence.
+- [ ] Re-run the fourteen prior pending packages and the three unprocessed jobs.
+- [ ] Stop workers and record final state and remaining human holds.
+
+### Surprises and discoveries
+
+
+The false CLUB package uses a page with explicit `og:type=article` and
+JSON-LD `Article` metadata. Its candidate title names four colleges. Its
+selected action anchor points to an unrelated news article. Current validation
+checks non-empty title/action URL, source description, and sport evidence, but
+does not check the document entity or the action's purpose.
+
+The exact source HTML has SHA-256
+`711296bca92f2ae5653b83dcd102036b2ccd2a87af25a6eb5d025bafed3f2f11`.
+The local handoff is `local://quality-article-source.html`, with mapping data
+at `local://quality-article-mapping.json`. Use a small stored-HTML regression
+that preserves these structural signals. Do not make a new provider request.
+
+### Decision log
+
+
+Use a small deterministic entity/action analysis module. Reuse the DOM and
+field-selection rules in `mappingExtractor.ts`; do not introduce a second
+selector convention. Reject an explicitly identified primary news/article
+document as a CLUB source. Do not infer source identity from a domain name or
+a title keyword. Validate that each candidate's action comes from its own
+evidenced link or canonical official page, not navigation or a related-story
+link. Keep valid registration, membership, booking, and official-information
+paths. Missing SEO metadata alone does not reject a plain club page. An
+unevidenced action or contradictory document metadata remains a hold.
+
+Use explicit work limits before expensive analysis. Allow at most 1000
+candidates. Limit each analyzed title and action label to 512 UTF-16 code
+units. Limit contextual evidence to 128 inspected DOM nodes and 1024 text
+code units. An exceeded limit must produce a specific invalid quality report.
+Do not truncate input and then accept it. Direct action evidence must not
+trigger an unnecessary contextual scan. Context must label the selected link.
+It must not come from another link or override a conflicting local label.
+
+Put the server-produced quality report into the immutable validation evidence.
+Recompute it at commit and independent approval. Update both producer and
+reviewer instructions so they check one real entity and an appropriate action,
+not just catalog sport and syntactic package validity. Advance role and prompt
+versions to 11. Keep the active Supply Contract unchanged.
+
+Use a separate operator correction admission, not a relaxed normal admission.
+The correction starts a fresh bounded producer/reviewer cycle under the current
+contract. This gives each of the fourteen prior packages current validation and
+independent review. It can also renew the three never-claimed version-10 jobs.
+Original mapping IDs still define the user's first-20 limit.
+
+Correction must archive the exact old pending pointer and context in an
+immutable operator audit. It must keep old mapping JSON, validation evidence,
+producer results, and reviewer decisions unchanged. It may cancel only scoped,
+non-active queued/retry-wait Gateway jobs, with an append-only cancellation
+event. It must not cancel an active or unresolved effect.
+
+Retire the old pending pointer only in the same transaction that installs
+`existingDataRepairCorrectionHold` on both source and root and creates the new
+admission. Every ordinary source activity and capture path must hold on that
+metadata, including malformed or one-sided values. A valid new pending commit
+removes the correction hold atomically while it installs the new pending
+pointer. A producer gap leaves the correction hold in place. No working
+mapping, organization, candidate, target, source identity, or automation field
+may change during correction admission.
+
+### Plan of work and interfaces
+
+
+Add `apps/site/src/server/affiliateImports/entityActionQuality.ts` with
+`analyzeAffiliateEntityActionQuality({ page, mapping, candidates })`. It returns
+a versioned report with `isValid`, the observed document kind, and bounded
+candidate-specific issues. It performs no network or database operation.
+Use the existing `ScrapedPage`, `AffiliateScrapeMapping`, and
+`AffiliateCandidateInput` types. Reuse the current public-action vocabulary
+where it applies. Keep diagnostic labels separate from public descriptions.
+
+Integrate that module in `agentGatewayAdapters.ts` at validation, commit, and
+independent approval. The report must be derived from claim-owned HTML and the
+same selected elements as extraction. Do not trust a producer-supplied boolean.
+The article regression must fail even when the package has valid sport evidence,
+valid source prose, and a syntactically valid absolute URL.
+
+Extend `affiliateExistingDataRepairAdmission.ts` with
+`previewAffiliateExistingDataRepairCorrection` and
+`applyAffiliateExistingDataRepairCorrection`. They use the current admission
+input and result shape. Correction reports add `operation: CORRECTION`,
+`supersededMappingIds`, and `supersededGatewayJobIds`; those fields and complete
+prior-state fingerprints bind the report hash. Normal admission remains strict.
+Expose the pair only through operator POST `/existing-repair/correction`.
+Require closed admission, exact selectors, current policy/catalog/contracts,
+no active claims/pointers/effects, and an exact PREVIEW hash for APPLY.
+
+Reuse the existing serializable admission transaction and exclusive activity
+lock. Extend the current claim/audit proof rather than inventing a parallel
+job-assignment path. Store the correction-hold key and its shape in
+`affiliateExistingDataRepairState.ts`. The protected state hash excludes this
+server-owned metadata, but actual hold identity and audit hashes remain
+separately verified. A normal admission or capture may not bypass the hold.
+The immutable context adds `correction.priorAdmissionHash` and
+`correction.priorPendingMappingHash`. Historical contexts omit this field.
+The current claim requires either the matching correction hold or the new
+pending pointer from a valid current-contract commit. The existing pending
+transition proof still checks the mapping, evidence, and protected state.
+
+### Validation and acceptance
+
+
+Run site commands from `apps/site`. The real article regression must reject the
+old CLUB mapping. Direct club pages and proper official action links must still
+pass. A related-story, navigation, wrong-candidate, or unevidenced URL must fail
+with a specific quality issue.
+
+Use the isolated PostgreSQL database for a complete correction workflow.
+Begin with a version-10 approved inactive pending package. Correction PREVIEW
+must make zero writes. APPLY must preserve the original approval and mapping,
+hold source activity, and create a current-contract producer job atomically.
+A stale pointer, active claim, unresolved effect, changed working state, or
+replayed intent with changed actor/reason must make zero writes. Exact replay
+must not create a second cycle. Prove that a never-claimed old-contract job is
+superseded without deleting its history.
+
+Prove a valid new producer commit and independent approval under version 11.
+Also prove that the article cannot produce a valid CLUB package and stays
+held without publishing or changing working data. Run the affected unit,
+HTTP, and PostgreSQL suites, `npx tsc --noEmit`, targeted ESLint, and independent
+Standards and Spec reviews from the fixed workstream base.
+
+After deployment, use only governed correction admission for the exact
+fourteen prior pending packages and three unprocessed jobs. Preserve the two
+capture holds and the separate Football & Cheer contract gap unless supported
+evidence and the authorized contract resolve them. Record every outcome.
+
+### Idempotence, recovery, and outcome
+
+
+Never clear the operator quality hold merely to restart the old controller.
+Keep the hold until the revised correction route has superseded the flagged
+pending package through its reviewed transaction. Use new immutable workload
+and preflight artifacts for the next deployment. Do not overwrite the version-10
+files. Close admission and stop the three repair-worker services at completion.
+The site, Gateway, and model services stay in the final deployed state.
+
+The first source gate passed on 2026-09-15. TypeScript and seven unit/API
+suites passed with 334 tests. The PostgreSQL workflow passed against
+`bracketiq_e2e_71_quality_correction` on the existing local database runtime.
+All 219 migrations are current. The workflow checks a concrete club, an
+UNCLASSIFIED predecessor, and a new article capture. It proves old approval
+preservation, a stale-pointer rejection, actor-bound replay, a held article,
+and valid new commits with independent review. The old queued job uses
+`PIPELINE_BLOCKED` with `CORRECTION_SUPERSEDED`; its immutable subject and
+evidence remain unchanged.
+
+The earlier local test database contained orphaned CLAIMED jobs from old
+smoke runs. The correction guard rejected that state. The new isolated
+database avoids those rows without deleting them. Each fixture now uses a
+unique policy domain. This prevents an expired policy from another run from
+changing its result.
+
+The temporary claim-binding probe is removed. The source gate found and fixed
+the hold-to-pending transition for reviewer claims. A later gate passed 11
+unit/API suites with 401 tests, three PostgreSQL suites with 61 tests, source
+TypeScript, and targeted ESLint. The new and migrated test contracts passed a
+focused Jest type check. The full Jest type project is not clean: the unchanged
+base has 927 diagnostics in 206 files. Two added nullable-result diagnostics
+were fixed. Do not report that broader type project as passing.
+
+Independent review found further boundary cases. Fix the sibling-link and
+conflicting-label context leaks, bounded text work, URL-resolved source holds,
+verified redirect holds, and complete historical audit binding. Re-review
+these fixes before publication. The database workflow now also proves a
+limit-one mixed correction, a claimable admitted member, a retained evidence
+gap, and exact replay after an unselected member becomes eligible.
+
+The seventeen intended correction members still have their original refreshed
+evidence. Fourteen have APPROVED inactive pending mappings. Three remain
+UNCLASSIFIED and never claimed. Read-only production checks found zero active
+claims, active pointers, unresolved jobs/claims/receipts, or running captures.
+Use the exact pinned run/page selections in
+`local://v11-correction-preview-request.json`, not an older intake lastRunId.
+
+Local operator helpers are prepared under
+`/var/folders/_n/6dvz_rkj0y14dd6nvmr7x9r40000gn/T/bracketiq-repair-v11.txRjV2KU2U`.
+All eleven Python files pass a syntax check. An offline manifest smoke check
+proved the seventeen-member scope, article-first order, replay with null row
+Gateway IDs, unchanged original bytes, and cross-source rejection. The smoke
+inputs and outputs are removed. No runtime operation ran during this check.
+The live release config must use real published image digests and the observed
+site image ID. Its source export must contain role/prompt version 11.
+
+For first startup, use direct `preflight-v11.py` while Gateway is stopped.
+Then use `start-v11-gateway.py` with the config and fresh report. The renewal
+helper first closes admission on a running Gateway; use it only for a later
+renewal. Correction report contractVersion/contractHash identify the active
+Supply Contract, not deployment version 11. The controller separately checks
+the current deployment hash and every live root's source/context binding.
+
+Production correction and image publication remain pending. The deployed
+version-10 repair workers remain stopped. Discovery, activation, and listing
+publication remain prohibited.
+
+The final reviewed source gate passed on 2026-09-15. All fifteen affected
+suites passed with 491 tests, including the three real PostgreSQL suites.
+Source TypeScript, the focused new/migrated Jest contracts, and targeted
+ESLint passed. Both review axes have no remaining source findings. The
+coherent pending-package mismatch failed before the immutable producer hash
+comparison was added and passed after it. The exact stored article remains
+invalid as a CLUB; its large unsupported action context also remains held.
+
+Contextual action authority now uses only one unambiguous adjacent text label.
+Container attributes and competing labels cannot authorize another link.
+The selected anchor's own attributes remain direct evidence. URL hold checks
+match identityKey, canonicalUrl, and the persistence pathKey fallback. The
+verified redirect target is checked before deferred provider work and before
+identity/link mutations. Existing hold metadata is not replaced.
+
+The final live correction PREVIEW freshness scenario belongs to the controlled
+rollout smoke. Exercise stale rejection before a fresh preflight renewal.
+Then require a fresh zero-write PREVIEW before correction APPLY. No version-11
+production job has been admitted or processed at this checkpoint.

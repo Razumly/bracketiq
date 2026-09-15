@@ -21,14 +21,26 @@ import { affiliateDiscoveryPolicyKeyForUrl } from '../sourceDiscoveryRules';
 import {
   previewAffiliateExistingDataRepairAdmission,
   applyAffiliateExistingDataRepairAdmission,
+  previewAffiliateExistingDataRepairCorrection,
+  applyAffiliateExistingDataRepairCorrection,
+  assertAffiliateExistingDataRepairClaimBinding,
 } from '../affiliateExistingDataRepairAdmission';
 import {
   previewAffiliateExistingRepairCapture,
   applyAffiliateExistingRepairCapture,
   processAffiliateExistingRepairCapture,
 } from '../affiliateExistingDataRepairCapture';
-import { queueAffiliateSourceIntakeRun, recoverStaleAffiliateSourceIntakeRuns, reviewAffiliateSourceIntakePolicy } from '../sourceIntake';
+import {
+  ensureAffiliateIntakeSupplySource,
+  processNextAffiliateSourceIntakeRun,
+  queueAffiliateSourceIntakeRun,
+  recoverStaleAffiliateSourceIntakeRuns,
+  reviewAffiliateSourceIntakePolicy,
+  type AffiliateExistingDataRepairEvidenceOnlyMarker,
+} from '../sourceIntake';
 import { tryLockAffiliateRepairWrites, withAffiliateRepairActivityLease } from '../affiliateRepairActivityLease';
+import { assertAffiliatePendingRepairClear, AffiliatePendingRepairHoldError } from '../affiliatePendingRepairGuard';
+import { captureAffiliateExistingRepairSourceState } from '../affiliateExistingDataRepairState';
 import { createAffiliateAgentGatewayArtifactStore } from '../../../../scripts/run-affiliate-agent-gateway';
 import {
   createPrismaAffiliateAgentGateway,
@@ -120,7 +132,7 @@ const exerciseExistingRepair = async () => {
     const sourceId = hasWorkingMapping ? `${prefix}-${label}-source` : null;
     const mappingId = hasWorkingMapping ? `${prefix}-${label}-working-mapping` : null;
     const organizationId = hasWorkingMapping ? `${prefix}-${label}-organization` : null;
-    const url = `https://${prefix}.example.test/${label}`;
+    const url = `https://${prefix}.test/${label}`;
     if (organizationId) {
       await prisma.organizations.create({ data: {
         id: organizationId, name: 'Existing public club', ownerId: `${prefix}-owner`, website: url,
@@ -146,7 +158,7 @@ const exerciseExistingRepair = async () => {
       } });
       for (const [ownedPageId, ownedUrl] of [[pageId, url], [aboutPageId, `${url}/about`]]) {
         for (const [kind, mimeType, text] of [
-          ['PAGE_HTML', 'text/html', '<main><p>We offer indoor volleyball on our hardwood courts.</p><a href="/register">Register</a></main>'],
+          ['PAGE_HTML', 'text/html', '<main><h1>Harbor Court Club</h1><p>We offer indoor volleyball on our hardwood courts.</p><a href=\"/register\">Register or book court time</a></main>'],
           ['PAGE_MARKDOWN', 'text/markdown', 'We offer indoor volleyball on our hardwood courts.'],
         ]) {
           const artifactId = `${id}-${ownedPageId}-${kind}`;
@@ -184,7 +196,7 @@ const exerciseExistingRepair = async () => {
     const privateSource = await seed('private');
     const publicSource = await seed('working', true);
     const gapSource = await seed('gap', true);
-    const workingIdentity = normalizeAffiliateSupplyIdentity({ requestedUrl: `https://${prefix}.example.test/working` });
+    const workingIdentity = normalizeAffiliateSupplyIdentity({ requestedUrl: `https://${prefix}.test/working` });
     const existingWorkingRoot = await prisma.affiliateSupplySources.create({ data: {
       id: `${prefix}-existing-working-root`, intakeId: publicSource.intakeId, liveSourceId: publicSource.sourceId,
       canonicalUrl: workingIdentity.canonicalUrl, identityKey: workingIdentity.identityKey,
@@ -223,6 +235,255 @@ const exerciseExistingRepair = async () => {
         await prisma.affiliateSourceIntakes.update({ where: { id: captureSource.intakeId }, data: { supplySourceId: root.id } });
       }
     }
+    const createHeldIdentityFixture = async (
+      label: string,
+      pageUrl: string,
+      heldUrl = pageUrl,
+    ) => {
+      const heldIntakeId = `${prefix}-${label}-intake`;
+      const heldPageId = `${prefix}-${label}-page`;
+      const heldSourceId = `${prefix}-${label}-source`;
+      const heldRootId = `${prefix}-${label}-root`;
+      const intake = await prisma.affiliateSourceIntakes.create({
+        data: {
+          id: heldIntakeId,
+          name: `Repair smoke ${label}`,
+          sourceKey: `${prefix}-${label}`,
+          baseUrl: pageUrl,
+          status: 'REVIEW_REQUIRED',
+          complianceStatus: 'ALLOWED',
+          targetKindHints: [],
+        },
+      });
+      const page = await prisma.affiliateSourceIntakePages.create({
+        data: {
+          id: heldPageId,
+          intakeId: intake.id,
+          url: pageUrl,
+          canonicalUrl: pageUrl,
+          urlKey: `${prefix}-${label}-url`,
+          role: 'LISTING',
+          status: 'ACTIVE',
+          robotsStatus: 'ALLOWED',
+        },
+      });
+      const identity = normalizeAffiliateSupplyIdentity({ requestedUrl: heldUrl });
+      const root = await prisma.affiliateSupplySources.create({
+        data: {
+          id: heldRootId,
+          intakeId: intake.id,
+          rolloutCohort,
+          canonicalUrl: identity.canonicalUrl,
+          identityKey: identity.identityKey,
+          origin: identity.origin,
+          pathKey: identity.pathKey,
+          targetKind: 'CLUB',
+        },
+      });
+      const source = await prisma.affiliateScrapeSources.create({
+        data: {
+          id: heldSourceId,
+          sourceKey: `${prefix}-${label}-live-source`,
+          name: `Repair smoke ${label} live source`,
+          listUrl: heldUrl,
+          baseUrl: heldUrl,
+          targetKind: 'CLUB',
+          supplySourceId: root.id,
+          autoScrapeEnabled: false,
+        },
+      });
+      const hold = {
+        schemaVersion: 1,
+        sourceId: source.id,
+        supplySourceId: root.id,
+        mappingJobId: `${prefix}-${label}-mapping-job`,
+        admissionHash: 'c'.repeat(64),
+        priorPendingMappingHash: 'd'.repeat(64),
+      };
+      await prisma.affiliateSupplySources.update({
+        where: { id: root.id },
+        data: {
+          liveSourceId: source.id,
+          metadata: { existingDataRepairCorrectionHold: hold },
+        },
+      });
+      await prisma.affiliateScrapeSources.update({
+        where: { id: source.id },
+        data: { metadata: { existingDataRepairCorrectionHold: hold } },
+      });
+      return {
+        intake,
+        page,
+        root: await prisma.affiliateSupplySources.findUniqueOrThrow({ where: { id: root.id } }),
+        source: await prisma.affiliateScrapeSources.findUniqueOrThrow({ where: { id: source.id } }),
+        heldUrl,
+      };
+    };
+    const urlHeld = await createHeldIdentityFixture(
+      'url-held',
+      `https://${prefix}.test/url-held`,
+    );
+    const urlHeldPageBefore = await prisma.affiliateSourceIntakePages.findUniqueOrThrow({
+      where: { id: urlHeld.page.id },
+    });
+    const urlHeldIntakeBefore = await prisma.affiliateSourceIntakes.findUniqueOrThrow({
+      where: { id: urlHeld.intake.id },
+    });
+    const urlHeldRootBefore = await prisma.affiliateSupplySources.findUniqueOrThrow({
+      where: { id: urlHeld.root.id },
+    });
+    const urlHeldRunCount = await prisma.affiliateSourceIntakeRuns.count({
+      where: { intakeId: urlHeld.intake.id },
+    });
+    await assert.rejects(
+      queueAffiliateSourceIntakeRun(urlHeld.intake.id, [urlHeld.page.id], 'ordinary-url-held', { db: prisma }),
+      (error: unknown) => error instanceof Error
+        && 'code' in error
+        && error.code === 'GOVERNED_CAPTURE_OWNERSHIP_CONFLICT',
+    );
+    assert.equal(
+      await prisma.affiliateSourceIntakeRuns.count({ where: { intakeId: urlHeld.intake.id } }),
+      urlHeldRunCount,
+    );
+    assert.deepEqual(
+      await prisma.affiliateSourceIntakePages.findUniqueOrThrow({ where: { id: urlHeld.page.id } }),
+      urlHeldPageBefore,
+    );
+    assert.deepEqual(
+      await prisma.affiliateSourceIntakes.findUniqueOrThrow({ where: { id: urlHeld.intake.id } }),
+      urlHeldIntakeBefore,
+    );
+    assert.deepEqual(
+      await prisma.affiliateSupplySources.findUniqueOrThrow({ where: { id: urlHeld.root.id } }),
+      urlHeldRootBefore,
+    );
+    const pathHeld = await createHeldIdentityFixture(
+      'path-held',
+      `https://${prefix}.test/events?candidate=1`,
+      `https://${prefix}.test/events?held=1`,
+    );
+    const pathHeldPageBefore = await prisma.affiliateSourceIntakePages.findUniqueOrThrow({
+      where: { id: pathHeld.page.id },
+    });
+    const pathHeldIntakeBefore = await prisma.affiliateSourceIntakes.findUniqueOrThrow({
+      where: { id: pathHeld.intake.id },
+    });
+    const pathHeldRootBefore = await prisma.affiliateSupplySources.findUniqueOrThrow({
+      where: { id: pathHeld.root.id },
+    });
+    const pathHeldSourceBefore = await prisma.affiliateScrapeSources.findUniqueOrThrow({
+      where: { id: pathHeld.source.id },
+    });
+    const pathHeldArtifactAssociationsBefore = await prisma.affiliateSourceIntakeArtifacts.findMany({
+      where: { intakeId: pathHeld.intake.id },
+      select: { id: true, supplySourceId: true, pageId: true },
+    });
+    const pathHeldTargetCountBefore = await prisma.affiliateSupplyTargets.count({
+      where: { supplySourceId: pathHeld.root.id },
+    });
+    const pathHeldRunCount = await prisma.affiliateSourceIntakeRuns.count({
+      where: { intakeId: pathHeld.intake.id },
+    });
+    await assert.rejects(
+      queueAffiliateSourceIntakeRun(pathHeld.intake.id, [pathHeld.page.id], 'ordinary-path-held', { db: prisma }),
+      (error: unknown) => error instanceof Error
+        && 'code' in error
+        && error.code === 'GOVERNED_CAPTURE_OWNERSHIP_CONFLICT',
+    );
+    assert.equal(
+      await prisma.affiliateSourceIntakeRuns.count({ where: { intakeId: pathHeld.intake.id } }),
+      pathHeldRunCount,
+    );
+    assert.deepEqual(
+      await prisma.affiliateSourceIntakePages.findUniqueOrThrow({ where: { id: pathHeld.page.id } }),
+      pathHeldPageBefore,
+    );
+    assert.deepEqual(
+      await prisma.affiliateSourceIntakes.findUniqueOrThrow({ where: { id: pathHeld.intake.id } }),
+      pathHeldIntakeBefore,
+    );
+    assert.deepEqual(
+      await prisma.affiliateSupplySources.findUniqueOrThrow({ where: { id: pathHeld.root.id } }),
+      pathHeldRootBefore,
+    );
+    assert.deepEqual(
+      await prisma.affiliateScrapeSources.findUniqueOrThrow({ where: { id: pathHeld.source.id } }),
+      pathHeldSourceBefore,
+    );
+    assert.deepEqual(
+      await prisma.affiliateSourceIntakeArtifacts.findMany({
+        where: { intakeId: pathHeld.intake.id },
+        select: { id: true, supplySourceId: true, pageId: true },
+      }),
+      pathHeldArtifactAssociationsBefore,
+    );
+    assert.equal(
+      await prisma.affiliateSupplyTargets.count({ where: { supplySourceId: pathHeld.root.id } }),
+      pathHeldTargetCountBefore,
+    );
+    const redirectHeld = await createHeldIdentityFixture(
+      'redirect-held',
+      `https://${prefix}.test/redirect-source`,
+      `https://${prefix}.test/redirect-target`,
+    );
+    const redirectIntakeBefore = await prisma.affiliateSourceIntakes.findUniqueOrThrow({
+      where: { id: redirectHeld.intake.id },
+    });
+    const redirectPageBefore = await prisma.affiliateSourceIntakePages.findUniqueOrThrow({
+      where: { id: redirectHeld.page.id },
+    });
+    const redirectRootBefore = await prisma.affiliateSupplySources.findUniqueOrThrow({
+      where: { id: redirectHeld.root.id },
+    });
+    const redirectSourceBefore = await prisma.affiliateScrapeSources.findUniqueOrThrow({
+      where: { id: redirectHeld.source.id },
+    });
+    const redirectArtifactAssociationsBefore = await prisma.affiliateSourceIntakeArtifacts.findMany({
+      where: { intakeId: redirectHeld.intake.id },
+      select: { id: true, supplySourceId: true, pageId: true },
+    });
+    const redirectTargetCountBefore = await prisma.affiliateSupplyTargets.count({
+      where: { supplySourceId: redirectHeld.root.id },
+    });
+    await assert.rejects(
+      ensureAffiliateIntakeSupplySource({
+        intakeId: redirectHeld.intake.id,
+        pageId: redirectHeld.page.id,
+        pageUrl: redirectHeld.heldUrl,
+        isRedirectVerified: true,
+        db: prisma,
+      }),
+      (error: unknown) => error instanceof Error
+        && 'code' in error
+        && error.code === 'GOVERNED_CAPTURE_OWNERSHIP_CONFLICT',
+    );
+    assert.deepEqual(
+      await prisma.affiliateSourceIntakes.findUniqueOrThrow({ where: { id: redirectHeld.intake.id } }),
+      redirectIntakeBefore,
+    );
+    assert.deepEqual(
+      await prisma.affiliateSourceIntakePages.findUniqueOrThrow({ where: { id: redirectHeld.page.id } }),
+      redirectPageBefore,
+    );
+    assert.deepEqual(
+      await prisma.affiliateSupplySources.findUniqueOrThrow({ where: { id: redirectHeld.root.id } }),
+      redirectRootBefore,
+    );
+    assert.deepEqual(
+      await prisma.affiliateScrapeSources.findUniqueOrThrow({ where: { id: redirectHeld.source.id } }),
+      redirectSourceBefore,
+    );
+    assert.deepEqual(
+      await prisma.affiliateSourceIntakeArtifacts.findMany({
+        where: { intakeId: redirectHeld.intake.id },
+        select: { id: true, supplySourceId: true, pageId: true },
+      }),
+      redirectArtifactAssociationsBefore,
+    );
+    assert.equal(
+      await prisma.affiliateSupplyTargets.count({ where: { supplySourceId: redirectHeld.root.id } }),
+      redirectTargetCountBefore,
+    );
     const intakeBefore = await prisma.affiliateSourceIntakes.findUniqueOrThrow({ where: { id: captureSource.intakeId } });
     const captureInput = {
       prisma, bundle, targets: [{ intakeId: captureSource.intakeId, pageIds: [captureSource.pageId, captureSource.aboutPageId] }],
@@ -371,7 +632,7 @@ const exerciseExistingRepair = async () => {
 
     const publicProjection = await seed('public-projection');
     const projectedSourceId = `${prefix}-public-projection-source`;
-    const projectedUrl = `https://${prefix}.example.test/public-projection`;
+    const projectedUrl = `https://${prefix}.test/public-projection`;
     await prisma.affiliateScrapeSources.create({ data: {
       id: projectedSourceId, sourceKey: `${prefix}-public-projection`, name: 'Existing published projection',
       listUrl: projectedUrl, targetKind: 'UNCLASSIFIED', autoScrapeEnabled: false,
@@ -433,7 +694,7 @@ const exerciseExistingRepair = async () => {
     await prisma.affiliateSourceMappingJobs.update({
       where: { id: privateSource.jobId }, data: { resultSummary: historyBefore.resultSummary ?? Prisma.JsonNull },
     });
-    const policyKey = affiliateDiscoveryPolicyKeyForUrl(`https://${prefix}.example.test/private`);
+    const policyKey = affiliateDiscoveryPolicyKeyForUrl(`https://${prefix}.test/private`);
     const policyBefore = await prisma.affiliateSourceDomainPolicies.findUniqueOrThrow({ where: { policyKey } });
     await prisma.affiliateSourceDomainPolicies.update({ where: { policyKey }, data: { status: 'BLOCKED' } });
     const blockedPreview = await previewAffiliateExistingDataRepairAdmission(privateRepairInput);
@@ -585,7 +846,8 @@ const exerciseExistingRepair = async () => {
       assert.equal(evidence.entries.length, 4);
     }
     const admission = createAffiliateAgentClaimAdmission();
-    const contracts = { loadActiveBundle: async () => bundle };
+    let activeBundle = bundle;
+    const contracts = { loadActiveBundle: async () => activeBundle };
     let clockOffsetMs = 0;
     const clock = { now: () => new Date(Date.now() + clockOffsetMs) };
     const adapters = createProductionAffiliateAgentGatewayAdapters({ prisma, artifacts: artifactStore, storage, clock });
@@ -676,7 +938,7 @@ const exerciseExistingRepair = async () => {
           { field: 'description', selector: 'p', mode: 'TEXT', attribute: null, transform: 'TRIM' },
           { field: 'officialActionUrl', selector: 'a', mode: 'ATTRIBUTE', attribute: 'href', transform: 'ABSOLUTE_URL' },
           { field: 'sportName', mode: 'CONSTANT', value: 'Indoor Volleyball' },
-          { field: 'title', selector: 'p', mode: 'TEXT', attribute: null, transform: 'TRIM' },
+          { field: 'title', selector: 'h1', mode: 'TEXT', attribute: null, transform: 'TRIM' },
         ],
         evidenceRefs: [listing.evidenceRef],
         sportEvidence: {
@@ -1108,6 +1370,1037 @@ const exerciseExistingRepair = async () => {
       break;
       }
     }
+    assert.equal(await prisma.affiliateAgentGatewayClaims.count({ where: { status: 'ACTIVE' } }), 0);
+
+    const queuedFixture = await seed('correction-queued');
+    const queuedInput = {
+      ...repairInput,
+      jobIds: [queuedFixture.jobId],
+      evidenceSelections: [{ jobId: queuedFixture.jobId, runId: queuedFixture.runId, pageId: queuedFixture.pageId }],
+    };
+    const queuedPreview = await previewAffiliateExistingDataRepairAdmission(queuedInput);
+    const queuedAdmission = await applyAffiliateExistingDataRepairAdmission({
+      ...queuedInput, expectedReportHash: queuedPreview.reportHash,
+    });
+    assert.equal(queuedAdmission.appliedJobs.length, 1, JSON.stringify(queuedAdmission));
+    const oldQueuedJob = await prisma.affiliateAgentGatewayJobs.findUniqueOrThrow({
+      where: { id: queuedAdmission.appliedJobs[0].jobId },
+    });
+    const approvedSource = await prisma.affiliateScrapeSources.findUniqueOrThrow({ where: { id: publicSource.sourceId! } });
+    const approvedJob = await prisma.affiliateSourceMappingJobs.findUniqueOrThrow({ where: { id: publicSource.jobId } });
+    const approvedRoot = await prisma.affiliateSupplySources.findUniqueOrThrow({ where: { id: approvedJob.supplySourceId! } });
+    const oldPendingMapping = await prisma.affiliateScrapeMappings.findUniqueOrThrow({ where: { id: approvedJob.mappingId! } });
+    const correctionWorkingMapping = await prisma.affiliateScrapeMappings.findUniqueOrThrow({ where: { id: oldMapping.id } });
+    const oldCompletedJobs = await prisma.affiliateAgentGatewayJobs.findMany({
+      where: { supplySourceId: approvedRoot.id, status: 'COMPLETED' }, orderBy: { id: 'asc' },
+    });
+    const protectedState = await captureAffiliateExistingRepairSourceState(prisma, approvedSource.id);
+    const articleRunId = `${prefix}-correction-article-run`;
+    await prisma.affiliateSourceIntakeRuns.create({ data: {
+      id: articleRunId, intakeId: publicSource.intakeId, supplySourceId: approvedRoot.id,
+      requestedPageIds: [publicSource.pageId], status: 'SUCCEEDED', capturedPageCount: 1,
+      startedAt: new Date(), finishedAt: new Date(),
+    } });
+    for (const [kind, mimeType, body] of [
+      ['PAGE_HTML', 'text/html', '<meta property="og:type" content="article"><article><h1>Four colleges add club teams</h1><p>We offer indoor volleyball on our hardwood courts.</p><a href="/news/another-story">Read another story</a></article>'],
+      ['PAGE_MARKDOWN', 'text/markdown', 'Four colleges add club teams. We offer indoor volleyball on our hardwood courts.'],
+    ]) {
+      const artifactId = `${articleRunId}-${kind}`;
+      const bytes = Buffer.from(body);
+      const stored = await storage.putObject({ data: bytes, originalName: `${kind}.txt`, contentType: mimeType, key: `${prefix}/${artifactId}` });
+      const fileId = `${artifactId}-file`;
+      await prisma.file.create({ data: { id: fileId, originalName: `${kind}.txt`, mimeType, sizeBytes: bytes.length, path: stored.key } });
+      await prisma.affiliateSourceIntakeArtifacts.create({ data: {
+        id: artifactId, intakeId: publicSource.intakeId, pageId: publicSource.pageId, runId: articleRunId,
+        supplySourceId: approvedRoot.id, kind, sourceUrl: workingIdentity.canonicalUrl, finalUrl: workingIdentity.canonicalUrl,
+        contentHash: createHash('sha256').update(bytes).digest('hex'), dedupeKey: artifactId, fileId, mimeType, sizeBytes: bytes.length,
+      } });
+    }
+    const correctionDeployment = { ...deployment, version: 11 };
+    activeBundle = affiliateAgentContractBundleSchema.parse({
+      ...bundle, deploymentContract: { ...correctionDeployment, hash: hashAffiliateAgentValue(correctionDeployment) },
+    });
+    const correctionInput = {
+      prisma, artifactStore, bundle: activeBundle, operatorId: 'smoke-correction-operator',
+      reason: 'Recheck entity and official action evidence under the current contract.',
+      jobIds: [publicSource.jobId, privateSource.jobId, queuedFixture.jobId],
+      evidenceSelections: [
+        { jobId: publicSource.jobId, runId: articleRunId, pageId: publicSource.pageId },
+        { jobId: privateSource.jobId, runId: privateSource.runId, pageId: privateSource.pageId },
+        { jobId: queuedFixture.jobId, runId: queuedFixture.runId, pageId: queuedFixture.pageId },
+      ],
+    };
+    const correctionPreview = await previewAffiliateExistingDataRepairCorrection(correctionInput);
+    assert.equal(correctionPreview.counts.selected, 3, JSON.stringify(correctionPreview.rows.map(({ mappingJobId, reasonCodes }) => ({ mappingJobId, reasonCodes }))));
+    assert.equal(correctionPreview.writeCount, 0);
+    const leaseCaptureInput = {
+      ...captureInput,
+      bundle: activeBundle,
+      targets: [{ intakeId: captureSource.intakeId, pageIds: [captureSource.pageId] }],
+      reason: 'Queue a governed evidence-only run before correction apply.',
+      operatorId: 'smoke-lease-operator',
+    };
+    const leaseCapturePreview = await previewAffiliateExistingRepairCapture(leaseCaptureInput);
+    assert.equal(leaseCapturePreview.rows[0]?.eligible, true, JSON.stringify(leaseCapturePreview.rows));
+    const leaseCaptureApplied = await applyAffiliateExistingRepairCapture({
+      ...leaseCaptureInput,
+      expectedReportHash: leaseCapturePreview.reportHash,
+    });
+    assert.equal(leaseCaptureApplied.writeCount, 1, JSON.stringify(leaseCaptureApplied));
+    const leaseRunId = leaseCaptureApplied.runIds[0];
+    assert.ok(leaseRunId);
+    const leaseRun = await prisma.affiliateSourceIntakeRuns.findUniqueOrThrow({ where: { id: leaseRunId } });
+    const leaseMarker = (
+      (leaseRun.summary as Record<string, unknown>).existingDataRepairEvidenceOnly
+    ) as AffiliateExistingDataRepairEvidenceOnlyMarker;
+    let markLeaseVerification!: () => void;
+    let releaseLeaseVerification!: () => void;
+    const leaseVerificationReached = new Promise<void>((resolve) => { markLeaseVerification = resolve; });
+    const leaseVerificationRelease = new Promise<void>((resolve) => { releaseLeaseVerification = resolve; });
+    const leaseProcess = processNextAffiliateSourceIntakeRun({
+      runId: leaseRunId,
+      workerId: 'smoke-lease-worker',
+      governedProcessIntent: {
+        purpose: 'EXISTING_DATA_REPAIR_EVIDENCE_ONLY',
+        operatorId: leaseMarker.operatorId,
+        markerSha256: hashAffiliateAgentValue(leaseMarker),
+        verifyAfterClaim: async () => {
+          markLeaseVerification();
+          await leaseVerificationRelease;
+          throw new Error('controlled before provider access');
+        },
+      },
+    });
+    await leaseVerificationReached;
+    const correctionGatewayCountBeforeActivity = await prisma.affiliateAgentGatewayJobs.count();
+    await assert.rejects(
+      applyAffiliateExistingDataRepairCorrection({
+        ...correctionInput,
+        expectedReportHash: correctionPreview.reportHash,
+      }),
+      (error: unknown) => error instanceof Error
+        && 'code' in error
+        && error.code === 'ACTIVE_SOURCE_ACTIVITY',
+    );
+    assert.equal(await prisma.affiliateAgentGatewayJobs.count(), correctionGatewayCountBeforeActivity);
+    releaseLeaseVerification();
+    const leaseTerminalResult = await leaseProcess;
+    assert.ok(leaseTerminalResult);
+    assert.equal(leaseTerminalResult.status, 'FAILED', JSON.stringify(leaseTerminalResult));
+    assert.match(leaseTerminalResult.errorMessage ?? '', /controlled before provider access/);
+    assert.equal(await prisma.$transaction((transaction) => tryLockAffiliateRepairWrites(transaction)), true);
+    const reverseSourceId = `${prefix}-reverse-source`;
+    const reversePage = await prisma.affiliateSourceIntakePages.findUniqueOrThrow({
+      where: { id: captureSource.pageId },
+    });
+    await prisma.affiliateSupplySources.update({
+      where: { id: reversePage.supplySourceId! },
+      data: { liveSourceId: null, metadata: Prisma.JsonNull },
+    });
+    const reverseRoot = await prisma.affiliateSupplySources.findUniqueOrThrow({
+      where: { id: reversePage.supplySourceId! },
+    });
+    assert.equal(reverseRoot.liveSourceId, null);
+    const reverseSource = await prisma.affiliateScrapeSources.create({
+      data: {
+        id: reverseSourceId,
+        sourceKey: `${prefix}-capture`,
+        name: 'Reverse-link source',
+        listUrl: reversePage.canonicalUrl!,
+        baseUrl: reversePage.canonicalUrl!,
+        targetKind: 'CLUB',
+        supplySourceId: reverseRoot.id,
+        autoScrapeEnabled: false,
+      },
+    });
+    const ordinaryReverseRun = await queueAffiliateSourceIntakeRun(
+      captureSource.intakeId,
+      [captureSource.pageId],
+      'smoke-reverse-operator',
+      { db: prisma },
+    );
+    const reverseHold = {
+      schemaVersion: 1,
+      sourceId: reverseSource.id,
+      supplySourceId: reverseRoot.id,
+      mappingJobId: `${prefix}-reverse-hold-job`,
+      admissionHash: 'a'.repeat(64),
+      priorPendingMappingHash: 'b'.repeat(64),
+    };
+    const reverseSourceHeld = await prisma.affiliateScrapeSources.update({
+      where: { id: reverseSource.id },
+      data: { metadata: { existingDataRepairCorrectionHold: reverseHold } },
+    });
+    const reverseSourceCount = await prisma.affiliateScrapeSources.count({
+      where: { id: reverseSource.id },
+    });
+    const reverseArtifactCount = await prisma.affiliateSourceIntakeArtifacts.count({
+      where: { intakeId: captureSource.intakeId },
+    });
+    const reverseMappingJobCount = await prisma.affiliateSourceMappingJobs.count({
+      where: { intakeId: captureSource.intakeId },
+    });
+    const blockedReverseRun = await processNextAffiliateSourceIntakeRun({
+      runId: ordinaryReverseRun.id,
+      workerId: 'smoke-reverse-worker',
+    });
+    assert.equal(blockedReverseRun?.status, 'BLOCKED', JSON.stringify(blockedReverseRun));
+    assert.equal(await prisma.affiliateScrapeSources.count({ where: { id: reverseSource.id } }), reverseSourceCount);
+    assert.equal(
+      await prisma.affiliateSourceIntakeArtifacts.count({ where: { intakeId: captureSource.intakeId } }),
+      reverseArtifactCount,
+    );
+    assert.equal(
+      await prisma.affiliateSourceMappingJobs.count({ where: { intakeId: captureSource.intakeId } }),
+      reverseMappingJobCount,
+    );
+    assert.deepEqual(
+      await prisma.affiliateScrapeSources.findUniqueOrThrow({ where: { id: reverseSource.id } }),
+      reverseSourceHeld,
+    );
+    const limitedCorrectionPreview = await previewAffiliateExistingDataRepairCorrection({
+      ...correctionInput,
+      limit: 1,
+    });
+    assert.equal(limitedCorrectionPreview.counts.selected, 1, JSON.stringify(limitedCorrectionPreview.rows));
+    assert.equal(limitedCorrectionPreview.selectedJobIds.length, 1);
+    assert.equal(limitedCorrectionPreview.proposedWrites.length, 1);
+    assert.equal(
+      limitedCorrectionPreview.rows.filter((row) => row.reasonCodes.includes('SELECTION_LIMIT_EXCLUDED')).length,
+      2,
+      JSON.stringify(limitedCorrectionPreview.rows),
+    );
+    const queuedIntakeBeforeCorrection = await prisma.affiliateSourceIntakes.findUniqueOrThrow({
+      where: { id: queuedFixture.intakeId },
+    });
+    await prisma.affiliateSourceIntakes.update({
+      where: { id: queuedFixture.intakeId },
+      data: { complianceStatus: 'BLOCKED' },
+    });
+    try {
+      const mixedCorrectionPreview = await previewAffiliateExistingDataRepairCorrection(correctionInput);
+      assert.equal(mixedCorrectionPreview.counts.selected, 2, JSON.stringify(mixedCorrectionPreview.rows));
+      assert.deepEqual(mixedCorrectionPreview.selectedJobIds, [privateSource.jobId, publicSource.jobId].sort());
+      const heldQueuedRow = mixedCorrectionPreview.rows.find((row) => row.mappingJobId === queuedFixture.jobId);
+      assert.equal(heldQueuedRow?.eligible, false, JSON.stringify(mixedCorrectionPreview.rows));
+      assert.ok(heldQueuedRow?.reasonCodes.includes('SOURCE_POLICY_NOT_ALLOWED'), JSON.stringify(mixedCorrectionPreview.rows));
+    } finally {
+      await prisma.affiliateSourceIntakes.update({
+        where: { id: queuedFixture.intakeId },
+        data: { complianceStatus: queuedIntakeBeforeCorrection.complianceStatus, updatedAt: queuedIntakeBeforeCorrection.updatedAt },
+      });
+    }
+    const activeCorrectionRunId = `${prefix}-correction-active-run`;
+    await prisma.affiliateSourceIntakeRuns.create({
+      data: {
+        id: activeCorrectionRunId,
+        intakeId: publicSource.intakeId,
+        requestedPageIds: [publicSource.pageId],
+        status: 'QUEUED',
+      },
+    });
+    try {
+      const activeRunCorrectionPreview = await previewAffiliateExistingDataRepairCorrection(correctionInput);
+      const activeRunRow = activeRunCorrectionPreview.rows.find((row) => row.mappingJobId === publicSource.jobId);
+      assert.equal(activeRunRow?.eligible, false, JSON.stringify(activeRunCorrectionPreview.rows));
+      assert.ok(activeRunRow?.reasonCodes.includes('ACTIVE_INTAKE_RUN_PRESENT'), JSON.stringify(activeRunCorrectionPreview.rows));
+    } finally {
+      await prisma.affiliateSourceIntakeRuns.delete({ where: { id: activeCorrectionRunId } });
+    }
+    const mappingBeforeCorrectionProof = await prisma.affiliateScrapeMappings.findUniqueOrThrow({
+      where: { id: oldPendingMapping.id },
+    });
+    await prisma.affiliateScrapeMappings.update({
+      where: { id: oldPendingMapping.id },
+      data: {
+        mapping: {
+          ...(mappingBeforeCorrectionProof.mapping as Record<string, unknown>),
+          itemSelector: '.correction-proof-drift',
+        },
+      },
+    });
+    try {
+      const mappingProofCorrectionPreview = await previewAffiliateExistingDataRepairCorrection(correctionInput);
+      const mappingProofRow = mappingProofCorrectionPreview.rows.find((row) => row.mappingJobId === publicSource.jobId);
+      assert.equal(mappingProofRow?.eligible, false, JSON.stringify(mappingProofCorrectionPreview.rows));
+      assert.ok(mappingProofRow?.reasonCodes.includes('PRIOR_PENDING_MAPPING_PROOF_INVALID'), JSON.stringify(mappingProofCorrectionPreview.rows));
+    } finally {
+      await prisma.affiliateScrapeMappings.update({
+        where: { id: oldPendingMapping.id },
+        data: { mapping: mappingBeforeCorrectionProof.mapping ?? Prisma.JsonNull, updatedAt: mappingBeforeCorrectionProof.updatedAt },
+      });
+    }
+    const rootBeforeCorrectionIdentity = await prisma.affiliateSupplySources.findUniqueOrThrow({
+      where: { id: approvedRoot.id },
+    });
+    await prisma.affiliateSupplySources.update({
+      where: { id: approvedRoot.id },
+      data: { canonicalUrl: `${rootBeforeCorrectionIdentity.canonicalUrl}/changed`, updatedAt: rootBeforeCorrectionIdentity.updatedAt },
+    });
+    try {
+      const rootIdentityCorrectionPreview = await previewAffiliateExistingDataRepairCorrection(correctionInput);
+      const rootIdentityRow = rootIdentityCorrectionPreview.rows.find((row) => row.mappingJobId === publicSource.jobId);
+      assert.equal(rootIdentityRow?.eligible, false, JSON.stringify(rootIdentityCorrectionPreview.rows));
+      assert.ok(rootIdentityRow?.reasonCodes.includes('ROOT_CANONICAL_URL_CONFLICT'), JSON.stringify(rootIdentityCorrectionPreview.rows));
+    } finally {
+      await prisma.affiliateSupplySources.update({
+        where: { id: approvedRoot.id },
+        data: {
+          canonicalUrl: rootBeforeCorrectionIdentity.canonicalUrl,
+          updatedAt: rootBeforeCorrectionIdentity.updatedAt,
+        },
+      });
+    }
+    const sourceBeforeCorrectionContext = await prisma.affiliateScrapeSources.findUniqueOrThrow({
+      where: { id: approvedSource.id },
+    });
+    const sourceContextBeforeCorrection = sourceBeforeCorrectionContext.metadata as Record<string, unknown>;
+    const priorContextBeforeCorrection = sourceContextBeforeCorrection.existingDataRepair as Record<string, unknown>;
+    await prisma.affiliateScrapeSources.update({
+      where: { id: approvedSource.id },
+      data: {
+        metadata: {
+          ...sourceContextBeforeCorrection,
+          existingDataRepair: { ...priorContextBeforeCorrection, evidenceRunId: `${prefix}-tampered-prior-run` },
+        } as Prisma.InputJsonValue,
+      },
+    });
+    try {
+      const contextCorrectionPreview = await previewAffiliateExistingDataRepairCorrection(correctionInput);
+      const contextRow = contextCorrectionPreview.rows.find((row) => row.mappingJobId === publicSource.jobId);
+      assert.equal(contextRow?.eligible, false, JSON.stringify(contextCorrectionPreview.rows));
+      assert.ok(
+        contextRow?.reasonCodes.includes('PRIOR_REPAIR_CONTEXT_CONFLICT')
+          || contextRow?.reasonCodes.includes('PRIOR_REPAIR_CONTEXT_INVALID'),
+        JSON.stringify(contextCorrectionPreview.rows),
+      );
+    } finally {
+      await prisma.affiliateScrapeSources.update({
+        where: { id: approvedSource.id },
+        data: { metadata: sourceBeforeCorrectionContext.metadata ?? Prisma.JsonNull, updatedAt: sourceBeforeCorrectionContext.updatedAt },
+      });
+    }
+    const rootBeforeCorrectionAudit = await prisma.affiliateSupplySources.findUniqueOrThrow({
+      where: { id: approvedRoot.id },
+    });
+    const rootMetadataBeforeCorrectionAudit = rootBeforeCorrectionAudit.metadata as Record<string, unknown>;
+    await prisma.affiliateSupplySources.update({
+      where: { id: approvedRoot.id },
+      data: {
+        metadata: {
+          ...rootMetadataBeforeCorrectionAudit,
+          existingDataRepairAdmission: null,
+        } as Prisma.InputJsonValue,
+      },
+    });
+    try {
+      const auditCorrectionPreview = await previewAffiliateExistingDataRepairCorrection(correctionInput);
+      const auditRow = auditCorrectionPreview.rows.find((row) => row.mappingJobId === publicSource.jobId);
+      assert.equal(auditRow?.eligible, false, JSON.stringify(auditCorrectionPreview.rows));
+      assert.ok(auditRow?.reasonCodes.includes('PRIOR_ADMISSION_AUDIT_MISSING'), JSON.stringify(auditCorrectionPreview.rows));
+    } finally {
+      await prisma.affiliateSupplySources.update({
+        where: { id: approvedRoot.id },
+        data: {
+          metadata: rootBeforeCorrectionAudit.metadata ?? Prisma.JsonNull,
+          updatedAt: rootBeforeCorrectionAudit.updatedAt,
+        },
+      });
+    }
+    const sourceBeforeCrossRootPointer = await prisma.affiliateScrapeSources.findUniqueOrThrow({
+      where: { id: approvedSource.id },
+    });
+    const rootBeforeCrossRootPointer = await prisma.affiliateSupplySources.findUniqueOrThrow({
+      where: { id: approvedRoot.id },
+    });
+    const sourceCrossRootMetadata = sourceBeforeCrossRootPointer.metadata as Record<string, unknown>;
+    const rootCrossRootMetadata = rootBeforeCrossRootPointer.metadata as Record<string, unknown>;
+    const crossRootPending = {
+      ...(sourceCrossRootMetadata.pendingMapping as Record<string, unknown>),
+      producerJobId: oldQueuedJob.id,
+    };
+    await prisma.affiliateScrapeSources.update({
+      where: { id: approvedSource.id },
+      data: {
+        metadata: { ...sourceCrossRootMetadata, pendingMapping: crossRootPending } as Prisma.InputJsonValue,
+      },
+    });
+    await prisma.affiliateSupplySources.update({
+      where: { id: approvedRoot.id },
+      data: {
+        metadata: {
+          ...rootCrossRootMetadata,
+          pendingMapping: { ...(rootCrossRootMetadata.pendingMapping as Record<string, unknown>), producerJobId: oldQueuedJob.id },
+        } as Prisma.InputJsonValue,
+      },
+    });
+    try {
+      const crossRootPointerPreview = await previewAffiliateExistingDataRepairCorrection(correctionInput);
+      const crossRootPointerRow = crossRootPointerPreview.rows.find((row) => row.mappingJobId === publicSource.jobId);
+      assert.equal(crossRootPointerRow?.eligible, false, JSON.stringify(crossRootPointerPreview.rows));
+      assert.ok(
+        crossRootPointerRow?.reasonCodes.includes('PENDING_GATEWAY_POINTER_IDENTITY_CONFLICT'),
+        JSON.stringify(crossRootPointerPreview.rows),
+      );
+      assert.deepEqual(
+        await prisma.affiliateAgentGatewayJobs.findUniqueOrThrow({ where: { id: oldQueuedJob.id } }),
+        oldQueuedJob,
+      );
+    } finally {
+      await prisma.affiliateScrapeSources.update({
+        where: { id: approvedSource.id },
+        data: { metadata: sourceBeforeCrossRootPointer.metadata ?? Prisma.JsonNull, updatedAt: sourceBeforeCrossRootPointer.updatedAt },
+      });
+      await prisma.affiliateSupplySources.update({
+        where: { id: approvedRoot.id },
+        data: { metadata: rootBeforeCrossRootPointer.metadata ?? Prisma.JsonNull, updatedAt: rootBeforeCrossRootPointer.updatedAt },
+      });
+    }
+    assert.deepEqual(await prisma.affiliateScrapeSources.findUniqueOrThrow({ where: { id: approvedSource.id } }), approvedSource);
+    assert.deepEqual(await prisma.affiliateAgentGatewayJobs.findUniqueOrThrow({ where: { id: oldQueuedJob.id } }), oldQueuedJob);
+    const oldSourceMetadata = approvedSource.metadata as Record<string, unknown>;
+    await prisma.affiliateScrapeSources.update({
+      where: { id: approvedSource.id },
+      data: { metadata: { ...oldSourceMetadata, pendingMapping: { ...(oldSourceMetadata.pendingMapping as Record<string, unknown>), state: 'STAGED' } } as Prisma.InputJsonValue },
+    });
+    try {
+      await assert.rejects(
+        applyAffiliateExistingDataRepairCorrection({ ...correctionInput, expectedReportHash: correctionPreview.reportHash }),
+        (error: unknown) => error instanceof Error && 'code' in error && error.code === 'ADMISSION_REPORT_DRIFT',
+      );
+      assert.deepEqual(await prisma.affiliateAgentGatewayJobs.findUniqueOrThrow({ where: { id: oldQueuedJob.id } }), oldQueuedJob);
+    } finally {
+      await prisma.affiliateScrapeSources.update({
+        where: { id: approvedSource.id }, data: { metadata: approvedSource.metadata ?? Prisma.JsonNull, updatedAt: approvedSource.updatedAt },
+      });
+    }
+    const intakeIdentityBeforeCorrection = await prisma.affiliateSourceIntakes.findUniqueOrThrow({
+      where: { id: publicSource.intakeId },
+    });
+    await prisma.affiliateSourceIntakes.update({
+      where: { id: publicSource.intakeId },
+      data: { affiliateSourceId: null },
+    });
+    try {
+      const intakeIdentityPreview = await previewAffiliateExistingDataRepairCorrection(correctionInput);
+      const intakeIdentityRow = intakeIdentityPreview.rows.find((row) => row.mappingJobId === approvedJob.id);
+      assert.equal(intakeIdentityRow?.eligible, false, JSON.stringify(intakeIdentityPreview.rows));
+      assert.ok(
+        intakeIdentityRow?.reasonCodes.includes('INTAKE_SOURCE_IDENTITY_CONFLICT'),
+        JSON.stringify(intakeIdentityPreview.rows),
+      );
+    } finally {
+      await prisma.affiliateSourceIntakes.update({
+        where: { id: publicSource.intakeId },
+        data: {
+          affiliateSourceId: intakeIdentityBeforeCorrection.affiliateSourceId,
+          supplySourceId: intakeIdentityBeforeCorrection.supplySourceId,
+          updatedAt: intakeIdentityBeforeCorrection.updatedAt,
+        },
+      });
+    }
+    const reviewerJobForQueue = oldCompletedJobs.find((candidate) => (
+      candidate.role === 'SUPPLY_REVIEWER' && candidate.subjectId === approvedRoot.id
+    ));
+    assert.ok(reviewerJobForQueue);
+    const reviewerBeforeQueue = await prisma.affiliateAgentGatewayJobs.findUniqueOrThrow({
+      where: { id: reviewerJobForQueue.id },
+    });
+    await prisma.affiliateAgentGatewayJobs.update({
+      where: { id: reviewerJobForQueue.id },
+      data: { status: 'RETRY_WAIT' },
+    });
+    try {
+      const queuedReviewerPreview = await previewAffiliateExistingDataRepairCorrection(correctionInput);
+      const queuedReviewerRow = queuedReviewerPreview.rows.find((row) => row.mappingJobId === approvedJob.id);
+      assert.equal(queuedReviewerRow?.eligible, false, JSON.stringify(queuedReviewerPreview.rows));
+      assert.ok(
+        queuedReviewerRow?.reasonCodes.includes('PRIOR_PENDING_MAPPING_PROOF_INVALID'),
+        JSON.stringify(queuedReviewerPreview.rows),
+      );
+    } finally {
+      await prisma.affiliateAgentGatewayJobs.update({
+        where: { id: reviewerBeforeQueue.id },
+        data: { status: reviewerBeforeQueue.status, updatedAt: reviewerBeforeQueue.updatedAt },
+      });
+    }
+    const pendingProofSourceBefore = await prisma.affiliateScrapeSources.findUniqueOrThrow({
+      where: { id: approvedSource.id },
+    });
+    const pendingProofRootBefore = await prisma.affiliateSupplySources.findUniqueOrThrow({
+      where: { id: approvedRoot.id },
+    });
+    const pendingProofSourceMetadata = pendingProofSourceBefore.metadata as Record<string, unknown>;
+    const pendingProofRootMetadata = pendingProofRootBefore.metadata as Record<string, unknown>;
+    const pendingProof = pendingProofSourceMetadata.pendingMapping as Record<string, unknown>;
+    assert.ok(pendingProof);
+    const invalidPendingProof = {
+      ...pendingProof,
+      producerClaimId: `${prefix}-missing-pending-producer-claim`,
+    };
+    await prisma.$transaction([
+      prisma.affiliateScrapeSources.update({
+        where: { id: approvedSource.id },
+        data: {
+          metadata: { ...pendingProofSourceMetadata, pendingMapping: invalidPendingProof } as Prisma.InputJsonValue,
+        },
+      }),
+      prisma.affiliateSupplySources.update({
+        where: { id: approvedRoot.id },
+        data: {
+          metadata: { ...pendingProofRootMetadata, pendingMapping: invalidPendingProof } as Prisma.InputJsonValue,
+        },
+      }),
+    ]);
+    try {
+      const pendingProofPreview = await previewAffiliateExistingDataRepairCorrection(correctionInput);
+      const pendingProofRow = pendingProofPreview.rows.find((row) => row.mappingJobId === approvedJob.id);
+      assert.equal(pendingProofRow?.eligible, false, JSON.stringify(pendingProofPreview.rows));
+      assert.ok(
+        pendingProofRow?.reasonCodes.includes('PRIOR_PENDING_MAPPING_PROOF_INVALID'),
+        JSON.stringify(pendingProofPreview.rows),
+      );
+    } finally {
+      await prisma.$transaction([
+        prisma.affiliateScrapeSources.update({
+          where: { id: approvedSource.id },
+          data: {
+            metadata: pendingProofSourceBefore.metadata ?? Prisma.JsonNull,
+            updatedAt: pendingProofSourceBefore.updatedAt,
+          },
+        }),
+        prisma.affiliateSupplySources.update({
+          where: { id: approvedRoot.id },
+          data: {
+            metadata: pendingProofRootBefore.metadata ?? Prisma.JsonNull,
+            updatedAt: pendingProofRootBefore.updatedAt,
+          },
+        }),
+      ]);
+    }
+    const originalPendingContent = oldPendingMapping.mapping as Record<string, unknown>;
+    const originalPendingMetadata = originalPendingContent.metadata as Record<string, unknown>;
+    const alteredPackageHash = 'f'.repeat(64);
+    const alteredValidation = {
+      ...(originalPendingMetadata.validationOutput as Record<string, unknown>),
+      validatedPackageHash: alteredPackageHash,
+    };
+    const alteredPendingContent = {
+      ...originalPendingContent,
+      metadata: { ...originalPendingMetadata, packageHash: alteredPackageHash, validationOutput: alteredValidation },
+    };
+    const coherentButUncommittedPointer = {
+      ...pendingProof,
+      packageHash: alteredPackageHash,
+      candidatePackageHash: alteredPackageHash,
+      mappingSha256: hashAffiliateAgentValue(alteredPendingContent),
+      validationHash: hashAffiliateAgentValue(alteredValidation),
+    };
+    await prisma.$transaction([
+      prisma.affiliateScrapeMappings.update({
+        where: { id: oldPendingMapping.id }, data: { mapping: alteredPendingContent as Prisma.InputJsonValue },
+      }),
+      prisma.affiliateScrapeSources.update({
+        where: { id: approvedSource.id },
+        data: { metadata: { ...pendingProofSourceMetadata, pendingMapping: coherentButUncommittedPointer } as Prisma.InputJsonValue },
+      }),
+      prisma.affiliateSupplySources.update({
+        where: { id: approvedRoot.id },
+        data: { metadata: { ...pendingProofRootMetadata, pendingMapping: coherentButUncommittedPointer } as Prisma.InputJsonValue },
+      }),
+    ]);
+    try {
+      const uncommittedPreview = await previewAffiliateExistingDataRepairCorrection(correctionInput);
+      const uncommittedRow = uncommittedPreview.rows.find((row) => row.mappingJobId === approvedJob.id);
+      assert.equal(uncommittedRow?.eligible, false);
+      assert.ok(uncommittedRow?.reasonCodes.includes('PRIOR_PENDING_MAPPING_PROOF_INVALID'));
+    } finally {
+      await prisma.$transaction([
+        prisma.affiliateScrapeMappings.update({
+          where: { id: oldPendingMapping.id },
+          data: { mapping: oldPendingMapping.mapping ?? Prisma.JsonNull, updatedAt: oldPendingMapping.updatedAt },
+        }),
+        prisma.affiliateScrapeSources.update({
+          where: { id: approvedSource.id },
+          data: { metadata: pendingProofSourceBefore.metadata ?? Prisma.JsonNull, updatedAt: pendingProofSourceBefore.updatedAt },
+        }),
+        prisma.affiliateSupplySources.update({
+          where: { id: approvedRoot.id },
+          data: { metadata: pendingProofRootBefore.metadata ?? Prisma.JsonNull, updatedAt: pendingProofRootBefore.updatedAt },
+        }),
+      ]);
+    }
+    const boundedRelationEventRows = Array.from({ length: 200 }, (_, index) => ({
+      id: `${prefix}-bounded-relation-event-${index}`,
+      eventKey: `${prefix}-bounded-relation-event-${index}`,
+      jobId: oldQueuedJob.id,
+      claimId: null,
+      receiptId: null,
+      sequence: 10_000 + index,
+      eventType: 'BOUNDED_RELATION_TEST',
+      actorKind: 'OPERATOR',
+      actorId: 'bounded-relation-test',
+      role: 'MAPPING_PRODUCER',
+      requestHash: null,
+      inputHash: null,
+      outputHash: null,
+      reasonCodes: [],
+      payload: {},
+      retentionClass: 'INDEFINITE',
+    }));
+    await prisma.affiliateAgentGatewayEvents.createMany({ data: boundedRelationEventRows });
+    try {
+      await assert.rejects(
+        previewAffiliateExistingDataRepairCorrection(correctionInput),
+        (error: unknown) => error instanceof Error && 'code' in error && error.code === 'SNAPSHOT_OVERFLOW',
+      );
+    } finally {
+      await prisma.$transaction(async (transaction) => {
+        await transaction.$executeRawUnsafe('SET LOCAL session_replication_role = replica');
+        await transaction.affiliateAgentGatewayEvents.deleteMany({
+          where: { id: { startsWith: `${prefix}-bounded-relation-event-` } },
+        });
+      });
+    }
+    const corrected = await applyAffiliateExistingDataRepairCorrection({
+      ...correctionInput, expectedReportHash: correctionPreview.reportHash,
+    });
+    assert.equal(corrected.appliedJobs.length, 3, JSON.stringify(corrected.rows));
+    const supersededJob = await prisma.affiliateAgentGatewayJobs.findUniqueOrThrow({ where: { id: oldQueuedJob.id } });
+    assert.equal(supersededJob.status, 'PIPELINE_BLOCKED');
+    assert.equal(supersededJob.terminalDisposition, 'CORRECTION_SUPERSEDED');
+    assert.deepEqual(supersededJob.subjectJson, oldQueuedJob.subjectJson);
+    assert.deepEqual(supersededJob.evidenceManifestJson, oldQueuedJob.evidenceManifestJson);
+    assert.deepEqual(await prisma.affiliateAgentGatewayJobs.findMany({
+      where: { id: { in: oldCompletedJobs.map((job) => job.id) } }, orderBy: { id: 'asc' },
+    }), oldCompletedJobs);
+    assert.deepEqual(await prisma.affiliateScrapeMappings.findUniqueOrThrow({ where: { id: oldPendingMapping.id } }), oldPendingMapping);
+    assert.equal((await captureAffiliateExistingRepairSourceState(prisma, approvedSource.id)).sourceStateSha256, protectedState.sourceStateSha256);
+    const replayTamperFirst = corrected.appliedJobs[0];
+    const replayTamperApplied = corrected.appliedJobs.find((entry) => entry.mappingJobId !== replayTamperFirst?.mappingJobId);
+    assert.ok(replayTamperApplied);
+    const replayTamperSourceBefore = await prisma.affiliateScrapeSources.findUniqueOrThrow({
+      where: { id: replayTamperApplied.sourceId },
+    });
+    const replayTamperRootBefore = await prisma.affiliateSupplySources.findUniqueOrThrow({
+      where: { id: replayTamperApplied.supplySourceId },
+    });
+    const replayTamperSourceMetadata = replayTamperSourceBefore.metadata as Record<string, unknown>;
+    const replayTamperRootMetadata = replayTamperRootBefore.metadata as Record<string, unknown>;
+    const replayTamperAudit = replayTamperSourceMetadata.existingDataRepairAdmission as Record<string, unknown>;
+    const replayTamperSnapshot = replayTamperAudit.reportSnapshot as Record<string, unknown>;
+    assert.ok(replayTamperAudit);
+    assert.ok(replayTamperSnapshot);
+    const replayTamperedAudit = {
+      ...replayTamperAudit,
+      reportSnapshot: { ...replayTamperSnapshot, reason: 'Tampered one selected audit entry.' },
+    };
+    await prisma.$transaction([
+      prisma.affiliateScrapeSources.update({
+        where: { id: replayTamperApplied.sourceId },
+        data: {
+          metadata: {
+            ...replayTamperSourceMetadata,
+            existingDataRepairAdmission: replayTamperedAudit,
+          } as Prisma.InputJsonValue,
+        },
+      }),
+      prisma.affiliateSupplySources.update({
+        where: { id: replayTamperApplied.supplySourceId },
+        data: {
+          metadata: {
+            ...replayTamperRootMetadata,
+            existingDataRepairAdmission: replayTamperedAudit,
+          } as Prisma.InputJsonValue,
+        },
+      }),
+    ]);
+    try {
+      await assert.rejects(
+        applyAffiliateExistingDataRepairCorrection({
+          ...correctionInput, expectedReportHash: correctionPreview.reportHash,
+        }),
+        (error: unknown) => error instanceof Error && 'code' in error && error.code === 'ADMISSION_REPORT_DRIFT',
+      );
+    } finally {
+      await prisma.$transaction([
+        prisma.affiliateScrapeSources.update({
+          where: { id: replayTamperApplied.sourceId },
+          data: {
+            metadata: replayTamperSourceBefore.metadata ?? Prisma.JsonNull,
+            updatedAt: replayTamperSourceBefore.updatedAt,
+          },
+        }),
+        prisma.affiliateSupplySources.update({
+          where: { id: replayTamperApplied.supplySourceId },
+          data: {
+            metadata: replayTamperRootBefore.metadata ?? Prisma.JsonNull,
+            updatedAt: replayTamperRootBefore.updatedAt,
+          },
+        }),
+      ]);
+    }
+    const correctionReplay = await applyAffiliateExistingDataRepairCorrection({
+      ...correctionInput, expectedReportHash: correctionPreview.reportHash,
+    });
+    assert.equal(correctionReplay.writeCount, 0);
+    assert.deepEqual(correctionReplay.appliedJobs, corrected.appliedJobs);
+    const subsetCorrectionInput = {
+      ...correctionInput,
+      jobIds: [publicSource.jobId],
+      evidenceSelections: correctionInput.evidenceSelections.filter((selection) => selection.jobId === publicSource.jobId),
+    };
+    await assert.rejects(
+      applyAffiliateExistingDataRepairCorrection({
+        ...subsetCorrectionInput,
+        expectedReportHash: correctionPreview.reportHash,
+      }),
+      (error: unknown) => error instanceof Error && 'code' in error && error.code === 'ADMISSION_REPORT_DRIFT',
+    );
+    await assert.rejects(
+      applyAffiliateExistingDataRepairCorrection({
+        ...correctionInput,
+        limit: 1,
+        expectedReportHash: correctionPreview.reportHash,
+      }),
+      (error: unknown) => error instanceof Error && 'code' in error && error.code === 'ADMISSION_REPORT_DRIFT',
+    );
+    await assert.rejects(
+      applyAffiliateExistingDataRepairCorrection({
+        ...correctionInput, operatorId: 'different-correction-operator', expectedReportHash: correctionPreview.reportHash,
+      }),
+      (error: unknown) => error instanceof Error && 'code' in error && error.code === 'ADMISSION_REPORT_DRIFT',
+    );
+    for (const correctedJob of corrected.appliedJobs) {
+      const isArticle = correctedJob.mappingJobId === publicSource.jobId;
+      const isKnownClub = correctedJob.mappingJobId === privateSource.jobId;
+      const fixture = isArticle ? publicSource : isKnownClub ? privateSource : queuedFixture;
+      const label = isArticle ? 'corrected-article' : isKnownClub ? 'corrected-known-club' : 'corrected-queued';
+      const sourceState = await captureAffiliateExistingRepairSourceState(prisma, correctedJob.sourceId);
+      assert.equal(sourceState.correctionHold?.admissionHash, corrected.reviewedReportHash);
+      await assert.rejects(
+        assertAffiliatePendingRepairClear({
+          database: prisma as unknown as Parameters<typeof assertAffiliatePendingRepairClear>[0]['database'],
+          sourceId: correctedJob.sourceId, expectedSupplySourceId: correctedJob.supplySourceId,
+        }),
+        (error: unknown) => error instanceof AffiliatePendingRepairHoldError
+          && error.reason === 'EXISTING_DATA_REPAIR_CORRECTION_HOLD',
+      );
+      const producer = await claim(correctedJob.jobId, 'MAPPING_PRODUCER', `${label}-producer`);
+      if (producer.envelope.subject.type !== 'MAPPING_PRODUCER') throw new Error('Unexpected correction producer subject.');
+      const repair = producer.envelope.subject.repairContext;
+      assert.equal(repair?.kind, 'EXISTING_DATA_REPAIR');
+      if (repair?.kind !== 'EXISTING_DATA_REPAIR') throw new Error('The correction claim lost its context.');
+      assert.equal(repair.deploymentContract.version, 11);
+      assert.ok(repair.correction);
+      if (isKnownClub) {
+        const legacyBeforeHistoryDrift = await prisma.affiliateSourceMappingJobs.findUniqueOrThrow({
+          where: { id: correctedJob.mappingJobId },
+        });
+        const legacySummary = legacyBeforeHistoryDrift.resultSummary as Record<string, unknown>;
+        const history = legacySummary.existingDataRepairAdmissionHistory as Record<string, unknown>[];
+        assert.ok(Array.isArray(history));
+        const claimedGatewayJob = await prisma.affiliateAgentGatewayJobs.findUniqueOrThrow({
+          where: { id: producer.envelope.jobId },
+        });
+        const malformedHistories = [
+          history.filter((entry) => entry.reportHash !== repair.admissionHash),
+          history.map((entry) => entry.reportHash === repair.correction!.priorAdmissionHash
+            ? { ...entry, operatorId: 'changed-prior-audit-operator' }
+            : entry),
+        ];
+        try {
+          for (const changedHistory of malformedHistories) {
+            await prisma.affiliateSourceMappingJobs.update({
+              where: { id: correctedJob.mappingJobId },
+              data: { resultSummary: { ...legacySummary, existingDataRepairAdmissionHistory: changedHistory } as Prisma.InputJsonValue },
+            });
+            await assert.rejects(assertAffiliateExistingDataRepairClaimBinding({
+              prisma, job: claimedGatewayJob, claim: producer.envelope,
+            }));
+          }
+        } finally {
+          await prisma.affiliateSourceMappingJobs.update({
+            where: { id: correctedJob.mappingJobId },
+            data: {
+              resultSummary: legacyBeforeHistoryDrift.resultSummary ?? Prisma.JsonNull,
+              updatedAt: legacyBeforeHistoryDrift.updatedAt,
+            },
+          });
+        }
+      }
+      if (isKnownClub) assert.equal(repair.sourceKindAssessment, undefined);
+      assert.equal(repair.evidenceRunId, isArticle ? articleRunId : fixture.runId);
+      const pageArtifact = await prisma.affiliateSourceIntakeArtifacts.findFirstOrThrow({
+        where: { intakeId: fixture.intakeId, runId: repair.evidenceRunId, pageId: fixture.pageId, kind: 'PAGE_HTML' },
+      });
+      const listing = producer.envelope.evidenceManifest.entries.find((entry) => entry.artifactId === `intake-artifact:${pageArtifact.id}`);
+      assert.ok(listing);
+      const candidatePackage = affiliateAgentDeclarativePackageSchema.parse({
+        schemaVersion: 1, supplySourceId: correctedJob.supplySourceId, listingKind: 'CLUB',
+        listUrlRef: listing.evidenceRef, itemSelector: isArticle ? 'article' : 'main',
+        fields: [
+          { field: 'description', selector: 'p', mode: 'TEXT', attribute: null, transform: 'TRIM' },
+          { field: 'officialActionUrl', selector: 'a', mode: 'ATTRIBUTE', attribute: 'href', transform: 'ABSOLUTE_URL' },
+          { field: 'sportName', mode: 'CONSTANT', value: 'Indoor Volleyball' },
+          { field: 'title', selector: 'h1', mode: 'TEXT', attribute: null, transform: 'TRIM' },
+        ],
+        evidenceRefs: [listing.evidenceRef],
+        sportEvidence: {
+          evidenceRunId: repair.evidenceRunId, sportsCatalogSha256: repair.sportsCatalog.sha256,
+          sportDeterminations: [{
+            sourceLabels: ['indoor volleyball'], status: 'RESOLVED', resolutionBasis: 'SOURCE_EVIDENCE',
+            canonicalSportNames: ['Indoor Volleyball'], rationale: 'The source specifies indoor volleyball on hardwood courts.',
+            evidence: [{
+              artifactId: listing.artifactId, artifactSha256: listing.sha256, artifactKind: 'PAGE_HTML',
+              pageUrl: pageArtifact.finalUrl, excerpt: 'We offer indoor volleyball on our hardwood courts.',
+            }],
+          }],
+        },
+      });
+      const validationOperation = {
+        kind: 'EXECUTE_COMMAND' as const, idempotencyKey: `${prefix}-${label}-validate`, authorization: authorizationFor(producer),
+        command: { type: 'VALIDATE_DECLARATIVE_PACKAGE' as const, data: { candidatePackage, evidenceManifestHash: producer.envelope.evidenceManifest.hash } },
+      };
+      if (isArticle) {
+        await assert.rejects(
+          gateway.perform(validationOperation),
+          (error: unknown) => error instanceof Error && 'code' in error && error.code === 'COMMAND_SCHEMA_INVALID',
+        );
+        const gap = await gateway.perform({
+          kind: 'SUBMIT_RESULT', idempotencyKey: `${prefix}-${label}-gap`, authorization: authorizationFor(producer),
+          result: {
+            ...affiliateAgentTerminalIdentityFor(producer.envelope), disposition: 'CONTRACT_GAP',
+            reasonCodes: ['CONTRACT_REQUIREMENT_MISSING'], evidenceRefs: [listing.evidenceRef],
+            summary: 'The article does not establish one club or its official action.',
+            payload: { contractArea: 'MAPPING_EVIDENCE', requestedChange: 'Provide a first-party club page.', sportEvidence: candidatePackage.sportEvidence },
+          },
+        });
+        assert.equal(gap.kind, 'TERMINAL_ACCEPTED', JSON.stringify(gap));
+        const held = await captureAffiliateExistingRepairSourceState(prisma, correctedJob.sourceId);
+        assert.deepEqual(held.correctionHold, sourceState.correctionHold);
+        assert.equal(held.sourceStateSha256, protectedState.sourceStateSha256);
+        assert.equal((await prisma.affiliateSourceMappingJobs.findUniqueOrThrow({ where: { id: fixture.jobId } })).status, 'HUMAN_REVIEW_REQUIRED');
+        const ordinarySourceBeforeHeldAttempt = await prisma.affiliateScrapeSources.findUniqueOrThrow({
+          where: { id: correctedJob.sourceId },
+        });
+        const ordinaryAdmissionWhileHeld = {
+          prisma,
+          artifactStore,
+          bundle: activeBundle,
+          jobIds: [fixture.jobId],
+          reason: 'Attempt an ordinary admission while correction owns the source.',
+          operatorId: 'smoke-ordinary-operator',
+          evidenceSelections: [{ jobId: fixture.jobId, runId: articleRunId, pageId: fixture.pageId }],
+        };
+        const ordinaryHeldPreview = await previewAffiliateExistingDataRepairAdmission(ordinaryAdmissionWhileHeld);
+        assert.equal(ordinaryHeldPreview.rows[0]?.eligible, false, JSON.stringify(ordinaryHeldPreview.rows));
+        assert.ok(
+          ordinaryHeldPreview.rows[0]?.reasonCodes.includes('CORRECTION_HOLD_PRESENT'),
+          JSON.stringify(ordinaryHeldPreview.rows),
+        );
+        const ordinaryHeldApply = await applyAffiliateExistingDataRepairAdmission({
+          ...ordinaryAdmissionWhileHeld,
+          expectedReportHash: ordinaryHeldPreview.reportHash,
+        });
+        assert.equal(ordinaryHeldApply.writeCount, 0, JSON.stringify(ordinaryHeldApply));
+        assert.deepEqual(
+          await prisma.affiliateScrapeSources.findUniqueOrThrow({ where: { id: correctedJob.sourceId } }),
+          ordinarySourceBeforeHeldAttempt,
+        );
+        continue;
+      }
+      const validated = await gateway.perform(validationOperation);
+      assert.equal(validated.kind, 'COMMAND_SUCCEEDED', JSON.stringify(validated));
+      if (validated.kind !== 'COMMAND_SUCCEEDED') throw new Error('Correction validation failed.');
+      const packageHash = hashAffiliateAgentValue(candidatePackage);
+      const committed = await gateway.perform({
+        kind: 'EXECUTE_COMMAND', idempotencyKey: `${prefix}-${label}-commit`, authorization: authorizationFor(producer),
+        command: { type: 'COMMIT_DECLARATIVE_PACKAGE', data: { validationReceiptId: validated.receiptId, validatedPackageHash: packageHash } },
+      });
+      assert.equal(committed.kind, 'COMMAND_SUCCEEDED', JSON.stringify(committed));
+      if (committed.kind !== 'COMMAND_SUCCEEDED') throw new Error('Correction commit failed.');
+      assert.equal((await captureAffiliateExistingRepairSourceState(prisma, correctedJob.sourceId)).correctionHold, null);
+      const submitted = await gateway.perform({
+        kind: 'SUBMIT_RESULT', idempotencyKey: `${prefix}-${label}-result`, authorization: authorizationFor(producer),
+        result: {
+          ...affiliateAgentTerminalIdentityFor(producer.envelope), disposition: 'BOUNDED_REPAIR_SUBMITTED',
+          reasonCodes: ['SCHEMA_VALIDATED'], evidenceRefs: [listing.evidenceRef],
+          summary: 'The new package passed current entity and action checks.',
+          payload: { repairPass: 1, packageHash, commitReceiptId: committed.receiptId },
+        },
+      });
+      assert.equal(submitted.kind, 'TERMINAL_ACCEPTED', JSON.stringify(submitted));
+      const reviewerJob = await prisma.affiliateAgentGatewayJobs.findFirstOrThrow({
+        where: { parentClaimId: producer.envelope.claimId, role: 'SUPPLY_REVIEWER' },
+      });
+      const reviewer = await claim(reviewerJob.id, 'SUPPLY_REVIEWER', `${label}-reviewer`);
+      const approvedResult = affiliateAgentTerminalResultEnvelopeSchema.parse({
+        ...affiliateAgentTerminalIdentityFor(reviewer.envelope),
+        disposition: 'APPROVED' as const,
+        reasonCodes: ['EVIDENCE_VERIFIED'],
+        evidenceRefs: reviewer.envelope.evidenceManifest.entries.map((entry) => entry.evidenceRef),
+        summary: 'The independent reviewer verified the current club and action evidence.',
+        payload: { committedPackageHash: packageHash },
+      });
+      if (approvedResult.role !== 'SUPPLY_REVIEWER' || approvedResult.disposition !== 'APPROVED') {
+        throw new Error('Expected a correction approval result.');
+      }
+      if (isKnownClub) {
+        const approvalSourceBeforeHold = await prisma.affiliateScrapeSources.findUniqueOrThrow({
+          where: { id: correctedJob.sourceId },
+        });
+        const approvalRootBeforeHold = await prisma.affiliateSupplySources.findUniqueOrThrow({
+          where: { id: correctedJob.supplySourceId },
+        });
+        const approvalSourceMetadata = approvalSourceBeforeHold.metadata as Record<string, unknown>;
+        const approvalPending = approvalSourceMetadata.pendingMapping as Record<string, unknown>;
+        const approvalMappingId = approvalPending.mappingId as string;
+        assert.ok(approvalMappingId);
+        const approvalMappingBeforeHold = await prisma.affiliateScrapeMappings.findUniqueOrThrow({
+          where: { id: approvalMappingId },
+        });
+        assert.equal(approvalPending.state, 'STAGED');
+        const approvalHold = {
+          schemaVersion: 1,
+          sourceId: approvalSourceBeforeHold.id,
+          supplySourceId: approvalRootBeforeHold.id,
+          mappingJobId: correctedJob.mappingJobId,
+          admissionHash: repair.admissionHash,
+          priorPendingMappingHash: repair.correction!.priorPendingMappingHash,
+        };
+        const approvalReceiptCount = await prisma.affiliateAgentGatewayOperationReceipts.count();
+        const approvalRootMetadata = approvalRootBeforeHold.metadata as Record<string, unknown>;
+        await prisma.$transaction([
+          prisma.affiliateScrapeSources.update({
+            where: { id: approvalSourceBeforeHold.id },
+            data: { metadata: { ...approvalSourceMetadata, existingDataRepairCorrectionHold: approvalHold } as Prisma.InputJsonValue },
+          }),
+          prisma.affiliateSupplySources.update({
+            where: { id: approvalRootBeforeHold.id },
+            data: { metadata: { ...approvalRootMetadata, existingDataRepairCorrectionHold: approvalHold } as Prisma.InputJsonValue },
+          }),
+        ]);
+        try {
+          await assert.rejects(
+            adapters.terminalEffects.APPROVED.execute({
+              receiptId: `${prefix}-${label}-approved-hold`,
+              claim: reviewer.envelope,
+              result: approvedResult,
+            }),
+          );
+          assert.equal(await prisma.affiliateAgentGatewayOperationReceipts.count(), approvalReceiptCount);
+          assert.deepEqual(
+            await prisma.affiliateScrapeMappings.findUniqueOrThrow({ where: { id: approvalMappingBeforeHold.id } }),
+            approvalMappingBeforeHold,
+          );
+        } finally {
+          await prisma.$transaction([
+            prisma.affiliateScrapeSources.update({
+              where: { id: approvalSourceBeforeHold.id },
+              data: { metadata: approvalSourceBeforeHold.metadata ?? Prisma.JsonNull, updatedAt: approvalSourceBeforeHold.updatedAt },
+            }),
+            prisma.affiliateSupplySources.update({
+              where: { id: approvalRootBeforeHold.id },
+              data: { metadata: approvalRootBeforeHold.metadata ?? Prisma.JsonNull, updatedAt: approvalRootBeforeHold.updatedAt },
+            }),
+          ]);
+        }
+      }
+      const approved = await gateway.perform({
+        kind: 'SUBMIT_RESULT',
+        idempotencyKey: `${prefix}-${label}-approved`,
+        authorization: authorizationFor(reviewer),
+        result: approvedResult,
+      });
+      assert.equal(approved.kind, 'TERMINAL_ACCEPTED', JSON.stringify(approved));
+      const finalSource = await prisma.affiliateScrapeSources.findUniqueOrThrow({ where: { id: correctedJob.sourceId } });
+      const pending = (finalSource.metadata as Record<string, unknown>).pendingMapping as { mappingId: string; state: string };
+      assert.equal(pending.state, 'APPROVED');
+      assert.equal(finalSource.activeMappingId, null);
+      assert.equal(finalSource.autoScrapeEnabled, false);
+      const finalMapping = await prisma.affiliateScrapeMappings.findUniqueOrThrow({ where: { id: pending.mappingId } });
+      assert.equal(finalMapping.isActive, false);
+      assert.ok(finalMapping.validatedAt);
+    }
+    assert.deepEqual(await prisma.affiliateScrapeMappings.findUniqueOrThrow({ where: { id: oldPendingMapping.id } }), oldPendingMapping);
+    assert.deepEqual(await prisma.affiliateScrapeMappings.findUniqueOrThrow({ where: { id: correctionWorkingMapping.id } }), correctionWorkingMapping);
+    assert.equal(await prisma.affiliateSupplyTargets.count({ where: { supplySourceId: { in: corrected.appliedJobs.map((job) => job.supplySourceId) } } }), 0);
+
+    const boundedFixtures = [
+      await seed('bounded-a'),
+      await seed('bounded-b'),
+      await seed('bounded-held'),
+    ];
+    const boundedAdmissionInput = {
+      ...repairInput,
+      jobIds: boundedFixtures.map((fixture) => fixture.jobId),
+      evidenceSelections: boundedFixtures.map((fixture) => ({
+        jobId: fixture.jobId, runId: fixture.runId, pageId: fixture.pageId,
+      })),
+    };
+    const boundedAdmissionPreview = await previewAffiliateExistingDataRepairAdmission(boundedAdmissionInput);
+    await applyAffiliateExistingDataRepairAdmission({
+      ...boundedAdmissionInput, expectedReportHash: boundedAdmissionPreview.reportHash,
+    });
+    await prisma.affiliateSourceIntakes.update({
+      where: { id: boundedFixtures[2].intakeId }, data: { complianceStatus: 'BLOCKED' },
+    });
+    const boundedCorrectionInput = { ...boundedAdmissionInput, bundle: activeBundle, limit: 1 };
+    const boundedPreview = await previewAffiliateExistingDataRepairCorrection(boundedCorrectionInput);
+    assert.deepEqual(boundedPreview.selectedJobIds, [boundedFixtures[0].jobId]);
+    assert.ok(boundedPreview.rows.find((row) => row.jobId === boundedFixtures[1].jobId)?.reasonCodes.includes('SELECTION_LIMIT_EXCLUDED'));
+    assert.ok(boundedPreview.rows.find((row) => row.jobId === boundedFixtures[2].jobId)?.reasonCodes.includes('SOURCE_POLICY_NOT_ALLOWED'));
+    const boundedJobsBefore = await prisma.affiliateAgentGatewayJobs.count();
+    const boundedApplied = await applyAffiliateExistingDataRepairCorrection({
+      ...boundedCorrectionInput, expectedReportHash: boundedPreview.reportHash,
+    });
+    assert.equal(boundedApplied.writeCount, 1);
+    assert.equal(await prisma.affiliateAgentGatewayJobs.count(), boundedJobsBefore + 1);
+    assert.equal(boundedApplied.appliedJobs.length, 1);
+    const boundedProducer = await claim(boundedApplied.appliedJobs[0].jobId, 'MAPPING_PRODUCER', 'bounded-mixed-producer');
+    if (boundedProducer.envelope.subject.type !== 'MAPPING_PRODUCER'
+      || boundedProducer.envelope.subject.repairContext?.kind !== 'EXISTING_DATA_REPAIR') {
+      throw new Error('The bounded mixed correction is not claimable.');
+    }
+    const boundedContext = boundedProducer.envelope.subject.repairContext;
+    const boundedHtml = boundedProducer.envelope.evidenceManifest.entries.find((entry) => entry.kind === 'PAGE_HTML');
+    assert.ok(boundedHtml);
+    const boundedPage = await prisma.affiliateSourceIntakePages.findUniqueOrThrow({ where: { id: boundedFixtures[0].pageId } });
+    const boundedGap = await gateway.perform({
+      kind: 'SUBMIT_RESULT', idempotencyKey: `${prefix}-bounded-mixed-gap`, authorization: authorizationFor(boundedProducer),
+      result: {
+        ...affiliateAgentTerminalIdentityFor(boundedProducer.envelope),
+        disposition: 'CONTRACT_GAP', reasonCodes: ['CONTRACT_REQUIREMENT_MISSING'],
+        evidenceRefs: [boundedHtml.evidenceRef],
+        summary: 'The current source needs additional first-party location evidence.',
+        payload: {
+          contractArea: 'MAPPING_EVIDENCE', requestedChange: 'Provide the missing first-party location evidence.',
+          sportEvidence: {
+            evidenceRunId: boundedContext.evidenceRunId,
+            sportsCatalogSha256: boundedContext.sportsCatalog.sha256,
+            sportDeterminations: [{
+              sourceLabels: ['indoor volleyball'], status: 'RESOLVED', resolutionBasis: 'SOURCE_EVIDENCE',
+              canonicalSportNames: ['Indoor Volleyball'], rationale: 'The source specifies indoor volleyball on hardwood courts.',
+              evidence: [{
+                artifactId: boundedHtml.artifactId, artifactSha256: boundedHtml.sha256, artifactKind: 'PAGE_HTML',
+                pageUrl: boundedPage.canonicalUrl, excerpt: 'We offer indoor volleyball on our hardwood courts.',
+              }],
+            }],
+          },
+        },
+      },
+    });
+    assert.equal(boundedGap.kind, 'TERMINAL_ACCEPTED');
+    await prisma.affiliateSourceIntakes.update({
+      where: { id: boundedFixtures[2].intakeId }, data: { complianceStatus: 'ALLOWED' },
+    });
+    const boundedReplay = await applyAffiliateExistingDataRepairCorrection({
+      ...boundedCorrectionInput, expectedReportHash: boundedPreview.reportHash,
+    });
+    assert.equal(boundedReplay.writeCount, 0);
+    assert.deepEqual(boundedReplay.appliedJobs, boundedApplied.appliedJobs);
+    assert.equal(await prisma.affiliateAgentGatewayJobs.count(), boundedJobsBefore + 1);
     assert.equal(await prisma.affiliateAgentGatewayClaims.count({ where: { status: 'ACTIVE' } }), 0);
   } finally {
     await cleanRepairFixture(prefix, storageKeys);

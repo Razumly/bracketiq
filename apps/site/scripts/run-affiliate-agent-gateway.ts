@@ -18,6 +18,8 @@ import {
 import {
   previewAffiliateExistingDataRepairAdmission,
   applyAffiliateExistingDataRepairAdmission,
+  previewAffiliateExistingDataRepairCorrection,
+  applyAffiliateExistingDataRepairCorrection,
   AffiliateExistingDataRepairAdmissionError,
 } from '../src/server/affiliateImports/affiliateExistingDataRepairAdmission';
 import {
@@ -694,6 +696,7 @@ export type AffiliateAgentGatewayHttpDependencies = Readonly<{
   legacyRepairContinuation: (request: LegacyRepairContinuationRequest) => Promise<unknown>;
   sourceExclusionAdmission: (request: SourceExclusionAdmissionRequest) => Promise<unknown>;
   existingDataRepairAdmission: (request: ExistingDataRepairAdmissionRequest) => Promise<unknown>;
+  existingDataRepairCorrection: (request: ExistingDataRepairAdmissionRequest) => Promise<unknown>;
   existingRepairCapture: (request: ExistingRepairCaptureRequest) => Promise<unknown>;
   existingRepairCaptureProcess: (request: ExistingRepairCaptureProcessRequest) => Promise<unknown>;
   reviewerEffectRecovery: (
@@ -1322,7 +1325,7 @@ const handleExistingRepairRequest = async (
   input: AffiliateAgentGatewayHttpDependencies,
   body: unknown,
 ): Promise<boolean> => {
-  if (!['/existing-repair/admission', '/existing-repair/capture', '/existing-repair/capture/process']
+  if (!['/existing-repair/admission', '/existing-repair/correction', '/existing-repair/capture', '/existing-repair/capture/process']
     .includes(httpRequest.route ?? '')) return false;
   if (!authorizeOperatorRequest(request, response, input.operatorToken)) return true;
   if (input.admission.isOpen()) {
@@ -1334,10 +1337,14 @@ const handleExistingRepairRequest = async (
     return true;
   }
   try {
-    if (httpRequest.route === '/existing-repair/admission') {
+    if (httpRequest.route === '/existing-repair/admission' || httpRequest.route === '/existing-repair/correction') {
       const parsed = existingDataRepairAdmissionRequestSchema.safeParse(body);
       if (!parsed.success) sendJson(response, 400, { error: 'Invalid existing-data repair admission request.' });
-      else sendGatewayResult(response, await input.existingDataRepairAdmission(parsed.data));
+      else sendGatewayResult(response, await (
+        httpRequest.route === '/existing-repair/correction'
+          ? input.existingDataRepairCorrection(parsed.data)
+          : input.existingDataRepairAdmission(parsed.data)
+      ));
     } else if (httpRequest.route === '/existing-repair/capture') {
       const parsed = existingRepairCaptureRequestSchema.safeParse(body);
       if (!parsed.success) sendJson(response, 400, { error: 'Invalid existing-source capture request.' });
@@ -1733,6 +1740,7 @@ type AffiliateAgentGatewayRuntime = Readonly<{
   legacyRepairContinuation: (request: LegacyRepairContinuationRequest) => Promise<unknown>;
   sourceExclusionAdmission: (request: SourceExclusionAdmissionRequest) => Promise<unknown>;
   existingDataRepairAdmission: (request: ExistingDataRepairAdmissionRequest) => Promise<unknown>;
+  existingDataRepairCorrection: (request: ExistingDataRepairAdmissionRequest) => Promise<unknown>;
   existingRepairCapture: (request: ExistingRepairCaptureRequest) => Promise<unknown>;
   existingRepairCaptureProcess: (request: ExistingRepairCaptureProcessRequest) => Promise<unknown>;
   reviewerEffectRecovery: (
@@ -1902,30 +1910,47 @@ const createGateway = async (): Promise<AffiliateAgentGatewayRuntime> => {
     },
   });
   await healthChecks.startup();
+  const runExistingRepairAdmission = (
+    request: ExistingDataRepairAdmissionRequest,
+    operation: 'REPAIR' | 'CORRECTION',
+  ) => admission.withClaim(async () => {
+    if (admission.isOpen()) throw new AffiliateExistingDataRepairAdmissionError(
+      'EXISTING_REPAIR_ADMISSION_OPEN', 'Close claim admission before existing-data repair admission.',
+    );
+    const bundle = await contracts.loadActiveBundle();
+    const options = {
+      prisma,
+      bundle,
+      jobIds: request.jobIds,
+      sourceIds: request.sourceIds,
+      evidenceSelections: request.evidenceSelections,
+      reason: request.reason,
+      limit: request.limit,
+      operatorId: AFFILIATE_AGENT_GATEWAY_OPERATOR_ID,
+      artifactStore,
+    };
+    const preview = operation === 'CORRECTION'
+      ? previewAffiliateExistingDataRepairCorrection
+      : previewAffiliateExistingDataRepairAdmission;
+    const apply = operation === 'CORRECTION'
+      ? applyAffiliateExistingDataRepairCorrection
+      : applyAffiliateExistingDataRepairAdmission;
+    if (request.mode === 'PREVIEW') {
+      if (operation === 'CORRECTION') {
+        const active = await loadActiveAffiliateSupplyContract({ db: database, rolloutCohort });
+        assertStartupPreflight(active);
+      }
+      return preview(options);
+    }
+    if (!request.expectedReportHash) throw new Error('Existing-data repair apply requires a reviewed hash.');
+    const active = await loadActiveAffiliateSupplyContract({ db: database, rolloutCohort });
+    assertStartupPreflight(active);
+    return apply({ ...options, expectedReportHash: request.expectedReportHash });
+  });
   return {
     gateway,
-    existingDataRepairAdmission: (request) => admission.withClaim(async () => {
-      if (admission.isOpen()) throw new AffiliateExistingDataRepairAdmissionError(
-        'EXISTING_REPAIR_ADMISSION_OPEN', 'Close claim admission before existing-data repair admission.',
-      );
-      const bundle = await contracts.loadActiveBundle();
-      const options = {
-        prisma,
-        bundle,
-        jobIds: request.jobIds,
-        sourceIds: request.sourceIds,
-        evidenceSelections: request.evidenceSelections,
-        reason: request.reason,
-        limit: request.limit,
-        operatorId: AFFILIATE_AGENT_GATEWAY_OPERATOR_ID,
-        artifactStore,
-      };
-      if (request.mode === 'PREVIEW') return previewAffiliateExistingDataRepairAdmission(options);
-      if (!request.expectedReportHash) throw new Error('Existing-data repair apply requires a reviewed hash.');
-      const active = await loadActiveAffiliateSupplyContract({ db: database, rolloutCohort });
-      assertStartupPreflight(active);
-      return applyAffiliateExistingDataRepairAdmission({ ...options, expectedReportHash: request.expectedReportHash });
-    }),
+    existingDataRepairAdmission: (request) => runExistingRepairAdmission(request, 'REPAIR'),
+    existingDataRepairCorrection: (request) => runExistingRepairAdmission(request, 'CORRECTION'),
     existingRepairCapture: (request) => admission.withClaim(async () => {
       if (admission.isOpen()) throw new AffiliateExistingDataRepairCaptureError(
         'EXISTING_REPAIR_ADMISSION_OPEN', 'Close claim admission before existing-source capture.',

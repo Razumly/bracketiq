@@ -503,6 +503,7 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
     writeCount: 0,
   }));
   const existingDataRepairAdmission = jest.fn(async () => ({ reportHash: "a".repeat(64), writeCount: 0 }));
+  const existingDataRepairCorrection = jest.fn(async () => ({ operation: "CORRECTION", reportHash: "b".repeat(64), writeCount: 0 }));
   const existingRepairCapture = jest.fn(async () => ({ reportHash: "a".repeat(64), writeCount: 0 }));
   const existingRepairCaptureProcess = jest.fn(async () => ({ runId: "repair-run-1", status: "SUCCEEDED" }));
   const reviewerEffectRecovery = jest.fn(async (
@@ -541,6 +542,7 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
       legacyRepairRetry,
       sourceExclusionAdmission,
       existingDataRepairAdmission,
+      existingDataRepairCorrection,
       existingRepairCapture,
       existingRepairCaptureProcess,
       replenishment: gateway.replenishment,
@@ -745,6 +747,11 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
       action: existingDataRepairAdmission,
     },
     {
+      route: "/existing-repair/correction",
+      body: { mode: "PREVIEW", jobIds: ["mapping-job-1"], reason: "Recheck the pending entity and action." },
+      action: existingDataRepairCorrection,
+    },
+    {
       route: "/existing-repair/capture",
       body: { mode: "PREVIEW", targets: [{ intakeId: "intake-1", pageIds: ["page-1"] }], reason: "Verify current source data." },
       action: existingRepairCapture,
@@ -787,6 +794,26 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
     expect(existingDataRepairAdmission).not.toHaveBeenCalled();
   });
 
+  it("does not accept correction authority in the normal admission body", async () => {
+    const response = await request("/existing-repair/admission", OPERATOR_TOKEN, "POST", {
+      mode: "PREVIEW",
+      jobIds: ["mapping-job-1"],
+      reason: "Recheck the pending entity.",
+      operation: "CORRECTION",
+    });
+    expect(response.status).toBe(400);
+    expect(existingDataRepairAdmission).not.toHaveBeenCalled();
+    expect(existingDataRepairCorrection).not.toHaveBeenCalled();
+  });
+
+  it("rejects correction writes without exact reviewed intent", async () => {
+    const response = await request("/existing-repair/correction", OPERATOR_TOKEN, "POST", {
+      mode: "APPLY", jobIds: ["mapping-job-1"], reason: "Recheck the pending package.",
+    });
+    expect(response.status).toBe(400);
+    expect(existingDataRepairCorrection).not.toHaveBeenCalled();
+  });
+
   it("rejects capture URL injection and pages outside the bounded request", async () => {
     const preview = {
       mode: "PREVIEW", reason: "Verify current source data.",
@@ -809,6 +836,14 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
     ));
     let response = await request("/existing-repair/admission", OPERATOR_TOKEN, "POST", {
       mode: "APPLY", jobIds: ["mapping-job-1"], reason: "Repair stored mapping concerns.", expectedReportHash: "a".repeat(64),
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: { code: "ADMISSION_REPORT_DRIFT", isRetryable: false } });
+    existingDataRepairCorrection.mockRejectedValueOnce(new AffiliateExistingDataRepairAdmissionError(
+      "ADMISSION_REPORT_DRIFT", "The pending package changed after review.",
+    ));
+    response = await request("/existing-repair/correction", OPERATOR_TOKEN, "POST", {
+      mode: "APPLY", jobIds: ["mapping-job-1"], reason: "Recheck the pending package.", expectedReportHash: "b".repeat(64),
     });
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({ error: { code: "ADMISSION_REPORT_DRIFT", isRetryable: false } });

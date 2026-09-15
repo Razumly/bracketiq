@@ -44,7 +44,7 @@ const nullableFieldNames = [
   'tagText',
 ] as const;
 
-const createDom = (html: string, url: string): JSDOM => (
+export const createAffiliateMappingDom = (html: string, url: string): JSDOM => (
   new JSDOM(html, {
     url,
     virtualConsole: new VirtualConsole(),
@@ -122,12 +122,26 @@ const findNearestPreviousText = (element: Element, selector: string): string | n
   return null;
 };
 
-const selectElement = (root: Element, selector: string): Element | null => {
+export const selectAffiliateMappingElement = (root: Element | Document, selector: string): Element | null => {
   const normalized = selector.trim();
   if (normalized === ':scope' || normalized === '&') {
-    return root;
+    return root.nodeType === 1 ? root as Element : null;
   }
   return root.querySelector(normalized);
+};
+
+export const selectAffiliateMappingItems = (
+  root: Element | Document,
+  mapping: AffiliateScrapeMapping,
+): Element[] => {
+  const requiredIncludes = (mapping.itemTextIncludes ?? []).map((value) => normalizeWhitespace(value).toLowerCase());
+  const requiredExcludes = (mapping.itemTextExcludes ?? []).map((value) => normalizeWhitespace(value).toLowerCase());
+  return Array.from(root.querySelectorAll(mapping.itemSelector))
+    .filter((element) => {
+      const itemText = normalizeWhitespace(element.textContent ?? '').toLowerCase();
+      return requiredIncludes.every((needle) => itemText.includes(needle))
+        && !requiredExcludes.some((needle) => itemText.includes(needle));
+    });
 };
 
 const applyRegex = (value: string, pattern?: string): string => {
@@ -314,7 +328,7 @@ const extractRawFieldValue = (
   if (mapping.mode === 'literal') {
     return mapping.value ?? '';
   }
-  const element = selectElement(root, mapping.selector);
+  const element = selectAffiliateMappingElement(root, mapping.selector);
   if (!element) return null;
   return extractElementValue(element, mapping, baseUrl);
 };
@@ -752,17 +766,10 @@ export const extractAffiliateCandidatesFromPage = (
     ));
   }
 
-  const dom = createDom(page.body, page.finalUrl || page.url);
+  const dom = createAffiliateMappingDom(page.body, page.finalUrl || page.url);
   const referenceDate = new Date(page.fetchedAt);
   const effectiveReferenceDate = Number.isNaN(referenceDate.getTime()) ? new Date() : referenceDate;
-  const requiredIncludes = (mapping.itemTextIncludes ?? []).map((value) => normalizeWhitespace(value).toLowerCase());
-  const requiredExcludes = (mapping.itemTextExcludes ?? []).map((value) => normalizeWhitespace(value).toLowerCase());
-  const itemElements = Array.from(dom.window.document.querySelectorAll(mapping.itemSelector))
-    .filter((element) => {
-      const itemText = normalizeWhitespace(element.textContent ?? '').toLowerCase();
-      return requiredIncludes.every((needle) => itemText.includes(needle))
-        && !requiredExcludes.some((needle) => itemText.includes(needle));
-    });
+  const itemElements = selectAffiliateMappingItems(dom.window.document, mapping);
 
   return itemElements
     .map((element, index): AffiliateCandidateInput | null => {
@@ -776,7 +783,7 @@ export const extractAffiliateCandidatesFromPage = (
           warnings.push(`Missing required field: ${fieldName}`);
         }
         fieldValues[fieldName] = value;
-        fieldElements[fieldName] = selectElement(element, fieldMapping.selector);
+        fieldElements[fieldName] = selectAffiliateMappingElement(element, fieldMapping.selector);
       }
 
       const rawFieldValues = { ...fieldValues };
@@ -839,7 +846,7 @@ export const extractAffiliateFieldValuesFromPage = (
   fields: Record<string, FieldMapping>,
 ): ExtractedAffiliateFieldValues => {
   const baseUrl = page.finalUrl || page.url;
-  const dom = createDom(page.body, baseUrl);
+  const dom = createAffiliateMappingDom(page.body, baseUrl);
   const referenceDate = new Date(page.fetchedAt);
   const effectiveReferenceDate = Number.isNaN(referenceDate.getTime()) ? new Date() : referenceDate;
   const root = dom.window.document.documentElement;

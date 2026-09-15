@@ -40,9 +40,11 @@ const prismaMock = {
   },
   affiliateScrapeSources: {
     findMany: jest.fn(),
+    findUnique: jest.fn(),
   },
   affiliateSupplySources: {
     findMany: jest.fn(),
+    findUnique: jest.fn(),
   },
   affiliateAgentGatewayJobs: {
     findMany: jest.fn(),
@@ -52,6 +54,9 @@ const prismaMock = {
   },
 };
 const persistArtifactMock = jest.fn();
+const withAffiliateRepairActivityLeaseForIntakeMock = jest.fn(
+  async (_intakeId: string, action: () => Promise<unknown>) => action(),
+);
 
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 jest.mock('@/lib/id', () => ({ createId: () => 'generated_id' }));
@@ -60,8 +65,19 @@ jest.mock('@/server/affiliateImports/sourceIntakeArtifacts', () => ({
   persistAffiliateSourceIntakeArtifact: (...args: unknown[]) => persistArtifactMock(...args),
   readAffiliateSourceIntakeArtifact: jest.fn(),
 }));
+jest.mock('@/server/affiliateImports/affiliateRepairActivityLease', () => {
+  const actual = jest.requireActual('@/server/affiliateImports/affiliateRepairActivityLease');
+  return {
+    ...actual,
+    withAffiliateRepairActivityLeaseForIntake: (
+      intakeId: string,
+      action: () => Promise<unknown>,
+    ) => withAffiliateRepairActivityLeaseForIntakeMock(intakeId, action),
+  };
+});
 
 import {
+  assertOrdinaryAffiliateSourceIntakeQueueOwnership,
   affiliateExistingRepairAuthoritySnapshot,
   affiliateExistingRepairCaptureSnapshot,
   classifyAffiliateSourceEvidence,
@@ -72,11 +88,16 @@ import {
   recoverStaleAffiliateSourceIntakeRuns,
   reviewAffiliateSourceIntakePolicy,
 } from '@/server/affiliateImports/sourceIntake';
+import { normalizeAffiliateSupplyIdentity } from '@/server/affiliateImports/affiliateSupplyLifecycle';
+import { AffiliateRepairActivityIntakeBusyError } from '@/server/affiliateImports/affiliateRepairActivityLease';
 import { hashAffiliateAgentValue } from '@/server/affiliateImports/agentGatewayContracts';
 
 describe('affiliate source intake service', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    withAffiliateRepairActivityLeaseForIntakeMock.mockImplementation(
+      async (_intakeId: string, action: () => Promise<unknown>) => action(),
+    );
     prismaMock.affiliateSourceIntakes.count.mockResolvedValue(0);
     prismaMock.affiliateSourceIntakes.findMany.mockResolvedValue([]);
     prismaMock.affiliateSourceIntakePages.groupBy.mockResolvedValue([]);
@@ -97,6 +118,8 @@ describe('affiliate source intake service', () => {
     prismaMock.affiliateSourceDomainPolicies.upsert.mockResolvedValue({});
     prismaMock.affiliateSourceDiscoveryResults.updateMany.mockResolvedValue({ count: 0 });
     prismaMock.affiliateScrapeSources.findMany.mockResolvedValue([]);
+    prismaMock.affiliateScrapeSources.findUnique.mockResolvedValue(null);
+    prismaMock.affiliateSupplySources.findUnique.mockResolvedValue(null);
     prismaMock.affiliateSupplySources.findMany.mockResolvedValue([]);
     prismaMock.affiliateAgentGatewayJobs.findMany.mockResolvedValue([]);
     prismaMock.affiliateAgentGatewayClaims.findMany.mockResolvedValue([]);
@@ -144,6 +167,169 @@ describe('affiliate source intake service', () => {
     expect(result).toMatchObject({ status: 'FAILED', errorMessage: expect.stringContaining('CAPTURE_INTENT_DRIFT') });
     expect(fetchResource).not.toHaveBeenCalled();
     expect(captureSourcePage).not.toHaveBeenCalled();
+  });
+  it('rechecks the correction hold inside the intake activity lease before provider access', async () => {
+    const fixture = reviewedCaptureFixture();
+    const clearIntake = { ...fixture.intake };
+    const heldIntake = { ...fixture.intake, supplySourceId: 'root_held' };
+    prismaMock.affiliateSourceIntakes.findUnique
+      .mockReset()
+      .mockResolvedValueOnce(clearIntake)
+      .mockResolvedValue(heldIntake);
+    prismaMock.affiliateSupplySources.findMany.mockResolvedValue([{
+      id: 'root_held',
+      metadata: { existingDataRepairCorrectionHold: {} },
+    }]);
+    const verifyAfterClaim = jest.fn().mockRejectedValue(
+      new Error('unexpected provider access'),
+    );
+
+    const result = await processNextAffiliateSourceIntakeRun({
+      runId: fixture.queued.id,
+      workerId: 'reviewed-worker',
+      governedProcessIntent: { ...fixture.intent, verifyAfterClaim },
+    });
+
+    expect(result).toMatchObject({ status: 'BLOCKED' });
+    expect(verifyAfterClaim).not.toHaveBeenCalled();
+    expect(prismaMock.affiliateSourceIntakeRuns.updateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'BLOCKED' }),
+      }),
+    );
+    expect(prismaMock.affiliateSourceIntakes.update).not.toHaveBeenCalled();
+    expect(persistArtifactMock).not.toHaveBeenCalled();
+    expect(prismaMock.affiliateSourceMappingJobs.create).not.toHaveBeenCalled();
+  });
+  it('blocks a selected page whose distinct root and live source are held', async () => {
+    const fixture = reviewedCaptureFixture();
+    const distinctPage = { ...fixture.page, supplySourceId: 'root_distinct' };
+    prismaMock.affiliateSourceIntakePages.findMany.mockResolvedValue([distinctPage]);
+    prismaMock.affiliateSupplySources.findMany.mockResolvedValue([{
+      id: 'root_distinct',
+      liveSourceId: 'source_distinct',
+      metadata: { existingDataRepairCorrectionHold: {} },
+    }]);
+    prismaMock.affiliateScrapeSources.findMany.mockResolvedValue([{
+      id: 'source_distinct',
+      metadata: { existingDataRepairCorrectionHold: {} },
+    }]);
+    const verifyAfterClaim = jest.fn().mockRejectedValue(
+      new Error('unexpected provider access'),
+    );
+
+    const result = await processNextAffiliateSourceIntakeRun({
+      runId: fixture.queued.id,
+      workerId: 'reviewed-worker',
+      governedProcessIntent: { ...fixture.intent, verifyAfterClaim },
+    });
+
+    expect(result).toMatchObject({ status: 'BLOCKED' });
+    expect(verifyAfterClaim).not.toHaveBeenCalled();
+    expect(prismaMock.affiliateSourceIntakeRuns.updateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'BLOCKED' }),
+      }),
+    );
+    expect(prismaMock.affiliateSourceIntakes.update).not.toHaveBeenCalled();
+    expect(persistArtifactMock).not.toHaveBeenCalled();
+    expect(prismaMock.affiliateSourceMappingJobs.create).not.toHaveBeenCalled();
+  });
+  it('blocks an unlinked selected page whose path identity matches a held root before provider access', async () => {
+    const fixture = reviewedCaptureFixture();
+    const pageUrl = 'https://example.com/events?candidate=1';
+    const heldUrl = 'https://example.com/events?held=1';
+    const identity = normalizeAffiliateSupplyIdentity({ requestedUrl: heldUrl });
+    const unlinkedPage = {
+      ...fixture.page,
+      url: pageUrl,
+      canonicalUrl: pageUrl,
+      supplySourceId: null,
+    };
+    const heldRoot = {
+      id: 'root_url_held',
+      identityKey: identity.identityKey,
+      canonicalUrl: identity.canonicalUrl,
+      pathKey: identity.pathKey,
+      liveSourceId: null,
+      metadata: { existingDataRepairCorrectionHold: {} },
+    };
+    prismaMock.affiliateSourceIntakePages.findMany.mockResolvedValue([unlinkedPage]);
+    prismaMock.affiliateSupplySources.findMany.mockResolvedValue([heldRoot]);
+    const verifyAfterClaim = jest.fn().mockRejectedValue(
+      new Error('unexpected provider access'),
+    );
+
+    const result = await processNextAffiliateSourceIntakeRun({
+      runId: fixture.queued.id,
+      workerId: 'reviewed-worker',
+      governedProcessIntent: { ...fixture.intent, verifyAfterClaim },
+    });
+
+    expect(result).toMatchObject({ status: 'BLOCKED' });
+    expect(verifyAfterClaim).not.toHaveBeenCalled();
+    expect(persistArtifactMock).not.toHaveBeenCalled();
+    expect(prismaMock.affiliateSourceIntakes.update).not.toHaveBeenCalled();
+    expect(prismaMock.affiliateSourceMappingJobs.create).not.toHaveBeenCalled();
+    expect(prismaMock.affiliateSourceIntakeRuns.updateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'BLOCKED' }),
+      }),
+    );
+  });
+  it('checks all active page roots when queue ownership has no exact page selection', async () => {
+    const intake = {
+      id: 'intake_queue',
+      affiliateSourceId: null,
+      supplySourceId: null,
+    };
+    prismaMock.affiliateSourceIntakes.findUnique.mockResolvedValue(intake);
+    prismaMock.affiliateSourceIntakePages.findMany.mockResolvedValue([{
+      id: 'page_distinct',
+      intakeId: intake.id,
+      status: 'ACTIVE',
+      supplySourceId: 'root_distinct',
+    }]);
+    prismaMock.affiliateSupplySources.findMany.mockResolvedValue([{
+      id: 'root_distinct',
+      liveSourceId: null,
+      metadata: {},
+    }]);
+    prismaMock.affiliateScrapeSources.findMany.mockResolvedValue([{
+      id: 'source_reverse',
+      supplySourceId: 'root_distinct',
+      metadata: { existingDataRepairCorrectionHold: {} },
+    }]);
+
+    await expect(assertOrdinaryAffiliateSourceIntakeQueueOwnership(
+      intake.id,
+      prismaMock,
+    )).rejects.toMatchObject({
+      code: 'GOVERNED_CAPTURE_OWNERSHIP_CONFLICT',
+    });
+  });
+  it('completes a claimed intake as blocked when the shared lease is busy', async () => {
+    const fixture = reviewedCaptureFixture();
+    withAffiliateRepairActivityLeaseForIntakeMock.mockRejectedValueOnce(
+      new AffiliateRepairActivityIntakeBusyError(fixture.intake.id),
+    );
+
+    const result = await processNextAffiliateSourceIntakeRun({
+      runId: fixture.queued.id,
+      workerId: 'reviewed-worker',
+      governedProcessIntent: fixture.intent,
+    });
+
+    expect(result).toMatchObject({
+      status: 'BLOCKED',
+      errorMessage: 'AFFILIATE_REPAIR_ACTIVITY_BUSY',
+    });
+    expect(prismaMock.affiliateSourceIntakeRuns.updateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ status: 'RUNNING' }),
+        data: expect.objectContaining({ status: 'BLOCKED' }),
+      }),
+    );
   });
 
   it('rejects a policy that expires without any row changing', async () => {

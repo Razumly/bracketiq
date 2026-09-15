@@ -66,6 +66,7 @@ import {
 } from "./affiliateProviderFactory";
 import { extractAffiliateCandidatesFromPage } from "./mappingExtractor";
 import { analyzeAffiliateDescriptionQuality } from "./descriptionQuality";
+import { analyzeAffiliateEntityActionQuality } from "./entityActionQuality";
 import {
   affiliateScrapeMappingSchema,
   type AffiliateCandidateInput,
@@ -91,6 +92,7 @@ import {
   type VerifiedAffiliateSportCompletion,
 } from "./affiliateSportDetermination";
 import {
+  AFFILIATE_EXISTING_DATA_REPAIR_CORRECTION_HOLD_METADATA_KEY,
   captureAffiliateExistingRepairSourceState,
   existingDataRepairContextForMetadata,
   pendingMappingForMetadata,
@@ -3856,6 +3858,7 @@ type ProductionValidationExtraction = Readonly<{
   candidates: readonly AffiliateCandidateInput[];
   candidateHash: string;
   observedSportNames: readonly string[];
+  entityActionQuality: ReturnType<typeof analyzeAffiliateEntityActionQuality>;
 }>;
 
 type ProductionValidationEvidence = Readonly<{
@@ -3988,6 +3991,26 @@ const extractProductionValidationCandidates = (
   ))) {
     throw packageValidationError("The declarative package output must include title and official action URL.");
   }
+  const entityActionQuality = analyzeAffiliateEntityActionQuality({ page, mapping, candidates });
+  if (!entityActionQuality.isValid) {
+    switch (entityActionQuality.issues[0]?.code) {
+      case "DOCUMENT_ENTITY_MISMATCH":
+        throw packageValidationError("The source document does not represent the declared listing entity.");
+      case "ACTION_NAVIGATION":
+      case "ACTION_RELATED_STORY":
+        throw packageValidationError("The official action link points to navigation or unrelated editorial content.");
+      case "ACTION_CROSS_CANDIDATE":
+        throw packageValidationError("The official action link belongs to another candidate.");
+      case "ACTION_NOT_EVIDENCED":
+      case "ACTION_URL_INVALID":
+      case "ACTION_URL_UNRESOLVED":
+        throw packageValidationError("The official action URL is not bound to an evidenced source link.");
+      case "ACTION_PURPOSE_UNSUPPORTED":
+        throw packageValidationError("The official action link does not establish a supported action purpose.");
+      default:
+        throw packageValidationError("The package entity or official action is not supported by its source.");
+    }
+  }
   if (candidatePackage.listingKind === "EVENT" || candidatePackage.listingKind === "CLUB") {
     for (let index = 0; index < candidates.length; index += 1) {
       const candidate = candidates[index]!;
@@ -4012,6 +4035,7 @@ const extractProductionValidationCandidates = (
     candidates,
     candidateHash: productionHash(candidates),
     observedSportNames,
+    entityActionQuality,
   };
 };
 
@@ -4101,6 +4125,7 @@ const prepareProductionValidation = async (
     evidenceRefs,
     evidenceKinds,
     validationReceiptId: receiptId,
+    entityActionQuality: extraction.entityActionQuality,
     claimId: claim.claimId,
     claimGeneration: claim.claimGeneration,
     invocationId: claim.invocationId,
@@ -4960,6 +4985,22 @@ const persistProductionCommit = async (
     if (!existingRepairSourceState || !existingRepairContext || !existingRepairLineage) {
       throw packageValidationError("The existing-data repair baseline is missing.");
     }
+    const correctionHold = existingRepairSourceState.correctionHold;
+    const correction = existingRepairContext.correction;
+    if (correctionHold && (
+      !correction
+      || correctionHold.sourceId !== sourceId
+      || correctionHold.supplySourceId !== claim.subject.supplySourceId
+      || correctionHold.mappingJobId !== claim.subject.mappingJobId
+      || correctionHold.admissionHash !== existingRepairContext.admissionHash
+      || correctionHold.priorPendingMappingHash !== correction.priorPendingMappingHash
+      || existingRepairPendingMapping !== null
+    )) {
+      throw packageValidationError("The correction hold does not match the current repair claim.");
+    }
+    if (correction && !existingRepairPendingMapping && !correctionHold) {
+      throw packageValidationError("The correction hold is missing before the first pending commit.");
+    }
     const baselineMatches = existingRepairSourceState.sourceStateSha256
       === existingRepairContext.sourceStateSha256
       && existingRepairSourceState.workingMappingId === existingRepairContext.workingMappingId
@@ -5177,22 +5218,20 @@ const persistProductionCommit = async (
       reviewerJobId: existingRepairProducerManifest.reviewerJobId,
       now: input.clock?.now() ?? new Date(),
     });
+    sourceMetadata = { ...sourceMetadata, pendingMapping };
+    rootMetadata = { ...rootMetadata, pendingMapping };
+    delete sourceMetadata[AFFILIATE_EXISTING_DATA_REPAIR_CORRECTION_HOLD_METADATA_KEY];
+    delete rootMetadata[AFFILIATE_EXISTING_DATA_REPAIR_CORRECTION_HOLD_METADATA_KEY];
     await transaction.affiliateScrapeSources.update({
       where: { id: sourceId },
       data: {
-        metadata: productionJson({
-          ...sourceMetadata,
-          pendingMapping,
-        }),
+        metadata: productionJson(sourceMetadata),
       },
     });
     await transaction.affiliateSupplySources.update({
       where: { id: claim.subject.supplySourceId },
       data: {
-        metadata: productionJson({
-          ...rootMetadata,
-          pendingMapping,
-        }),
+        metadata: productionJson(rootMetadata),
       },
     });
   }

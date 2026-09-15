@@ -1,6 +1,10 @@
 import {
+  affiliateExistingDataRepairCorrectionHoldsMatch,
+  correctionHoldForMetadata,
+  hasAffiliateExistingDataRepairCorrectionHold,
   pendingMappingForMetadata,
   pendingMappingHash,
+  type AffiliateExistingDataRepairCorrectionHold,
   type AffiliateExistingDataRepairPendingMapping,
 } from './affiliateExistingDataRepairState';
 
@@ -20,16 +24,24 @@ const recordValue = (value: unknown): Record<string, unknown> => (
     ? value as Record<string, unknown>
     : {}
 );
-
 const hasPendingMappingField = (metadata: unknown): boolean => (
   Object.prototype.hasOwnProperty.call(recordValue(metadata), PENDING_MAPPING_METADATA_KEY)
 );
+
+type CorrectionPointer = Readonly<{
+  present: boolean;
+  hold: AffiliateExistingDataRepairCorrectionHold | null;
+}>;
+
+const correctionPointerFor = (metadata: unknown): CorrectionPointer => ({
+  present: hasAffiliateExistingDataRepairCorrectionHold(metadata),
+  hold: correctionHoldForMetadata(metadata),
+});
 
 type PendingPointer = Readonly<{
   present: boolean;
   pending: AffiliateExistingDataRepairPendingMapping | null;
 }>;
-
 const pendingPointerFor = (metadata: unknown): PendingPointer => ({
   present: hasPendingMappingField(metadata),
   pending: pendingMappingForMetadata(metadata),
@@ -40,6 +52,8 @@ export type AffiliatePendingRepairSnapshot = Readonly<{
   root: AffiliatePendingRepairRow | null;
   sourcePending: AffiliateExistingDataRepairPendingMapping | null;
   rootPending: AffiliateExistingDataRepairPendingMapping | null;
+  sourceCorrectionHold: AffiliateExistingDataRepairCorrectionHold | null;
+  rootCorrectionHold: AffiliateExistingDataRepairCorrectionHold | null;
   reason: string | null;
 }>;
 
@@ -72,6 +86,33 @@ const normalizedIdentifier = (value: unknown): string | null => (
   typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
 );
 
+const correctionHoldReasonFor = (input: PendingRepairSnapshotInput): string | null => {
+  const sourcePointer = correctionPointerFor(input.sourceMetadata);
+  const rootPointer = correctionPointerFor(input.rootMetadata);
+  const sourceHold = sourcePointer.hold;
+  const rootHold = rootPointer.hold;
+  if ((sourcePointer.present && !sourceHold) || (rootPointer.present && !rootHold)) {
+    return 'MALFORMED_EXISTING_DATA_REPAIR_CORRECTION_HOLD';
+  }
+  if (!sourcePointer.present && !rootPointer.present) return null;
+
+  const expectedSourceId = normalizedIdentifier(input.sourceId);
+  const expectedRootId = normalizedIdentifier(input.rootId ?? input.supplySourceId);
+  for (const hold of [sourceHold, rootHold]) {
+    if (!hold) continue;
+    if (
+      hold.sourceId !== expectedSourceId
+      || (expectedRootId !== null && hold.supplySourceId !== expectedRootId)
+    ) {
+      return 'MISMATCHED_EXISTING_DATA_REPAIR_CORRECTION_HOLD';
+    }
+  }
+  if (sourceHold && rootHold && !affiliateExistingDataRepairCorrectionHoldsMatch(sourceHold, rootHold)) {
+    return 'MISMATCHED_EXISTING_DATA_REPAIR_CORRECTION_HOLD';
+  }
+  return 'EXISTING_DATA_REPAIR_CORRECTION_HOLD';
+};
+
 /**
  * Return the server-owned repair hold for a source/root pair.
  *
@@ -83,6 +124,8 @@ const normalizedIdentifier = (value: unknown): string | null => (
 export const affiliatePendingRepairReasonFor = (
   input: PendingRepairSnapshotInput,
 ): string | null => {
+  const correctionReason = correctionHoldReasonFor(input);
+  if (correctionReason) return correctionReason;
   const sourcePointer = pendingPointerFor(input.sourceMetadata);
   const rootPointer = pendingPointerFor(input.rootMetadata);
   const sourcePending = sourcePointer.pending;
@@ -164,6 +207,8 @@ export const readAffiliatePendingRepairSnapshot = async (input: Readonly<{
       root,
       sourcePending: pendingPointerFor(source?.metadata).pending,
       rootPending: pendingPointerFor(root?.metadata).pending,
+      sourceCorrectionHold: correctionPointerFor(source?.metadata).hold,
+      rootCorrectionHold: correctionPointerFor(root?.metadata).hold,
       reason: 'MISMATCHED_PENDING_EXISTING_DATA_REPAIR',
     };
   }
@@ -172,6 +217,8 @@ export const readAffiliatePendingRepairSnapshot = async (input: Readonly<{
     root,
     sourcePending: pendingPointerFor(source?.metadata).pending,
     rootPending: pendingPointerFor(root?.metadata).pending,
+    sourceCorrectionHold: correctionPointerFor(source?.metadata).hold,
+    rootCorrectionHold: correctionPointerFor(root?.metadata).hold,
     reason,
   };
 };

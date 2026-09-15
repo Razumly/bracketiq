@@ -45,6 +45,7 @@ describe('/api/admin/affiliate-sources', () => {
     requireRazumlyAdminMock.mockResolvedValue({ userId: 'admin_1' });
     runAffiliateSourceScrapeMock.mockRejectedValue(new AffiliatePendingRepairHoldError({
       source: { id: 'source_1' }, root: null, sourcePending: null, rootPending: null,
+      sourceCorrectionHold: null, rootCorrectionHold: null,
       reason: 'PENDING_EXISTING_DATA_REPAIR',
     }, 'source_1'));
     const result = await scrapeSource(

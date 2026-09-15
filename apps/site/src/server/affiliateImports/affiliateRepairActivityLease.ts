@@ -19,10 +19,24 @@ export class AffiliateRepairActivityBusyError extends AffiliatePendingRepairHold
       root: null,
       sourcePending: null,
       rootPending: null,
+      sourceCorrectionHold: null,
+      rootCorrectionHold: null,
       reason: AFFILIATE_REPAIR_ACTIVITY_BUSY_REASON,
     };
     super(snapshot, sourceId);
     this.name = 'AffiliateRepairActivityBusyError';
+  }
+}
+
+export class AffiliateRepairActivityIntakeBusyError extends Error {
+  readonly code = AFFILIATE_REPAIR_ACTIVITY_BUSY_REASON;
+  readonly reason = AFFILIATE_REPAIR_ACTIVITY_BUSY_REASON;
+  readonly intakeId: string;
+
+  constructor(intakeId: string) {
+    super(AFFILIATE_REPAIR_ACTIVITY_BUSY_REASON);
+    this.name = 'AffiliateRepairActivityIntakeBusyError';
+    this.intakeId = intakeId;
   }
 }
 
@@ -76,12 +90,12 @@ const unlockResultFromSession = (value: { rows?: unknown }): boolean =>
   );
 
 /**
- * Run ordinary source activity while holding the shared session advisory lock.
- * The dedicated pg client remains checked out for the complete action so the
- * lease covers provider access, identity reconciliation, and all side effects.
+ * Run source or intake activity while holding the shared session advisory
+ * lock. The dedicated pg client remains checked out for the complete action
+ * so the lease covers provider access and all side effects.
  */
-export const withAffiliateRepairActivityLease = async <T>(
-  sourceId: string,
+const withAffiliateRepairActivityLeaseOwner = async <T>(
+  owner: Readonly<{ kind: 'source' | 'intake'; id: string }>,
   action: () => Promise<T>,
 ): Promise<T> => {
   const { max: _poolMax, ...clientConfig } = resolvePrismaPgPoolConfig();
@@ -105,7 +119,9 @@ export const withAffiliateRepairActivityLease = async <T>(
       'The affiliate repair activity lock query returned no boolean result.',
     )) {
       await endClient();
-      throw new AffiliateRepairActivityBusyError(sourceId);
+      throw owner.kind === 'source'
+        ? new AffiliateRepairActivityBusyError(owner.id)
+        : new AffiliateRepairActivityIntakeBusyError(owner.id);
     }
 
     try {
@@ -130,6 +146,26 @@ export const withAffiliateRepairActivityLease = async <T>(
     throw error;
   }
 };
+
+/**
+ * Run ordinary source activity while holding the shared session advisory lock.
+ * The dedicated pg client remains checked out for the complete action so the
+ * lease covers provider access, identity reconciliation, and all side effects.
+ */
+export const withAffiliateRepairActivityLease = async <T>(
+  sourceId: string,
+  action: () => Promise<T>,
+): Promise<T> => withAffiliateRepairActivityLeaseOwner({ kind: 'source', id: sourceId }, action);
+
+/**
+ * Run an intake capture while holding the same shared session advisory lock.
+ * Intakes can exist before a live source is attached, so contention identifies
+ * the real intake rather than inventing a source identifier.
+ */
+export const withAffiliateRepairActivityLeaseForIntake = async <T>(
+  intakeId: string,
+  action: () => Promise<T>,
+): Promise<T> => withAffiliateRepairActivityLeaseOwner({ kind: 'intake', id: intakeId }, action);
 
 /**
  * Try to enter the exclusive repair-writer side of the shared lease. The

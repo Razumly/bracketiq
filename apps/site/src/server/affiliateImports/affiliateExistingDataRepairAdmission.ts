@@ -36,10 +36,18 @@ import {
 } from './affiliateSupplyPersistence';
 import {
   AFFILIATE_EXISTING_DATA_REPAIR_ADMISSION_METADATA_KEY,
+  AFFILIATE_EXISTING_DATA_REPAIR_CORRECTION_HOLD_METADATA_KEY,
   AFFILIATE_EXISTING_DATA_REPAIR_LEGACY_HOLD_STATUS,
   AFFILIATE_EXISTING_DATA_REPAIR_PENDING_MAPPING_METADATA_KEY,
+  affiliateExistingDataRepairCorrectionHoldSchema,
   affiliateExistingDataRepairPendingMappingSchema,
   captureAffiliateExistingRepairSourceState,
+  metadataWithExistingDataRepairCorrectionHold,
+  pendingMappingForMetadata,
+  pendingMappingHash,
+  readAffiliateExistingDataRepairCorrectionHold,
+  type AffiliateExistingDataRepairCorrectionHold,
+  type AffiliateExistingDataRepairPendingMapping,
   type AffiliateExistingDataRepairSourceState,
 } from './affiliateExistingDataRepairState';
 import { tryLockAffiliateRepairWrites } from './affiliateRepairActivityLease';
@@ -54,6 +62,7 @@ const SNAPSHOT_PER_INTAKE_LIMIT = 200;
 const SNAPSHOT_GLOBAL_LIMIT = 2_000;
 
 const SUCCESSFUL_RUN_STATUSES = new Set(['SUCCEEDED', 'PARTIAL']);
+const ACTIVE_INTAKE_RUN_STATUSES = new Set(['QUEUED', 'RUNNING', 'CLAIMED']);
 const ACTIVE_JOB_STATUSES = new Set(['QUEUED', 'CLAIMED', 'REVIEW_REQUIRED', 'MAPPING_IN_PROGRESS', AFFILIATE_EXISTING_DATA_REPAIR_LEGACY_HOLD_STATUS]);
 const TERMINAL_REPAIR_STATUSES = new Set([
   'COMPLETED', 'SUCCEEDED', 'FAILED', 'EXCLUDED', 'REJECTED', 'CANCELLED', 'APPROVED', 'DONE',
@@ -143,6 +152,8 @@ type RunRow = {
   intakeId: string;
   supplySourceId: string | null;
   status: string;
+  claimedAt?: Date | string | null;
+  workerId?: string | null;
   createdAt?: Date | string;
   finishedAt?: Date | string | null;
   summary?: unknown;
@@ -263,6 +274,7 @@ type GatewayJobRow = {
   status: string;
   activeClaimId: string | null;
   parentClaimId?: string | null;
+  eventSequence?: number;
   claimGeneration?: number;
   terminalDisposition?: string | null;
   resultHash?: string | null;
@@ -445,6 +457,43 @@ export type AffiliateExistingDataRepairAdmissionReport = Readonly<{
   appliedJobs: readonly AffiliateExistingDataRepairAppliedJob[];
   replayed: boolean;
 }>;
+export type AffiliateExistingDataRepairCorrectionPriorState = Readonly<{
+  mappingJobId: string;
+  sourceId: string;
+  supplySourceId: string;
+  mappingId: string | null;
+  pendingMapping: unknown;
+  pendingMappingHash: string;
+  context: unknown;
+  admissionAuditReference: Readonly<{
+    mappingJobId: string;
+    reportHash: string | null;
+    gatewayJobId: string | null;
+    auditHash: string;
+  }>;
+  mappingState: unknown;
+  mappingBytes: unknown;
+  mappingSha256: string | null;
+  mappingJobState: unknown;
+  gatewayJobs: readonly unknown[];
+  gatewayClaims: readonly unknown[];
+  gatewayReceipts: readonly unknown[];
+  gatewayArtifacts: readonly unknown[];
+  gatewayEvents: readonly unknown[];
+  admissionEventId: string | null;
+}>;
+
+export type AffiliateExistingDataRepairCorrectionReport =
+  AffiliateExistingDataRepairAdmissionReport & Readonly<{
+    operation: 'CORRECTION';
+    supersededMappingIds: readonly string[];
+    supersededGatewayJobIds: readonly string[];
+    priorStates: readonly AffiliateExistingDataRepairCorrectionPriorState[];
+  }>;
+export type AffiliateExistingDataRepairCorrectionPreview =
+  AffiliateExistingDataRepairCorrectionReport & { mode: 'PREVIEW' };
+export type AffiliateExistingDataRepairCorrectionApplyReport =
+  AffiliateExistingDataRepairCorrectionReport & { mode: 'APPLY' };
 export type AffiliateExistingDataRepairAdmissionPreview = AffiliateExistingDataRepairAdmissionReport & { mode: 'PREVIEW' };
 export type AffiliateExistingDataRepairAdmissionApplyReport = AffiliateExistingDataRepairAdmissionReport & { mode: 'APPLY' };
 type ExistingDataRepairAdmissionAuditSelectedRow = Readonly<{
@@ -491,6 +540,7 @@ type ExistingDataRepairAdmissionAudit = Readonly<{
   sourceState: unknown;
   workingMappingState: unknown;
   organizationState: unknown;
+  baseline?: Pick<AffiliateExistingDataRepairSourceState, 'sourceStateSha256' | 'sourceState' | 'workingMappingState' | 'organizationState'>;
   rootLifecycleGeneration: number;
   artifactIds: readonly string[];
   evidenceSnapshots?: readonly ExistingDataRepairArtifact[];
@@ -505,6 +555,10 @@ type ExistingDataRepairAdmissionAudit = Readonly<{
     supplySourceId: string;
     evidenceArtifactIds: readonly string[];
   }>;
+  operation?: 'CORRECTION';
+  supersededMappingIds?: readonly string[];
+  supersededGatewayJobIds?: readonly string[];
+  correctionPriorState?: AffiliateExistingDataRepairCorrectionPriorState;
 }>;
 export type ExistingDataRepairEvidenceSelection = Readonly<{
   jobId: string;
@@ -564,6 +618,9 @@ const artifactSort = (left: ArtifactRow, right: ArtifactRow): number => (
 const recordValue = (value: unknown): JsonRecord => (
   value && typeof value === 'object' && !Array.isArray(value) ? value as JsonRecord : {}
 );
+const hasOwn = (value: unknown, key: string): boolean => (
+  Object.prototype.hasOwnProperty.call(recordValue(value), key)
+);
 const text = (value: unknown): string | null => typeof value === 'string' && value.trim() ? value.trim() : null;
 const upper = (value: unknown): string => String(value ?? '').trim().toUpperCase();
 const normalizeAdmissionHashValue = (value: unknown): unknown => {
@@ -592,10 +649,19 @@ const activeLease = (row: { claimedAt?: Date | string | null; leaseExpiresAt?: D
 const activeGatewayClaim = (snapshot: Snapshot, gatewayJob: GatewayJobRow | null): boolean => (
   Boolean(gatewayJob && (gatewayJob.activeClaimId || snapshot.gatewayClaims.some((claim) => claim.jobId === gatewayJob.id && upper(claim.status) === 'ACTIVE')))
 );
-const admissionHistory = (summary: unknown): JsonRecord[] => {
-  const value = recordValue(summary).existingDataRepairAdmissionHistory;
-  return Array.isArray(value) ? value.filter((entry) => entry && typeof entry === 'object' && !Array.isArray(entry)).map((entry) => entry as JsonRecord) : [];
+const admissionHistoryValues = (summary: unknown): unknown[] => {
+  const envelope = recordValue(summary);
+  const value = envelope.existingDataRepairAdmissionHistory;
+  return Array.isArray(value) ? value : value === undefined ? [] : [value];
 };
+const admissionHistoryHasMalformedEntry = (summary: unknown): boolean => (
+  admissionHistoryValues(summary).some((entry) => !entry || typeof entry !== 'object' || Array.isArray(entry))
+);
+const admissionHistory = (summary: unknown): JsonRecord[] => (
+  admissionHistoryValues(summary).filter((entry): entry is JsonRecord => (
+    Boolean(entry && typeof entry === 'object' && !Array.isArray(entry))
+  ))
+);
 const priorContextFor = (job: MappingJobRow): JsonRecord | null => {
   const history = admissionHistory(job.resultSummary);
   const context = history.find((entry) => recordValue(entry.repairContext).kind === 'EXISTING_DATA_REPAIR');
@@ -1788,6 +1854,7 @@ const evaluateJob = async (
     };
     return { row, plan: null };
   }
+  if (admissionHistoryHasMalformedEntry(job.resultSummary)) reasons.push('PRIOR_ADMISSION_HISTORY_INVALID');
 
   if (upper(intake.complianceStatus) !== 'ALLOWED') {
     reasons.push(intake.complianceStatus ? 'SOURCE_POLICY_NOT_ALLOWED' : 'SOURCE_POLICY_MISSING');
@@ -1864,6 +1931,7 @@ const evaluateJob = async (
     reasons.push('ROOT_TARGET_KIND_CONFLICT');
   }
   if (mapping && root && mapping.supplySourceId && mapping.supplySourceId !== root.id) reasons.push('MAPPING_ROOT_OWNERSHIP_CONFLICT');
+  if (source && root) reasons.push(...correctionHoldReasonsFor(source, root));
 
   const pair = identity
     ? pagePairFor(snapshot, intake, source, identity, job, input, root?.id ?? null)
@@ -2352,12 +2420,15 @@ const buildReport = async (
     },
   };
 };
-
 const appendHistory = (summary: unknown, entry: JsonRecord): JsonRecord => {
   const envelope = recordValue(summary);
+  const rawHistory = admissionHistoryValues(summary);
   const history = admissionHistory(summary);
-  if (history.some((candidate) => candidate.reportHash === entry.reportHash && candidate.gatewayJobId === entry.gatewayJobId)) return envelope;
-  return { ...envelope, existingDataRepairAdmissionHistory: [...history, entry] };
+  if (
+    !admissionHistoryHasMalformedEntry(summary)
+    && history.some((candidate) => candidate.reportHash === entry.reportHash && candidate.gatewayJobId === entry.gatewayJobId)
+  ) return envelope;
+  return { ...envelope, existingDataRepairAdmissionHistory: [...rawHistory, entry] };
 };
 const appendMetadata = (
   metadata: unknown,
@@ -2569,18 +2640,41 @@ const applyPlan = async (
     ...plan.artifacts.flatMap((artifact) => [artifact.sourceUrl, artifact.finalUrl]),
   ];
   await assertCurrentPolicies(tx, policyUrls);
-  if (plan.source) {
-    const currentSource = await readUnique(db, 'affiliateScrapeSources', { where: { id: plan.source.id } });
-    const pending = recordValue(recordValue(currentSource).metadata)[AFFILIATE_EXISTING_DATA_REPAIR_PENDING_MAPPING_METADATA_KEY];
-    if (Object.keys(recordValue(pending)).length) {
-      throw new AffiliateExistingDataRepairAdmissionError('PENDING_REPAIR_PRESENT', `Source ${plan.source.id} already has a pending repair.`);
+  const currentSource = plan.source
+    ? await readUnique(db, 'affiliateScrapeSources', { where: { id: plan.source.id } })
+    : null;
+  const currentRoot = plan.root
+    ? await readUnique(db, 'affiliateSupplySources', { where: { id: plan.root.id } })
+    : null;
+  if (plan.source && !currentSource) {
+    throw new AffiliateExistingDataRepairAdmissionError('SOURCE_IDENTITY_DRIFT', `Source ${plan.source.id} disappeared after preview.`);
+  }
+  if (plan.root && !currentRoot) {
+    throw new AffiliateExistingDataRepairAdmissionError('ROOT_IDENTITY_DRIFT', `Supply Source ${plan.root.id} disappeared after preview.`);
+  }
+  if (currentSource && currentRoot) {
+    const holdReasons = correctionHoldReasonsFor(
+      currentSource as unknown as SourceRow,
+      currentRoot as unknown as RootRow,
+    );
+    if (holdReasons.length) {
+      throw new AffiliateExistingDataRepairAdmissionError(
+        'CORRECTION_HOLD_PRESENT',
+        `Existing-data repair admission is blocked by a correction hold on ${plan.source?.id ?? 'the selected source'}.`,
+        { reasonCodes: holdReasons },
+      );
     }
   }
-  if (plan.root) {
-    const currentRoot = await readUnique(db, 'affiliateSupplySources', { where: { id: plan.root.id } });
+  if (currentSource) {
+    const pending = recordValue(recordValue(currentSource).metadata)[AFFILIATE_EXISTING_DATA_REPAIR_PENDING_MAPPING_METADATA_KEY];
+    if (Object.keys(recordValue(pending)).length) {
+      throw new AffiliateExistingDataRepairAdmissionError('PENDING_REPAIR_PRESENT', `Source ${plan.source?.id ?? 'the selected source'} already has a pending repair.`);
+    }
+  }
+  if (currentRoot) {
     const pending = recordValue(recordValue(currentRoot).metadata)[AFFILIATE_EXISTING_DATA_REPAIR_PENDING_MAPPING_METADATA_KEY];
     if (Object.keys(recordValue(pending)).length) {
-      throw new AffiliateExistingDataRepairAdmissionError('PENDING_REPAIR_PRESENT', `Supply Source ${plan.root.id} already has a pending repair.`);
+      throw new AffiliateExistingDataRepairAdmissionError('PENDING_REPAIR_PRESENT', `Supply Source ${plan.root?.id ?? 'the selected root'} already has a pending repair.`);
     }
   }
   const now = new Date();
@@ -3215,6 +3309,8 @@ const assertPendingTransition = (
     || pending.mappingJobId !== mappingJob.id
     || pending.mappingId !== mappingJob.mappingId
     || pending.mappingId !== mapping?.id
+    || mapping?.sourceId !== source.id
+    || mapping?.supplySourceId !== root.id
     || pending.packageHash !== mappingMetadata.packageHash
     || pending.candidatePackageHash !== pending.packageHash
     || pending.candidateHash !== validationOutput.candidateHash
@@ -3286,15 +3382,11 @@ const manifestUnionFor = (
   return parsed.data;
 };
 
-const loadGatewayNode = async (db: AnyDelegate, claimId: string): Promise<CompletedGatewayNode | null> => {
-  const claimRaw = await readUnique(db, 'affiliateAgentGatewayClaims', { where: { id: claimId } });
-  if (!claimRaw) return null;
-  const claim = claimRaw as unknown as GatewayClaimRow;
-  const jobId = text(claim.jobId);
-  if (!jobId) return null;
-  const jobRaw = await readUnique(db, 'affiliateAgentGatewayJobs', { where: { id: jobId } });
-  if (!jobRaw) return null;
-  const job = jobRaw as unknown as GatewayJobRow;
+const decodeGatewayNode = (
+  job: GatewayJobRow,
+  claim: GatewayClaimRow,
+  receipt: GatewayReceiptRow,
+): CompletedGatewayNode | null => {
   let envelopeValue: unknown = null;
   if (upper(job.role) === 'MAPPING_PRODUCER') {
     envelopeValue = parseAffiliateAgentProducerClaimEnvelopeForHistoricalRead(claim.claimEnvelopeJson);
@@ -3305,10 +3397,7 @@ const loadGatewayNode = async (db: AnyDelegate, claimId: string): Promise<Comple
   const envelope = envelopeValue ? recordValue(envelopeValue) : null;
   const parsedManifest = affiliateAgentEvidenceManifestSchema.safeParse(job.evidenceManifestJson);
   const parsedResult = affiliateAgentTerminalResultEnvelopeSchema.safeParse(job.resultJson);
-  const receiptId = text(claim.terminalReceiptId);
-  if (!envelope || !parsedManifest.success || !parsedResult.success || !receiptId) return null;
-  const receiptRaw = await readUnique(db, 'affiliateAgentGatewayOperationReceipts', { where: { id: receiptId } });
-  if (!receiptRaw) return null;
+  if (!envelope || !parsedManifest.success || !parsedResult.success || !text(claim.terminalReceiptId)) return null;
   const result = parsedResult.data as unknown as AffiliateAgentTerminalResultEnvelope;
   return {
     job,
@@ -3317,8 +3406,24 @@ const loadGatewayNode = async (db: AnyDelegate, claimId: string): Promise<Comple
     subject: recordValue(envelope.subject),
     manifest: parsedManifest.data,
     result: result as unknown as JsonRecord,
-    receipt: receiptRaw as unknown as GatewayReceiptRow,
+    receipt,
   };
+};
+
+const loadGatewayNode = async (db: AnyDelegate, claimId: string): Promise<CompletedGatewayNode | null> => {
+  const claimRaw = await readUnique(db, 'affiliateAgentGatewayClaims', { where: { id: claimId } });
+  if (!claimRaw) return null;
+  const claim = claimRaw as unknown as GatewayClaimRow;
+  const jobId = text(claim.jobId);
+  if (!jobId) return null;
+  const jobRaw = await readUnique(db, 'affiliateAgentGatewayJobs', { where: { id: jobId } });
+  if (!jobRaw) return null;
+  const job = jobRaw as unknown as GatewayJobRow;
+  const receiptId = text(claim.terminalReceiptId);
+  if (!receiptId) return null;
+  const receiptRaw = await readUnique(db, 'affiliateAgentGatewayOperationReceipts', { where: { id: receiptId } });
+  if (!receiptRaw) return null;
+  return decodeGatewayNode(job, claim, receiptRaw as unknown as GatewayReceiptRow);
 };
 
 const assertAdmittedContractBinding = (
@@ -3487,9 +3592,10 @@ const assertCompletedGatewayNode = (
 };
 
 const assertReviewerManifestAuthorized = async (
-  db: AnyDelegate,
+  db: AnyDelegate | null,
   reviewer: CompletedGatewayNode,
   producer: CompletedGatewayNode,
+  suppliedArtifacts?: readonly GatewayArtifactRow[],
 ): Promise<void> => {
   const reviewerSubject = reviewer.subject;
   const entries = reviewer.manifest.entries;
@@ -3518,7 +3624,7 @@ const assertReviewerManifestAuthorized = async (
   ) {
     bindingError('The reviewer evidence manifest is not authorized by its producer claim.');
   }
-  const producerArtifacts = await delegateRows<GatewayArtifactRow>(db.affiliateAgentGatewayArtifacts, {
+  const producerArtifacts = suppliedArtifacts ?? await delegateRows<GatewayArtifactRow>(db?.affiliateAgentGatewayArtifacts, {
     where: {
       claimId: producer.claim.id,
       claimGeneration: Number(producer.envelope.claimGeneration),
@@ -4060,6 +4166,7 @@ const pendingProducerManifestFor = async (
   if (
     producer.claim.id !== producerClaimId
     || producer.job.id !== producerJobId
+    || normalizeHash(recordValue(producer.result.payload).packageHash) !== normalizeHash(pending.packageHash)
     || !sameValue(producer.subject.repairContext, context)
     || producer.subject.mappingJobId !== mappingJobId
     || producer.subject.supplySourceId !== rootId
@@ -4239,8 +4346,2877 @@ export const assertAffiliateExistingDataRepairClaimBinding = async (input: Reado
   const isChild = dedupeKey.startsWith('mapping-repair:');
   assertProducerKindBinding(context, source, root, subject, isChild, completedNode);
   const origin = await resolveExistingRepairOrigin(db, job, subject, manifest, completedNode, context, root.id, mappingJob.id);
-  await assertOriginalAdmissionAudit(db, origin.job, origin.manifest, origin.node, context, mappingJob, source, intake, run, root);
+  if ((context as unknown as JsonRecord).correction) {
+    await assertCorrectionAdmissionAudit(db, origin.job, origin.manifest, origin.node, context, mappingJob, source, root);
+  } else {
+    await assertOriginalAdmissionAudit(db, origin.job, origin.manifest, origin.node, context, mappingJob, source, intake, run, root);
+  }
   const pendingManifest = await pendingProducerManifestFor(db, source, context, root.id, mappingJob.id);
   assertPendingTransition(context, pendingManifest ?? origin.manifest, await loadBaseline(client, source.id), mappingJob, source, root, mapping);
   await artifactBinding(client, context, origin.manifest, source, intake, run, root, Object.keys(admissionAudit).length ? admissionAudit : null);
+};
+
+type CorrectionRelations = Readonly<{
+  gatewayJobs: readonly GatewayJobRow[];
+  gatewayClaims: readonly JsonRecord[];
+  gatewayReceipts: readonly JsonRecord[];
+  gatewayArtifacts: readonly JsonRecord[];
+  gatewayEvents: readonly JsonRecord[];
+}>;
+
+type CorrectionPlan = Readonly<{
+  row: AffiliateExistingDataRepairAdmissionRow;
+  job: MappingJobRow;
+  intake: IntakeRow;
+  source: SourceRow;
+  mapping: MappingRow | null;
+  root: RootRow;
+  identity: AffiliateSupplyIdentity;
+  run: RunRow;
+  page: PageRow;
+  evidencePages: readonly PageRow[];
+  artifacts: readonly ArtifactRow[];
+  evidence: readonly ExistingDataRepairArtifact[];
+  manifest: AffiliateAgentEvidenceManifest;
+  baseline: AffiliateExistingDataRepairSourceState;
+  sourceSportScope?: JsonRecord;
+  policySnapshots: readonly DomainPolicyRow[];
+  sportsCatalog: AffiliateSportsCatalogSnapshot;
+  gatewayDedupeKey: string;
+  prior: AffiliateExistingDataRepairCorrectionPriorState;
+  priorPendingMapping: AffiliateExistingDataRepairPendingMapping | null;
+  priorContext: JsonRecord;
+  priorAdmissionAudit: JsonRecord | null;
+  oldGatewayJobs: readonly GatewayJobRow[];
+  supersededGatewayJobs: readonly GatewayJobRow[];
+}>;
+
+type CorrectionBuild = Readonly<{
+  report: AffiliateExistingDataRepairCorrectionReport;
+  plans: readonly CorrectionPlan[];
+  relationsByMappingJobId: ReadonlyMap<string, CorrectionRelations>;
+}>;
+
+const correctionSnapshotRelationRows = async (
+  client: Client,
+  gatewayJobIds: readonly string[],
+): Promise<CorrectionRelations> => {
+  const db = client as unknown as AnyDelegate;
+  const ids = sortedUnique(gatewayJobIds);
+  const rowsForIds = async <T>(
+    delegate: Delegate | undefined,
+    values: readonly string[],
+    parentField: string,
+    scope: string,
+    orderBy: JsonRecord | readonly JsonRecord[],
+  ): Promise<T[]> => {
+    const parentIds = sortedUnique(values);
+    if (!parentIds.length) return [];
+    const rows = await snapshotRows<T>(
+      delegate,
+      { where: { [parentField]: { in: parentIds } }, orderBy },
+      SNAPSHOT_GLOBAL_LIMIT,
+      scope,
+    );
+    const countsByParent = new Map<string, number>();
+    for (const row of rows) {
+      const parentId = text(recordValue(row)[parentField]);
+      if (!parentId) continue;
+      const count = (countsByParent.get(parentId) ?? 0) + 1;
+      countsByParent.set(parentId, count);
+      if (count > SNAPSHOT_PER_INTAKE_LIMIT) {
+        throw new AffiliateExistingDataRepairAdmissionError(
+          'SNAPSHOT_OVERFLOW',
+          `The bounded admission snapshot is larger than the ${scope}:${parentId} limit.`,
+          { scope: `${scope}:${parentId}`, limit: SNAPSHOT_PER_INTAKE_LIMIT },
+        );
+      }
+    }
+    return rows;
+  };
+  const gatewayJobs = ids.length
+    ? await snapshotRows<GatewayJobRow>(
+      db.affiliateAgentGatewayJobs,
+      { where: { id: { in: ids } }, orderBy: { id: 'asc' } },
+      SNAPSHOT_GLOBAL_LIMIT,
+      'correction Gateway jobs',
+    )
+    : [];
+  const gatewayClaims = await rowsForIds<JsonRecord>(
+    db.affiliateAgentGatewayClaims,
+    ids,
+    'jobId',
+    'correction Gateway claims',
+    { id: 'asc' },
+  );
+  const claimIds = sortedUnique(gatewayClaims.map((claim) => text(claim.id)).filter((id): id is string => Boolean(id)));
+  const gatewayReceipts = await rowsForIds<JsonRecord>(
+    db.affiliateAgentGatewayOperationReceipts,
+    ids,
+    'jobId',
+    'correction Gateway receipts',
+    { id: 'asc' },
+  );
+  const gatewayArtifacts = await rowsForIds<JsonRecord>(
+    db.affiliateAgentGatewayArtifacts,
+    claimIds,
+    'claimId',
+    'correction Gateway artifacts',
+    { id: 'asc' },
+  );
+  const gatewayEvents = await rowsForIds<JsonRecord>(
+    db.affiliateAgentGatewayEvents,
+    ids,
+    'jobId',
+    'correction Gateway events',
+    [{ jobId: 'asc' }, { sequence: 'asc' }],
+  );
+  const relationCount = gatewayJobs.length
+    + gatewayClaims.length
+    + gatewayReceipts.length
+    + gatewayArtifacts.length
+    + gatewayEvents.length;
+  if (relationCount > SNAPSHOT_GLOBAL_LIMIT) {
+    throw new AffiliateExistingDataRepairAdmissionError(
+      'SNAPSHOT_OVERFLOW',
+      'The bounded correction Gateway relation snapshot is larger than the global limit.',
+      { scope: 'correction Gateway relations', limit: SNAPSHOT_GLOBAL_LIMIT },
+    );
+  }
+  const byId = (left: JsonRecord, right: JsonRecord): number => (
+    String(left.id ?? '').localeCompare(String(right.id ?? ''))
+  );
+  return {
+    gatewayJobs: [...gatewayJobs].sort(compareId),
+    gatewayClaims: [...gatewayClaims].sort(byId),
+    gatewayReceipts: [...gatewayReceipts].sort(byId),
+    gatewayArtifacts: [...gatewayArtifacts].sort(byId),
+    gatewayEvents: [...gatewayEvents].sort((left, right) => (
+      String(left.jobId ?? '').localeCompare(String(right.jobId ?? ''))
+      || Number(left.sequence ?? 0) - Number(right.sequence ?? 0)
+      || byId(left, right)
+    )),
+  };
+};
+const gatewayNodeFromRelations = (
+  relations: CorrectionRelations,
+  claimId: string,
+): CompletedGatewayNode | null => {
+  const claim = relations.gatewayClaims.find((candidate) => text(candidate.id) === claimId);
+  if (!claim) return null;
+  const jobId = text(claim.jobId);
+  const receiptId = text(claim.terminalReceiptId);
+  if (!jobId || !receiptId) return null;
+  const job = relations.gatewayJobs.find((candidate) => candidate.id === jobId);
+  const receipt = relations.gatewayReceipts.find((candidate) => text(candidate.id) === receiptId);
+  if (!job || !receipt) return null;
+  return decodeGatewayNode(
+    job,
+    claim as unknown as GatewayClaimRow,
+    receipt as unknown as GatewayReceiptRow,
+  );
+};
+
+const pendingProducerManifestFromRelations = async (
+  relations: CorrectionRelations,
+  pending: AffiliateExistingDataRepairPendingMapping,
+  context: AffiliateAgentExistingDataRepairContext,
+  baseline: AffiliateExistingDataRepairSourceState,
+  mappingJob: MappingJobRow,
+  source: SourceRow,
+  root: RootRow,
+  mapping: MappingRow | null,
+): Promise<AffiliateAgentEvidenceManifest | null> => {
+  try {
+    const producerClaimId = text(pending.producerClaimId);
+    const producerJobId = text(pending.producerJobId);
+    if (!producerClaimId || !producerJobId) return null;
+    const producer = gatewayNodeFromRelations(relations, producerClaimId);
+    if (!producer) return null;
+    assertCompletedGatewayNode(producer, 'MAPPING_PRODUCER', root.id, mappingJob.id, context);
+    if (
+      producer.claim.id !== producerClaimId
+      || producer.job.id !== producerJobId
+      || normalizeHash(recordValue(producer.result.payload).packageHash) !== normalizeHash(pending.packageHash)
+      || !sameValue(producer.subject.repairContext, context)
+      || producer.subject.mappingJobId !== mappingJob.id
+      || producer.subject.supplySourceId !== root.id
+    ) return null;
+
+    const reviewerClaimId = text(pending.reviewerClaimId);
+    const reviewerJobId = text(pending.reviewerJobId);
+    if ((reviewerClaimId === null) !== (reviewerJobId === null)) return null;
+    if (reviewerClaimId) {
+      const reviewer = gatewayNodeFromRelations(relations, reviewerClaimId);
+      if (!reviewer) return null;
+      assertCompletedGatewayNode(reviewer, 'SUPPLY_REVIEWER', root.id, mappingJob.id, context);
+      if (
+        reviewer.job.id !== reviewerJobId
+        || text(producer.job.parentClaimId) !== reviewer.claim.id
+        || reviewer.subject.producerClaimId === producer.claim.id
+        || upper(reviewer.result.disposition) !== 'PRODUCER_REPAIR_REQUIRED'
+      ) return null;
+      const reviewedProducerId = text(reviewer.subject.producerClaimId);
+      if (!reviewedProducerId) return null;
+      const reviewedProducer = gatewayNodeFromRelations(relations, reviewedProducerId);
+      if (!reviewedProducer) return null;
+      assertCompletedGatewayNode(reviewedProducer, 'MAPPING_PRODUCER', root.id, mappingJob.id, context);
+      if (
+        Number(reviewedProducer.subject.pass) + 1 !== Number(producer.subject.pass)
+        || !sameValue(reviewedProducer.subject.repairContext, context)
+      ) return null;
+      const reviewedProducerArtifacts = relations.gatewayArtifacts
+        .filter((artifact) => text(artifact.claimId) === reviewedProducer.claim.id)
+        .map((artifact) => artifact as unknown as GatewayArtifactRow);
+      await assertReviewerManifestAuthorized(null, reviewer, reviewedProducer, reviewedProducerArtifacts);
+    } else if (text(producer.job.parentClaimId) !== null) {
+      return null;
+    }
+    assertPendingTransition(context, producer.manifest, baseline, mappingJob, source, root, mapping);
+    return producer.manifest;
+  } catch {
+    return null;
+  }
+};
+
+const correctionImmutableGatewayJob = (job: GatewayJobRow): JsonRecord => ({
+  id: job.id,
+  dedupeKey: job.dedupeKey,
+  role: job.role,
+  subjectType: job.subjectType,
+  subjectId: job.subjectId,
+  supplySourceId: job.supplySourceId,
+  expectedLifecycleGeneration: job.expectedLifecycleGeneration,
+  status: job.status,
+  activeClaimId: job.activeClaimId,
+  parentClaimId: job.parentClaimId ?? null,
+  claimGeneration: job.claimGeneration ?? null,
+  terminalDisposition: job.terminalDisposition ?? null,
+  terminalReceiptId: job.terminalReceiptId ?? null,
+  eventSequence: job.eventSequence ?? null,
+  subjectJsonHash: hash(job.subjectJson),
+  evidenceManifestHash: hash(job.evidenceManifestJson),
+  resultHash: job.resultHash ?? null,
+  resultJsonHash: hash(job.resultJson ?? null),
+  stateHash: hash(job),
+});
+
+const correctionImmutableClaim = (claim: JsonRecord): JsonRecord => ({
+  id: claim.id ?? null,
+  jobId: claim.jobId ?? null,
+  parentClaimId: claim.parentClaimId ?? null,
+  claimGeneration: claim.claimGeneration ?? null,
+  status: claim.status ?? null,
+  terminalReceiptId: claim.terminalReceiptId ?? null,
+  claimEnvelopeHash: claim.claimEnvelopeHash ?? null,
+  evidenceManifestHash: claim.evidenceManifestHash ?? null,
+  deploymentContractVersion: claim.deploymentContractVersion ?? null,
+  deploymentContractHash: claim.deploymentContractHash ?? null,
+  roleContractVersion: claim.roleContractVersion ?? null,
+  roleContractHash: claim.roleContractHash ?? null,
+  promptTemplateVersion: claim.promptTemplateVersion ?? null,
+  promptTemplateHash: claim.promptTemplateHash ?? null,
+  supplyContractVersion: claim.supplyContractVersion ?? null,
+  supplyContractHash: claim.supplyContractHash ?? null,
+  stateHash: hash(claim),
+});
+
+const correctionImmutableReceipt = (receipt: JsonRecord): JsonRecord => ({
+  id: receipt.id ?? null,
+  claimId: receipt.claimId ?? null,
+  jobId: receipt.jobId ?? null,
+  claimGeneration: receipt.claimGeneration ?? null,
+  operationKind: receipt.operationKind ?? null,
+  commandName: receipt.commandName ?? null,
+  status: receipt.status ?? null,
+  requestHash: receipt.requestHash ?? null,
+  responseHash: receipt.responseHash ?? null,
+  safeErrorCode: receipt.safeErrorCode ?? null,
+  externalOperationKey: receipt.externalOperationKey ?? null,
+  stateHash: hash(receipt),
+});
+
+const correctionImmutableArtifact = (artifact: JsonRecord): JsonRecord => ({
+  id: artifact.id ?? null,
+  claimId: artifact.claimId ?? null,
+  claimGeneration: artifact.claimGeneration ?? null,
+  evidenceRef: artifact.evidenceRef ?? null,
+  evidenceKind: artifact.evidenceKind ?? null,
+  sourceArtifactId: artifact.sourceArtifactId ?? null,
+  fileId: artifact.fileId ?? null,
+  contentHash: artifact.contentHash ?? null,
+  mimeType: artifact.mimeType ?? null,
+  byteSize: artifact.byteSize ?? null,
+  creatingClaimId: artifact.creatingClaimId ?? null,
+  stateHash: hash(artifact),
+});
+
+const correctionImmutableEvent = (event: JsonRecord): JsonRecord => ({
+  id: event.id ?? null,
+  eventKey: event.eventKey ?? null,
+  jobId: event.jobId ?? null,
+  claimId: event.claimId ?? null,
+  receiptId: event.receiptId ?? null,
+  sequence: event.sequence ?? null,
+  eventType: event.eventType ?? null,
+  actorKind: event.actorKind ?? null,
+  actorId: event.actorId ?? null,
+  role: event.role ?? null,
+  requestHash: event.requestHash ?? null,
+  inputHash: event.inputHash ?? null,
+  outputHash: event.outputHash ?? null,
+  reasonCodes: event.reasonCodes ?? [],
+  payloadHash: hash(event.payload ?? null),
+  stateHash: hash(event),
+});
+
+const correctionImmutableMappingJob = (job: MappingJobRow): JsonRecord => ({
+  id: job.id,
+  intakeId: job.intakeId,
+  sourceId: job.sourceId,
+  mappingId: job.mappingId,
+  supplySourceId: job.supplySourceId,
+  status: job.status,
+  claimedAt: job.claimedAt ?? null,
+  leaseExpiresAt: job.leaseExpiresAt ?? null,
+  workerId: job.workerId ?? null,
+  legacyIdentityMigrationEligible: job.legacyIdentityMigrationEligible ?? null,
+  resultSummaryHash: hash(job.resultSummary),
+  errorMessage: job.errorMessage ?? null,
+  stateHash: hash(job),
+});
+
+const correctionImmutableMapping = (mapping: MappingRow | null): JsonRecord | null => mapping ? {
+  id: mapping.id,
+  sourceId: mapping.sourceId,
+  supplySourceId: mapping.supplySourceId,
+  version: mapping.version,
+  isActive: mapping.isActive,
+  createdByUserId: mapping.createdByUserId ?? null,
+  notes: mapping.notes ?? null,
+  validatedAt: mapping.validatedAt ?? null,
+  mappingSha256: hash(mapping.mapping),
+  stateHash: hash(mapping),
+} : null;
+
+type CorrectionPriorContextResult = Readonly<{
+  context: JsonRecord | null;
+  reasonCodes: readonly string[];
+}>;
+
+const correctionPriorContextFor = (
+  job: MappingJobRow,
+  source: SourceRow,
+  root: RootRow,
+  gatewayJobs: readonly GatewayJobRow[],
+): CorrectionPriorContextResult => {
+  const sourceMetadata = recordValue(source.metadata);
+  const rootMetadata = recordValue(root.metadata);
+  const candidates: Array<{ value: unknown; required: boolean }> = [
+    { value: sourceMetadata.existingDataRepair, required: true },
+    { value: rootMetadata.existingDataRepair, required: true },
+    ...admissionHistory(job.resultSummary)
+      .flatMap((entry) => {
+        if (hasOwn(entry, 'repairContext') && hasOwn(entry, 'context')) {
+          return [
+            { value: entry.repairContext, required: true },
+            { value: entry.context, required: true },
+          ];
+        }
+        return [{
+          value: hasOwn(entry, 'repairContext') ? entry.repairContext : entry.context,
+          required: true,
+        }];
+      }),
+    ...gatewayJobs.map((gatewayJob) => {
+      const subject = recordValue(gatewayJob.subjectJson);
+      return {
+        value: hasOwn(subject, 'repairContext') ? subject.repairContext : undefined,
+        required: ['MAPPING_PRODUCER', 'SUPPLY_REVIEWER'].includes(upper(gatewayJob.role)),
+      };
+    }).filter((candidate) => candidate.required),
+  ];
+  const parsed: JsonRecord[] = [];
+  let invalid = false;
+  for (const candidate of candidates) {
+    if (candidate.value === undefined || candidate.value === null) {
+      invalid = true;
+      continue;
+    }
+    const result = affiliateAgentExistingDataRepairContextSchema.safeParse(candidate.value);
+    if (!result.success) {
+      invalid = true;
+      continue;
+    }
+    parsed.push(result.data as unknown as JsonRecord);
+  }
+  const reasonCodes: string[] = [];
+  if (invalid) reasonCodes.push('PRIOR_REPAIR_CONTEXT_INVALID');
+  if (!parsed.length) {
+    reasonCodes.push('PRIOR_REPAIR_CONTEXT_MISSING_OR_CONFLICT');
+    return { context: null, reasonCodes: sortedUnique(reasonCodes) };
+  }
+  const first = parsed[0]!;
+  if (parsed.some((candidate) => !sameValue(candidate, first))) {
+    reasonCodes.push('PRIOR_REPAIR_CONTEXT_CONFLICT');
+  }
+  return {
+    context: first,
+    reasonCodes: sortedUnique(reasonCodes),
+  };
+};
+
+const correctionAdmissionAuditFor = (
+  job: MappingJobRow,
+  source: SourceRow,
+  context: JsonRecord,
+): JsonRecord | null => {
+  const sourceAudit = recordValue(recordValue(source.metadata)[AFFILIATE_EXISTING_DATA_REPAIR_ADMISSION_METADATA_KEY]);
+  const contextAdmissionHash = normalizeHash(context.admissionHash);
+  const sourceAuditContext = hasOwn(sourceAudit, 'context')
+    ? sourceAudit.context
+    : sourceAudit.repairContext;
+  if (
+    !Object.keys(sourceAudit).length
+    || sourceAudit.operation === 'CORRECTION'
+    || !contextAdmissionHash
+    || normalizeHash(sourceAudit.reportHash) !== contextAdmissionHash
+    || text(sourceAudit.mappingJobId) !== job.id
+    || sourceAuditContext === undefined
+    || !Array.isArray(sourceAudit.evidenceSnapshots)
+    || !Array.isArray(sourceAudit.pageSnapshots)
+    || !Array.isArray(sourceAudit.policySnapshots)
+    || !sourceAudit.deploymentContract
+    || !sameValue(sourceAuditContext, context)
+  ) {
+    return null;
+  }
+  const sourceGatewayJobId = text(sourceAudit.gatewayJobId);
+  const matchingHistory = admissionHistory(job.resultSummary).filter((entry) => (
+    normalizeHash(entry.reportHash) === contextAdmissionHash
+    && text(entry.mappingJobId) === job.id
+    && text(entry.intakeId) === text(sourceAudit.intakeId)
+    && text(entry.evidenceRunId) === text(sourceAudit.evidenceRunId)
+    && text(entry.sourceId) === text(sourceAudit.sourceId)
+    && text(entry.supplySourceId) === text(sourceAudit.supplySourceId)
+    && text(entry.operatorId) === text(sourceAudit.operatorId)
+    && text(entry.reason) === text(sourceAudit.reason)
+    && (!sourceGatewayJobId || text(entry.gatewayJobId) === sourceGatewayJobId)
+    && entry.repairContext !== undefined
+    && Array.isArray(entry.evidenceSnapshots)
+    && Array.isArray(entry.pageSnapshots)
+    && Array.isArray(entry.policySnapshots)
+    && entry.deploymentContract !== undefined
+    && sameValue(entry.repairContext, context)
+    && sameValue(entry.evidenceSnapshots, sourceAudit.evidenceSnapshots)
+    && sameValue(entry.pageSnapshots, sourceAudit.pageSnapshots)
+    && sameValue(entry.policySnapshots, sourceAudit.policySnapshots)
+    && sameValue(entry.deploymentContract, sourceAudit.deploymentContract)
+  ));
+  return matchingHistory.length === 1 ? matchingHistory[0]! : null;
+};
+const admissionReportHashFromSnapshot = (report: JsonRecord): string | null => {
+  const rows = Array.isArray(report.rows)
+    ? report.rows.map(recordValue) as unknown as AffiliateExistingDataRepairAdmissionRow[]
+    : null;
+  const writes = Array.isArray(report.proposedWrites)
+    ? report.proposedWrites.map(recordValue) as unknown as AffiliateExistingDataRepairAdmissionWrite[]
+    : null;
+  const selectedJobIds = stringArray(report.selectedJobIds);
+  const requestedJobIds = report.requestedJobIds === null
+    ? null
+    : stringArray(report.requestedJobIds);
+  const requestedSourceIds = report.requestedSourceIds === null
+    ? null
+    : stringArray(report.requestedSourceIds);
+  if (
+    !rows?.length
+    || !writes?.length
+    || !selectedJobIds
+    || (requestedJobIds === null && report.requestedJobIds !== null)
+    || (requestedSourceIds === null && report.requestedSourceIds !== null)
+    || !report.counts
+  ) return null;
+  try {
+    return reportHashFor({
+      contractVersion: Number(report.contractVersion),
+      contractHash: String(report.contractHash ?? ''),
+      reason: String(report.reason ?? ''),
+      operatorId: String(report.operatorId ?? ''),
+      requestedJobIds,
+      requestedSourceIds,
+      evidenceSelections: Array.isArray(report.evidenceSelections)
+        ? report.evidenceSelections as ExistingDataRepairEvidenceSelection[]
+        : null,
+      selectionLimit: Number(report.selectionLimit),
+      counts: recordValue(report.counts) as unknown as AffiliateExistingDataRepairAdmissionCounts,
+      selectedJobIds,
+      rows,
+      proposedWrites: writes,
+    });
+  } catch {
+    return null;
+  }
+};
+
+const correctionPendingStateFor = (
+  job: MappingJobRow,
+  source: SourceRow,
+  root: RootRow,
+): {
+  pending: AffiliateExistingDataRepairPendingMapping | null;
+  pendingHash: string;
+  reasonCodes: string[];
+} => {
+  const sourceMetadata = recordValue(source.metadata);
+  const rootMetadata = recordValue(root.metadata);
+  const sourcePresent = hasOwn(sourceMetadata, AFFILIATE_EXISTING_DATA_REPAIR_PENDING_MAPPING_METADATA_KEY);
+  const rootPresent = hasOwn(rootMetadata, AFFILIATE_EXISTING_DATA_REPAIR_PENDING_MAPPING_METADATA_KEY);
+  const sourcePending = pendingMappingForMetadata(sourceMetadata);
+  const rootPending = pendingMappingForMetadata(rootMetadata);
+  const reasons: string[] = [];
+  if ((sourcePresent && !sourcePending) || (rootPresent && !rootPending)) {
+    reasons.push('MALFORMED_PENDING_REPAIR');
+    return { pending: null, pendingHash: hash(null), reasonCodes: reasons };
+  }
+  if (sourcePresent !== rootPresent) {
+    reasons.push('PENDING_POINTER_ONE_SIDED');
+    return { pending: null, pendingHash: hash(null), reasonCodes: reasons };
+  }
+  if (!sourcePending && !rootPending) return { pending: null, pendingHash: hash(null), reasonCodes: reasons };
+  if (!sourcePending || !rootPending) {
+    reasons.push('PENDING_POINTER_MISSING');
+    return { pending: null, pendingHash: hash(null), reasonCodes: reasons };
+  }
+  if (pendingMappingHash(sourcePending) !== pendingMappingHash(rootPending)) {
+    reasons.push('PENDING_POINTER_CONFLICT');
+    return { pending: null, pendingHash: hash(sourcePending), reasonCodes: reasons };
+  }
+  const pending = sourcePending;
+  if (
+    pending.mappingJobId !== job.id
+    || pending.sourceId !== source.id
+    || pending.supplySourceId !== root.id
+    || pending.mappingId !== job.mappingId
+    || !['STAGED', 'APPROVED'].includes(upper(pending.state))
+  ) {
+    reasons.push('PENDING_POINTER_IDENTITY_CONFLICT');
+  }
+  return {
+    pending,
+    pendingHash: pendingMappingHash(pending),
+    reasonCodes: reasons,
+  };
+};
+
+const correctionGatewayJobsFor = async (
+  client: Client,
+  snapshot: Snapshot,
+  job: MappingJobRow,
+  root: RootRow,
+  pending: AffiliateExistingDataRepairPendingMapping | null,
+): Promise<GatewayJobRow[]> => {
+  const db = client as unknown as AnyDelegate;
+  const pointerIds = pending
+    ? [pending.producerJobId, pending.reviewerJobId].filter((id): id is string => Boolean(id))
+    : [];
+  const existing = snapshot.gatewayJobs.filter((candidate) => (
+    pointerIds.includes(candidate.id)
+    || (
+      candidate.subjectId === job.id
+      && candidate.supplySourceId === root.id
+    )
+    || (
+      upper(candidate.role) === 'SUPPLY_REVIEWER'
+      && candidate.subjectId === root.id
+    )
+  ));
+  const queried = await snapshotRows<GatewayJobRow>(
+    db.affiliateAgentGatewayJobs,
+    {
+      where: {
+        OR: [
+          { supplySourceId: root.id, subjectId: job.id },
+          { subjectId: root.id, role: 'SUPPLY_REVIEWER' },
+          ...(pointerIds.length ? [{ id: { in: pointerIds } }] : []),
+        ],
+      },
+      orderBy: { id: 'asc' },
+    },
+    SNAPSHOT_GLOBAL_LIMIT,
+    'correction Gateway job candidates',
+  );
+  return uniqueRows<GatewayJobRow>([...existing, ...queried]);
+};
+
+const correctionManifestFor = (
+  audit: JsonRecord | null,
+  gatewayJobs: readonly GatewayJobRow[],
+): AffiliateAgentEvidenceManifest | null => {
+  const candidates: unknown[] = [
+    audit?.manifest,
+    ...gatewayJobs
+      .filter((job) => upper(job.role) === 'MAPPING_PRODUCER')
+      .map((job) => job.evidenceManifestJson),
+  ];
+  for (const candidate of candidates) {
+    const parsed = affiliateAgentEvidenceManifestSchema.safeParse(candidate);
+    if (parsed.success) return parsed.data;
+  }
+  return null;
+};
+
+const correctionEvidenceFor = (
+  audit: JsonRecord | null,
+  manifest: AffiliateAgentEvidenceManifest | null,
+  snapshot: Snapshot,
+  reasons: string[],
+): { evidence: ExistingDataRepairArtifact[]; artifacts: ArtifactRow[]; pages: PageRow[] } => {
+  if (!manifest) {
+    reasons.push('CORRECTION_MANIFEST_MISSING');
+    return { evidence: [], artifacts: [], pages: [] };
+  }
+  const auditEvidence = Array.isArray(audit?.evidenceSnapshots)
+    ? audit.evidenceSnapshots.map((entry) => recordValue(entry))
+    : [];
+  const evidence: ExistingDataRepairArtifact[] = [];
+  const artifacts: ArtifactRow[] = [];
+  const pages: PageRow[] = [];
+  for (const entry of manifest.entries) {
+    if (entry.kind !== 'PAGE_HTML' && entry.kind !== 'PAGE_MARKDOWN') continue;
+    const sourceArtifactId = entry.artifactId.startsWith('intake-artifact:')
+      ? entry.artifactId.slice('intake-artifact:'.length)
+      : entry.artifactId;
+    const artifact = snapshot.artifacts.find((candidate) => candidate.id === sourceArtifactId);
+    const file = artifact ? snapshot.files.find((candidate) => candidate.id === artifact.fileId) : null;
+    if (!artifact || !file) {
+      reasons.push(`CORRECTION_EVIDENCE_MISSING_${sourceArtifactId}`);
+      continue;
+    }
+    const byteSize = artifact.sizeBytes ?? file.sizeBytes;
+    if (
+      artifact.contentHash.toLowerCase() !== entry.sha256.toLowerCase()
+      || (artifact.mimeType ?? file.mimeType ?? '') !== entry.mimeType
+      || byteSize !== entry.byteSize
+    ) {
+      reasons.push(`CORRECTION_EVIDENCE_DRIFT_${sourceArtifactId}`);
+      continue;
+    }
+    artifacts.push(artifact);
+    const prior = auditEvidence.find((candidate) => (
+      text(candidate.intakeArtifactId) === artifact.id
+      || text(candidate.sourceArtifactId) === artifact.id
+    ));
+    evidence.push({
+      kind: entry.kind,
+      artifactId: entry.artifactId,
+      sourceArtifactId: file.id,
+      storageKey: text(prior?.storageKey) ?? file.path,
+      sha256: entry.sha256,
+      mimeType: entry.mimeType,
+      byteSize: entry.byteSize,
+      sourceUrl: artifact.sourceUrl,
+      finalUrl: artifact.finalUrl,
+      intakeArtifactId: artifact.id,
+      runId: artifact.runId,
+      pageId: artifact.pageId ?? '',
+    });
+    const page = artifact.pageId
+      ? snapshot.pages.find((candidate) => candidate.id === artifact.pageId) ?? null
+      : null;
+    if (page) pages.push(page);
+  }
+  if (!evidence.length) reasons.push('CORRECTION_EVIDENCE_MISSING');
+  return {
+    evidence,
+    artifacts: uniqueRows<ArtifactRow>(artifacts),
+    pages: uniqueRows<PageRow>(pages),
+  };
+};
+const validQueuedCorrectionPredecessor = async (
+  client: Client,
+  candidate: GatewayJobRow,
+  job: MappingJobRow,
+  root: RootRow,
+  context: JsonRecord,
+  priorAudit: JsonRecord,
+): Promise<boolean> => {
+  if (
+    upper(candidate.role) !== 'MAPPING_PRODUCER'
+    || upper(candidate.queue) !== 'AFFILIATE_MAPPING'
+    || upper(candidate.lane) !== 'MAPPING_PRODUCTION'
+    || candidate.subjectId !== job.id
+    || candidate.supplySourceId !== root.id
+    || !['QUEUED', 'RETRY_WAIT'].includes(upper(candidate.status))
+  ) return false;
+  const subjectResult = affiliateAgentSubjectSchema.safeParse(candidate.subjectJson);
+  const manifestResult = affiliateAgentEvidenceManifestSchema.safeParse(candidate.evidenceManifestJson);
+  const contextResult = affiliateAgentExistingDataRepairContextSchema.safeParse(context);
+  if (!subjectResult.success || !manifestResult.success || !contextResult.success) return false;
+  const subject = recordValue(subjectResult.data);
+  if (
+    subject.type !== 'MAPPING_PRODUCER'
+    || subject.mappingJobId !== job.id
+    || subject.supplySourceId !== root.id
+    || !sameValue(subject.repairContext, context)
+  ) return false;
+  const dedupeKey = text(candidate.dedupeKey) ?? '';
+  if (dedupeKey.startsWith(AFFILIATE_EXISTING_REPAIR_PRODUCER_PREFIX)
+    && !dedupeKey.startsWith('mapping-repair:')) {
+    return text(candidate.parentClaimId) === null
+      && Number(subject.pass) === 1
+      && text(priorAudit.gatewayJobId) === candidate.id;
+  }
+  if (!dedupeKey.startsWith('mapping-repair:')) return false;
+  try {
+    const origin = await resolveExistingRepairOrigin(
+      client as unknown as AnyDelegate,
+      candidate,
+      subject,
+      manifestResult.data,
+      null,
+      contextResult.data,
+      root.id,
+      job.id,
+    );
+    return origin.job.id === text(priorAudit.gatewayJobId);
+  } catch {
+    return false;
+  }
+};
+
+const correctionPriorStateFor = (
+  job: MappingJobRow,
+  source: SourceRow,
+  root: RootRow,
+  mapping: MappingRow | null,
+  pending: AffiliateExistingDataRepairPendingMapping | null,
+  pendingHash: string,
+  context: JsonRecord,
+  audit: JsonRecord | null,
+  gatewayJobs: readonly GatewayJobRow[],
+  relations: CorrectionRelations,
+): AffiliateExistingDataRepairCorrectionPriorState => {
+  const priorGatewayJobId = text(audit?.gatewayJobId)
+    ?? pending?.producerJobId
+    ?? gatewayJobs.find((candidate) => upper(candidate.role) === 'MAPPING_PRODUCER')?.id
+    ?? null;
+  const admissionEvent = relations.gatewayEvents.find((event) => (
+    upper(event.eventType) === 'JOB_CREATED'
+    && (!priorGatewayJobId || text(event.jobId) === priorGatewayJobId)
+    && (!context.admissionHash || normalizeHash(event.requestHash) === normalizeHash(context.admissionHash))
+  )) ?? null;
+  return {
+    mappingJobId: job.id,
+    sourceId: source.id,
+    supplySourceId: root.id,
+    mappingId: mapping?.id ?? null,
+    pendingMapping: pending,
+    pendingMappingHash: pendingHash,
+    context,
+    admissionAuditReference: {
+      mappingJobId: text(audit?.mappingJobId) ?? job.id,
+      reportHash: normalizeHash(audit?.reportHash) ?? normalizeHash(context.admissionHash),
+      gatewayJobId: priorGatewayJobId,
+      auditHash: hash(audit ?? {
+        reportHash: normalizeHash(context.admissionHash),
+        mappingJobId: job.id,
+        gatewayJobId: priorGatewayJobId,
+      }),
+    },
+    mappingState: correctionImmutableMapping(mapping),
+    mappingBytes: mapping?.mapping ?? null,
+    mappingSha256: mapping ? hash(mapping.mapping) : null,
+    mappingJobState: correctionImmutableMappingJob(job),
+    gatewayJobs: gatewayJobs.map(correctionImmutableGatewayJob),
+    gatewayClaims: relations.gatewayClaims.map(correctionImmutableClaim),
+    gatewayReceipts: relations.gatewayReceipts.map(correctionImmutableReceipt),
+    gatewayArtifacts: relations.gatewayArtifacts.map(correctionImmutableArtifact),
+    gatewayEvents: relations.gatewayEvents.map(correctionImmutableEvent),
+    admissionEventId: text(admissionEvent?.id),
+  };
+};
+
+const correctionGatewayStateReasons = (
+  gatewayJobs: readonly GatewayJobRow[],
+  relations: CorrectionRelations,
+): string[] => {
+  const activeClaimIds = new Set(
+    relations.gatewayClaims
+      .filter((claim) => upper(claim.status) === 'ACTIVE')
+      .map((claim) => text(claim.id))
+      .filter((id): id is string => Boolean(id)),
+  );
+  const reasons: string[] = [];
+  for (const job of gatewayJobs) {
+    if (job.activeClaimId || activeClaimIds.has(job.id)) reasons.push('ACTIVE_GATEWAY_CLAIM');
+    if (['CLAIMED', 'RECONCILIATION_REQUIRED'].includes(upper(job.status))) {
+      reasons.push('ACTIVE_GATEWAY_JOB');
+    }
+  }
+  if (relations.gatewayClaims.some((claim) => ['ACTIVE', 'RECONCILIATION_REQUIRED'].includes(upper(claim.status)))) {
+    reasons.push('ACTIVE_OR_UNRESOLVED_GATEWAY_CLAIM');
+  }
+  if (relations.gatewayReceipts.some((receipt) => ['PENDING', 'UNKNOWN'].includes(upper(receipt.status)))) {
+    reasons.push('UNRESOLVED_GATEWAY_EFFECT');
+  }
+  return sortedUnique(reasons);
+};
+
+const correctionHoldReasonsFor = (
+  source: SourceRow,
+  root: RootRow,
+): string[] => {
+  const sourceMetadata = recordValue(source.metadata);
+  const rootMetadata = recordValue(root.metadata);
+  const sourcePresent = hasOwn(sourceMetadata, AFFILIATE_EXISTING_DATA_REPAIR_CORRECTION_HOLD_METADATA_KEY);
+  const rootPresent = hasOwn(rootMetadata, AFFILIATE_EXISTING_DATA_REPAIR_CORRECTION_HOLD_METADATA_KEY);
+  const sourceHold = readAffiliateExistingDataRepairCorrectionHold(
+    sourceMetadata[AFFILIATE_EXISTING_DATA_REPAIR_CORRECTION_HOLD_METADATA_KEY],
+  );
+  const rootHold = readAffiliateExistingDataRepairCorrectionHold(
+    rootMetadata[AFFILIATE_EXISTING_DATA_REPAIR_CORRECTION_HOLD_METADATA_KEY],
+  );
+  const reasons: string[] = [];
+  if ((sourcePresent && !sourceHold) || (rootPresent && !rootHold)) {
+    reasons.push('MALFORMED_CORRECTION_HOLD');
+  } else if (sourcePresent || rootPresent) {
+    reasons.push('CORRECTION_HOLD_PRESENT');
+    if (sourceHold && rootHold && !sameValue(sourceHold, rootHold)) {
+      reasons.push('CORRECTION_HOLD_CONFLICT');
+    }
+  }
+  if (sourcePresent !== rootPresent) reasons.push('CORRECTION_HOLD_ONE_SIDED');
+  return sortedUnique(reasons);
+};
+
+const correctionSourceFor = (
+  snapshot: Snapshot,
+  job: MappingJobRow,
+  intake: IntakeRow,
+  mapping: MappingRow | null,
+): SourceRow | null => {
+  const ids = sortedUnique([
+    job.sourceId,
+    intake.affiliateSourceId,
+    mapping?.sourceId ?? null,
+  ].filter((id): id is string => Boolean(id)));
+  const candidates = snapshot.sources.filter((source) => ids.includes(source.id));
+  return candidates.length === 1 ? candidates[0]! : null;
+};
+
+const correctionRootFor = (
+  snapshot: Snapshot,
+  job: MappingJobRow,
+  intake: IntakeRow,
+  source: SourceRow,
+  mapping: MappingRow | null,
+  identity: AffiliateSupplyIdentity,
+  expectedCohort: string,
+  evidenceRootIds: readonly string[],
+): { root: RootRow | null; reasons: string[] } => rootFor(
+  snapshot,
+  identity,
+  source,
+  intake,
+  job,
+  mapping,
+  expectedCohort,
+  evidenceRootIds,
+);
+
+const correctionSelectedJobsFor = (
+  snapshot: Snapshot,
+  validated: ValidatedAdmissionInput,
+): MappingJobRow[] => {
+  const requestedJobs = new Set(validated.jobIds ?? []);
+  const requestedSources = new Set(validated.sourceIds ?? []);
+  return snapshot.jobs.filter((job) => (
+    requestedJobs.has(job.id)
+    || Boolean(
+      job.sourceId && requestedSources.has(job.sourceId)
+      || job.mappingId && snapshot.mappings.some((mapping) => (
+        mapping.id === job.mappingId && requestedSources.has(mapping.sourceId)
+      ))
+      || snapshot.intakes.some((intake) => (
+        intake.id === job.intakeId && intake.affiliateSourceId !== null
+          && requestedSources.has(intake.affiliateSourceId)
+      )),
+    )
+  )).sort(compareId);
+};
+
+const correctionWriteFor = (
+  plan: Pick<CorrectionPlan, 'job' | 'intake' | 'source' | 'root' | 'mapping' | 'baseline' | 'evidence' | 'run' | 'gatewayDedupeKey'>,
+): AffiliateExistingDataRepairAdmissionWrite => ({
+  mappingJobId: plan.job.id,
+  intakeId: plan.intake.id,
+  sourceAction: 'REUSE_SOURCE',
+  rootAction: 'REUSE_ROOT',
+  sourceId: plan.source.id,
+  rootIdentityKey: plan.root.identityKey,
+  supplySourceId: plan.root.id,
+  evidenceRunId: plan.run.id,
+  artifactIds: plan.evidence.map((entry) => entry.artifactId).sort(),
+  gatewayDedupeKey: plan.gatewayDedupeKey,
+  writes: [
+    'AFFILIATE_EXISTING_REPAIR_PENDING_POINTER_RETIREMENT',
+    'AFFILIATE_EXISTING_REPAIR_CORRECTION_HOLD',
+    'AFFILIATE_EXISTING_REPAIR_CONTEXT',
+    'AFFILIATE_EXISTING_REPAIR_AUDIT',
+    'AFFILIATE_EXISTING_REPAIR_EVIDENCE_PIN',
+    'AFFILIATE_EXISTING_REPAIR_GATEWAY_JOB',
+    'AFFILIATE_EXISTING_REPAIR_MAPPING_JOB',
+    'AFFILIATE_EXISTING_REPAIR_OLD_GATEWAY_JOB_SUPERSESSION',
+  ],
+});
+
+const correctionRowFor = (input: Readonly<{
+  job: MappingJobRow;
+  intake: IntakeRow | null;
+  source: SourceRow | null;
+  mapping: MappingRow | null;
+  root: RootRow | null;
+  identity: AffiliateSupplyIdentity | null;
+  run: RunRow | null;
+  page: PageRow | null;
+  evidencePages: readonly PageRow[];
+  evidence: readonly ExistingDataRepairArtifact[];
+  manifest: AffiliateAgentEvidenceManifest | null;
+  baseline: AffiliateExistingDataRepairSourceState | null;
+  sportsCatalog: AffiliateSportsCatalogSnapshot;
+  stateFingerprint: string;
+  gatewayDedupeKey: string | null;
+  reasons: readonly string[];
+  sourceKindAssessment?: AffiliateAgentSourceKindAssessment;
+}>): AffiliateExistingDataRepairAdmissionRow => {
+  const reasonCodes = sortedUnique([...input.reasons]);
+  const eligible = reasonCodes.length === 0
+    && Boolean(input.intake && input.source && input.root && input.identity && input.run && input.page && input.manifest && input.baseline && input.gatewayDedupeKey);
+  return {
+    jobId: input.job.id,
+    mappingJobId: input.job.id,
+    intakeId: input.intake?.id ?? null,
+    status: input.job.status,
+    sourceKey: input.intake?.sourceKey ?? null,
+    sourceId: input.source?.id ?? input.job.sourceId,
+    mappingId: input.mapping?.id ?? input.job.mappingId,
+    supplySourceId: input.root?.id ?? input.job.supplySourceId,
+    rootId: input.root?.id ?? null,
+    rootIdentityKey: input.identity?.identityKey ?? null,
+    sourceIdentityKey: input.identity?.identityKey ?? null,
+    evidenceRunId: input.run?.id ?? null,
+    evidencePageId: input.page?.id ?? null,
+    evidencePageIds: input.evidencePages.map((page) => page.id).sort(),
+    sportsCatalogSha256: input.sportsCatalog.sha256,
+    sourceStateSha256: input.baseline?.sourceStateSha256 ?? null,
+    workingMappingId: input.baseline?.workingMappingId ?? null,
+    ...(input.sourceKindAssessment ? { sourceKindAssessment: input.sourceKindAssessment } : {}),
+    isPublicReplacement: input.baseline?.isPublicReplacement ?? false,
+    artifacts: input.evidence,
+    gatewayJobId: null,
+    gatewayDedupeKey: input.gatewayDedupeKey,
+    stateFingerprint: input.stateFingerprint,
+    eligible,
+    alreadyAdmitted: false,
+    reason: eligible ? 'ELIGIBLE' : (reasonCodes[0] ?? 'CORRECTION_NOT_ELIGIBLE'),
+    reasonCodes,
+    outcome: eligible ? 'PROPOSED' : 'HELD',
+  };
+};
+
+const correctionReportHashFor = (input: Readonly<{
+  contractVersion: number;
+  contractHash: string;
+  reason: string;
+  operatorId: string;
+  requestedJobIds: readonly string[] | null;
+  requestedSourceIds: readonly string[] | null;
+  evidenceSelections: readonly ExistingDataRepairEvidenceSelection[] | null;
+  selectionLimit: number;
+  counts: AffiliateExistingDataRepairAdmissionCounts;
+  selectedJobIds: readonly string[];
+  rows: readonly AffiliateExistingDataRepairAdmissionRow[];
+  proposedWrites: readonly AffiliateExistingDataRepairAdmissionWrite[];
+  supersededMappingIds: readonly string[];
+  supersededGatewayJobIds: readonly string[];
+  priorStates: readonly AffiliateExistingDataRepairCorrectionPriorState[];
+}>): string => hash({
+  operation: 'CORRECTION',
+  admissionReportHash: reportHashFor(input),
+  supersededMappingIds: [...input.supersededMappingIds].sort(),
+  supersededGatewayJobIds: [...input.supersededGatewayJobIds].sort(),
+  priorStates: [...input.priorStates].sort((left, right) => left.mappingJobId.localeCompare(right.mappingJobId)),
+});
+
+const correctionMissingRowFor = (
+  jobId: string,
+  sportsCatalog: AffiliateSportsCatalogSnapshot,
+): AffiliateExistingDataRepairAdmissionRow => ({
+  jobId,
+  mappingJobId: jobId,
+  intakeId: null,
+  status: 'MISSING',
+  sourceKey: null,
+  sourceId: null,
+  mappingId: null,
+  supplySourceId: null,
+  rootId: null,
+  rootIdentityKey: null,
+  sourceIdentityKey: null,
+  evidenceRunId: null,
+  evidencePageId: null,
+  evidencePageIds: [],
+  sportsCatalogSha256: sportsCatalog.sha256,
+  sourceStateSha256: null,
+  workingMappingId: null,
+  isPublicReplacement: false,
+  artifacts: [],
+  gatewayJobId: null,
+  gatewayDedupeKey: null,
+  stateFingerprint: hash({ jobId, missing: true }),
+  eligible: false,
+  alreadyAdmitted: false,
+  reason: 'MAPPING_JOB_MISSING',
+  reasonCodes: ['MAPPING_JOB_MISSING'],
+  outcome: 'HELD',
+});
+
+
+const correctionPlanFor = async (
+  client: Client,
+  snapshot: Snapshot,
+  job: MappingJobRow,
+  parsedBundle: AffiliateAgentContractBundle,
+  input: CommonInput,
+): Promise<Readonly<{
+  row: AffiliateExistingDataRepairAdmissionRow;
+  plan: CorrectionPlan | null;
+  prior: AffiliateExistingDataRepairCorrectionPriorState | null;
+  relations: CorrectionRelations;
+}>> => {
+  const reasons: string[] = [];
+  const empty = (input: Partial<Parameters<typeof correctionRowFor>[0]> = {}) => ({
+    row: correctionRowFor({
+      job,
+      intake: null,
+      source: null,
+      mapping: null,
+      root: null,
+      identity: null,
+      run: null,
+      page: null,
+      evidencePages: [],
+      evidence: [],
+      manifest: null,
+      baseline: null,
+      sportsCatalog: snapshot.sportsCatalog,
+      stateFingerprint: hash({ job, reasons }),
+      gatewayDedupeKey: null,
+      reasons,
+      ...input,
+    }),
+    plan: null,
+    prior: null,
+    relations: {
+      gatewayJobs: [],
+      gatewayClaims: [],
+      gatewayReceipts: [],
+      gatewayArtifacts: [],
+      gatewayEvents: [],
+    },
+  });
+  const intake = snapshot.intakes.find((candidate) => candidate.id === job.intakeId) ?? null;
+  if (!intake) {
+    reasons.push('INTAKE_MISSING');
+    return empty();
+  }
+  const mapping = job.mappingId
+    ? snapshot.mappings.find((candidate) => candidate.id === job.mappingId) ?? null
+    : null;
+  if (job.mappingId && !mapping) reasons.push('MAPPING_MISSING');
+  const source = correctionSourceFor(snapshot, job, intake, mapping);
+  if (!source) {
+    reasons.push('SOURCE_IDENTITY_MISSING_OR_AMBIGUOUS');
+    return empty({ intake, mapping });
+  }
+  const identity = identityForSource(source, null, intake);
+  if (!identity) {
+    reasons.push('SOURCE_IDENTITY_UNVERIFIABLE');
+    return empty({ intake, source, mapping });
+  }
+  const rootState = correctionRootFor(
+    snapshot,
+    job,
+    intake,
+    source,
+    mapping,
+    identity,
+    cohort(parsedBundle),
+    evidenceRootReferencesFor(snapshot, intake, identity, job, input),
+  );
+  reasons.push(...rootState.reasons);
+  const root = rootState.root;
+  if (!root) {
+    reasons.push('ROOT_IDENTITY_MISSING_OR_AMBIGUOUS');
+    return empty({ intake, source, mapping, identity });
+  }
+  if (intake.affiliateSourceId !== source.id) reasons.push('INTAKE_SOURCE_IDENTITY_CONFLICT');
+  if (intake.supplySourceId !== root.id) reasons.push('INTAKE_ROOT_IDENTITY_CONFLICT');
+  if (admissionHistoryHasMalformedEntry(job.resultSummary)) reasons.push('PRIOR_ADMISSION_HISTORY_INVALID');
+  const activeIntakeRuns = snapshot.runs.filter((candidate) => (
+    candidate.intakeId === intake.id
+    && ACTIVE_INTAKE_RUN_STATUSES.has(upper(candidate.status))
+  ));
+  if (activeIntakeRuns.length) reasons.push('ACTIVE_INTAKE_RUN_PRESENT');
+  const pendingState = correctionPendingStateFor(job, source, root);
+  reasons.push(...pendingState.reasonCodes);
+  const initialGatewayJobs = await correctionGatewayJobsFor(client, snapshot, job, root, null);
+  const initialProducerJobs = initialGatewayJobs.filter((candidate) => (
+    upper(candidate.role) === 'MAPPING_PRODUCER'
+    && candidate.subjectId === job.id
+    && candidate.supplySourceId === root.id
+  ));
+  const oldGatewayJobs = pendingState.pending
+    ? await correctionGatewayJobsFor(client, snapshot, job, root, pendingState.pending)
+    : initialGatewayJobs;
+  const relations = await correctionSnapshotRelationRows(
+    client,
+    oldGatewayJobs.map((candidate) => candidate.id),
+  );
+  const relationJobs = uniqueRows<GatewayJobRow>([
+    ...oldGatewayJobs,
+    ...relations.gatewayJobs,
+  ]);
+  const queuedOldJobs = relationJobs.filter((candidate) => (
+    upper(candidate.role) === 'MAPPING_PRODUCER'
+    && candidate.subjectId === job.id
+    && candidate.supplySourceId === root.id
+    && ['QUEUED', 'RETRY_WAIT'].includes(upper(candidate.status))
+  ));
+  const queuedReviewerJobs = relationJobs.filter((candidate) => (
+    upper(candidate.role) === 'SUPPLY_REVIEWER'
+    && candidate.subjectId === root.id
+    && ['QUEUED', 'RETRY_WAIT'].includes(upper(candidate.status))
+  ));
+  if (queuedReviewerJobs.length) reasons.push('PRIOR_PENDING_MAPPING_PROOF_INVALID');
+  if (pendingState.pending) {
+    if (queuedOldJobs.length > 1) reasons.push('MULTIPLE_SUPERSEDED_GATEWAY_JOBS');
+    const pointers = [
+      { id: pendingState.pending.producerJobId, role: 'MAPPING_PRODUCER', subjectId: job.id },
+      { id: pendingState.pending.reviewerJobId, role: 'SUPPLY_REVIEWER', subjectId: root.id },
+    ].filter((pointer): pointer is { id: string; role: string; subjectId: string } => Boolean(pointer.id));
+    for (const pointer of pointers) {
+      const pointed = relationJobs.find((candidate) => candidate.id === pointer.id);
+      if (!pointed) {
+        reasons.push('PENDING_GATEWAY_POINTER_MISSING');
+      } else if (
+        upper(pointed.role) !== pointer.role
+        || pointed.subjectId !== pointer.subjectId
+        || pointed.supplySourceId !== root.id
+      ) {
+        reasons.push('PENDING_GATEWAY_POINTER_IDENTITY_CONFLICT');
+      }
+    }
+  } else if (queuedOldJobs.length !== 1) {
+    reasons.push('OLD_GATEWAY_JOB_NOT_UNIQUE');
+  }
+  if (!initialProducerJobs.length && !pendingState.pending) reasons.push('OLD_GATEWAY_PRODUCER_MISSING');
+  reasons.push(...correctionGatewayStateReasons(relationJobs, relations));
+  if (activeLease(job)) reasons.push('MAPPING_JOB_HAS_ACTIVE_LEASE');
+  const siblingJobs = snapshot.jobs.filter((candidate) => (
+    candidate.id !== job.id
+    && candidate.intakeId === intake.id
+    && ACTIVE_JOB_STATUSES.has(upper(candidate.status))
+  ));
+  if (siblingJobs.length) reasons.push('ACTIVE_MAPPING_JOB_PRESENT');
+  if (snapshot.approvals.some((approval) => (
+    approval.subjectType === 'MAPPING_PACKAGE'
+    && approval.subjectKey === job.id
+    && ['QUEUED', 'CLAIMED', 'IN_PROGRESS'].includes(upper(approval.status))
+  ))) reasons.push('ACTIVE_APPROVAL_PRESENT');
+  reasons.push(...correctionHoldReasonsFor(source, root));
+  if (upper(intake.complianceStatus) !== 'ALLOWED') reasons.push('SOURCE_POLICY_NOT_ALLOWED');
+  if (['BLOCKED', 'EXCLUDED', 'POLICY_BLOCKED', 'REPLACED'].includes(upper(intake.status))) reasons.push('INTAKE_BLOCKED');
+  if (['BLOCKED', 'EXCLUDED', 'POLICY_BLOCKED', 'REPLACED'].includes(upper(source.status))) reasons.push('SOURCE_EXCLUDED_OR_REPLACED');
+  if (
+    root.isExcluded === true
+    || ['SOURCE_EXCLUDED', 'SUPERSEDED'].includes(upper(root.derivedStage))
+    || text(root.successorId) !== null
+  ) reasons.push('SOURCE_EXCLUDED_OR_REPLACED');
+  if (upper(source.targetKind) !== upper(root.targetKind)) reasons.push('ROOT_TARGET_KIND_CONFLICT');
+  if (!SUPPORTED_KINDS.has(upper(source.targetKind) as AffiliateAgentListingKind) && upper(source.targetKind) !== 'UNCLASSIFIED') {
+    reasons.push('SOURCE_LISTING_KIND_UNSUPPORTED');
+  }
+  const priorContextState = correctionPriorContextFor(job, source, root, relationJobs);
+  reasons.push(...priorContextState.reasonCodes);
+  const context = priorContextState.context;
+  const parsedContext = context
+    ? affiliateAgentExistingDataRepairContextSchema.safeParse(context)
+    : null;
+  if (context && text(context.sourceIdentityKey) !== identity.identityKey) {
+    reasons.push('PRIOR_SOURCE_IDENTITY_CONFLICT');
+  }
+  const sourceAudit = recordValue(recordValue(source.metadata)[AFFILIATE_EXISTING_DATA_REPAIR_ADMISSION_METADATA_KEY]);
+  const rootAudit = recordValue(recordValue(root.metadata)[AFFILIATE_EXISTING_DATA_REPAIR_ADMISSION_METADATA_KEY]);
+  const sourceAuditPresent = Object.keys(sourceAudit).length > 0;
+  const rootAuditPresent = Object.keys(rootAudit).length > 0;
+  if (!sourceAuditPresent || !rootAuditPresent) reasons.push('PRIOR_ADMISSION_AUDIT_MISSING');
+  if (sourceAuditPresent && rootAuditPresent && !sameValue(sourceAudit, rootAudit)) {
+    reasons.push('PRIOR_ADMISSION_AUDIT_CONFLICT');
+  }
+  const priorAudit = context ? correctionAdmissionAuditFor(job, source, context) : null;
+  if (context && !priorAudit) reasons.push('PRIOR_ADMISSION_AUDIT_INVALID');
+  if (priorAudit?.operation === 'CORRECTION') reasons.push('PRIOR_ADMISSION_AUDIT_INVALID');
+  if (priorAudit && admissionReportHashFromSnapshot(reportSnapshot(priorAudit.reportSnapshot)) !== context?.admissionHash) {
+    reasons.push('PRIOR_ADMISSION_AUDIT_INVALID');
+  }
+  const priorManifest = correctionManifestFor(priorAudit, relationJobs);
+  const priorEvidenceState = correctionEvidenceFor(priorAudit, priorManifest, snapshot, reasons);
+  const priorContextRunId = text(context?.evidenceRunId);
+  const priorRun = priorContextRunId
+    ? snapshot.runs.find((candidate) => candidate.id === priorContextRunId && candidate.intakeId === intake.id) ?? null
+    : null;
+  if (!priorRun) reasons.push('PRIOR_EVIDENCE_RUN_MISSING');
+  if (priorRun && !SUCCESSFUL_RUN_STATUSES.has(upper(priorRun.status))) reasons.push('PRIOR_EVIDENCE_RUN_NOT_SUCCESSFUL');
+  const selectedRow = recordValue(priorAudit?.selectedRow);
+  const priorPrimaryPageId = text(selectedRow.evidencePageId) ?? priorEvidenceState.pages[0]?.id ?? null;
+  const priorPage = priorPrimaryPageId
+    ? snapshot.pages.find((candidate) => candidate.id === priorPrimaryPageId && candidate.intakeId === intake.id) ?? null
+    : null;
+  if (!priorPage) reasons.push('PRIOR_EVIDENCE_PAGE_MISSING');
+  if (priorPage && upper(priorPage.status) !== 'ACTIVE') reasons.push('PRIOR_EVIDENCE_PAGE_NOT_ACTIVE');
+  const priorGatewayJobId = text(priorAudit?.gatewayJobId);
+  const priorGatewayJob = priorGatewayJobId
+    ? relationJobs.find((candidate) => candidate.id === priorGatewayJobId) ?? null
+    : null;
+  if (!priorGatewayJob) {
+    reasons.push('PRIOR_GATEWAY_JOB_MISSING');
+  }
+  const priorGatewayManifest = priorGatewayJob
+    ? affiliateAgentEvidenceManifestSchema.safeParse(priorGatewayJob.evidenceManifestJson)
+    : null;
+  if (
+    priorGatewayJob
+    && (!priorGatewayManifest?.success
+      || !priorManifest
+      || !sameValue(priorGatewayManifest.data, priorManifest))
+  ) {
+    reasons.push('PRIOR_GATEWAY_MANIFEST_CONFLICT');
+  }
+  if (
+    !priorAudit
+    || !Array.isArray(priorAudit.evidenceSnapshots)
+    || !sameValue(
+      [...priorAudit.evidenceSnapshots].sort((left, right) => String(recordValue(left).artifactId).localeCompare(String(recordValue(right).artifactId))),
+      [...priorEvidenceState.evidence].sort((left, right) => left.artifactId.localeCompare(right.artifactId)),
+    )
+  ) {
+    reasons.push('PRIOR_EVIDENCE_PROOF_INVALID');
+  }
+  if (priorRun && priorManifest) {
+    for (const entry of priorEvidenceState.evidence) {
+      const artifact = snapshot.artifacts.find((candidate) => candidate.id === entry.intakeArtifactId);
+      const evidencePage = artifact?.pageId
+        ? snapshot.pages.find((candidate) => candidate.id === artifact.pageId) ?? null
+        : null;
+      if (
+        !artifact
+        || artifact.intakeId !== intake.id
+        || artifact.runId !== priorRun.id
+        || !evidencePage
+        || evidencePage.intakeId !== intake.id
+        || upper(evidencePage.status) !== 'ACTIVE'
+      ) {
+        reasons.push('PRIOR_EVIDENCE_OWNERSHIP_CONFLICT');
+      }
+    }
+  }
+  if (priorAudit && priorGatewayJob && priorRun && priorManifest && parsedContext?.success) {
+    const originClaims = relations.gatewayClaims.filter((claim) => (
+      text(claim.jobId) === priorGatewayJob.id
+      && claim.claimGeneration === priorGatewayJob.claimGeneration
+      && upper(claim.status) === 'COMPLETED'
+      && text(claim.terminalReceiptId) === text(priorGatewayJob.terminalReceiptId)
+    ));
+    const originClaimId = originClaims.length === 1 ? text(originClaims[0]!.id) : null;
+    const originNode = upper(priorGatewayJob.status) === 'COMPLETED' && originClaimId
+      ? gatewayNodeFromRelations(relations, originClaimId)
+      : null;
+    if (upper(priorGatewayJob.status) === 'COMPLETED' && !originNode) {
+      reasons.push('PRIOR_GATEWAY_CLAIM_MISSING');
+    }
+    try {
+      if (originNode) {
+        assertCompletedGatewayNode(originNode, 'MAPPING_PRODUCER', root.id, job.id, parsedContext.data);
+      }
+      await assertOriginalAdmissionAudit(
+        client as unknown as AnyDelegate,
+        priorGatewayJob,
+        priorManifest,
+        originNode,
+        parsedContext.data,
+        job,
+        source,
+        intake,
+        priorRun,
+        root,
+      );
+    } catch {
+      reasons.push('PRIOR_ADMISSION_PROOF_INVALID');
+    }
+  }
+  const currentPair = identity
+    ? pagePairFor(snapshot, intake, source, identity, job, input, root.id)
+    : { run: null, page: null, pairs: [], artifacts: [], reasons: ['EVIDENCE_PAGE_MISSING'] };
+  reasons.push(...currentPair.reasons);
+  const currentEvidenceState = currentPair.run && currentPair.page
+    ? await artifactManifestFor(snapshot, currentPair.pairs, job, input.artifactStore)
+    : { entries: [] as ExistingDataRepairArtifact[], reasons: ['EVIDENCE_PAGE_MISSING'] };
+  reasons.push(...currentEvidenceState.reasons);
+  const run = currentPair.run;
+  const page = currentPair.page;
+  const evidencePages = uniqueRows<PageRow>(currentPair.pairs.map((pair) => pair.page));
+  const evidence = currentEvidenceState.entries;
+  const manifest = evidence.length ? manifestFor(evidence, job.id) : null;
+  const kindState = run
+    ? sourceKindAssessmentFor(intake, source, root, run, page)
+    : { reasons: [] as string[] };
+  reasons.push(...kindState.reasons);
+  const policyUrls = [
+    identity?.canonicalUrl ?? null,
+    intake.baseUrl,
+    source.listUrl,
+    source.baseUrl,
+    ...evidencePages.map((candidate) => candidate.canonicalUrl),
+    ...evidence.flatMap((entry) => [entry.sourceUrl, entry.finalUrl]),
+  ];
+  appendCurrentPolicyReasons(snapshot, policyUrls, reasons);
+  const baseline = await loadBaselineSafe(
+    client,
+    source.id,
+    reasons,
+    root as unknown as AffiliateSupplySources,
+  );
+  if (!baseline) reasons.push('SOURCE_STATE_UNAVAILABLE');
+  if (baseline && context && !pendingState.pending) {
+    if (
+      baseline.sourceStateSha256 !== context.sourceStateSha256
+      || baseline.workingMappingId !== context.workingMappingId
+      || baseline.isPublicReplacement !== context.isPublicReplacement
+    ) {
+      reasons.push('PRIOR_SOURCE_STATE_CONFLICT');
+    }
+  }
+  if (pendingState.pending) {
+    const pendingProducerManifest = baseline && mapping && parsedContext?.success
+      ? await pendingProducerManifestFromRelations(
+        relations,
+        pendingState.pending,
+        parsedContext.data,
+        baseline,
+        job,
+        source,
+        root,
+        mapping,
+      )
+      : null;
+    if (!mapping || !baseline || !parsedContext?.success || !pendingProducerManifest) {
+      reasons.push('PRIOR_PENDING_MAPPING_PROOF_INVALID');
+    }
+  }
+  let supersededGatewayJobs: GatewayJobRow[] = [];
+  if (queuedOldJobs.length && context && priorAudit) {
+    const queuedValidity = await Promise.all(
+      queuedOldJobs.map((candidate) => (
+        validQueuedCorrectionPredecessor(client, candidate, job, root, context, priorAudit)
+      )),
+    );
+    if (queuedValidity.some((valid) => !valid)) reasons.push('INVALID_QUEUED_REPAIR_PREDECESSOR');
+    supersededGatewayJobs = queuedOldJobs.filter((candidate, index) => (
+      queuedValidity[index] && !candidate.activeClaimId
+    ));
+  }
+  const prior = context && baseline
+    ? correctionPriorStateFor(
+      job,
+      source,
+      root,
+      mapping,
+      pendingState.pending,
+      pendingState.pendingHash,
+      context,
+      priorAudit,
+      relationJobs,
+      relations,
+    )
+    : null;
+  const priorStateHash = prior ? hash(prior) : hash({ jobId: job.id, sourceId: source.id, rootId: root.id });
+  const gatewayDedupeKey = identity && run && manifest
+    ? `${AFFILIATE_EXISTING_REPAIR_PRODUCER_PREFIX}${job.id}:${identity.identityKey}:${run.id}:${manifest.hash}:correction:${hash({
+      priorStateHash,
+      sportsCatalogSha256: snapshot.sportsCatalog.sha256,
+      sourceStateSha256: baseline?.sourceStateSha256 ?? null,
+      deploymentContract: parsedBundle.deploymentContract,
+      supplyContract: {
+        version: parsedBundle.supplyContract.version,
+        hash: parsedBundle.supplyContract.hash,
+      },
+    })}`
+    : null;
+  const stateFingerprint = hash({
+    job,
+    intake,
+    source,
+    mapping,
+    root,
+    context,
+    prior,
+    manifest,
+    evidence,
+    activeIntakeRuns,
+    baseline: baseline?.sourceStateSha256 ?? null,
+    policies: snapshot.policies,
+    sportsCatalogSha256: snapshot.sportsCatalog.sha256,
+  });
+  const row = correctionRowFor({
+    job,
+    intake,
+    source,
+    mapping,
+    root,
+    identity,
+    run,
+    page,
+    evidencePages,
+    evidence,
+    manifest,
+    baseline,
+    sportsCatalog: snapshot.sportsCatalog,
+    stateFingerprint,
+    gatewayDedupeKey,
+    reasons,
+    ...(kindState.assessment ? { sourceKindAssessment: kindState.assessment } : {}),
+  });
+  if (!row.eligible || !context || !parsedContext?.success || !identity || !run || !page || !manifest || !baseline || !prior || !gatewayDedupeKey) {
+    return { row, plan: null, prior, relations };
+  }
+  const policyKeys = sortedUnique(policyUrls.map(policyKeyForUrl).filter((key): key is string => Boolean(key)));
+  const planBase: Omit<CorrectionPlan, 'row'> = {
+    job,
+    intake,
+    source,
+    mapping,
+    root,
+    artifacts: currentPair.artifacts,
+    evidence,
+    identity,
+    run,
+    page,
+    evidencePages,
+    manifest,
+    baseline,
+    ...(parsedContext.data.sourceSportScope ? { sourceSportScope: parsedContext.data.sourceSportScope as unknown as JsonRecord } : {}),
+    policySnapshots: snapshot.policies.filter((candidate) => policyKeys.includes(candidate.policyKey)),
+    sportsCatalog: snapshot.sportsCatalog,
+    gatewayDedupeKey,
+    prior,
+    priorPendingMapping: pendingState.pending,
+    priorContext: context,
+    priorAdmissionAudit: priorAudit,
+    oldGatewayJobs: relationJobs,
+    supersededGatewayJobs,
+  };
+  const rowWithWrite = { ...row, write: correctionWriteFor(planBase) };
+  const plan: CorrectionPlan = { ...planBase, row: rowWithWrite };
+  return { row: rowWithWrite, plan, prior, relations };
+};
+
+const buildCorrectionReport = async (
+  client: Client,
+  input: CommonInput,
+  parsedBundle: AffiliateAgentContractBundle,
+  mode: 'PREVIEW' | 'APPLY',
+): Promise<CorrectionBuild> => {
+  const validated = validateInput(input);
+  const normalizedInput: CommonInput = {
+    ...input,
+    jobIds: validated.jobIds,
+    sourceIds: validated.sourceIds,
+    evidenceSelections: validated.evidenceSelections,
+  };
+  const snapshot = await readSnapshot(client, validated.jobIds ?? [], validated.sourceIds ?? []);
+  const candidateJobs = correctionSelectedJobsFor(snapshot, validated);
+  const candidateJobIds = sortedUnique(candidateJobs.map((job) => job.id));
+  const missingJobIds = (validated.jobIds ?? []).filter((id) => !candidateJobIds.includes(id));
+  if (validated.evidenceSelections?.some((selection) => !candidateJobIds.includes(selection.jobId))) {
+    throw new AffiliateExistingDataRepairAdmissionError(
+      'EVIDENCE_SELECTION_JOB_NOT_SELECTED',
+      'Every evidence selection must identify one selected mapping job.',
+    );
+  }
+  const evaluated = await Promise.all(
+    candidateJobs.map((job) => (
+      correctionPlanFor(client, snapshot, job, parsedBundle, normalizedInput)
+    )),
+  );
+  const eligible = evaluated
+    .filter((entry) => entry.row.eligible && entry.plan)
+    .sort((left, right) => (left.row.jobId ?? '').localeCompare(right.row.jobId ?? ''));
+  const selected = eligible.slice(0, validated.limit);
+  const selectedEntryKeys = new Set(selected.map((entry) => entry.row.jobId));
+  const rows = evaluated.map(({ row }) => {
+    if (row.eligible && !selectedEntryKeys.has(row.jobId)) {
+      const marker = 'SELECTION_LIMIT_EXCLUDED';
+      return {
+        ...row,
+        eligible: false,
+        reason: marker,
+        reasonCodes: sortedUnique([...row.reasonCodes, marker]),
+        outcome: 'HELD' as const,
+      };
+    }
+    if (row.jobId !== null && selectedEntryKeys.has(row.jobId)) {
+      return { ...row, outcome: mode === 'APPLY' ? 'APPLIED' as const : 'PROPOSED' as const };
+    }
+    return row;
+  });
+  rows.push(...missingJobIds.map((id) => correctionMissingRowFor(id, snapshot.sportsCatalog)));
+  rows.sort((left, right) => (left.jobId ?? '').localeCompare(right.jobId ?? ''));
+  const plans = selected
+    .map((entry) => entry.plan!)
+    .sort((left, right) => left.job.id.localeCompare(right.job.id));
+  const relationEntries = selected
+    .map((entry) => [entry.plan!.job.id, evaluated.find((candidate) => candidate.row.jobId === entry.plan!.job.id)!.relations] as const);
+  const relationCount = relationEntries.reduce((total, [, relations]) => (
+    total
+    + relations.gatewayJobs.length
+    + relations.gatewayClaims.length
+    + relations.gatewayReceipts.length
+    + relations.gatewayArtifacts.length
+    + relations.gatewayEvents.length
+  ), 0);
+  if (relationCount > SNAPSHOT_GLOBAL_LIMIT) {
+    throw new AffiliateExistingDataRepairAdmissionError(
+      'SNAPSHOT_OVERFLOW',
+      'The bounded correction report relation snapshot is larger than the global limit.',
+      { scope: 'correction report Gateway relations', limit: SNAPSHOT_GLOBAL_LIMIT },
+    );
+  }
+  const relationsByMappingJobId = new Map(relationEntries);
+  const selectedJobIds = plans.map((plan) => plan.job.id).sort();
+  const supersededMappingIds = sortedUnique(
+    plans
+      .map((plan) => plan.priorPendingMapping?.mappingId ?? plan.mapping?.id ?? null)
+      .filter((id): id is string => Boolean(id)),
+  );
+  const supersededGatewayJobIds = sortedUnique(
+    plans.flatMap((plan) => plan.supersededGatewayJobs.map((job) => job.id)),
+  );
+  const proposedWrites = plans.map(correctionWriteFor);
+  const counts: AffiliateExistingDataRepairAdmissionCounts = {
+    total: rows.length,
+    eligible: rows.filter((row) => row.eligible).length,
+    held: rows.filter((row) => !row.eligible).length,
+    selected: plans.length,
+    alreadyAdmitted: 0,
+  };
+  const reportHash = correctionReportHashFor({
+    contractVersion: parsedBundle.supplyContract.version,
+    contractHash: parsedBundle.supplyContract.hash,
+    reason: validated.reason,
+    operatorId: validated.operatorId,
+    requestedJobIds: validated.jobIds ?? null,
+    requestedSourceIds: validated.sourceIds ?? null,
+    evidenceSelections: validated.evidenceSelections ?? null,
+    selectionLimit: validated.limit,
+    counts,
+    selectedJobIds,
+    rows,
+    proposedWrites,
+    supersededMappingIds,
+    supersededGatewayJobIds,
+    priorStates: plans.map((plan) => plan.prior),
+  });
+  const report: AffiliateExistingDataRepairCorrectionReport = {
+    schemaVersion: 1,
+    mode,
+    evaluatedAt: new Date().toISOString(),
+    contractVersion: parsedBundle.supplyContract.version,
+    contractHash: parsedBundle.supplyContract.hash,
+    reason: validated.reason,
+    operatorId: validated.operatorId,
+    requestedJobIds: validated.jobIds ?? null,
+    requestedSourceIds: validated.sourceIds ?? null,
+    evidenceSelections: validated.evidenceSelections ?? null,
+    selectionLimit: validated.limit,
+    selectedJobIds,
+    proposedJobIds: plans.map((plan) => plan.job.id).sort(),
+    counts,
+    rows,
+    proposedWrites,
+    reportHash,
+    reviewedReportHash: null,
+    writeCount: mode === 'APPLY' ? plans.length : 0,
+    appliedJobs: [],
+    replayed: false,
+    operation: 'CORRECTION',
+    supersededMappingIds,
+    supersededGatewayJobIds,
+    priorStates: plans.map((plan) => plan.prior),
+  };
+  return { report, plans, relationsByMappingJobId };
+};
+
+export type PreviewAffiliateExistingDataRepairCorrectionInput = CommonInput;
+export type ApplyAffiliateExistingDataRepairCorrectionInput = CommonInput & Readonly<{
+  expectedReportHash: string;
+}>;
+
+export const previewAffiliateExistingDataRepairCorrection = async (
+  input: PreviewAffiliateExistingDataRepairCorrectionInput,
+): Promise<AffiliateExistingDataRepairCorrectionPreview> => {
+  const parsedBundle = parseBundle(input.bundle);
+  const built = await buildCorrectionReport(input.prisma, input, parsedBundle, 'PREVIEW');
+  return built.report as AffiliateExistingDataRepairCorrectionPreview;
+};
+
+const assertNoUnresolvedGatewayEffects = async (client: Client): Promise<void> => {
+  const db = client as unknown as AnyDelegate;
+  const unresolvedJobs = await delegateRows<JsonRecord>(db.affiliateAgentGatewayJobs, {
+    where: { status: { in: ['CLAIMED', 'RECONCILIATION_REQUIRED'] } },
+    select: { id: true, status: true, activeClaimId: true },
+    orderBy: { id: 'asc' },
+    take: 1,
+  });
+  if (unresolvedJobs.length) {
+    throw new AffiliateExistingDataRepairAdmissionError(
+      'CLAIM_DRIFT',
+      'A Gateway job has an active or unresolved effect.',
+    );
+  }
+  const unresolvedClaims = await delegateRows<JsonRecord>(db.affiliateAgentGatewayClaims, {
+    where: { status: { in: ['ACTIVE', 'RECONCILIATION_REQUIRED'] } },
+    select: { id: true, jobId: true, status: true },
+    orderBy: { id: 'asc' },
+    take: 1,
+  });
+  if (unresolvedClaims.length) {
+    throw new AffiliateExistingDataRepairAdmissionError(
+      'CLAIM_DRIFT',
+      'A Gateway claim has an active or unresolved effect.',
+    );
+  }
+  const unresolvedReceipts = await delegateRows<JsonRecord>(db.affiliateAgentGatewayOperationReceipts, {
+    where: { status: { in: ['PENDING', 'UNKNOWN'] } },
+    select: { id: true, jobId: true, claimId: true, status: true },
+    orderBy: { id: 'asc' },
+    take: 1,
+  });
+  if (unresolvedReceipts.length) {
+    throw new AffiliateExistingDataRepairAdmissionError(
+      'CLAIM_DRIFT',
+      'A Gateway operation receipt has an unresolved effect.',
+    );
+  }
+};
+
+const correctionAuditFromMetadata = (
+  metadata: unknown,
+  expectedReportHash: string,
+): JsonRecord | null => {
+  const audit = recordValue(recordValue(metadata)[AFFILIATE_EXISTING_DATA_REPAIR_ADMISSION_METADATA_KEY]);
+  return audit.operation === 'CORRECTION'
+    && normalizeHash(audit.reportHash) === expectedReportHash
+    ? audit
+    : null;
+};
+
+const correctionPriorStatesFromReport = (
+  report: JsonRecord,
+): AffiliateExistingDataRepairCorrectionPriorState[] => (
+  Array.isArray(report.priorStates)
+    ? report.priorStates.filter((state): state is AffiliateExistingDataRepairCorrectionPriorState => (
+      Boolean(state && typeof state === 'object' && !Array.isArray(state))
+    ))
+    : []
+);
+
+const correctionReplay = async (
+  client: Client,
+  input: ApplyAffiliateExistingDataRepairCorrectionInput,
+  parsedBundle: AffiliateAgentContractBundle,
+  expectedReportHash: string,
+): Promise<AffiliateExistingDataRepairCorrectionApplyReport | null> => {
+  const validated = validateInput(input);
+  const normalizedInput: CommonInput = {
+    ...input,
+    jobIds: validated.jobIds,
+    sourceIds: validated.sourceIds,
+    evidenceSelections: validated.evidenceSelections,
+  };
+  const snapshot = await readSnapshot(client, validated.jobIds ?? [], validated.sourceIds ?? []);
+  const selectedJobs = correctionSelectedJobsFor(snapshot, validated);
+  if (!selectedJobs.length) return null;
+  const entries: Array<{
+    audit: JsonRecord;
+    source: SourceRow;
+    root: RootRow;
+    mappingJob: MappingJobRow;
+    gatewayJob: GatewayJobRow;
+  }> = [];
+  for (const job of selectedJobs) {
+    const intake = snapshot.intakes.find((candidate) => candidate.id === job.intakeId) ?? null;
+    const mapping = job.mappingId
+      ? snapshot.mappings.find((candidate) => candidate.id === job.mappingId) ?? null
+      : null;
+    const source = intake ? correctionSourceFor(snapshot, job, intake, mapping) : null;
+    const identity = intake && source ? identityForSource(source, null, intake) : null;
+    const rootState = intake && source && identity
+      ? correctionRootFor(
+        snapshot,
+        job,
+        intake,
+        source,
+        mapping,
+        identity,
+        cohort(parsedBundle),
+        evidenceRootReferencesFor(snapshot, intake, identity, job, normalizedInput),
+      )
+      : { root: null, reasons: [] as string[] };
+    const root = rootState.root;
+    if (!intake || !source || !root || !identity || rootState.reasons.length) continue;
+    const audit = correctionAuditFromMetadata(source.metadata, expectedReportHash);
+    if (!audit) continue;
+    if (intake.affiliateSourceId !== source.id || intake.supplySourceId !== root.id) {
+      throw new AffiliateExistingDataRepairAdmissionError(
+        'ADMISSION_REPORT_DRIFT',
+        'The correction intake identity no longer points to the audited source and supply root.',
+      );
+    }
+    if (admissionHistoryHasMalformedEntry(job.resultSummary)) {
+      throw new AffiliateExistingDataRepairAdmissionError(
+        'ADMISSION_REPORT_DRIFT',
+        'The correction admission history contains a malformed entry.',
+      );
+    }
+    const gatewayJobId = text(recordValue(audit.createdIds).gatewayJobId);
+    if (!gatewayJobId) return null;
+    const gatewayJob = await readUnique(
+      client as unknown as AnyDelegate,
+      'affiliateAgentGatewayJobs',
+      { where: { id: gatewayJobId } },
+    ) as unknown as GatewayJobRow | null;
+    if (!gatewayJob) return null;
+    const rootAudit = recordValue(recordValue(root.metadata)[AFFILIATE_EXISTING_DATA_REPAIR_ADMISSION_METADATA_KEY]);
+    if (!sameValue(rootAudit, audit)) {
+      throw new AffiliateExistingDataRepairAdmissionError(
+        'ADMISSION_REPORT_DRIFT',
+        'The correction admission audits do not agree across the source and root identities.',
+      );
+    }
+    const holdValues = [
+      recordValue(source.metadata)[AFFILIATE_EXISTING_DATA_REPAIR_CORRECTION_HOLD_METADATA_KEY],
+      recordValue(root.metadata)[AFFILIATE_EXISTING_DATA_REPAIR_CORRECTION_HOLD_METADATA_KEY],
+    ];
+    const holdPresent = [
+      hasOwn(source.metadata, AFFILIATE_EXISTING_DATA_REPAIR_CORRECTION_HOLD_METADATA_KEY),
+      hasOwn(root.metadata, AFFILIATE_EXISTING_DATA_REPAIR_CORRECTION_HOLD_METADATA_KEY),
+    ];
+    if (holdPresent[0] !== holdPresent[1]) {
+      throw new AffiliateExistingDataRepairAdmissionError('CLAIM_DRIFT', 'The correction hold is one-sided.');
+    }
+    if (holdPresent[0]) {
+      const sourceHold = affiliateExistingDataRepairCorrectionHoldSchema.safeParse(holdValues[0]);
+      const rootHold = affiliateExistingDataRepairCorrectionHoldSchema.safeParse(holdValues[1]);
+      if (
+        !sourceHold.success
+        || !rootHold.success
+        || !sameValue(sourceHold.data, rootHold.data)
+        || sourceHold.data.sourceId !== source.id
+        || sourceHold.data.supplySourceId !== root.id
+        || sourceHold.data.mappingJobId !== job.id
+        || normalizeHash(sourceHold.data.admissionHash) !== expectedReportHash
+      ) {
+        throw new AffiliateExistingDataRepairAdmissionError('CLAIM_DRIFT', 'The correction hold identity is invalid.');
+      }
+    }
+    if (gatewayJob.activeClaimId) {
+      throw new AffiliateExistingDataRepairAdmissionError('CLAIM_DRIFT', 'The corrected Gateway job is actively claimed.');
+    }
+    entries.push({ audit, source, root, mappingJob: job, gatewayJob });
+  }
+  if (!entries.length) return null;
+  const firstAudit = entries[0]?.audit;
+  const stored = recordValue(firstAudit?.reportSnapshot);
+  const storedSelectedJobIds = stringArray(stored.selectedJobIds);
+  const priorStates = correctionPriorStatesFromReport(stored);
+  const rows = Array.isArray(stored.rows)
+    ? stored.rows as unknown as AffiliateExistingDataRepairAdmissionRow[]
+    : [];
+  const proposedWrites = Array.isArray(stored.proposedWrites)
+    ? stored.proposedWrites as unknown as AffiliateExistingDataRepairAdmissionWrite[]
+    : [];
+  const supersededMappingIds = Array.isArray(stored.supersededMappingIds)
+    ? stored.supersededMappingIds.filter((id): id is string => typeof id === 'string')
+    : [];
+  const supersededGatewayJobIds = Array.isArray(stored.supersededGatewayJobIds)
+    ? stored.supersededGatewayJobIds.filter((id): id is string => typeof id === 'string')
+    : [];
+  const counts = recordValue(stored.counts) as unknown as AffiliateExistingDataRepairAdmissionCounts;
+  const storedRequestedJobIds = stored.requestedJobIds === null
+    ? null
+    : stringArray(stored.requestedJobIds);
+  const storedRequestedSourceIds = stored.requestedSourceIds === null
+    ? null
+    : stringArray(stored.requestedSourceIds);
+  const storedEvidenceSelections = stored.evidenceSelections === null
+    ? null
+    : Array.isArray(stored.evidenceSelections)
+      ? stored.evidenceSelections as ExistingDataRepairEvidenceSelection[]
+      : null;
+  const allAuditReportsMatch = entries.every((entry) => sameValue(entry.audit.reportSnapshot, stored));
+  const allAuditRequestProof = entries.every((entry) => (
+    String(entry.audit.operatorId ?? '') === String(stored.operatorId ?? '')
+    && String(entry.audit.reason ?? '') === String(stored.reason ?? '')
+    && Number(entry.audit.selectionLimit) === Number(stored.selectionLimit)
+    && sameValue(entry.audit.requestedJobIds ?? null, storedRequestedJobIds)
+    && sameValue(entry.audit.requestedSourceIds ?? null, storedRequestedSourceIds)
+    && sameValue(entry.audit.selectedJobIds, storedSelectedJobIds)
+  ));
+  let recomputedReportHash: string | null = null;
+  try {
+    recomputedReportHash = correctionReportHashFor({
+      contractVersion: Number(stored.contractVersion),
+      contractHash: String(stored.contractHash ?? ''),
+      reason: String(stored.reason ?? ''),
+      operatorId: String(stored.operatorId ?? ''),
+      requestedJobIds: storedRequestedJobIds,
+      requestedSourceIds: storedRequestedSourceIds,
+      evidenceSelections: storedEvidenceSelections,
+      selectionLimit: Number(stored.selectionLimit),
+      counts,
+      selectedJobIds: storedSelectedJobIds ?? [],
+      rows,
+      proposedWrites,
+      supersededMappingIds,
+      supersededGatewayJobIds,
+      priorStates,
+    });
+  } catch {
+    recomputedReportHash = null;
+  }
+  const entryMappingJobIds = entries.map((entry) => entry.mappingJob.id);
+  const entryMappingJobIdSet = sortedUnique(entryMappingJobIds);
+  const priorStateIds = priorStates.map((state) => state.mappingJobId);
+  const priorStateByMappingJobId = new Map(priorStates.map((state) => [state.mappingJobId, state]));
+  const expectedRequestedJobIds = validated.jobIds ?? null;
+  const expectedRequestedSourceIds = validated.sourceIds ?? null;
+  const expectedEvidenceSelections = validated.evidenceSelections ?? null;
+  const selectorsMatch = (
+    stored.requestedJobIds !== undefined
+    && stored.requestedSourceIds !== undefined
+    && stored.evidenceSelections !== undefined
+    && storedRequestedJobIds !== null
+      ? sameValue(storedRequestedJobIds, expectedRequestedJobIds)
+      : stored.requestedJobIds === null
+        && storedRequestedJobIds === null
+        && sameValue(expectedRequestedJobIds, null)
+  ) && (
+    stored.requestedSourceIds !== undefined
+      && storedRequestedSourceIds !== null
+      ? sameValue(storedRequestedSourceIds, expectedRequestedSourceIds)
+      : stored.requestedSourceIds === null
+        && storedRequestedSourceIds === null
+        && sameValue(expectedRequestedSourceIds, null)
+  ) && (
+    stored.evidenceSelections !== undefined
+      && storedEvidenceSelections !== null
+      ? sameValue(storedEvidenceSelections, expectedEvidenceSelections)
+      : stored.evidenceSelections === null
+        && storedEvidenceSelections === null
+        && sameValue(expectedEvidenceSelections, null)
+  );
+  const priorStatesMatch = Boolean(
+    Array.isArray(stored.priorStates)
+      && storedSelectedJobIds
+      && priorStates.length === stored.priorStates.length
+      && priorStates.length === storedSelectedJobIds.length
+      && priorStates.every((state) => typeof state.mappingJobId === 'string' && state.mappingJobId.length > 0)
+      && new Set(priorStateIds).size === priorStateIds.length
+      && sameValue([...priorStateIds].sort(), [...storedSelectedJobIds].sort()),
+  );
+  const selectedRowsBindEntries = Boolean(
+    storedSelectedJobIds
+      && entries.every((entry) => {
+        const row = rows.find((candidate) => candidate.mappingJobId === entry.mappingJob.id);
+        return Boolean(
+          row
+            && row.sourceId === entry.source.id
+            && row.rootId === entry.root.id
+            && row.supplySourceId === entry.root.id
+            && row.mappingJobId === entry.mappingJob.id,
+        );
+      }),
+  );
+  const priorStatesBindEntries = entries.every((entry) => {
+    const prior = priorStateByMappingJobId.get(entry.mappingJob.id);
+    return Boolean(
+      prior
+        && prior.mappingJobId === entry.mappingJob.id
+        && prior.sourceId === entry.source.id
+        && prior.supplySourceId === entry.root.id,
+    );
+  });
+  const immutableEntryProof = entries.every((entry) => {
+    const auditCreatedIds = recordValue(entry.audit.createdIds);
+    return (
+      entry.audit.operation === 'CORRECTION'
+      && normalizeHash(entry.audit.reportHash) === expectedReportHash
+      && text(entry.audit.mappingJobId) === entry.mappingJob.id
+      && text(entry.audit.gatewayJobId) === entry.gatewayJob.id
+      && text(auditCreatedIds.gatewayJobId) === entry.gatewayJob.id
+      && text(auditCreatedIds.mappingJobId) === entry.mappingJob.id
+      && text(auditCreatedIds.sourceId) === entry.source.id
+      && text(auditCreatedIds.supplySourceId) === entry.root.id
+      && sameValue(entry.audit.selectedJobIds, storedSelectedJobIds)
+      && sameValue(entry.audit.requestedJobIds ?? null, expectedRequestedJobIds)
+      && sameValue(entry.audit.requestedSourceIds ?? null, expectedRequestedSourceIds)
+      && entry.gatewayJob.role === 'MAPPING_PRODUCER'
+      && entry.gatewayJob.subjectType === 'MAPPING_PRODUCER'
+      && entry.gatewayJob.subjectId === entry.mappingJob.id
+      && entry.gatewayJob.supplySourceId === entry.root.id
+      && entry.gatewayJob.dedupeKey === entry.audit.gatewayDedupeKey
+    );
+  });
+  const holdProofMatchesPriorState = entries.every((entry) => {
+    const sourceMetadata = recordValue(entry.source.metadata);
+    const hold = readAffiliateExistingDataRepairCorrectionHold(
+      sourceMetadata[AFFILIATE_EXISTING_DATA_REPAIR_CORRECTION_HOLD_METADATA_KEY],
+    );
+    const prior = priorStateByMappingJobId.get(entry.mappingJob.id);
+    return !hold || Boolean(prior && normalizeHash(hold.priorPendingMappingHash) === normalizeHash(prior.pendingMappingHash));
+  });
+  if (
+    stored.operation !== 'CORRECTION'
+    || normalizeHash(stored.reportHash) !== expectedReportHash
+    || recomputedReportHash !== expectedReportHash
+    || Number(stored.contractVersion) !== parsedBundle.supplyContract.version
+    || String(stored.contractHash ?? '') !== parsedBundle.supplyContract.hash
+    || String(stored.operatorId ?? '') !== validated.operatorId
+    || String(stored.reason ?? '') !== validated.reason
+    || !Array.isArray(stored.rows)
+    || !Array.isArray(stored.proposedWrites)
+    || !storedSelectedJobIds
+    || !sameValue(storedSelectedJobIds, [...storedSelectedJobIds].sort())
+    || entries.length !== storedSelectedJobIds.length
+    || entryMappingJobIdSet.length !== entryMappingJobIds.length
+    || !sameValue(entryMappingJobIdSet, storedSelectedJobIds)
+    || Number(stored.selectionLimit) !== validated.limit
+    || !allAuditReportsMatch
+    || !allAuditRequestProof
+    || !selectorsMatch
+    || !priorStatesMatch
+    || !selectedRowsBindEntries
+    || !priorStatesBindEntries
+    || !immutableEntryProof
+    || !holdProofMatchesPriorState
+  ) {
+    throw new AffiliateExistingDataRepairAdmissionError(
+      'ADMISSION_REPORT_DRIFT',
+      'Stored correction admission evidence is incomplete or does not match the reviewed selection.',
+    );
+  }
+  const appliedJobs: AffiliateExistingDataRepairAppliedJob[] = entries.map((entry) => ({
+    jobId: entry.gatewayJob.id,
+    mappingJobId: entry.mappingJob.id,
+    sourceId: entry.source.id,
+    supplySourceId: entry.root.id,
+  })).sort((left, right) => left.mappingJobId.localeCompare(right.mappingJobId));
+  return {
+    ...(stored as unknown as AffiliateExistingDataRepairCorrectionReport),
+    mode: 'APPLY',
+    reviewedReportHash: expectedReportHash,
+    writeCount: 0,
+    appliedJobs,
+    replayed: true,
+  };
+};
+
+const correctionContextForApply = (
+  plan: CorrectionPlan,
+  reportHash: string,
+  reasonText: string,
+  bundle: AffiliateAgentContractBundle,
+): AffiliateAgentExistingDataRepairContext => {
+  const priorAdmissionHash = normalizeHash(plan.priorContext.admissionHash);
+  if (!priorAdmissionHash) {
+    throw new AffiliateExistingDataRepairAdmissionError(
+      'PRIOR_ADMISSION_AUDIT_MISSING',
+      `Mapping job ${plan.job.id} has no valid prior admission hash.`,
+    );
+  }
+  const kindState = upper(plan.source.targetKind) === 'UNCLASSIFIED'
+    ? sourceKindAssessmentFor(plan.intake, plan.source, plan.root, plan.run, plan.page)
+    : { assessment: undefined, reasons: [] as string[] };
+  if (kindState.reasons.length || (upper(plan.source.targetKind) === 'UNCLASSIFIED' && !kindState.assessment)) {
+    throw new AffiliateExistingDataRepairAdmissionError(
+      'SOURCE_LISTING_KIND_UNSUPPORTED',
+      `The current source kind cannot be admitted for ${plan.job.id}.`,
+      { reasonCodes: kindState.reasons },
+    );
+  }
+  return parseContext({
+    kind: 'EXISTING_DATA_REPAIR',
+    intakeId: plan.intake.id,
+    evidenceRunId: plan.run.id,
+    sportsCatalog: plan.sportsCatalog,
+    sourceId: plan.source.id,
+    sourceIdentityKey: plan.identity.identityKey,
+    admissionHash: reportHash,
+    sourceStateSha256: plan.baseline.sourceStateSha256,
+    workingMappingId: plan.baseline.workingMappingId,
+    isPublicReplacement: plan.baseline.isPublicReplacement,
+    repairReasons: sortedUnique([
+      reasonText,
+      ...recordedRepairReasons(plan.job.resultSummary),
+    ]),
+    ...(kindState.assessment ? { sourceKindAssessment: kindState.assessment } : {}),
+    deploymentContract: bundle.deploymentContract,
+    ...(plan.sourceSportScope ? { sourceSportScope: plan.sourceSportScope } : {}),
+    correction: {
+      priorAdmissionHash,
+      priorPendingMappingHash: plan.prior.pendingMappingHash,
+    },
+  });
+};
+
+const assertCorrectionPlanCurrent = async (
+  tx: Client,
+  plan: CorrectionPlan,
+): Promise<{ job: MappingJobRow; source: SourceRow; root: RootRow; mapping: MappingRow | null }> => {
+  const db = tx as unknown as AnyDelegate;
+  const currentJob = await readUnique(
+    db,
+    'affiliateSourceMappingJobs',
+    { where: { id: plan.job.id } },
+  ) as unknown as MappingJobRow | null;
+  if (
+    !currentJob
+    || currentJob.intakeId !== plan.intake.id
+    || currentJob.status !== plan.job.status
+    || currentJob.sourceId !== plan.job.sourceId
+    || currentJob.mappingId !== plan.job.mappingId
+    || currentJob.supplySourceId !== plan.job.supplySourceId
+    || activeLease(currentJob)
+  ) {
+    throw new AffiliateExistingDataRepairAdmissionError(
+      'IDENTITY_DRIFT',
+      `Mapping job ${plan.job.id} changed after correction preview.`,
+    );
+  }
+  const activeRuns = await snapshotRows<RunRow>(
+    db.affiliateSourceIntakeRuns,
+    {
+      where: { intakeId: plan.intake.id, status: { in: [...ACTIVE_INTAKE_RUN_STATUSES] } },
+      orderBy: { id: 'asc' },
+    },
+    SNAPSHOT_PER_INTAKE_LIMIT,
+    `correction active intake runs:${plan.intake.id}`,
+  );
+  if (activeRuns.length) {
+    throw new AffiliateExistingDataRepairAdmissionError(
+      'ACTIVE_INTAKE_RUN_PRESENT',
+      `Intake ${plan.intake.id} has active capture work.`,
+    );
+  }
+  const currentIntake = await readUnique(
+    db,
+    'affiliateSourceIntakes',
+    { where: { id: plan.intake.id } },
+  ) as unknown as IntakeRow | null;
+  const source = await readUnique(db, 'affiliateScrapeSources', { where: { id: plan.source.id } }) as unknown as SourceRow | null;
+  const root = await readUnique(db, 'affiliateSupplySources', { where: { id: plan.root.id } }) as unknown as RootRow | null;
+  const mapping = plan.mapping
+    ? await readUnique(db, 'affiliateScrapeMappings', { where: { id: plan.mapping.id } }) as unknown as MappingRow | null
+    : null;
+  const currentIdentity = source ? identityForSource(source, null, currentIntake) : null;
+  if (
+    !currentIntake
+    || !source
+    || !root
+    || !currentIdentity
+    || currentIntake.id !== plan.intake.id
+    || currentIntake.affiliateSourceId !== source.id
+    || currentIntake.supplySourceId !== root.id
+    || currentIdentity.identityKey !== plan.identity.identityKey
+    || source.supplySourceId !== root.id
+    || root.identityKey !== plan.identity.identityKey
+    || canonical(root.canonicalUrl) !== plan.identity.canonicalUrl
+    || root.origin !== plan.identity.origin
+    || root.pathKey !== plan.identity.pathKey
+    || root.rolloutCohort !== plan.root.rolloutCohort
+    || root.intakeId !== plan.intake.id
+    || root.liveSourceId !== source.id
+    || source.targetKind.toUpperCase() !== root.targetKind.toUpperCase()
+    || (plan.mapping && (
+      !mapping
+      || mapping.sourceId !== source.id
+      || mapping.supplySourceId !== root.id
+    ))
+  ) {
+    throw new AffiliateExistingDataRepairAdmissionError(
+      'IDENTITY_DRIFT',
+      `Source, Supply Source, or mapping ${plan.job.id} changed after correction preview.`,
+    );
+  }
+  const sourceMetadata = recordValue(source.metadata);
+  const rootMetadata = recordValue(root.metadata);
+  const currentPending = correctionPendingStateFor(currentJob, source, root);
+  if (
+    currentPending.reasonCodes.length
+    || currentPending.pendingHash !== plan.prior.pendingMappingHash
+    || !sameValue(currentPending.pending, plan.priorPendingMapping)
+  ) {
+    throw new AffiliateExistingDataRepairAdmissionError(
+      'PENDING_REPAIR_PRESENT',
+      `The prior pending pointer for ${plan.job.id} changed after correction preview.`,
+    );
+  }
+  if (plan.priorPendingMapping) {
+    const pendingProducerJob = plan.priorPendingMapping.producerJobId
+      ? plan.oldGatewayJobs.find((candidate) => candidate.id === plan.priorPendingMapping!.producerJobId) ?? null
+      : null;
+    const pendingManifest = pendingProducerJob
+      ? affiliateAgentEvidenceManifestSchema.safeParse(pendingProducerJob.evidenceManifestJson)
+      : null;
+    const contextResult = affiliateAgentExistingDataRepairContextSchema.safeParse(plan.priorContext);
+    if (!mapping || !pendingManifest?.success || !contextResult.success) {
+      throw new AffiliateExistingDataRepairAdmissionError(
+        'PENDING_REPAIR_PRESENT',
+        `The pending mapping proof for ${plan.job.id} is unavailable.`,
+      );
+    }
+    try {
+      assertPendingTransition(
+        contextResult.data,
+        pendingManifest.data,
+        plan.baseline,
+        currentJob,
+        source,
+        root,
+        mapping,
+      );
+    } catch {
+      throw new AffiliateExistingDataRepairAdmissionError(
+        'PENDING_REPAIR_PRESENT',
+        `The pending mapping proof for ${plan.job.id} changed after correction preview.`,
+      );
+    }
+  }
+  if (
+    !sameValue(sourceMetadata.existingDataRepair, plan.priorContext)
+    || !sameValue(rootMetadata.existingDataRepair, plan.priorContext)
+    || !sameValue(
+      sourceMetadata[AFFILIATE_EXISTING_DATA_REPAIR_ADMISSION_METADATA_KEY],
+      rootMetadata[AFFILIATE_EXISTING_DATA_REPAIR_ADMISSION_METADATA_KEY],
+    )
+    || !sameValue(
+      correctionAdmissionAuditFor(currentJob, source, plan.priorContext),
+      plan.priorAdmissionAudit,
+    )
+  ) {
+    throw new AffiliateExistingDataRepairAdmissionError(
+      'ADMISSION_REPORT_DRIFT',
+      `The prior correction evidence for ${plan.job.id} changed after preview.`,
+    );
+  }
+  const sourceHoldPresent = hasOwn(sourceMetadata, AFFILIATE_EXISTING_DATA_REPAIR_CORRECTION_HOLD_METADATA_KEY);
+  const rootHoldPresent = hasOwn(rootMetadata, AFFILIATE_EXISTING_DATA_REPAIR_CORRECTION_HOLD_METADATA_KEY);
+  if (sourceHoldPresent || rootHoldPresent) {
+    throw new AffiliateExistingDataRepairAdmissionError(
+      'CORRECTION_HOLD_PRESENT',
+      `A correction hold already exists for ${plan.source.id}.`,
+    );
+  }
+  const baseline = await loadBaseline(tx, source.id, root as unknown as AffiliateSupplySources);
+  if (
+    baseline.sourceStateSha256 !== plan.baseline.sourceStateSha256
+    || baseline.workingMappingId !== plan.baseline.workingMappingId
+    || baseline.isPublicReplacement !== plan.baseline.isPublicReplacement
+    || baseline.correctionHold !== null
+  ) {
+    throw new AffiliateExistingDataRepairAdmissionError(
+      'SOURCE_STATE_DRIFT',
+      `Source ${plan.source.id} changed after correction preview.`,
+    );
+  }
+  return { job: currentJob, source, root, mapping };
+};
+
+const assertCorrectionGatewayGraphCurrent = async (
+  tx: Client,
+  plan: CorrectionPlan,
+): Promise<CorrectionRelations> => {
+  const ids = plan.oldGatewayJobs.map((job) => job.id);
+  const relations = await correctionSnapshotRelationRows(tx, ids);
+  const currentJobs = [...relations.gatewayJobs].sort(compareId);
+  const priorJobs = [...plan.prior.gatewayJobs].sort((left, right) => (
+    String(recordValue(left).id).localeCompare(String(recordValue(right).id))
+  ));
+  if (!sameValue(currentJobs.map(correctionImmutableGatewayJob), priorJobs)) {
+    throw new AffiliateExistingDataRepairAdmissionError(
+      'CLAIM_DRIFT',
+      `Gateway job state for ${plan.job.id} changed after correction preview.`,
+    );
+  }
+  const projections: Array<[string, readonly unknown[], readonly unknown[]]> = [
+    ['claim', relations.gatewayClaims.map(correctionImmutableClaim), plan.prior.gatewayClaims],
+    ['receipt', relations.gatewayReceipts.map(correctionImmutableReceipt), plan.prior.gatewayReceipts],
+    ['artifact', relations.gatewayArtifacts.map(correctionImmutableArtifact), plan.prior.gatewayArtifacts],
+    ['event', relations.gatewayEvents.map(correctionImmutableEvent), plan.prior.gatewayEvents],
+  ];
+  for (const [label, current, prior] of projections) {
+    if (!sameValue(current, prior)) {
+      throw new AffiliateExistingDataRepairAdmissionError(
+        'CLAIM_DRIFT',
+        `Gateway ${label} state for ${plan.job.id} changed after correction preview.`,
+      );
+    }
+  }
+  const reasons = correctionGatewayStateReasons(currentJobs, relations);
+  if (reasons.length) {
+    throw new AffiliateExistingDataRepairAdmissionError(
+      'CLAIM_DRIFT',
+      `Gateway activity blocks correction for ${plan.job.id}.`,
+      { reasonCodes: reasons },
+    );
+  }
+  return relations;
+};
+
+const cancelCorrectionGatewayJob = async (
+  tx: Client,
+  oldJob: GatewayJobRow,
+  reportHash: string,
+  operatorId: string,
+  replacementGatewayJobId: string,
+): Promise<void> => {
+  const db = tx as unknown as AnyDelegate;
+  const current = await readUnique(
+    db,
+    'affiliateAgentGatewayJobs',
+    { where: { id: oldJob.id } },
+  ) as unknown as GatewayJobRow | null;
+  if (
+    !current
+    || !['QUEUED', 'RETRY_WAIT'].includes(upper(current.status))
+    || current.activeClaimId
+    || current.status !== oldJob.status
+    || current.eventSequence !== oldJob.eventSequence
+  ) {
+    throw new AffiliateExistingDataRepairAdmissionError(
+      'CLAIM_DRIFT',
+      `Gateway job ${oldJob.id} is no longer a cancellable queued correction predecessor.`,
+    );
+  }
+  const activeClaims = await delegateRows<GatewayClaimRow>(db.affiliateAgentGatewayClaims, {
+    where: { jobId: current.id, status: { in: ['ACTIVE', 'RECONCILIATION_REQUIRED'] } },
+    orderBy: { id: 'asc' },
+    take: 1,
+  });
+  if (activeClaims.length) {
+    throw new AffiliateExistingDataRepairAdmissionError(
+      'CLAIM_DRIFT',
+      `Gateway job ${oldJob.id} has an active or unresolved claim.`,
+    );
+  }
+  const eventSequence = current.eventSequence ?? 1;
+  const update = await requiredWriteDelegateMethod(db, 'affiliateAgentGatewayJobs', 'updateMany')({
+    where: {
+      id: current.id,
+      status: current.status,
+      activeClaimId: null,
+      eventSequence,
+    },
+    data: {
+      status: 'PIPELINE_BLOCKED',
+      terminalDisposition: 'CORRECTION_SUPERSEDED',
+      nextAttemptAt: null,
+      pipelineBlockedAt: new Date(),
+      eventSequence: { increment: 1 },
+    },
+  });
+  if (update.count !== 1) {
+    throw new AffiliateExistingDataRepairAdmissionError(
+      'CLAIM_DRIFT',
+      `Gateway job ${oldJob.id} could not be superseded atomically.`,
+    );
+  }
+  await requiredWriteDelegateMethod(db, 'affiliateAgentGatewayEvents', 'create')({
+    data: {
+      id: createId(),
+      eventKey: `${AFFILIATE_EXISTING_REPAIR_PRODUCER_PREFIX}${current.id}:superseded:${reportHash}`,
+      jobId: current.id,
+      claimId: null,
+      receiptId: null,
+      sequence: eventSequence + 1,
+      eventType: 'JOB_SUPERSEDED',
+      actorKind: 'OPERATOR',
+      actorId: operatorId,
+      role: current.role,
+      requestHash: reportHash,
+      inputHash: hash(correctionImmutableGatewayJob(oldJob)),
+      outputHash: reportHash,
+      reasonCodes: ['EXISTING_DATA_REPAIR_CORRECTION'],
+      payload: asJson({
+        operation: 'CORRECTION',
+        reportHash,
+        supersededByGatewayJobId: replacementGatewayJobId,
+        priorStatus: oldJob.status,
+      }),
+      retentionClass: 'INDEFINITE',
+    },
+  });
+};
+
+const applyCorrectionPlan = async (
+  tx: Client,
+  plan: CorrectionPlan,
+  report: AffiliateExistingDataRepairCorrectionReport,
+  reportHash: string,
+  operatorId: string,
+  reasonText: string,
+  bundle: AffiliateAgentContractBundle,
+  requestedJobIds: readonly string[] | undefined,
+  requestedSourceIds: readonly string[] | undefined,
+  selectionLimit: number,
+  relations: CorrectionRelations,
+): Promise<AffiliateExistingDataRepairAppliedJob> => {
+  const db = tx as unknown as AnyDelegate;
+  const currentState = await assertCorrectionPlanCurrent(tx, plan);
+  const currentRelations = await assertCorrectionGatewayGraphCurrent(tx, plan);
+  const context = correctionContextForApply(plan, reportHash, reasonText, bundle);
+  const now = new Date();
+  const source = currentState.source;
+  const root = currentState.root;
+  const currentJob = currentState.job;
+  const mapping = currentState.mapping;
+  const hold = affiliateExistingDataRepairCorrectionHoldSchema.parse({
+    schemaVersion: 1,
+    sourceId: source.id,
+    supplySourceId: root.id,
+    mappingJobId: currentJob.id,
+    admissionHash: reportHash,
+    priorPendingMappingHash: plan.prior.pendingMappingHash,
+  });
+  const subject: AffiliateAgentSubject = upper(source.targetKind) === 'UNCLASSIFIED'
+    ? {
+      type: 'MAPPING_PRODUCER',
+      supplySourceId: root.id,
+      mappingJobId: currentJob.id,
+      pass: 1,
+      repairContext: context,
+    }
+    : {
+      type: 'MAPPING_PRODUCER',
+      supplySourceId: root.id,
+      mappingJobId: currentJob.id,
+      listingKind: upper(source.targetKind) as AffiliateAgentListingKind,
+      pass: 1,
+      repairContext: context,
+    };
+  const gatewayData = {
+    id: createId(),
+    dedupeKey: plan.gatewayDedupeKey,
+    queue: 'AFFILIATE_MAPPING',
+    lane: 'MAPPING_PRODUCTION',
+    role: 'MAPPING_PRODUCER',
+    subjectType: 'MAPPING_PRODUCER',
+    subjectId: currentJob.id,
+    subjectJson: asJson(subject),
+    evidenceManifestJson: asJson(plan.manifest),
+    supplySourceId: root.id,
+    expectedLifecycleGeneration: root.lifecycleGeneration,
+    status: 'QUEUED',
+    priority: 0,
+    nextAttemptAt: now,
+    claimGeneration: 0,
+    eventSequence: 1,
+    activeClaimId: null,
+    parentClaimId: null,
+  };
+  const gateway = await requiredWriteDelegateMethod(db, 'affiliateAgentGatewayJobs', 'create')({
+    data: gatewayData as unknown as Record<string, unknown>,
+  }) as unknown as GatewayJobRow;
+  if (!gateway?.id) {
+    throw new AffiliateExistingDataRepairAdmissionError(
+      'GATEWAY_CREATE_FAILED',
+      `Correction Gateway job for ${currentJob.id} was not created.`,
+    );
+  }
+  const sourceAudit: ExistingDataRepairAdmissionAudit = {
+    schemaVersion: 1,
+    operation: 'CORRECTION',
+    reportHash,
+    reportSnapshot: report,
+    operatorId,
+    reason: reasonText,
+    mappingJobId: currentJob.id,
+    intakeId: plan.intake.id,
+    evidenceRunId: plan.run.id,
+    sourceId: source.id,
+    supplySourceId: root.id,
+    rootId: root.id,
+    rootIdentityKey: root.identityKey,
+    mappingId: mapping?.id ?? currentJob.mappingId,
+    gatewayJobId: gateway.id,
+    gatewayDedupeKey: plan.gatewayDedupeKey,
+    selectedJobIds: [...report.selectedJobIds].sort(),
+    requestedJobIds: requestedJobIds ? [...requestedJobIds].sort() : null,
+    requestedSourceIds: requestedSourceIds ? [...requestedSourceIds].sort() : null,
+    selectionLimit,
+    selectedRow: {
+      jobId: currentJob.id,
+      mappingJobId: currentJob.id,
+      intakeId: plan.intake.id,
+      sourceId: source.id,
+      mappingId: mapping?.id ?? currentJob.mappingId,
+      supplySourceId: root.id,
+      rootId: root.id,
+      gatewayJobId: gateway.id,
+      evidenceRunId: plan.run.id,
+      eligible: true,
+      outcome: 'APPLIED',
+    },
+    selectedWrite: {
+      ...correctionWriteFor(plan),
+      sourceId: source.id,
+      supplySourceId: root.id,
+    },
+    repairContext: context,
+    manifest: plan.manifest,
+    sourceStateSha256: plan.baseline.sourceStateSha256,
+    sourceState: plan.baseline.sourceState,
+    workingMappingState: plan.baseline.workingMappingState,
+    organizationState: plan.baseline.organizationState,
+    baseline: {
+      sourceStateSha256: plan.baseline.sourceStateSha256,
+      sourceState: plan.baseline.sourceState,
+      workingMappingState: plan.baseline.workingMappingState,
+      organizationState: plan.baseline.organizationState,
+    },
+    rootLifecycleGeneration: root.lifecycleGeneration,
+    artifactIds: plan.evidence.map((entry) => entry.artifactId).sort(),
+    evidenceSnapshots: plan.evidence,
+    pageSnapshots: plan.evidencePages.map((page) => ({
+      id: page.id,
+      intakeId: page.intakeId,
+      supplySourceId: page.supplySourceId,
+      url: page.url,
+      canonicalUrl: page.canonicalUrl,
+      status: page.status,
+      role: page.role ?? null,
+      targetKindHints: page.targetKindHints ?? [],
+      metadata: page.metadata ?? null,
+    })),
+    policySnapshots: plan.policySnapshots,
+    deploymentContract: bundle.deploymentContract,
+    legacyMappingJobState: {
+      status: currentJob.status,
+      sourceId: currentJob.sourceId,
+      mappingId: currentJob.mappingId,
+      supplySourceId: currentJob.supplySourceId,
+      claimedAt: currentJob.claimedAt ?? null,
+      leaseExpiresAt: currentJob.leaseExpiresAt ?? null,
+      workerId: currentJob.workerId ?? null,
+      nextStatus: AFFILIATE_EXISTING_DATA_REPAIR_LEGACY_HOLD_STATUS,
+    },
+    supersededMappingIds: report.supersededMappingIds,
+    supersededGatewayJobIds: report.supersededGatewayJobIds,
+    correctionPriorState: plan.prior,
+    createdIds: {
+      gatewayJobId: gateway.id,
+      mappingJobId: currentJob.id,
+      sourceId: source.id,
+      supplySourceId: root.id,
+      evidenceArtifactIds: plan.evidence.map((entry) => `intake-artifact:${entry.intakeArtifactId}`).sort(),
+    },
+  };
+  const sourceMetadata = { ...recordValue(source.metadata) };
+  const rootMetadata = { ...recordValue(root.metadata) };
+  delete sourceMetadata[AFFILIATE_EXISTING_DATA_REPAIR_PENDING_MAPPING_METADATA_KEY];
+  delete rootMetadata[AFFILIATE_EXISTING_DATA_REPAIR_PENDING_MAPPING_METADATA_KEY];
+  const sourceWithHold = metadataWithExistingDataRepairCorrectionHold({
+    ...sourceMetadata,
+    existingDataRepair: context,
+    [AFFILIATE_EXISTING_DATA_REPAIR_ADMISSION_METADATA_KEY]: sourceAudit,
+  }, hold);
+  const rootWithHold = metadataWithExistingDataRepairCorrectionHold({
+    ...rootMetadata,
+    existingDataRepair: context,
+    [AFFILIATE_EXISTING_DATA_REPAIR_ADMISSION_METADATA_KEY]: sourceAudit,
+  }, hold);
+  const sourceUpdate = await requiredWriteDelegateMethod(db, 'affiliateScrapeSources', 'updateMany')({
+    where: { id: source.id, supplySourceId: root.id },
+    data: { metadata: asJson(sourceWithHold) },
+  });
+  if (sourceUpdate.count !== 1) {
+    throw new AffiliateExistingDataRepairAdmissionError('SOURCE_CAS_FAILED', `Source ${source.id} changed during correction.`);
+  }
+  const rootUpdate = await requiredWriteDelegateMethod(db, 'affiliateSupplySources', 'updateMany')({
+    where: { id: root.id, identityKey: plan.identity.identityKey },
+    data: { metadata: asJson(rootWithHold) },
+  });
+  if (rootUpdate.count !== 1) {
+    throw new AffiliateExistingDataRepairAdmissionError('ROOT_CAS_FAILED', `Supply Source ${root.id} changed during correction.`);
+  }
+  for (const artifact of plan.artifacts) {
+    const update = await requiredWriteDelegateMethod(db, 'affiliateSourceIntakeArtifacts', 'updateMany')({
+      where: {
+        id: artifact.id,
+        intakeId: plan.intake.id,
+        runId: artifact.runId,
+        pageId: artifact.pageId,
+        fileId: artifact.fileId,
+        supplySourceId: artifact.supplySourceId ?? null,
+      },
+      data: { isPinned: true, retainUntil: null, supplySourceId: root.id },
+    });
+    if (update.count !== 1) {
+      throw new AffiliateExistingDataRepairAdmissionError('ARTIFACT_CAS_FAILED', `Artifact ${artifact.id} could not be retained.`);
+    }
+  }
+  const nextSummary = appendHistory(currentJob.resultSummary, sourceAudit as unknown as JsonRecord);
+  const jobUpdate = await requiredWriteDelegateMethod(db, 'affiliateSourceMappingJobs', 'updateMany')({
+    where: {
+      id: currentJob.id,
+      intakeId: plan.intake.id,
+      status: currentJob.status,
+      sourceId: currentJob.sourceId,
+      mappingId: currentJob.mappingId,
+      supplySourceId: currentJob.supplySourceId,
+      claimedAt: null,
+      workerId: null,
+      leaseExpiresAt: null,
+    },
+    data: {
+      sourceId: source.id,
+      supplySourceId: root.id,
+      mappingId: mapping?.id ?? currentJob.mappingId,
+      status: AFFILIATE_EXISTING_DATA_REPAIR_LEGACY_HOLD_STATUS,
+      legacyIdentityMigrationEligible: false,
+      resultSummary: asJson(nextSummary),
+    },
+  });
+  if (jobUpdate.count !== 1) {
+    throw new AffiliateExistingDataRepairAdmissionError('MAPPING_JOB_CAS_FAILED', `Mapping job ${currentJob.id} changed during correction.`);
+  }
+  await requiredWriteDelegateMethod(db, 'affiliateAgentGatewayEvents', 'create')({
+    data: {
+      id: createId(),
+      eventKey: `${AFFILIATE_EXISTING_REPAIR_PRODUCER_PREFIX}${gateway.id}:created`,
+      jobId: gateway.id,
+      claimId: null,
+      receiptId: null,
+      sequence: 1,
+      eventType: 'JOB_CREATED',
+      actorKind: 'OPERATOR',
+      actorId: operatorId,
+      role: 'MAPPING_PRODUCER',
+      requestHash: reportHash,
+      inputHash: plan.row.stateFingerprint,
+      outputHash: reportHash,
+      reasonCodes: ['EXISTING_DATA_REPAIR_CORRECTION'],
+      payload: asJson(sourceAudit),
+      retentionClass: 'INDEFINITE',
+    },
+  });
+  for (const oldGatewayJob of plan.supersededGatewayJobs) {
+    await cancelCorrectionGatewayJob(tx, oldGatewayJob, reportHash, operatorId, gateway.id);
+  }
+  void relations;
+  void currentRelations;
+  return {
+    jobId: gateway.id,
+    mappingJobId: currentJob.id,
+    sourceId: source.id,
+    supplySourceId: root.id,
+  };
+};
+
+export const applyAffiliateExistingDataRepairCorrection = async (
+  input: ApplyAffiliateExistingDataRepairCorrectionInput,
+): Promise<AffiliateExistingDataRepairCorrectionApplyReport> => {
+  const validated = validateInput(input);
+  const parsedBundle = parseBundle(input.bundle);
+  const expectedHash = normalizeHash(input.expectedReportHash);
+  if (!expectedHash) {
+    throw new AffiliateExistingDataRepairAdmissionError(
+      'INVALID_REPORT_HASH',
+      'expectedReportHash must be a SHA-256 hash.',
+    );
+  }
+  const transaction = transactionFor(input.prisma) as unknown as ((
+    callback: (tx: Client) => Promise<AffiliateExistingDataRepairCorrectionApplyReport>,
+    options?: unknown,
+  ) => Promise<AffiliateExistingDataRepairCorrectionApplyReport>) | null;
+  const execute = async (tx: Client): Promise<AffiliateExistingDataRepairCorrectionApplyReport> => {
+    if (!await tryLockAffiliateRepairWrites(tx)) {
+      throw new AffiliateExistingDataRepairAdmissionError(
+        'ACTIVE_SOURCE_ACTIVITY',
+        'Existing-data repair correction is blocked while ordinary affiliate source activity is in progress.',
+      );
+    }
+    await assertActiveContract(tx, parsedBundle);
+    await assertNoGlobalActiveGatewayClaims(tx);
+    await assertNoUnresolvedGatewayEffects(tx);
+    const replay = await correctionReplay(tx, input, parsedBundle, expectedHash);
+    if (replay) return replay;
+    const current = await buildCorrectionReport(tx, input, parsedBundle, 'APPLY');
+    if (current.report.reportHash !== expectedHash) {
+      throw new AffiliateExistingDataRepairAdmissionError(
+        'ADMISSION_REPORT_DRIFT',
+        'The reviewed existing-data repair correction report no longer matches current state.',
+        { expectedReportHash: expectedHash, observedReportHash: current.report.reportHash },
+      );
+    }
+    const appliedJobs: AffiliateExistingDataRepairAppliedJob[] = [];
+    for (const plan of current.plans) {
+      const relations = current.relationsByMappingJobId.get(plan.job.id);
+      if (!relations) {
+        throw new AffiliateExistingDataRepairAdmissionError(
+          'CLAIM_DRIFT',
+          `Prior Gateway relation state for ${plan.job.id} is unavailable.`,
+        );
+      }
+      appliedJobs.push(await applyCorrectionPlan(
+        tx,
+        plan,
+        current.report,
+        expectedHash,
+        validated.operatorId,
+        validated.reason,
+        parsedBundle,
+        validated.jobIds,
+        validated.sourceIds,
+        validated.limit,
+        relations,
+      ));
+    }
+    const appliedByMappingJobId = new Map(appliedJobs.map((job) => [job.mappingJobId, job]));
+    return {
+      ...current.report,
+      mode: 'APPLY',
+      reviewedReportHash: expectedHash,
+      writeCount: appliedJobs.length,
+      appliedJobs,
+      replayed: false,
+      rows: current.report.rows.map((row) => {
+        const applied = row.mappingJobId ? appliedByMappingJobId.get(row.mappingJobId) : undefined;
+        return applied
+          ? {
+            ...row,
+            outcome: 'APPLIED' as const,
+            gatewayJobId: applied.jobId,
+            sourceId: applied.sourceId,
+            supplySourceId: applied.supplySourceId,
+            rootId: applied.supplySourceId,
+          }
+          : row;
+      }),
+    };
+  };
+  if (transaction) {
+    return transaction((tx: Client) => execute(tx), {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      maxWait: 10_000,
+      timeout: 120_000,
+    });
+  }
+  return execute(input.prisma as unknown as Client);
+};
+
+export const calculateAffiliateExistingDataRepairCorrectionReportHash = (
+  report: Pick<
+    AffiliateExistingDataRepairCorrectionReport,
+    'contractVersion'
+    | 'contractHash'
+    | 'reason'
+    | 'operatorId'
+    | 'requestedJobIds'
+    | 'requestedSourceIds'
+    | 'evidenceSelections'
+    | 'selectionLimit'
+    | 'counts'
+    | 'selectedJobIds'
+    | 'rows'
+    | 'proposedWrites'
+    | 'supersededMappingIds'
+    | 'supersededGatewayJobIds'
+    | 'priorStates'
+  >,
+): string => correctionReportHashFor(report);
+
+const assertCorrectionAdmissionAudit = async (
+  db: AnyDelegate,
+  originJob: GatewayJobRow,
+  originManifest: AffiliateAgentEvidenceManifest,
+  originNode: CompletedGatewayNode | null,
+  context: AffiliateAgentExistingDataRepairContext,
+  mappingJob: MappingJobRow,
+  source: SourceRow,
+  root: RootRow,
+): Promise<void> => {
+  const contextRecord = context as unknown as JsonRecord;
+  const correction = recordValue(contextRecord.correction);
+  const priorAdmissionHash = normalizeHash(correction.priorAdmissionHash);
+  const priorPendingMappingHash = normalizeHash(correction.priorPendingMappingHash);
+  const originJobId = text(originJob.id);
+  if (!priorAdmissionHash || !priorPendingMappingHash || !originJobId) {
+    bindingError('The correction context does not contain immutable prior admission links.');
+  }
+  const sourceMetadata = recordValue(source.metadata);
+  const rootMetadata = recordValue(root.metadata);
+  const sourceHold = affiliateExistingDataRepairCorrectionHoldSchema.safeParse(
+    sourceMetadata[AFFILIATE_EXISTING_DATA_REPAIR_CORRECTION_HOLD_METADATA_KEY],
+  );
+  const rootHold = affiliateExistingDataRepairCorrectionHoldSchema.safeParse(
+    rootMetadata[AFFILIATE_EXISTING_DATA_REPAIR_CORRECTION_HOLD_METADATA_KEY],
+  );
+  const sourcePending = pendingMappingForMetadata(sourceMetadata);
+  const rootPending = pendingMappingForMetadata(rootMetadata);
+  const holdPresent = hasOwn(sourceMetadata, AFFILIATE_EXISTING_DATA_REPAIR_CORRECTION_HOLD_METADATA_KEY)
+    || hasOwn(rootMetadata, AFFILIATE_EXISTING_DATA_REPAIR_CORRECTION_HOLD_METADATA_KEY);
+  if (holdPresent) {
+    if (
+      !sourceHold.success
+      || !rootHold.success
+      || !sameValue(sourceHold.data, rootHold.data)
+      || sourceHold.data.sourceId !== source.id
+      || sourceHold.data.supplySourceId !== root.id
+      || sourceHold.data.mappingJobId !== mappingJob.id
+      || normalizeHash(sourceHold.data.admissionHash) !== context.admissionHash
+      || normalizeHash(sourceHold.data.priorPendingMappingHash) !== priorPendingMappingHash
+      || hasOwn(sourceMetadata, AFFILIATE_EXISTING_DATA_REPAIR_PENDING_MAPPING_METADATA_KEY)
+      || hasOwn(rootMetadata, AFFILIATE_EXISTING_DATA_REPAIR_PENDING_MAPPING_METADATA_KEY)
+    ) {
+      bindingError('The correction hold is not bound to the current repair context.');
+    }
+  } else if (!sourcePending || !rootPending || !sameValue(sourcePending, rootPending)
+    || sourcePending.admissionHash !== context.admissionHash
+    || sourcePending.mappingJobId !== mappingJob.id
+    || sourcePending.sourceId !== source.id
+    || sourcePending.supplySourceId !== root.id) {
+    bindingError('A correction requires its hold or a new pending mapping bound to the current admission.');
+  }
+  const sourceAudit = recordValue(sourceMetadata[AFFILIATE_EXISTING_DATA_REPAIR_ADMISSION_METADATA_KEY]);
+  const rootAudit = recordValue(rootMetadata[AFFILIATE_EXISTING_DATA_REPAIR_ADMISSION_METADATA_KEY]);
+  const report = recordValue(sourceAudit.reportSnapshot);
+  const reportRows = Array.isArray(report.rows) ? report.rows.map(recordValue) : [];
+  const reportWrites = Array.isArray(report.proposedWrites) ? report.proposedWrites.map(recordValue) : [];
+  const priorStates = correctionPriorStatesFromReport(report);
+  const reportSelectedJobIds = stringArray(report.selectedJobIds);
+  const recomputed = (
+    reportSelectedJobIds
+    && report.counts
+    && report.operation === 'CORRECTION'
+    && reportRows.length > 0
+    && reportWrites.length > 0
+  )
+    ? correctionReportHashFor({
+      contractVersion: Number(report.contractVersion),
+      contractHash: String(report.contractHash ?? ''),
+      reason: String(report.reason ?? ''),
+      operatorId: String(report.operatorId ?? ''),
+      requestedJobIds: report.requestedJobIds === null ? null : stringArray(report.requestedJobIds) ?? [],
+      requestedSourceIds: report.requestedSourceIds === null ? null : stringArray(report.requestedSourceIds) ?? [],
+      evidenceSelections: Array.isArray(report.evidenceSelections)
+        ? report.evidenceSelections as ExistingDataRepairEvidenceSelection[]
+        : null,
+      selectionLimit: Number(report.selectionLimit),
+      counts: recordValue(report.counts) as unknown as AffiliateExistingDataRepairAdmissionCounts,
+      selectedJobIds: reportSelectedJobIds,
+      rows: reportRows as unknown as AffiliateExistingDataRepairAdmissionRow[],
+      proposedWrites: reportWrites as unknown as AffiliateExistingDataRepairAdmissionWrite[],
+      supersededMappingIds: Array.isArray(report.supersededMappingIds)
+        ? report.supersededMappingIds.filter((value): value is string => typeof value === 'string')
+        : [],
+      supersededGatewayJobIds: Array.isArray(report.supersededGatewayJobIds)
+        ? report.supersededGatewayJobIds.filter((value): value is string => typeof value === 'string')
+        : [],
+      priorStates,
+    })
+    : null;
+  const priorState = priorStates.find((candidate) => candidate.mappingJobId === mappingJob.id);
+  const priorHistory = admissionHistory(mappingJob.resultSummary).filter((entry) => (
+    normalizeHash(entry.reportHash) === priorAdmissionHash
+    && text(entry.mappingJobId) === mappingJob.id
+    && sameValue(entry.repairContext, priorState?.context)
+  ));
+  const currentHistory = admissionHistory(mappingJob.resultSummary).filter((entry) => (
+    entry.operation === 'CORRECTION'
+    && normalizeHash(entry.reportHash) === context.admissionHash
+    && text(entry.mappingJobId) === mappingJob.id
+    && text(entry.gatewayJobId) === originJobId
+    && sameValue(entry.repairContext, context)
+  ));
+  const priorHistoryReferenceValid = Boolean(
+    priorState
+      && priorHistory.length === 1
+      && normalizeHash(priorState.admissionAuditReference.reportHash) === normalizeHash(priorHistory[0]?.reportHash)
+      && text(priorState.admissionAuditReference.gatewayJobId) === text(priorHistory[0]?.gatewayJobId)
+      && hash(priorHistory[0]) === priorState.admissionAuditReference.auditHash,
+  );
+  const created = recordValue(sourceAudit.createdIds);
+  const events = await delegateRows<JsonRecord>(db.affiliateAgentGatewayEvents, {
+    where: { jobId: originJobId, eventType: 'JOB_CREATED' },
+    orderBy: { id: 'asc' },
+    take: 2,
+  });
+  const event = events.length === 1 ? events[0]! : null;
+  if (
+    sourceAudit.operation !== 'CORRECTION'
+    || !sameValue(sourceAudit, rootAudit)
+    || normalizeHash(sourceAudit.reportHash) !== context.admissionHash
+    || !sameValue(sourceAudit.repairContext, context)
+    || !sameValue(recordValue(report).operation, 'CORRECTION')
+    || report.mode !== 'APPLY'
+    || report.reviewedReportHash !== null
+    || report.replayed !== false
+    || Number(report.writeCount) !== reportSelectedJobIds?.length
+    || !Array.isArray(report.appliedJobs)
+    || report.appliedJobs.length !== 0
+    || recomputed !== context.admissionHash
+    || !priorState
+    || priorState.admissionAuditReference.mappingJobId !== mappingJob.id
+    || priorState.admissionAuditReference.reportHash !== priorAdmissionHash
+    || priorState.pendingMappingHash !== priorPendingMappingHash
+    || priorHistory.length !== 1
+    || !priorHistoryReferenceValid
+    || currentHistory.length !== 1
+    || !sameValue(currentHistory[0], sourceAudit)
+    || text(sourceAudit.gatewayJobId) !== originJobId
+    || text(created.gatewayJobId) !== originJobId
+    || text(created.mappingJobId) !== mappingJob.id
+    || text(created.sourceId) !== source.id
+    || text(created.supplySourceId) !== root.id
+    || !sameValue(originJob.evidenceManifestJson, originManifest)
+    || !sameValue(recordValue(originJob.subjectJson).repairContext, context)
+    || (originNode && (
+      originNode.job.id !== originJob.id
+      || originNode.claim.parentClaimId !== null
+    ))
+    || !event
+    || text(event.eventKey) !== `${AFFILIATE_EXISTING_REPAIR_PRODUCER_PREFIX}${originJobId}:created`
+    || Number(event.sequence) !== 1
+    || upper(event.actorKind) !== 'OPERATOR'
+    || text(event.actorId) !== text(sourceAudit.operatorId)
+    || normalizeHash(event.requestHash) !== context.admissionHash
+    || normalizeHash(event.outputHash) !== context.admissionHash
+    || !sameValue(event.payload, sourceAudit)
+    || !sameValue(event.reasonCodes, ['EXISTING_DATA_REPAIR_CORRECTION'])
+  ) {
+    bindingError('The correction admission audit is not bound to the immutable correction proof.');
+  }
 };

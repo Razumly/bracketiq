@@ -98,6 +98,7 @@ export const AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_REASON_CODES = [
   "PACKAGE_SELECTOR_INVALID",
   "PACKAGE_NO_CANDIDATES",
   "PACKAGE_REQUIRED_FIELDS_MISSING",
+  "PACKAGE_ENTITY_ACTION_INVALID",
   "PACKAGE_SPORT_EVIDENCE_REQUIRED",
   "PACKAGE_CITATION_REFERENCE_MISSING",
   "SPORT_EVIDENCE_RUN_MISMATCH",
@@ -372,6 +373,13 @@ const gatewayReasonCodeFor = (
     case "The declarative package must map title and official action URL.":
     case "The declarative package output must include title and official action URL.":
       return "PACKAGE_REQUIRED_FIELDS_MISSING";
+    case "The source document does not represent the declared listing entity.":
+    case "The official action link points to navigation or unrelated editorial content.":
+    case "The official action link belongs to another candidate.":
+    case "The official action URL is not bound to an evidenced source link.":
+    case "The official action link does not establish a supported action purpose.":
+    case "The package entity or official action is not supported by its source.":
+      return "PACKAGE_ENTITY_ACTION_INVALID";
     case "Legacy sport repair packages require sportEvidence.":
       return "PACKAGE_SPORT_EVIDENCE_REQUIRED";
     case "Legacy sport citations must be included in package evidenceRefs.":

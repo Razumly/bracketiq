@@ -2,7 +2,10 @@ import {
   hashAffiliateAgentValue,
   type AffiliateAgentContractBundle,
 } from './agentGatewayContracts';
-import { pendingMappingForMetadata } from './affiliateExistingDataRepairState';
+import {
+  hasAffiliateExistingDataRepairCorrectionHold,
+  pendingMappingForMetadata,
+} from './affiliateExistingDataRepairState';
 import {
   AFFILIATE_EXISTING_DATA_REPAIR_EVIDENCE_ONLY_PURPOSE,
   affiliateExistingRepairAuthoritySnapshot,
@@ -656,6 +659,9 @@ const loadTargetStates = async (
         (String(root.id) === textValue(source?.supplySourceId) && textValue(root.liveSourceId) !== textValue(source?.id))
         || (textValue(root.liveSourceId) !== null && textValue(root.liveSourceId) !== textValue(source?.id))
       ) scopeReasonCodes.push('ROOT_SOURCE_OWNERSHIP_CONFLICT');
+      if (hasAffiliateExistingDataRepairCorrectionHold(root.metadata)) {
+        scopeReasonCodes.push('ACTIVE_EXISTING_DATA_REPAIR_CORRECTION_HOLD');
+      }
       if (Object.prototype.hasOwnProperty.call(record(root.metadata), 'pendingMapping')) scopeReasonCodes.push('ACTIVE_PENDING_ROOT_REPAIR');
       if (
         root.isExcluded === true
@@ -704,6 +710,9 @@ const loadTargetStates = async (
       ? pendingMappingForMetadata(source?.metadata) ?? sourceMetadata.pendingMapping ?? { malformed: true }
       : null;
     if (hasPendingMapping) scopeReasonCodes.push('ACTIVE_PENDING_MAPPING');
+    if (hasAffiliateExistingDataRepairCorrectionHold(sourceMetadata)) {
+      scopeReasonCodes.push('ACTIVE_EXISTING_DATA_REPAIR_CORRECTION_HOLD');
+    }
     const baseline = recordBaselineFor(reason, intake, pages, source, roots, policies, contract);
     const activeRuns = (runsByIntakeId.get(target.intakeId) ?? [])
       .filter((run) => (

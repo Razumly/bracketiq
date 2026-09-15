@@ -240,7 +240,7 @@ const packageAdapterFixtureFor = (
   const listingKind = options.listingKind ?? "EVENT";
   const evidenceBytes = Buffer.from(
     evidenceKind === "PAGE_HTML"
-      ? options.html ?? '<div class="event"><span class="title">Sample event</span><p class="description">Join weekly outdoor games with players of all skill levels.</p><a class="link" href="https://outbound.example.test/events/sample">Details</a></div>'
+      ? options.html ?? '<div class="event"><span class="title">Sample event</span><p class="description">Join weekly outdoor games with players of all skill levels.</p><a class="link" href="https://outbound.example.test/events/sample">Register</a></div>'
       : '# Sample event\n\n[Details](https://outbound.example.test/events/sample)',
     "utf8",
   );

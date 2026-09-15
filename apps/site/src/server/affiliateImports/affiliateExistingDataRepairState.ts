@@ -21,9 +21,12 @@ import { hasPublicAffiliateCandidate } from "./affiliateSourcePublicationSafety"
 export const AFFILIATE_EXISTING_DATA_REPAIR_METADATA_KEY = "existingDataRepair";
 export const AFFILIATE_EXISTING_DATA_REPAIR_PENDING_MAPPING_METADATA_KEY = "pendingMapping";
 export const AFFILIATE_EXISTING_DATA_REPAIR_ADMISSION_METADATA_KEY = "existingDataRepairAdmission";
+export const AFFILIATE_EXISTING_DATA_REPAIR_CORRECTION_HOLD_METADATA_KEY =
+  "existingDataRepairCorrectionHold" as const;
 export const AFFILIATE_EXISTING_DATA_REPAIR_LEGACY_HOLD_STATUS = "GOVERNED_REPAIR_PENDING";
 export const AFFILIATE_EXISTING_DATA_REPAIR_PENDING_MAPPING_KIND =
   "EXISTING_DATA_REPAIR_PENDING_MAPPING" as const;
+
 
 const identifierSchema = z.string().trim().min(1).max(200);
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/i);
@@ -39,6 +42,20 @@ const sortedUniqueStringsSchema = z.array(identifierSchema).superRefine((values,
     }
   }
 });
+const affiliateExistingDataRepairCorrectionHoldShape = {
+  schemaVersion: z.literal(1),
+  sourceId: identifierSchema,
+  supplySourceId: identifierSchema,
+  mappingJobId: identifierSchema,
+  admissionHash: sha256Schema,
+  priorPendingMappingHash: sha256Schema,
+} as const;
+export const affiliateExistingDataRepairCorrectionHoldSchema = z.object(
+  affiliateExistingDataRepairCorrectionHoldShape,
+).strict();
+export type AffiliateExistingDataRepairCorrectionHold = z.infer<
+  typeof affiliateExistingDataRepairCorrectionHoldSchema
+>;
 
 const affiliateExistingDataRepairPendingMappingShape = {
   schemaVersion: z.literal(1),
@@ -88,13 +105,13 @@ export type AffiliateExistingDataRepairSourceState = Readonly<{
   sourceStateSha256: string;
   workingMappingId: string | null;
   isPublicReplacement: boolean;
+  correctionHold: AffiliateExistingDataRepairCorrectionHold | null;
   sourceState: Readonly<Record<string, unknown>>;
   workingMappingState: Readonly<Record<string, unknown>> | null;
   organizationState: Readonly<Record<string, unknown>> | null;
   workingMappingStateSha256: string;
   organizationStateSha256: string | null;
 }>;
-
 export type AffiliateExistingRepairPrisma = Readonly<{
   affiliateScrapeSources: Readonly<{
     findUnique(args: { where: { id: string } }): Promise<AffiliateScrapeSources | null>;
@@ -126,6 +143,7 @@ const stableMetadata = (value: unknown): Readonly<Record<string, unknown>> => {
   delete metadata[AFFILIATE_EXISTING_DATA_REPAIR_METADATA_KEY];
   delete metadata[AFFILIATE_EXISTING_DATA_REPAIR_PENDING_MAPPING_METADATA_KEY];
   delete metadata[AFFILIATE_EXISTING_DATA_REPAIR_ADMISSION_METADATA_KEY];
+  delete metadata[AFFILIATE_EXISTING_DATA_REPAIR_CORRECTION_HOLD_METADATA_KEY];
   return metadata;
 };
 const AFFILIATE_EXISTING_REPAIR_PUBLIC_STATE_MAX_ROWS = 1_000;
@@ -508,8 +526,8 @@ const loadPublicState = async (
 
 /**
  * Capture the protected working state from the database. The hash excludes
- * row timestamps and the two server-owned repair metadata entries. It binds
- * the source, its current working mapping, and its organization state.
+ * row timestamps and server-owned repair metadata entries. It binds the source,
+ * its current working mapping, and its organization state.
  */
 export const captureAffiliateExistingRepairSourceState = async (
   prisma: AffiliateExistingRepairPrisma,
@@ -528,6 +546,37 @@ export const captureAffiliateExistingRepairSourceState = async (
   if (supplySourceId && (!root || root.id !== supplySourceId)) {
     throw new Error("Existing-data repair source backlink conflicts with the resolved Supply Source root.");
   }
+  const sourceHoldPresent = hasAffiliateExistingDataRepairCorrectionHold(source.metadata);
+  const rootHoldPresent = hasAffiliateExistingDataRepairCorrectionHold(root?.metadata);
+  const sourceCorrectionHold = correctionHoldForMetadata(source.metadata);
+  const rootCorrectionHold = correctionHoldForMetadata(root?.metadata);
+  if (sourceHoldPresent || rootHoldPresent) {
+    if (!root || !sourceHoldPresent || !rootHoldPresent || !sourceCorrectionHold || !rootCorrectionHold) {
+      throw new Error("Existing-data repair correction hold is malformed or one-sided.");
+    }
+    if (
+      !affiliateExistingDataRepairCorrectionHoldsMatch(sourceCorrectionHold, rootCorrectionHold)
+      || sourceCorrectionHold.sourceId !== source.id
+      || sourceCorrectionHold.supplySourceId !== root.id
+    ) {
+      throw new Error("Existing-data repair correction hold identity conflicts with the source/root pair.");
+    }
+  }
+  const sourcePendingPointerPresent = Object.prototype.hasOwnProperty.call(
+    recordValue(source.metadata),
+    AFFILIATE_EXISTING_DATA_REPAIR_PENDING_MAPPING_METADATA_KEY,
+  );
+  const rootPendingPointerPresent = Object.prototype.hasOwnProperty.call(
+    recordValue(root?.metadata),
+    AFFILIATE_EXISTING_DATA_REPAIR_PENDING_MAPPING_METADATA_KEY,
+  );
+  if (
+    (sourceHoldPresent || rootHoldPresent)
+    && (sourcePendingPointerPresent || rootPendingPointerPresent)
+  ) {
+    throw new Error("Existing-data repair correction hold cannot coexist with a pending mapping pointer.");
+  }
+  const correctionHold = sourceCorrectionHold ?? null;
   const workingMappingId = source.activeMappingId ?? null;
   const workingMapping = workingMappingId
     ? await prisma.affiliateScrapeMappings.findUnique({ where: { id: workingMappingId } })
@@ -572,6 +621,7 @@ export const captureAffiliateExistingRepairSourceState = async (
     sourceStateSha256,
     workingMappingId,
     isPublicReplacement,
+    correctionHold,
     sourceState,
     workingMappingState,
     organizationState,
@@ -631,6 +681,15 @@ export const metadataWithExistingDataRepairContext = (
 ): Record<string, unknown> => ({
   ...recordValue(metadata),
   [AFFILIATE_EXISTING_DATA_REPAIR_METADATA_KEY]: context,
+});
+
+export const metadataWithExistingDataRepairCorrectionHold = (
+  metadata: unknown,
+  hold: AffiliateExistingDataRepairCorrectionHold,
+): Record<string, unknown> => ({
+  ...recordValue(metadata),
+  [AFFILIATE_EXISTING_DATA_REPAIR_CORRECTION_HOLD_METADATA_KEY]:
+    affiliateExistingDataRepairCorrectionHoldSchema.parse(hold),
 });
 
 export const metadataWithPendingMapping = (
@@ -703,3 +762,37 @@ export const pendingMappingFor = (input: Readonly<{
 export const pendingMappingHash = (pendingMapping: AffiliateExistingDataRepairPendingMapping): string => (
   hashAffiliateAgentValue(pendingMapping)
 );
+export const hasAffiliateExistingDataRepairCorrectionHold = (
+  metadata: unknown,
+): boolean => Object.prototype.hasOwnProperty.call(
+  recordValue(metadata),
+  AFFILIATE_EXISTING_DATA_REPAIR_CORRECTION_HOLD_METADATA_KEY,
+);
+
+export const readAffiliateExistingDataRepairCorrectionHold = (
+  value: unknown,
+): AffiliateExistingDataRepairCorrectionHold | null => {
+  const parsed = affiliateExistingDataRepairCorrectionHoldSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+};
+
+export const correctionHoldForMetadata = (
+  metadata: unknown,
+): AffiliateExistingDataRepairCorrectionHold | null => (
+  readAffiliateExistingDataRepairCorrectionHold(
+    recordValue(metadata)[AFFILIATE_EXISTING_DATA_REPAIR_CORRECTION_HOLD_METADATA_KEY],
+  )
+);
+export const affiliateExistingDataRepairCorrectionHoldsMatch = (
+  left: AffiliateExistingDataRepairCorrectionHold | null,
+  right: AffiliateExistingDataRepairCorrectionHold | null,
+): boolean => {
+  if (!left || !right) return false;
+  return left.schemaVersion === right.schemaVersion
+    && left.sourceId === right.sourceId
+    && left.supplySourceId === right.supplySourceId
+    && left.mappingJobId === right.mappingJobId
+    && left.admissionHash.toLowerCase() === right.admissionHash.toLowerCase()
+    && left.priorPendingMappingHash.toLowerCase() === right.priorPendingMappingHash.toLowerCase();
+};
+
