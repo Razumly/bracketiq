@@ -2,7 +2,7 @@ import React, { useState, useCallback, useRef } from 'react';
 import { Alert, Button, Group, Stack, Text } from '@/components/organization/organization-operation-ui';
 import type { JoinIntent } from './eventDetail/eventRegistrationCommands';
 import { useEventSignupJourney } from './eventDetail/hooks/useEventSignupJourney';
-import { EventCheckoutContext, EventCheckoutModal } from './eventDetail/EventCheckoutLayout';
+import { EventCheckoutContext, EventCheckoutModal, EventCheckoutPage, type EventCheckoutPresentation } from './eventDetail/EventCheckoutLayout';
 import TeamCard from '@/components/ui/TeamCard';
 import { useRouter } from 'next/navigation';
 import {
@@ -44,6 +44,7 @@ interface EventDetailSheetProps {
     isOpen: boolean;
     onClose: () => void;
     renderInline?: boolean;
+    checkoutPresentation?: EventCheckoutPresentation;
     selectedOccurrence?: WeeklyOccurrenceSelection | null;
     onWeeklyOccurrenceChange?: (occurrence: { slotId: string; occurrenceDate: string } | null) => void;
     publicCompletion?: {
@@ -61,6 +62,7 @@ export default function EventDetailSheet({
     isOpen,
     onClose,
     renderInline = false,
+    checkoutPresentation = 'modal',
     selectedOccurrence = null,
     onWeeklyOccurrenceChange,
     publicCompletion,
@@ -68,6 +70,14 @@ export default function EventDetailSheet({
     const todayForDob = new Date();
     const [checkoutOpened, setCheckoutOpened] = useState(false);
     const [checkoutIntent, setCheckoutIntent] = useState<JoinIntent | null>(null);
+    const registrationTriggerId = React.useId();
+    const restoreRegistrationFocus = useRef(false);
+    React.useEffect(() => {
+        if (!checkoutOpened && restoreRegistrationFocus.current) {
+            document.getElementById(registrationTriggerId)?.focus();
+            restoreRegistrationFocus.current = false;
+        }
+    }, [checkoutOpened, registrationTriggerId]);
     const reviewSubmitting = useRef(false);
     const presentationController = useEventDetailPresentationController();
     const {
@@ -132,7 +142,10 @@ export default function EventDetailSheet({
         showSignModal,
         paymentPlanPreview,
     } = registrationWorkflowController;
-    const joinCardDocking = useJoinCardDocking({ active: isActive, inline: renderInline });
+    const joinCardDocking = useJoinCardDocking({
+        active: isActive && !(checkoutOpened && checkoutPresentation === 'page'),
+        inline: renderInline,
+    });
 
     const weeklyModel = useWeeklyEventSelectionModel({
         event: currentEvent,
@@ -502,6 +515,7 @@ export default function EventDetailSheet({
             childrenError={childrenError}
             childrenLoading={childrenLoading}
             currentEvent={currentEvent}
+            checkoutPresentation={checkoutPresentation}
             currentUserPaymentFailed={currentUserPaymentFailed}
             divisionModel={divisionRegistrationModel}
             eventTeams={teams}
@@ -579,7 +593,11 @@ export default function EventDetailSheet({
         || registrationWorkflowController.showCheckoutPreviewModal || registrationWorkflowController.showBillingAddressModal
         || registrationWorkflowController.showPaymentModal || registrationWorkflowController.showManualPaymentModal
         || Boolean(registrationWorkflowController.paymentPlanPreview);
-    const registrationPanel = <Button fullWidth size="md" onClick={() => { setCheckoutIntent(null); setCheckoutOpened(true); }}>
+    const registrationPanel = <Button id={registrationTriggerId} fullWidth size="md" onClick={() => {
+        restoreRegistrationFocus.current = checkoutPresentation === 'page';
+        setCheckoutIntent(null);
+        setCheckoutOpened(true);
+    }}>
         {checkoutController.progress.state?.draft ? 'Continue registration' : 'Register'}
     </Button>;
     const content = (
@@ -622,25 +640,41 @@ export default function EventDetailSheet({
         />
     );
 
+    const checkoutContent = <>
+        {isLoadingEvent ? <Text role="status" size="sm" c="dimmed">Loading event details...</Text> : null}
+        {joinError ? <Alert color="red">{joinError}</Alert> : null}
+        {joinNotice ? <Alert color="blue">{joinNotice}</Alert> : null}
+        {registrationSteps}
+    </>;
+    const selectedCheckoutTeam = checkoutIntent?.mode === 'user_free_agent'
+        ? undefined : userTeams.find((team) => team.$id === selectedTeamId);
+
     return (
         <EventCheckoutContext.Provider value={{
             eventName: currentEvent.name,
             isTeamRegistration: isTeamSignup,
             imageUrl: eventImageUrl,
             divisionName: selectedDivisionOption?.name,
+            sportLabel: publicModel.sportLabel,
+            scheduleLabel: publicModel.eventScheduleDisplayText,
+            locationLabel: publicModel.eventLocationSummary,
+            rosterLabel: isTeamSignup && selectedCheckoutTeam
+                ? `${selectedCheckoutTeam.playerIds.length} of ${selectedCheckoutTeam.teamSize} players` : undefined,
             registrantName: checkoutIntent?.mode === 'user_free_agent' ? 'You · Free agent' : isTeamSignup
-                ? userTeams.find((team) => team.$id === selectedTeamId)?.name
+                ? selectedCheckoutTeam?.name
                 : selectedChildId
                     ? participantModel.childOptions.find((child) => child.value === selectedChildId)?.label
                     : [user?.firstName, user?.lastName].filter(Boolean).join(' '),
             priceCents: checkoutIntent?.mode === 'user_free_agent' ? 0 : selectedDivisionBilling.priceCents,
         }}>
-            {content}
-            {checkoutOpened ? <EventCheckoutModal opened={!workflowStepOpened && !finalReview && !signupJourney.dialogOpened}
+            {checkoutOpened && checkoutPresentation === 'page' ? (
+                <EventCheckoutPage onBack={() => setCheckoutOpened(false)}>
+                    {checkoutContent}
+                </EventCheckoutPage>
+            ) : content}
+            {checkoutOpened && checkoutPresentation === 'modal' ? <EventCheckoutModal opened={!workflowStepOpened && !finalReview && !signupJourney.dialogOpened}
                 onClose={() => setCheckoutOpened(false)} title={isTeamSignup ? 'Team registration' : 'Event checkout'} step="Entry" centered zIndex={1700}>
-                {joinError ? <Alert color="red">{joinError}</Alert> : null}
-                {joinNotice ? <Alert color="blue">{joinNotice}</Alert> : null}
-                {registrationSteps}
+                {checkoutContent}
             </EventCheckoutModal> : null}
             {registrationDialogs}
             <EventDetailOverlays

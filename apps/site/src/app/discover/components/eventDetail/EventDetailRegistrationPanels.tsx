@@ -16,6 +16,7 @@ import type { useWeeklyEventSelectionModel } from './hooks/useWeeklyEventSelecti
 import { ChildRegistrationPanel } from './ChildRegistrationPanel';
 import { EventIndividualRegistrationPanel } from './EventIndividualRegistrationPanel';
 import { EventTeamRegistrationPanel } from './EventTeamRegistrationPanel';
+import type { EventCheckoutPresentation } from './EventCheckoutLayout';
 
 const SHEET_POPOVER_Z_INDEX = 1800;
 const sharedComboboxProps = { withinPortal: true, zIndex: SHEET_POPOVER_Z_INDEX };
@@ -24,6 +25,7 @@ type EventDetailRegistrationPanelsProps = {
     childrenError: string | null;
     childrenLoading: boolean;
     currentEvent: Event;
+    checkoutPresentation?: EventCheckoutPresentation;
     currentUserPaymentFailed: boolean;
     divisionModel: ReturnType<typeof useEventDivisionRegistrationModel>;
     eventTeams: Team[];
@@ -84,6 +86,7 @@ export const EventDetailRegistrationPanels = ({
     childrenError,
     childrenLoading,
     currentEvent,
+    checkoutPresentation = 'modal',
     currentUserPaymentFailed,
     divisionModel,
     eventTeams,
@@ -196,6 +199,7 @@ export const EventDetailRegistrationPanels = ({
             <EventTeamRegistrationPanel
                 eventHasStarted={divisionModel.eventHasStarted}
                 eventName={currentEvent.name}
+                checkoutPresentation={checkoutPresentation}
                 selectedWeeklySession={Boolean(weeklyModel.isWeeklyParentEvent && weeklyModel.selectedWeeklyOccurrenceOption)}
                 showTeamJoinOptions={true}
                 isLoadingTeams={isLoadingTeams}

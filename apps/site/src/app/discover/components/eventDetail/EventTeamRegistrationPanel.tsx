@@ -4,10 +4,13 @@ import { Alert, Avatar, Badge, Button, Paper, Radio, Text } from '@/components/o
 import type { Team } from '@/types';
 import { getTeamAvatarUrl } from '@/types';
 import { cn } from '@/lib/utils';
+import type { EventCheckoutPresentation } from './EventCheckoutLayout';
+import styles from './EventCheckoutLayout.module.css';
 
 type EventTeamRegistrationPanelProps = {
     eventHasStarted: boolean;
     eventName: string;
+    checkoutPresentation?: EventCheckoutPresentation;
     selectedWeeklySession: boolean;
     showTeamJoinOptions: boolean;
     isLoadingTeams: boolean;
@@ -51,6 +54,7 @@ type EventTeamRegistrationPanelProps = {
 export function EventTeamRegistrationPanel({
     eventHasStarted,
     eventName,
+    checkoutPresentation = 'modal',
     selectedWeeklySession,
     showTeamJoinOptions,
     isLoadingTeams,
@@ -91,6 +95,7 @@ export function EventTeamRegistrationPanel({
     onViewBracket,
 }: EventTeamRegistrationPanelProps) {
     const selectionId = useId();
+    const isPage = checkoutPresentation === 'page';
     const selectedTeam = userTeams.find((team) => team.$id === selectedTeamId);
     const selectionDisabled = joining || confirmingPurchase || eventHasStarted || weeklySelectionRequired;
     const selectionReason = weeklySelectionRequired
@@ -109,9 +114,9 @@ export function EventTeamRegistrationPanel({
 
 
             {showTeamJoinOptions ? (
-                <Paper withBorder p="md" radius="md" className="space-y-4">
-                    <div>
-                        <Text component="h2" size="xl" fw={700}>Choose a team</Text>
+                <Paper withBorder p="md" radius="md" className={cn('space-y-4', isPage && styles.teamPanel)}>
+                    <div className={isPage ? styles.teamHeading : undefined}>
+                        <Text component="h2" size="xl" fw={700}>{isPage ? 'Select a team' : 'Choose a team'}</Text>
                         <Text c="dimmed" size="sm">Register for {eventName}. Choose a team you manage or create a new team{sportName ? ` for ${sportName}` : ''}.</Text>
                     </div>
                     {isLoadingTeams ? (
@@ -125,17 +130,18 @@ export function EventTeamRegistrationPanel({
                                             'flex min-h-20 items-center gap-3 rounded-xl border p-4 focus-within:ring-2 focus-within:ring-ring',
                                             team.$id === selectedTeamId ? 'border-primary bg-primary/5' : 'border-border bg-background',
                                             selectionDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:border-primary',
+                                            isPage && styles.teamOption,
                                         )}>
                                             <Radio value={team.$id} aria-label={team.name} aria-describedby={`${selectionId}-help`} disabled={selectionDisabled} />
-                                            <Avatar src={getTeamAvatarUrl(team, 48)} name={team.name} alt="" />
+                                            <Avatar src={getTeamAvatarUrl(team, 48)} name={team.name} alt="" className={isPage ? styles.teamAvatar : undefined} />
                                             <span className="min-w-0 flex-1">
-                                                <span className="block font-semibold text-foreground">{team.name}</span>
+                                                <span className="block break-words font-semibold text-foreground">{team.name}</span>
                                                 <span className="block text-sm text-muted-foreground">
                                                     {team.sport}{team.sport ? ' · ' : ''}{team.playerIds.length} of {team.teamSize} players
                                                     {team.pending.length > 0 ? ` · ${team.pending.length} pending` : ''}
                                                 </span>
                                             </span>
-                                            {team.$id === selectedTeamId ? <Badge className="shrink-0">Selected</Badge> : null}
+                                            {team.$id === selectedTeamId ? <Badge className={cn('shrink-0', isPage && styles.selectedBadge)}>Selected</Badge> : null}
                                         </label>
                                     ))}
                                 </div>
@@ -147,7 +153,7 @@ export function EventTeamRegistrationPanel({
                                 <Button variant="subtle" onClick={onManageTeams} disabled={joining || eventHasStarted || weeklySelectionRequired}>Create team</Button>
                             </div>
 
-                            <Text id={`${selectionId}-help`} size="sm" c="dimmed">
+                            <Text id={`${selectionId}-help`} size="sm" c="dimmed" className={isPage ? styles.teamHelp : undefined}>
                                 {selectionReason ?? 'Players are optional. Invitations remain pending until each person accepts.'}
                             </Text>
                             <div className="flex flex-col items-stretch gap-2 pt-2 sm:items-end">
@@ -184,6 +190,7 @@ export function EventTeamRegistrationPanel({
                                             || selectedTeamIsRegistered
                                         }
                                         color={selectedTeamIsRegistered ? 'gray' : 'green'}
+                                        size={isPage ? 'lg' : 'md'}
                                     >
                                         {eventHasStarted
                                             ? 'Unavailable'
@@ -266,11 +273,12 @@ export function EventTeamRegistrationPanel({
                     type="button"
                     onClick={onJoinFreeAgents}
                     disabled={joining || Boolean(freeAgentJoinBlockedReason)}
-                    className={`min-h-11 w-full rounded-lg px-4 py-2 font-medium text-white transition-colors ${
-                        joining || freeAgentJoinBlockedReason
-                            ? 'cursor-not-allowed bg-gray-400'
-                            : 'bg-purple-600 hover:bg-purple-700'
-                    }`}
+                    className={cn('min-h-11 w-full rounded-lg px-4 py-2 font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+                        isPage
+                            ? cn(styles.secondaryAction, (joining || freeAgentJoinBlockedReason) && 'cursor-not-allowed opacity-50')
+                            : cn('text-white', joining || freeAgentJoinBlockedReason
+                                ? 'cursor-not-allowed bg-gray-400' : 'bg-purple-600 hover:bg-purple-700'),
+                    )}
                 >
                     {joining
                         ? (isMinor ? 'Sending…' : 'Adding…')

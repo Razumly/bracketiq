@@ -14,7 +14,9 @@ jest.mock('next/image', () => ({
 }));
 
 jest.mock('next/navigation', () => ({
-  useRouter: () => ({ push: jest.fn() }),
+  useRouter: () => ({ push: jest.fn(), replace: jest.fn() }),
+  usePathname: () => '/o/river-city/events/team-registration',
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 jest.mock('@/app/providers', () => ({
@@ -116,6 +118,7 @@ jest.mock('@/components/ui/RefundSection', () => () => null);
 jest.mock('@/components/ui/UserCard', () => () => null);
 
 import EventDetailSheet from '../EventDetailSheet';
+import EventRegistrationClient from '@/app/o/[slug]/events/[eventId]/EventRegistrationClient';
 import { useApp } from '@/app/providers';
 import { billingAddressService } from '@/lib/billingAddressService';
 import { billService } from '@/lib/billService';
@@ -231,6 +234,61 @@ describe('EventDetailSheet payment-plan team join', () => {
       participantCapacity: null,
       divisionWarnings: [],
     });
+  });
+
+  it('keeps the selected team when returning from the public checkout page and its player dialog', async () => {
+    const event = buildEvent({
+      name: 'Fall Tip-Off Classic',
+      eventType: 'EVENT',
+      teamSignup: true,
+      start: '2099-09-19T14:00:00Z',
+      end: '2099-09-20T20:00:00Z',
+      price: 45000,
+      requiredTemplateIds: [],
+    });
+    const user = buildUser({ $id: 'captain', dateOfBirth: '1990-01-01' });
+    const teams = [
+      buildTeam({ $id: 'cascade', name: 'Cascade Crew', captainId: user.$id }),
+      buildTeam({ $id: 'north', name: 'North Loop', captainId: user.$id }),
+    ];
+    draftState = {
+      ...draftState,
+      eligibleTeams: teams.map((team) => ({ id: team.$id, name: team.name, sport: team.sport ?? null })),
+    };
+    (useApp as jest.Mock).mockReturnValue({
+      user, authUser: { $id: user.$id, email: 'captain@example.test' },
+      isAuthenticated: true, isGuest: false, loading: false,
+    });
+    jest.mocked(familyService.listChildren).mockResolvedValue([]);
+    jest.mocked(eventService.getEventWithRelations).mockResolvedValue(event);
+    jest.mocked(eventService.getEvent).mockResolvedValue(event);
+    jest.mocked(teamService.getTeamsByIds).mockResolvedValue(teams);
+    jest.mocked(userService.getUsersByIds).mockResolvedValue([]);
+    renderWithMantine(<EventRegistrationClient event={event} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Register$/ }));
+    const page = screen.getByRole('region', { name: 'Choose a team' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(within(page).getByRole('heading', { level: 1 })).toHaveFocus();
+    const selectedOption = await within(page).findByRole('radio', { name: 'North Loop' });
+    await waitFor(() => expect(selectedOption).toBeEnabled());
+    fireEvent.click(selectedOption);
+    await waitFor(() => expect(within(page).getByRole('button', { name: 'Continue registration' })).toBeEnabled());
+    expect(selectedOption).toBeChecked();
+    expect(within(within(page).getByRole('complementary', { name: 'Registration summary' })).getByText('North Loop')).toBeInTheDocument();
+
+    fireEvent.click(within(page).getByRole('button', { name: 'Continue registration' }));
+    const players = await screen.findByRole('dialog', { name: 'Add players (optional)' });
+    expect(within(players).getByRole('heading', { name: 'North Loop' })).toBeInTheDocument();
+    fireEvent.click(within(players).getByRole('button', { name: 'Back to teams' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: `Back to ${event.name}` }));
+    const resumeButton = await screen.findByRole('button', { name: 'Continue registration' });
+    expect(resumeButton).toHaveFocus();
+    expect(screen.queryByRole('region', { name: 'Choose a team' })).not.toBeInTheDocument();
+    fireEvent.click(resumeButton);
+    expect(screen.getByRole('radio', { name: 'North Loop' })).toBeChecked();
+    expect(paymentService.joinEvent).not.toHaveBeenCalled();
   });
 
   it('lists tournament bracket divisions, not generated pools, for tournament pool registration', async () => {
