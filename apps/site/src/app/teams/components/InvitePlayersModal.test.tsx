@@ -1,5 +1,4 @@
 import React from 'react';
-import type * as MantineCore from '@mantine/core';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 
 import { ApiRequestError } from '@/lib/apiClient';
@@ -9,49 +8,6 @@ import type { Invite, Team, UserData } from '@/types';
 import { renderWithMantine } from '../../../../test/utils/renderWithMantine';
 import InvitePlayersModal from './InvitePlayersModal';
 
-const mockShowNotification = jest.fn();
-jest.mock('@mantine/core', () => {
-  const actual = jest.requireActual<typeof MantineCore>('@mantine/core');
-  const ScrollAreaMock = Object.assign(
-    ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-    {
-      Autosize: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-    },
-  );
-  return {
-    ...actual,
-    ScrollArea: ScrollAreaMock,
-    SegmentedControl: ({
-      data,
-      value,
-      onChange,
-    }: {
-      data: Array<{ label: string; value: string }>;
-      value: string;
-      onChange: (value: string) => void;
-    }) => React.createElement(
-      'div',
-      { role: 'radiogroup' },
-      data.map((item) => React.createElement(
-        'button',
-        {
-          key: item.value,
-          type: 'button',
-          'aria-pressed': item.value === value,
-          onClick: () => onChange(item.value),
-        },
-        item.label,
-      )),
-    ),
-  };
-});
-
-jest.mock('@mantine/notifications', () => ({
-  Notifications: () => null,
-  notifications: {
-    show: (...args: unknown[]) => mockShowNotification(...args),
-  },
-}));
 
 jest.mock('@/lib/teamService', () => ({
   teamService: {
@@ -153,7 +109,6 @@ describe('InvitePlayersModal player invite failures', () => {
   });
 
   beforeEach(() => {
-    mockShowNotification.mockReset();
     teamServiceMock.inviteUserToTeamRole.mockReset();
     teamServiceMock.createTeamMemberInvite.mockReset();
     teamServiceMock.getTeamById.mockReset();
@@ -261,39 +216,20 @@ describe('InvitePlayersModal player invite failures', () => {
     expect(screen.getByRole('button', { name: 'Save Player Invite' })).toBeDisabled();
   });
 
-  it('surfaces the exact capacity conflict and does not report success', async () => {
-    const capacityError = new ApiRequestError(
-      'Team is full. Player invite was not sent.',
-      409,
-      {},
-    );
-    teamServiceMock.inviteUserToTeamRole.mockRejectedValue(capacityError);
+  it('keeps a failed account invitation available for retry without claiming success', async () => {
+    const capacityError = new ApiRequestError('Team is full. Player invite was not sent.', 409, {});
+    teamServiceMock.inviteUserToTeamRole.mockRejectedValueOnce(capacityError).mockResolvedValueOnce(true);
     const onPlayerInviteSent = jest.fn();
-
     await openUserSearch(onPlayerInviteSent);
     fireEvent.click(screen.getByRole('button', { name: 'Invite' }));
-
-    await waitFor(() => expect(mockShowNotification).toHaveBeenCalledWith({
-      color: 'red',
-      message: 'Team is full. Player invite was not sent.',
-    }));
+    expect(await screen.findByText(capacityError.message)).toBeInTheDocument();
     expect(onPlayerInviteSent).not.toHaveBeenCalled();
-    expect(mockShowNotification).not.toHaveBeenCalledWith(expect.objectContaining({ color: 'green' }));
-  });
-
-  it('keeps the generic notification for a false result', async () => {
-    teamServiceMock.inviteUserToTeamRole.mockResolvedValue(false);
-
-    await openUserSearch();
     fireEvent.click(screen.getByRole('button', { name: 'Invite' }));
-
-    await waitFor(() => expect(mockShowNotification).toHaveBeenCalledWith({
-      color: 'red',
-      message: 'Failed to send invite.',
-    }));
+    await waitFor(() => expect(onPlayerInviteSent).toHaveBeenCalledWith(buildUser()));
+    expect(screen.queryByRole('button', { name: 'Invite', exact: true })).not.toBeInTheDocument();
   });
 
-  it('runs the success callback and notification for a successful invite', async () => {
+  it('removes a successfully invited account from candidates', async () => {
     const onPlayerInviteSent = jest.fn();
     const user = buildUser();
     const team = buildTeam();
@@ -316,9 +252,78 @@ describe('InvitePlayersModal player invite failures', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Invite' }));
 
     await waitFor(() => expect(onPlayerInviteSent).toHaveBeenCalledWith(buildUser()));
-    expect(mockShowNotification).toHaveBeenCalledWith({
-      color: 'green',
-      message: 'Player invite sent to Jane Doe.',
+    expect(screen.queryByRole('button', { name: 'Invite', exact: true })).not.toBeInTheDocument();
+    expect(screen.getByText(/Jane Doe's invitation is saved and pending acceptance/)).toBeInTheDocument();
+  });
+
+  it('retains a saved invite and private link through delivery and roster-refresh failures', async () => {
+    const onClose = jest.fn();
+    teamServiceMock.createTeamMemberInvite.mockResolvedValue({
+      ok: true, invite: { $id: 'saved-invite' }, shareUrl: 'https://bracket-iq.com/i/saved-invite',
+      delivery: { attempted: true, failed: true, inviteIds: ['saved-invite'] },
     });
+    teamServiceMock.getTeamById.mockRejectedValueOnce(new Error('Roster unavailable')).mockResolvedValue(buildTeam());
+    const clipboard = jest.fn().mockRejectedValue(new Error('Clipboard unavailable'));
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: clipboard }, configurable: true });
+    renderWithMantine(<InvitePlayersModal isOpen onClose={onClose} team={buildTeam()}
+      eventRegistration={{ eventId: 'event_1' }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'New Person' }));
+    fireEvent.change(screen.getByLabelText(/First name/), { target: { value: 'Jane' } });
+    fireEvent.change(screen.getByLabelText(/Last name/), { target: { value: 'Doe' } });
+    fireEvent.change(screen.getByLabelText('Email (optional)'), { target: { value: 'jane@example.com' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send Player Invite' }));
+    expect(await screen.findByLabelText('Private invite link')).toHaveValue('https://bracket-iq.com/i/saved-invite');
+    expect(await screen.findByRole('button', { name: 'Reload roster' })).toBeEnabled();
+    expect(screen.getByLabelText(/First name/)).toHaveValue('');
+    fireEvent.click(screen.getByRole('button', { name: 'Copy Invite Link' }));
+    expect(await screen.findByText(/Select and copy the link below/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Reload roster' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Reload roster' })).not.toBeInTheDocument());
+    expect(teamServiceMock.createTeamMemberInvite).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText('Private invite link')).toHaveValue('https://bracket-iq.com/i/saved-invite');
+    fireEvent.click(screen.getByRole('button', { name: 'Back to registration' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not lose an account invitation when its saved roster callback fails', async () => {
+    const onPlayerInviteSent = jest.fn().mockRejectedValueOnce(new Error('Roster unavailable')).mockResolvedValueOnce(undefined);
+    userServiceMock.searchUsers.mockResolvedValue([buildUser()]);
+    userServiceMock.getUserById.mockResolvedValue(buildUser());
+    teamServiceMock.createTeamMemberInvite.mockResolvedValue({
+      ok: true, invite: { $id: 'saved-account-invite' }, delivery: { attempted: true, failed: true, inviteIds: ['saved-account-invite'] },
+    });
+    renderWithMantine(<InvitePlayersModal isOpen onClose={jest.fn()} team={buildTeam()}
+      eventRegistration={{ eventId: 'event_1' }} onPlayerInviteSent={onPlayerInviteSent} />);
+    fireEvent.change(screen.getByLabelText('Search player'), { target: { value: 'Jane' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Invite', exact: true }));
+    expect(await screen.findByRole('button', { name: 'Reload roster' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Invite', exact: true })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Reload roster' }));
+    await waitFor(() => expect(onPlayerInviteSent).toHaveBeenCalledTimes(2));
+    expect(teamServiceMock.createTeamMemberInvite).toHaveBeenCalledTimes(1);
+    expect(teamServiceMock.inviteUserToTeamRole).not.toHaveBeenCalled();
+  });
+
+  it('counts a new event player once when the roster refresh includes the saved profile', async () => {
+    const team = buildTeam({ playerIds: ['captain'], teamSize: 3 });
+    teamServiceMock.createTeamMemberInvite.mockResolvedValue({
+      ok: true, invite: { $id: 'saved-invite', userId: 'new-player', firstName: 'Jane', lastName: 'Doe' },
+    });
+    teamServiceMock.getTeamById.mockResolvedValue({ ...team, pending: ['new-player'] });
+    function RegistrationInvites() {
+      const [current, setCurrent] = React.useState(team);
+      return <InvitePlayersModal isOpen onClose={jest.fn()} team={current} onTeamUpdated={setCurrent}
+        eventRegistration={{ eventId: 'event_1' }} />;
+    }
+    renderWithMantine(<RegistrationInvites />);
+    fireEvent.click(screen.getByRole('tab', { name: 'New Person' }));
+    fireEvent.change(screen.getByLabelText(/First name/), { target: { value: 'Jane' } });
+    fireEvent.change(screen.getByLabelText(/Last name/), { target: { value: 'Doe' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Player Invite' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Back to registration' })).toBeEnabled());
+    fireEvent.change(screen.getByLabelText(/First name/), { target: { value: 'Alex' } });
+    fireEvent.change(screen.getByLabelText(/Last name/), { target: { value: 'Smith' } });
+    expect(screen.getByRole('button', { name: 'Save Player Invite' })).toBeEnabled();
+    expect(screen.queryByText(/3 of 3 player slots filled/)).not.toBeInTheDocument();
   });
 });

@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef } from 'react';
-import { Alert, Button, Group, Stack, Text } from '@mantine/core';
+import { Alert, Button, Group, Stack, Text } from '@/components/organization/organization-operation-ui';
 import type { JoinIntent } from './eventDetail/eventRegistrationCommands';
 import { useEventSignupJourney } from './eventDetail/hooks/useEventSignupJourney';
 import { EventCheckoutContext, EventCheckoutModal } from './eventDetail/EventCheckoutLayout';
@@ -167,7 +167,11 @@ export default function EventDetailSheet({
         clearProgress: clearEventRegistrationProgress,
         prepareCheckout: prepareEventCheckout,
     } = checkoutController;
-    const signupJourney = useEventSignupJourney({ event: currentEvent, user, progress: checkoutController.progress, selectedTeamId });
+    const signupJourney = useEventSignupJourney({
+        event: currentEvent, user, progress: checkoutController.progress, selectedTeamId,
+        onTeamSelected: setSelectedTeamId,
+        onContinueToReview: (team) => { void joinActions.handleJoinAsTeam(false, team); },
+    });
     const userTeams = currentEvent.teamSignup ? signupJourney.teams : locallyManagedTeams;
     const isLoadingTeams = currentEvent.teamSignup
         ? checkoutController.progress.loading || signupJourney.loadingTeams : localTeamsLoading;
@@ -511,12 +515,15 @@ export default function EventDetailSheet({
             onAddPlayers={() => { void signupJourney.addPlayers(); }}
             onEditTeam={signupJourney.editTeam}
             hasDraft={Boolean(checkoutController.progress.state?.draft && !checkoutController.progress.state.draft.completedAt)}
-            onResumePreparation={signupJourney.preparationStep ? () => { void signupJourney.resumePreparation(); } : undefined}
+            onResumePreparation={signupJourney.preparationStep
+                ? () => { void signupJourney.resumePreparation(); }
+                : !checkoutController.progress.state?.draft?.completedSteps.includes('players')
+                    ? () => { void signupJourney.addPlayers(); } : undefined}
             onSelectedChildChange={(childId) => { setSelectedChildId(childId); setCheckoutIntent(null); }}
             onSelectedTeamChange={(teamId) => {
                 setCheckoutIntent(null);
                 setSelectedTeamId(teamId);
-                saveEventRegistrationProgress({ selectedTeamId: teamId || null });
+                saveEventRegistrationProgress({ selectedTeamId: teamId || null, step: 'players' });
             }}
             onViewBracket={navigationController.viewBracket}
             onViewSchedule={navigationController.viewSchedule}
@@ -618,6 +625,7 @@ export default function EventDetailSheet({
     return (
         <EventCheckoutContext.Provider value={{
             eventName: currentEvent.name,
+            isTeamRegistration: isTeamSignup,
             imageUrl: eventImageUrl,
             divisionName: selectedDivisionOption?.name,
             registrantName: checkoutIntent?.mode === 'user_free_agent' ? 'You · Free agent' : isTeamSignup
@@ -628,8 +636,8 @@ export default function EventDetailSheet({
             priceCents: checkoutIntent?.mode === 'user_free_agent' ? 0 : selectedDivisionBilling.priceCents,
         }}>
             {content}
-            {checkoutOpened ? <EventCheckoutModal keepMounted opened={!workflowStepOpened && !finalReview && !signupJourney.dialogOpened}
-                onClose={() => setCheckoutOpened(false)} title="Event checkout" step="Entry" centered zIndex={1700}>
+            {checkoutOpened ? <EventCheckoutModal opened={!workflowStepOpened && !finalReview && !signupJourney.dialogOpened}
+                onClose={() => setCheckoutOpened(false)} title={isTeamSignup ? 'Team registration' : 'Event checkout'} step="Entry" centered zIndex={1700}>
                 {joinError ? <Alert color="red">{joinError}</Alert> : null}
                 {joinNotice ? <Alert color="blue">{joinNotice}</Alert> : null}
                 {registrationSteps}

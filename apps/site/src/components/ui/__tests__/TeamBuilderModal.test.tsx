@@ -276,4 +276,36 @@ describe('TeamBuilderModal', () => {
       shareOnly: false,
     });
   });
+
+  it('locks event sport and saves the registration team before optional invitations', async () => {
+    const onTeamCreated = jest.fn();
+    eventServiceMock.getEventById.mockResolvedValue(buildEvent({ $id: 'event_1', sport: 'Basketball', teamSizeLimit: 8 }));
+    renderWithMantine(<TeamBuilderModal isOpen onClose={jest.fn()} currentUser={buildUser({ $id: 'creator' })}
+      eventId="event_1" registrationDraft={{ eventId: 'event_1', teamId: 'draft-team', baseRevision: 3 }}
+      onTeamCreated={onTeamCreated} />);
+    await waitFor(() => expect(screen.getByLabelText('Sport')).toHaveValue('Basketball'));
+    expect(screen.getByLabelText('Sport')).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/Team name/), { target: { value: 'North Loop' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save team and continue' }));
+    await waitFor(() => expect(onTeamCreated).toHaveBeenCalledTimes(1));
+    expect(teamServiceMock.createTeam).toHaveBeenCalledWith(
+      'North Loop', 'creator', 'Open', 'Basketball', 8, undefined,
+      expect.objectContaining({ teamId: 'draft-team', registrationDraft: expect.objectContaining({ eventId: 'event_1', baseRevision: 3 }) }),
+    );
+    expect(teamServiceMock.createTeamMemberInvite).not.toHaveBeenCalled();
+  });
+
+  it('keeps entered team details and blocks saving until the event sport can be recovered', async () => {
+    eventServiceMock.getEventById.mockResolvedValueOnce(null).mockResolvedValueOnce(buildEvent({ $id: 'event_1', sport: 'Basketball' }));
+    renderWithMantine(<TeamBuilderModal isOpen onClose={jest.fn()} currentUser={buildUser({ $id: 'creator' })}
+      eventId="event_1" registrationDraft={{ eventId: 'event_1', teamId: 'draft-team', baseRevision: 3 }} />);
+    fireEvent.change(screen.getByLabelText(/Team name/), { target: { value: 'North Loop' } });
+    expect(await screen.findByRole('button', { name: 'Reload event details' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Save team and continue' })).toBeDisabled();
+    expect(teamServiceMock.createTeam).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Reload event details' }));
+    await waitFor(() => expect(screen.getByLabelText('Sport')).toHaveValue('Basketball'));
+    expect(screen.getByLabelText(/Team name/)).toHaveValue('North Loop');
+    expect(screen.getByRole('button', { name: 'Save team and continue' })).toBeEnabled();
+  });
 });

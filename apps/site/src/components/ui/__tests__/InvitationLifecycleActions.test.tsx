@@ -75,12 +75,18 @@ it('retries the same reminder request and reports delivery failure after the sav
   expect(service.remindTeamInvitation.mock.calls[1]).toEqual(service.remindTeamInvitation.mock.calls[0]);
 });
 
-it('shows expiry and offers a new attempt without offering a reminder', async () => {
-  service.listInvites.mockImplementation(async (query) => query.history ? [{ ...invite, status: 'EXPIRED', invitationLabel: 'Invitation expired' }] : []);
+it('reinvites an expired attempt and exposes the new pending attempt', async () => {
+  const expired: Invite = { ...invite, status: 'EXPIRED', invitationLabel: 'Invitation expired' };
+  service.listInvites.mockImplementation(async (query) => query.history ? [expired] : []);
+  service.reinviteTeamInvitation.mockImplementation(async () => {
+    service.listInvites.mockImplementation(async (query) => query.history ? [{ ...expired, isCurrentAttempt: false }] : [{ ...invite, $id: 'attempt-2' }]);
+    return { delivery: { failed: false, status: 'SENT' } };
+  });
   renderWithMantine(<TeamInvitationManager teamId="team" onChanged={async () => undefined} onInvitesLoaded={() => undefined} />);
-  expect(await screen.findByRole('button', { name: 'Reinvite' })).toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Remind' })).not.toBeInTheDocument();
-  expect(screen.getAllByText(/Invitation expired/).length).toBeGreaterThan(0);
+  fireEvent.click(await screen.findByRole('button', { name: 'Reinvite' }));
+  expect(await screen.findByRole('button', { name: 'Remind' })).toBeEnabled();
+  expect(screen.queryByRole('button', { name: 'Reinvite' })).not.toBeInTheDocument();
+  expect(service.reinviteTeamInvitation).toHaveBeenCalledWith('attempt-1', expect.any(String));
 });
 
 it('shows a retry when recipient actions fail to load', async () => {
@@ -89,4 +95,24 @@ it('shows a retry when recipient actions fail to load', async () => {
   fireEvent.click(await screen.findByRole('button', { name: 'Retry' }));
   expect(await screen.findByRole('button', { name: 'Decline', exact: true })).toBeInTheDocument();
   expect(service.getInviteById).toHaveBeenCalledTimes(2);
+});
+
+it('recovers a failed history load and keeps a saved delivery failure available for sharing or cancellation', async () => {
+  const savedInvite = { ...invite, shareUrl: 'https://bracket-iq.com/i/attempt-1', delivery: { failed: true, status: 'FAILED' } };
+  service.listInvites.mockRejectedValueOnce(new Error('Connection lost.'));
+  service.listInvites.mockImplementation(async (query) => query.history ? [] : [savedInvite]);
+  service.deleteInviteById.mockImplementation(async () => {
+    service.listInvites.mockResolvedValue([]);
+    return true;
+  });
+  const clipboard = jest.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { value: { writeText: clipboard }, configurable: true });
+  renderWithMantine(<TeamInvitationManager teamId="team" onChanged={async () => undefined} onInvitesLoaded={() => undefined} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Reload invitations' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Copy invite link' }));
+  await waitFor(() => expect(clipboard).toHaveBeenCalledWith(savedInvite.shareUrl));
+  expect(screen.getByRole('button', { name: 'Remind' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel invitation' }));
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Remind' })).not.toBeInTheDocument());
+  expect(service.deleteInviteById).toHaveBeenCalledWith('attempt-1');
 });
