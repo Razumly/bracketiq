@@ -25,7 +25,7 @@ const numericRadiusClass = (value: number): string => {
 
 const radiusClasses: Record<string, string> = {
   none: 'org-radius-none', xs: 'org-radius-small', sm: 'org-radius-small',
-  xl: 'org-radius-pill', full: 'org-radius-pill',
+  xl: 'org-radius-surface', full: 'org-radius-surface',
 };
 
 const radiusClass = (value: RadiusValue, fallback: 'surface' | 'control'): string => {
@@ -441,13 +441,53 @@ const useDismissibleLayer = (open: boolean, onClose: () => void) => {
 };
 type SelectProps = Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'size'> & FieldProps & { data?: ReadonlyArray<SelectOption>; value?: string | null; onChange?: (value: string | null) => void; placeholder?: string; allowDeselect?: boolean; clearable?: boolean; searchable?: boolean; nothingFoundMessage?: string; size?: string; radius?: string | number; leftSection?: React.ReactNode; leftSectionWidth?: number; rightSection?: React.ReactNode; rightSectionWidth?: number; rightSectionPointerEvents?: string; searchValue?: string; onSearchChange?: (value: string) => void; renderOption?: ({ option }: { option: { label: React.ReactNode; value: string; disabled?: boolean } }) => React.ReactNode; hideSelectedLabel?: boolean; comboboxProps?: unknown; styles?: unknown; withAsterisk?: boolean; native?: boolean; w?: number | string; maw?: number | string };
 const hasClearableSelection = (value: SelectProps['value'], allowDeselect?: boolean, clearable?: boolean) => Boolean(value && (allowDeselect || clearable));
-export function Select({ data = [], value, onChange, id, label, description, error, errorProps, required, withAsterisk, mb, mt, p, placeholder, allowDeselect, clearable, searchable: _searchable, nothingFoundMessage: _nothingFoundMessage, size: _size, radius, leftSection, leftSectionWidth, rightSection, rightSectionWidth, rightSectionPointerEvents, searchValue: _searchValue, onSearchChange, renderOption: _renderOption, hideSelectedLabel = false, comboboxProps: _comboboxProps, styles: _styles, native = false, w, maw, className, style, onKeyDown: onKeyDownProp, ...props }: SelectProps) {
+export function Select({
+  data = [],
+  value,
+  onChange,
+  id,
+  label,
+  description,
+  error,
+  errorProps,
+  required,
+  withAsterisk,
+  mb,
+  mt,
+  p,
+  placeholder,
+  allowDeselect,
+  clearable,
+  searchable: searchableProp,
+  nothingFoundMessage: _nothingFoundMessage,
+  size: _size,
+  radius,
+  leftSection,
+  leftSectionWidth,
+  rightSection,
+  rightSectionWidth,
+  rightSectionPointerEvents,
+  searchValue: _searchValue,
+  onSearchChange,
+  renderOption: _renderOption,
+  hideSelectedLabel = false,
+  comboboxProps: _comboboxProps,
+  styles: _styles,
+  native = false,
+  w,
+  maw,
+  className,
+  style,
+  onKeyDown: onKeyDownProp,
+  ...props
+}: SelectProps) {
   const resolvedId = useFieldId(id, label);
   const messageIds = fieldMessageIds(resolvedId, description, error);
   const listboxId = React.useId();
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState<string | null>(null);
   const [activeOptionIndex, setActiveOptionIndex] = React.useState(-1);
+  const isSearchable = searchableProp ?? true;
   const listboxRef = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
     if (!open || activeOptionIndex < 0) return;
@@ -466,7 +506,9 @@ export function Select({ data = [], value, onChange, id, label, description, err
   const clearableSelection = hasClearableSelection(value, allowDeselect, clearable);
   const selectedOption = data.find((option) => normalizeSelectOption(option).value === value);
   const selectedLabel = selectedOption ? selectOptionLabel(selectedOption) : '';
-  const visibleOptions = data.filter((option) => !search || selectOptionLabel(option).toLowerCase().includes(search.toLowerCase()));
+  const visibleOptions = !isSearchable || !search
+    ? data
+    : data.filter((option) => selectOptionLabel(option).toLowerCase().includes(search.toLowerCase()));
   const controlRadius = radiusClass(radius, 'control');
   const selectOption = (option: SelectOption) => {
     const normalized = normalizeSelectOption(option);
@@ -515,19 +557,26 @@ export function Select({ data = [], value, onChange, id, label, description, err
           aria-expanded={open}
           aria-controls={listboxId}
           aria-activedescendant={open && activeOptionIndex >= 0 ? `${listboxId}-option-${activeOptionIndex}` : undefined}
-          aria-autocomplete="list"
-          value={search ?? (hideSelectedLabel ? '' : selectedLabel)}
+          aria-autocomplete={isSearchable ? 'list' : 'none'}
+          value={isSearchable ? search ?? (hideSelectedLabel ? '' : selectedLabel) : (hideSelectedLabel ? '' : selectedLabel)}
           placeholder={placeholder}
+          readOnly={!isSearchable}
           required={required || withAsterisk}
           aria-invalid={Boolean(error) || undefined}
           aria-describedby={props['aria-describedby'] ?? messageIds.describedBy}
           onFocus={() => { setOpen(true); setActiveOptionIndex(-1); }}
           onClick={() => { setOpen(true); setActiveOptionIndex(-1); }}
           onKeyDown={handleKeyDown}
-          onChange={(event) => { setOpen(true); setActiveOptionIndex(-1); setSearch(event.currentTarget.value); onSearchChange?.(event.currentTarget.value); }}
+          onChange={(event) => {
+            if (!isSearchable) return;
+            setOpen(true);
+            setActiveOptionIndex(-1);
+            setSearch(event.currentTarget.value);
+            onSearchChange?.(event.currentTarget.value);
+          }}
           className={cn('h-11 min-h-11 w-full min-w-0 rounded-lg border border-input bg-background px-3 py-2 pr-10 text-base text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:opacity-70 md:text-sm', leftSection && 'pl-9', rightSection && 'pr-9')}
         />
-        {clearableSelection && <button type="button" aria-label="Clear selection" disabled={Boolean(props.disabled)} onMouseDown={(event) => event.preventDefault()} onClick={clearSelection} className="absolute top-1/2 right-2 z-10 flex size-7 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"><X size={14} aria-hidden="true" /></button>}
+        {clearableSelection && <button type="button" aria-label="Clear selection" disabled={Boolean(props.disabled)} onMouseDown={(event) => event.preventDefault()} onClick={clearSelection} className="absolute top-1/2 right-2 z-10 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"><X size={14} aria-hidden="true" /></button>}
         {rightSection && <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={{ width: rightSectionWidth, pointerEvents: rightSectionPointerEvents as React.CSSProperties['pointerEvents'] }}>{rightSection}</span>}
         {open && <div ref={listboxRef} id={listboxId} role="listbox" className="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg">{visibleOptions.length ? visibleOptions.map((option, index) => { const normalized = normalizeSelectOption(option); const renderedOption = _renderOption?.({ option: { label: normalized.label, value: normalized.value, disabled: normalized.disabled } }); return <button type="button" role="option" id={`${listboxId}-option-${index}`} data-option-index={index} aria-label={selectOptionLabel(option)} aria-selected={normalized.value === value} key={normalized.value} disabled={normalized.disabled} onMouseDown={(event) => event.preventDefault()} onMouseEnter={() => setActiveOptionIndex(index)} onClick={() => selectOption(option)} className={cn('block min-h-10 w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50', index === activeOptionIndex && 'bg-muted')}>{renderedOption ?? selectOptionLabel(option)}</button>; }) : <div className="px-3 py-2 text-sm text-muted-foreground">{_nothingFoundMessage ?? 'Nothing found'}</div>}</div>}
       </div>
@@ -700,14 +749,14 @@ export function TagsInput({
       <div ref={containerRef} className={cn('relative', radiusClass(radius, 'control'))}>
         <div className="flex min-h-11 flex-wrap items-center gap-1.5 rounded-lg border border-input bg-background px-2 py-1.5 focus-within:border-ring focus-within:ring-[3px] focus-within:ring-inset focus-within:ring-ring">
           {selected.map((tag) => (
-            <span key={tag} className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-xs text-foreground">
+            <span key={tag} className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-xs text-foreground">
               {tag}
               <button
                 type="button"
                 aria-label={`Remove ${tag}`}
                 disabled={disabled}
                 onClick={() => removeTag(tag)}
-                className="rounded-full text-muted-foreground hover:text-foreground disabled:opacity-50"
+                className="rounded-md text-muted-foreground hover:text-foreground disabled:opacity-50"
               >
                 <X aria-hidden="true" size={12} />
               </button>
@@ -883,7 +932,7 @@ export function Switch({ id, label, description, mb, mt, p, size: _size, checked
 type CheckboxProps = Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' | 'size'> & { size?: string; label?: React.ReactNode; description?: React.ReactNode; onCheckedChange?: (checked: boolean) => void };
 export function Checkbox({ label, description, onChange, onCheckedChange, className, checked, size: _size, ...props }: CheckboxProps) { const accessibleLabel = props['aria-label'] ?? (typeof label === 'string' ? label : undefined); const input = <input {...props} type="checkbox" aria-label={accessibleLabel} checked={checked} onChange={(event) => { onChange?.(event); onCheckedChange?.(event.currentTarget.checked); }} className={cn('size-4 shrink-0 accent-primary', className)} />; return label ? <label className="flex min-h-11 items-start gap-3 text-sm"><span className="pt-1">{input}</span><span><span className="block font-medium">{label}</span>{description && <span className="mt-1 block text-xs text-muted-foreground">{description}</span>}</span></label> : input; }
 type ChipProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'onChange'> & { checked?: boolean; onChange?: (checked: boolean) => void; radius?: string };
-export function Chip({ checked = false, onChange, className, children, radius: _radius, ...props }: ChipProps) { return <button {...props} type="button" aria-pressed={checked} onClick={() => onChange?.(!checked)} className={cn('min-h-11 rounded-full border px-3 py-2 text-sm font-medium', checked ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-background text-foreground hover:bg-muted', className)}>{children}</button>; }
+export function Chip({ checked = false, onChange, className, children, radius: _radius, ...props }: ChipProps) { return <button {...props} type="button" aria-pressed={checked} onClick={() => onChange?.(!checked)} className={cn('min-h-11 rounded-md border px-3 py-2 text-sm font-medium', checked ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-background text-foreground hover:bg-muted', className)}>{children}</button>; }
 type SegmentedControlProps = { value: string; onChange: (value: string) => void; data: Array<{ label: React.ReactNode; value: string }>; className?: string; fullWidth?: boolean; radius?: string | number; size?: string };
 export function SegmentedControl({ value, onChange, data, className, fullWidth, radius: _radius, size: _size }: SegmentedControlProps) { return <div className={cn('inline-flex max-w-full flex-wrap gap-1 bg-muted p-1 org-radius-surface', fullWidth && 'w-full', className)} role="group">{data.map((item) => <button type="button" key={item.value} aria-label={typeof item.label === 'string' ? item.label : item.value} aria-pressed={item.value === value} onClick={() => onChange(item.value)} className={cn('min-h-11 px-3 py-2 text-sm font-medium text-muted-foreground org-radius-control', fullWidth && 'flex-1', item.value === value && 'bg-background text-foreground shadow-sm')}>{item.label}</button>)}</div>; }
 
@@ -919,12 +968,12 @@ const operationTone = (color: string | undefined, tones: Record<string, string>,
   const name = color ?? '';
   return tones[operationColorAliases[name] ?? name] ?? fallback;
 };
-export function Badge({ size = 'md', variant: _variant, color, radius: _radius, className, ...props }: BadgeProps) { const colorClass = operationTone(color, badgeToneClasses, 'border-border bg-muted text-muted-foreground'); return <span className={cn('inline-flex w-fit items-center rounded-full border font-medium', size === 'xs' ? 'px-1.5 py-0.5 text-[0.68rem]' : size === 'sm' ? 'px-2 py-0.5 text-xs' : 'px-2.5 py-1 text-sm', colorClass, className)} {...props} />; }
+export function Badge({ size = 'md', variant: _variant, color, radius: _radius, className, ...props }: BadgeProps) { const colorClass = operationTone(color, badgeToneClasses, 'border-border bg-muted text-muted-foreground'); return <span className={cn('inline-flex w-fit items-center rounded-md border font-medium', size === 'xs' ? 'px-1.5 py-0.5 text-[0.68rem]' : size === 'sm' ? 'px-2 py-0.5 text-xs' : 'px-2.5 py-1 text-sm', colorClass, className)} {...props} />; }
 type ImageProps = Omit<React.ImgHTMLAttributes<HTMLImageElement>, 'src' | 'alt' | 'width' | 'height'> & { src: string; alt: string; width?: number | string; height?: number | string; w?: number | string; h?: number | string; maw?: number | string; fit?: string; radius?: string | number };
 export function Image({ src, alt, width, height, w, h, maw, fit, radius, className, style, ...props }: ImageProps) { return <img src={src} alt={alt} width={width ?? w} height={height ?? h} className={cn(radiusClass(radius, 'surface'), className)} style={{ maxWidth: maw, objectFit: fit as React.CSSProperties['objectFit'], ...style }} {...props} />; }
 
 type PillProps = React.HTMLAttributes<HTMLSpanElement> & { withRemoveButton?: boolean; onRemove?: () => void; styles?: unknown };
-function PillBase({ children, withRemoveButton = false, onRemove, styles: _styles, className, ...props }: PillProps) { return <span className={cn('inline-flex min-h-8 max-w-full items-center gap-1 rounded-full border border-border bg-muted px-2 py-1 text-sm text-foreground', className)} {...props}><span className="min-w-0 truncate">{children}</span>{withRemoveButton && <button type="button" aria-label="Remove" onClick={(event) => { event.stopPropagation(); onRemove?.(); }} className="flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground"><X aria-hidden="true" className="size-3" /></button>}</span>; }
+function PillBase({ children, withRemoveButton = false, onRemove, styles: _styles, className, ...props }: PillProps) { return <span className={cn('inline-flex min-h-8 max-w-full items-center gap-1 rounded-md border border-border bg-muted px-2 py-1 text-sm text-foreground', className)} {...props}><span className="min-w-0 truncate">{children}</span>{withRemoveButton && <button type="button" aria-label="Remove" onClick={(event) => { event.stopPropagation(); onRemove?.(); }} className="flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground"><X aria-hidden="true" className="size-3" /></button>}</span>; }
 function PillGroup({ children, className, ...props }: React.HTMLAttributes<HTMLDivElement>) { return <div className={cn('flex min-w-0 flex-wrap items-center gap-1', className)} {...props}>{children}</div>; }
 export const Pill = Object.assign(PillBase, { Group: PillGroup });
 
@@ -975,7 +1024,7 @@ export function ActionIcon({ className, children, ...props }: ActionIconProps) {
 type TooltipProps = { label: React.ReactNode; children: React.ReactNode; multiline?: boolean; maw?: number | string; withArrow?: boolean };
 export function Tooltip({ label, children, maw, multiline: _multiline, withArrow: _withArrow }: TooltipProps) { return <span title={typeof label === 'string' ? label : undefined} style={{ maxWidth: maw }}>{children}</span>; }
 export function Divider({ className, mt, mb, ...props }: React.HTMLAttributes<HTMLHRElement> & { mt?: Spacing; mb?: Spacing }) { return <hr className={cn('border-0 border-t border-border', spacingClass(mt, 'mt'), spacingClass(mb, 'mb'), className)} {...props} />; }
-export function Progress({ value = 0, className, ...props }: React.HTMLAttributes<HTMLDivElement> & { value?: number; color?: string; size?: string | number }) { return <div role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={value} className={cn('h-2 w-full overflow-hidden rounded-full bg-muted', className)} {...props}><div className="h-full rounded-full bg-primary" style={{ width: `${Math.max(0, Math.min(100, value))}%` }} /></div>; }
+export function Progress({ value = 0, className, ...props }: React.HTMLAttributes<HTMLDivElement> & { value?: number; color?: string; size?: string | number }) { return <div role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={value} className={cn('h-2 w-full overflow-hidden rounded-md bg-muted', className)} {...props}><div className="h-full rounded-md bg-primary" style={{ width: `${Math.max(0, Math.min(100, value))}%` }} /></div>; }
 export function Rating({ value = 0, onChange, readOnly = false, size = 'md', className }: { value?: number; onChange?: (value: number) => void; readOnly?: boolean; size?: string; fractions?: number; className?: string }) { const sizeClass = size === 'xs' ? 'size-3' : size === 'sm' ? 'size-4' : size === 'lg' ? 'size-7' : 'size-5'; return <div className={cn('inline-flex items-center gap-0.5', className)} aria-label={`${value} out of 5 stars`} role={readOnly ? 'img' : 'radiogroup'}>{[1, 2, 3, 4, 5].map((star) => { const icon = <Star aria-hidden="true" className={cn(sizeClass, star <= value ? 'fill-amber-400 text-amber-500' : 'text-muted-foreground/40')} />; return readOnly ? <span key={star}>{icon}</span> : <button key={star} type="button" role="radio" aria-checked={star === value} aria-label={`${star} star${star === 1 ? '' : 's'}`} onClick={() => onChange?.(star)}>{icon}</button>; })}</div>; }
 
 type PopoverState = { open: boolean; controlled: boolean; setOpen: React.Dispatch<React.SetStateAction<boolean>> };

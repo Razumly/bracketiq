@@ -7,6 +7,30 @@ import com.razumly.mvp.icons.generated.Images
 import com.razumly.mvp.icons.generated.shared.ProductTrophy
 import com.razumly.mvp.icons.generated.shared.ProductTournamentBracket
 import com.razumly.mvp.icons.generated.shared.ProductGroups
+import com.razumly.mvp.icons.generated.shared.SportsIndoorVolleyball
+import com.razumly.mvp.icons.generated.shared.SportsBeachVolleyball
+import com.razumly.mvp.icons.generated.shared.SportsGrassVolleyball
+import com.razumly.mvp.icons.generated.shared.SportsBasketball
+import com.razumly.mvp.icons.generated.shared.SportsIndoorSoccer
+import com.razumly.mvp.icons.generated.shared.SportsGrassSoccer
+import com.razumly.mvp.icons.generated.shared.SportsBeachSoccer
+import com.razumly.mvp.icons.generated.shared.SportsTennis
+import com.razumly.mvp.icons.generated.shared.SportsPickleball
+import com.razumly.mvp.icons.generated.shared.SportsBadminton
+import com.razumly.mvp.icons.generated.shared.SportsRacquetball
+import com.razumly.mvp.icons.generated.shared.SportsFootball
+import com.razumly.mvp.icons.generated.shared.SportsFlagFootball
+import com.razumly.mvp.icons.generated.shared.SportsHockey
+import com.razumly.mvp.icons.generated.shared.SportsFieldHockey
+import com.razumly.mvp.icons.generated.shared.SportsLacrosse
+import com.razumly.mvp.icons.generated.shared.SportsAustralianFootball
+import com.razumly.mvp.icons.generated.shared.SportsBallHockey
+import com.razumly.mvp.icons.generated.shared.SportsFutsal
+import com.razumly.mvp.icons.generated.shared.SportsBaseball
+import com.razumly.mvp.icons.generated.shared.SportsSoftball
+import com.razumly.mvp.icons.generated.shared.SportsTableTennis
+import com.razumly.mvp.icons.generated.shared.SportsUltimateFrisbee
+import com.razumly.mvp.icons.generated.shared.SportsOther
 
 public object SharedIcons {
     public val Trophy: ImageVector
@@ -15,4 +39,111 @@ public object SharedIcons {
         get() = Images.Shared.ProductTournamentBracket
     public val Groups: ImageVector
         get() = Images.Shared.ProductGroups
+}
+
+public object SportIcons {
+    public val IndoorVolleyball: ImageVector
+        get() = Images.Shared.SportsIndoorVolleyball
+    public val BeachVolleyball: ImageVector
+        get() = Images.Shared.SportsBeachVolleyball
+    public val GrassVolleyball: ImageVector
+        get() = Images.Shared.SportsGrassVolleyball
+    public val Basketball: ImageVector
+        get() = Images.Shared.SportsBasketball
+    public val IndoorSoccer: ImageVector
+        get() = Images.Shared.SportsIndoorSoccer
+    public val GrassSoccer: ImageVector
+        get() = Images.Shared.SportsGrassSoccer
+    public val BeachSoccer: ImageVector
+        get() = Images.Shared.SportsBeachSoccer
+    public val Tennis: ImageVector
+        get() = Images.Shared.SportsTennis
+    public val Pickleball: ImageVector
+        get() = Images.Shared.SportsPickleball
+    public val Badminton: ImageVector
+        get() = Images.Shared.SportsBadminton
+    public val Racquetball: ImageVector
+        get() = Images.Shared.SportsRacquetball
+    public val Football: ImageVector
+        get() = Images.Shared.SportsFootball
+    public val FlagFootball: ImageVector
+        get() = Images.Shared.SportsFlagFootball
+    public val Hockey: ImageVector
+        get() = Images.Shared.SportsHockey
+    public val FieldHockey: ImageVector
+        get() = Images.Shared.SportsFieldHockey
+    public val Lacrosse: ImageVector
+        get() = Images.Shared.SportsLacrosse
+    public val AustralianFootball: ImageVector
+        get() = Images.Shared.SportsAustralianFootball
+    public val BallHockey: ImageVector
+        get() = Images.Shared.SportsBallHockey
+    public val Futsal: ImageVector
+        get() = Images.Shared.SportsFutsal
+    public val Baseball: ImageVector
+        get() = Images.Shared.SportsBaseball
+    public val Softball: ImageVector
+        get() = Images.Shared.SportsSoftball
+    public val TableTennis: ImageVector
+        get() = Images.Shared.SportsTableTennis
+    public val UltimateFrisbee: ImageVector
+        get() = Images.Shared.SportsUltimateFrisbee
+    public val Other: ImageVector
+        get() = Images.Shared.SportsOther
+
+    internal fun keyForName(name: String): String? = when (name) {
+        "indoor volleyball" -> "indoor-volleyball"
+        "beach volleyball" -> "beach-volleyball"
+        "grass volleyball" -> "grass-volleyball"
+        "basketball" -> "basketball"
+        "indoor soccer" -> "indoor-soccer"
+        "grass soccer" -> "grass-soccer"
+        "beach soccer" -> "beach-soccer"
+        "tennis" -> "tennis"
+        "pickleball" -> "pickleball"
+        "badminton" -> "badminton"
+        "racquetball" -> "racquetball"
+        "football" -> "football"
+        "flag football" -> "flag-football"
+        "hockey" -> "hockey"
+        "field hockey" -> "field-hockey"
+        "lacrosse" -> "lacrosse"
+        "australian football" -> "australian-football"
+        "ball hockey" -> "ball-hockey"
+        "futsal" -> "futsal"
+        "baseball" -> "baseball"
+        "softball" -> "softball"
+        "table tennis" -> "table-tennis"
+        "ultimate frisbee" -> "ultimate-frisbee"
+        "other" -> "other"
+        else -> null
+    }
+
+    public operator fun get(key: String): ImageVector = when (key) {
+        "indoor-volleyball" -> IndoorVolleyball
+        "beach-volleyball" -> BeachVolleyball
+        "grass-volleyball" -> GrassVolleyball
+        "basketball" -> Basketball
+        "indoor-soccer" -> IndoorSoccer
+        "grass-soccer" -> GrassSoccer
+        "beach-soccer" -> BeachSoccer
+        "tennis" -> Tennis
+        "pickleball" -> Pickleball
+        "badminton" -> Badminton
+        "racquetball" -> Racquetball
+        "football" -> Football
+        "flag-football" -> FlagFootball
+        "hockey" -> Hockey
+        "field-hockey" -> FieldHockey
+        "lacrosse" -> Lacrosse
+        "australian-football" -> AustralianFootball
+        "ball-hockey" -> BallHockey
+        "futsal" -> Futsal
+        "baseball" -> Baseball
+        "softball" -> Softball
+        "table-tennis" -> TableTennis
+        "ultimate-frisbee" -> UltimateFrisbee
+        "other" -> Other
+        else -> Other
+    }
 }

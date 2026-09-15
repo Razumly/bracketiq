@@ -39,17 +39,35 @@ const landingMono = IBM_Plex_Mono({
   weight: ['400', '500', '600', '700'],
   variable: '--font-landing-mono',
 });
-const mvpPrimary = [...MOBILE_APP_MANTINE_PRIMARY_SCALE] as MantineColorsTuple;
+const bqPrimary = [
+  '#fff5eb',
+  '#ffe8cf',
+  '#ffd0a0',
+  '#ffb266',
+  '#ff8f33',
+  '#f97a1e',
+  '#dc6110',
+  '#b8480f',
+  '#943913',
+  '#783114',
+] as MantineColorsTuple;
 const theme = createTheme({
-  primaryColor: 'mvpPrimary',
+  primaryColor: 'bqPrimary',
   colors: {
-    mvpPrimary,
+    bqPrimary,
   },
   fontFamily: robotoFlex.style.fontFamily,
   headings: {
     fontFamily: robotoFlex.style.fontFamily,
   },
   defaultRadius: 'md',
+  radius: {
+    xs: '0.5rem',
+    sm: '0.5rem',
+    md: '0.5rem',
+    lg: '0.5rem',
+    xl: '0.5rem',
+  },
 });
 
 interface RootLayoutProps {

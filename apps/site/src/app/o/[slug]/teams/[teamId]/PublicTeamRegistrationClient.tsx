@@ -123,7 +123,7 @@ export default function PublicTeamRegistrationClient({
                 alt=""
                 width={960}
                 height={540}
-                style={{ width: '100%', height: 'auto', borderRadius: 12, objectFit: 'cover' }}
+                style={{ width: '100%', height: 'auto', borderRadius: 8, objectFit: 'cover' }}
                 unoptimized
               />
 
@@ -150,7 +150,7 @@ export default function PublicTeamRegistrationClient({
                     style={{
                       height: 8,
                       overflow: 'hidden',
-                      borderRadius: 999,
+                      borderRadius: 8,
                       background: '#dbe6df',
                     }}
                   >

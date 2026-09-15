@@ -8,7 +8,7 @@ const variantClassNames: Record<BlogCta['variant'], string> = {
 };
 
 function BlogAction({ action }: { action: BlogCta }) {
-  const className = `${variantClassNames[action.variant]} inline-flex min-h-11 items-center justify-center rounded-full px-5 text-sm font-semibold transition`;
+  const className = `${variantClassNames[action.variant]} inline-flex min-h-11 items-center justify-center rounded-md px-5 text-sm font-semibold transition`;
 
   if (action.external) {
     return (
@@ -43,7 +43,7 @@ export default function BlogCtaCard({
   actions: BlogCta[];
 }) {
   return (
-    <section className="landing-cta marketing-cta rounded-3xl p-8">
+    <section className="landing-cta marketing-cta rounded-md p-8">
       <p className="landing-label-alt text-xs uppercase tracking-[0.16em]">Ready to build faster?</p>
       <h2 className="landing-section-title mt-3 text-3xl font-semibold sm:text-4xl">{title}</h2>
       <p className="landing-cta-copy mt-4 max-w-3xl text-base leading-8">{description}</p>

@@ -279,7 +279,7 @@ function OrganizationSectionDrawer({
         className="max-h-[min(90dvh,48rem)] gap-0 rounded-t-xl p-0"
       >
         <SheetHeader className="border-b border-border pb-4">
-          <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-muted-foreground/30" aria-hidden="true" />
+          <div className="mx-auto mb-3 h-1.5 w-12 rounded-md bg-muted-foreground/30" aria-hidden="true" />
           <div className="flex items-start gap-3">
             <div className="grid size-12 shrink-0 place-content-center overflow-hidden rounded-xl border border-border bg-muted">
               {organization.logoId || organization.logoUrl ? (

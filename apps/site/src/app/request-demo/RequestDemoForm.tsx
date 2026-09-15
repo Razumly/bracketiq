@@ -97,7 +97,7 @@ export default function RequestDemoForm() {
   };
 
   return (
-    <form className="landing-surface-strong marketing-demo-form rounded-3xl p-6 sm:p-8" onSubmit={handleSubmit}>
+    <form className="landing-surface-strong marketing-demo-form rounded-md p-6 sm:p-8" onSubmit={handleSubmit}>
       <input
         aria-hidden="true"
         autoComplete="off"
@@ -238,7 +238,7 @@ export default function RequestDemoForm() {
       ) : null}
 
       <button
-        className="landing-btn-primary mt-6 inline-flex min-h-11 w-full items-center justify-center rounded-full px-5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+        className="landing-btn-primary mt-6 inline-flex min-h-11 w-full items-center justify-center rounded-md px-5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
         disabled={isSubmitting}
         type="submit"
       >

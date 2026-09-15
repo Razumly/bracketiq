@@ -33,7 +33,7 @@ import {
   type EventFilterPanelProps,
   type EventSortValue,
 } from '@/components/events/EventFilterControls';
-import type { Event } from '@/types';
+import type { Event, SportCategory } from '@/types';
 import { getEventDivisionPriceRange } from '@/types';
 import { formatEnumDisplayLabel } from '@/lib/enumUtils';
 import {
@@ -68,6 +68,7 @@ type OrganizationEventsTabContentProps<TEventType extends string = Event['eventT
   selectedEndDate: Date | null;
   setSelectedEndDate: (value: Date | null) => void;
   sports: string[];
+  sportCategories?: SportCategory[];
   sportsLoading: boolean;
   sportsError: string | null;
   defaultMaxDistance: number;
@@ -352,7 +353,7 @@ const EventSegmentTabs = ({
         className={`min-h-12 shrink-0 border-b-2 px-5 text-sm font-medium capitalize transition-colors ${eventSegment === segment ? 'border-accent text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
       >
         {segment}
-        <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs"><OrganizationLoadingValue loading={loading}>{segmentCounts[segment]}</OrganizationLoadingValue></span>
+        <span className="ml-2 rounded-md bg-muted px-2 py-0.5 text-xs"><OrganizationLoadingValue loading={loading}>{segmentCounts[segment]}</OrganizationLoadingValue></span>
       </button>
     ))}
   </div>
@@ -491,6 +492,7 @@ export default function OrganizationEventsTabContent<TEventType extends string =
     selectedEndDate,
     setSelectedEndDate,
     sports,
+    sportCategories,
     sportsLoading,
     sportsError,
     defaultMaxDistance,
@@ -640,8 +642,9 @@ export default function OrganizationEventsTabContent<TEventType extends string =
     selectedSports,
     setSelectedSports,
     sportsData,
-    sportsLoading,
     selectedEventTypes,
+    sportCategories,
+    sportsLoading,
     setSelectedEventTypes,
     eventTypeData,
     selectedEventTypeLabels,

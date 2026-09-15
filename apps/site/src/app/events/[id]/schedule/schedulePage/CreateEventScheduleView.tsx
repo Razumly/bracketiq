@@ -156,7 +156,7 @@ export default function CreateEventScheduleView({
       {termsModal}
       <Container size="xl" py="lg" className="bg-slate-50/70">
         <Stack gap="lg">
-          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-5 shadow-sm sm:px-6">
+          <div className="rounded-md border border-slate-200 bg-white px-4 py-5 shadow-sm sm:px-6">
             <div className="flex flex-col gap-5">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <button

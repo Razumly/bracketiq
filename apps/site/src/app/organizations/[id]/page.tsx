@@ -213,7 +213,7 @@ function OrganizationDetailContent() {
   const searchParams = useSearchParams();
   const { user, authUser, loading: authLoading, isAuthenticated, updateUser } = useApp();
   const { location, requestLocation } = useLocation();
-  const { sports, loading: sportsLoading, error: sportsError } = useSports();
+  const { sports, categories: sportCategories, loading: sportsLoading, error: sportsError } = useSports();
   const id = Array.isArray(params?.id) ? params?.id[0] : (params?.id as string);
   const routeCustomerType = Array.isArray(params?.customerType)
     ? params?.customerType[0]
@@ -3138,6 +3138,7 @@ function OrganizationDetailContent() {
       selectedEndDate={eventsTabSelectedEndDate}
       setSelectedEndDate={setEventsTabSelectedEndDate}
       sports={sportOptions}
+      sportCategories={sportCategories}
       sportsLoading={sportsLoading}
       sportsError={sportsError?.message ?? null}
       defaultMaxDistance={ORG_EVENTS_DEFAULT_MAX_DISTANCE}
@@ -3174,6 +3175,7 @@ function OrganizationDetailContent() {
     <OrganizationTeamsTabContent
       teams={org.teams}
       divisionDetails={org.divisions}
+      sportCategories={sportCategories}
       isTeamManagementAllowed={canManageTeams}
       onCreateTeam={() => setShowCreateTeamModal(true)}
       onTeamClick={(team) => router.push(buildTeamManagementPath(team.$id))}

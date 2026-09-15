@@ -400,7 +400,7 @@ function MatchCard({
                 <div className="match-card__footer mt-3 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                         {showDivisionBadge && (
-                            <span className={`match-card__division text-xs px-2 py-1 rounded-full ${divisionBadgeClass}`}>
+                            <span className={`match-card__division text-xs px-2 py-1 rounded-md ${divisionBadgeClass}`}>
                                 Division: {divisionLabel}
                             </span>
                         )}
@@ -439,7 +439,7 @@ function MatchCard({
             {showFooter && (
                 <div className="match-card__footer flex items-center justify-between gap-3">
                     {showDivisionBadge && (
-                        <div className={`match-card__division text-xs px-2 py-1 rounded-full shrink-0 ${divisionBadgeClass}`}>
+                        <div className={`match-card__division text-xs px-2 py-1 rounded-md shrink-0 ${divisionBadgeClass}`}>
                             Division: {divisionLabel}
                         </div>
                     )}
@@ -456,7 +456,7 @@ function MatchCard({
         >
             {!hideTimeBadge && (
                 <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">
-                    <div className={`inline-flex whitespace-nowrap px-3 py-1 rounded-full text-xs font-medium text-white ${match.losersBracket ? 'bg-orange-500' : 'bg-blue-500'}`}>
+                    <div className={`inline-flex whitespace-nowrap px-3 py-1 rounded-md text-xs font-medium text-white ${match.losersBracket ? 'bg-orange-500' : 'bg-blue-500'}`}>
                         {formatTime(match.start)}
                     </div>
                 </div>
@@ -503,7 +503,7 @@ function MatchCard({
 
             {!showOfficialInHeader && showAnyOfficialDetails && (
                 <div className="absolute -bottom-3 left-1/2 transform -translate-x-1/2">
-            <div className="bg-white rounded-full px-3 py-1 text-xs text-gray-700 border shadow-sm flex items-center gap-3">
+            <div className="bg-white rounded-md px-3 py-1 text-xs text-gray-700 border shadow-sm flex items-center gap-3">
                 {showEventOfficialDetails && assignmentSummary.length > 0 ? (
                     <span className="font-medium truncate max-w-[220px]">Officials: {assignmentSummary.join(', ')}</span>
                 ) : showEventOfficialDetails && match.official && (

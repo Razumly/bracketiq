@@ -16,7 +16,7 @@ export default function GuideTopicNav({ topics, activeSlug }: GuideTopicNavProps
   const activeTopicId = topics.find((topic) => topic.posts.some((post) => post.slug === activeSlug))?.id;
 
   return (
-    <aside className="guide-topic-nav landing-surface-strong rounded-2xl p-4">
+    <aside className="guide-topic-nav landing-surface-strong rounded-md p-4">
       <Link href="/guides" className="guide-topic-nav-home">
         <BookOpen aria-hidden="true" className="h-4 w-4" />
         Guide Home

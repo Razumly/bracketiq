@@ -601,7 +601,7 @@ export default function CreateRentalSlotModal({
                         gap: '0.4rem',
                         maxWidth: '100%',
                         border: `1px solid ${colors.text}`,
-                        borderRadius: '999px',
+                        borderRadius: '0.5rem',
                         backgroundColor: colors.bg,
                         color: colors.text,
                         padding: '0.18rem 0.55rem 0.18rem 0.28rem',
@@ -615,7 +615,7 @@ export default function CreateRentalSlotModal({
                         style={{
                           width: '0.65rem',
                           height: '0.65rem',
-                          borderRadius: '999px',
+                          borderRadius: '50%',
                           backgroundColor: colors.text,
                           flex: '0 0 auto',
                         }}

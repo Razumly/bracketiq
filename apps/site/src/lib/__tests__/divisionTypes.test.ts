@@ -1,5 +1,6 @@
 import {
   cleanDivisionDisplayName,
+  DIVISION_AGE_GROUP_OPTIONS,
   getDivisionTypeOptionsForSport,
   getGlobalAgeDivisionTypeOptions,
   getSkillDivisionTypeOptionsForSport,
@@ -114,6 +115,11 @@ describe('divisionTypes age alignment', () => {
     const globalAgeIds = getGlobalAgeDivisionTypeOptions().map((option) => option.id);
 
     expect(globalAgeIds).toEqual(expect.arrayContaining(['u4', 'u5', 'u6', 'u7', 'u8', 'u9', 'u20']));
+    expect(globalAgeIds).toEqual(expect.arrayContaining([
+      '12u', '19u', '13o', '15o', 'tee_ball', 'minor', 'major',
+      'intermediate', 'junior', 'senior', '19plus', '33plus', '80plus',
+    ]));
+    expect(globalAgeIds).toEqual(DIVISION_AGE_GROUP_OPTIONS.map((option) => option.id));
     expect(new Set(globalAgeIds).size).toBe(globalAgeIds.length);
   });
 

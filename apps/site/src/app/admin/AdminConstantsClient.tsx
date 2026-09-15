@@ -20,7 +20,7 @@ import {
 import { notifications } from '@mantine/notifications';
 import { formatDisplayDateTime } from '@/lib/dateUtils';
 
-type ConstantKind = 'sports' | 'divisions' | 'leagueScoringConfigs';
+type ConstantKind = 'sports' | 'sportCategories' | 'divisions' | 'leagueScoringConfigs';
 
 type ConstantRecord = {
   $id?: string;
@@ -33,6 +33,7 @@ type ConstantRecord = {
 
 type ConstantsPayload = {
   sports: ConstantRecord[];
+  sportCategories: ConstantRecord[];
   divisions: ConstantRecord[];
   leagueScoringConfigs: ConstantRecord[];
   editableFields: Record<ConstantKind, string[]>;
@@ -41,12 +42,14 @@ type ConstantsPayload = {
 
 const API_KIND_BY_UI_KIND: Record<ConstantKind, string> = {
   sports: 'sports',
+  sportCategories: 'sport-categories',
   divisions: 'divisions',
   leagueScoringConfigs: 'league-scoring-configs',
 };
 
 const TABLE_TITLE_BY_KIND: Record<ConstantKind, string> = {
   sports: 'Sports',
+  sportCategories: 'Sport Categories',
   divisions: 'Divisions',
   leagueScoringConfigs: 'League Configs',
 };
@@ -56,8 +59,8 @@ const getRecordId = (record: ConstantRecord): string => (
 );
 
 const getPrimaryLabel = (kind: ConstantKind, record: ConstantRecord): string => {
-  if (kind === 'sports') {
-    return String(record.name ?? 'Unnamed sport');
+  if (kind === 'sports' || kind === 'sportCategories') {
+    return String(record.name ?? (kind === 'sports' ? 'Unnamed sport' : 'Unnamed sport category'));
   }
   if (kind === 'divisions') {
     const name = String(record.name ?? 'Unnamed division');
@@ -70,6 +73,12 @@ const getPrimaryLabel = (kind: ConstantKind, record: ConstantRecord): string => 
 const getSecondaryLabel = (kind: ConstantKind, record: ConstantRecord): string => {
   if (kind === 'sports') {
     return `ID: ${getRecordId(record)}`;
+  }
+  if (kind === 'sportCategories') {
+    const sportIds = Array.isArray(record.sportIds)
+      ? record.sportIds.filter((sportId): sportId is string => typeof sportId === 'string')
+      : [];
+    return `Sports: ${sportIds.join(', ') || 'none'}`;
   }
   if (kind === 'divisions') {
     const sportId = typeof record.sportId === 'string' ? record.sportId : 'n/a';
@@ -85,10 +94,12 @@ type AdminConstantsClientProps = {
 export default function AdminConstantsClient({ initialAdminEmail }: AdminConstantsClientProps) {
   const [constants, setConstants] = useState<ConstantsPayload>({
     sports: [],
+    sportCategories: [],
     divisions: [],
     leagueScoringConfigs: [],
     editableFields: {
       sports: [],
+      sportCategories: [],
       divisions: [],
       leagueScoringConfigs: [],
     },
@@ -117,10 +128,12 @@ export default function AdminConstantsClient({ initialAdminEmail }: AdminConstan
       }
       setConstants({
         sports: Array.isArray(payload.sports) ? payload.sports : [],
+        sportCategories: Array.isArray(payload.sportCategories) ? payload.sportCategories : [],
         divisions: Array.isArray(payload.divisions) ? payload.divisions : [],
         leagueScoringConfigs: Array.isArray(payload.leagueScoringConfigs) ? payload.leagueScoringConfigs : [],
         editableFields: payload.editableFields ?? {
           sports: [],
+          sportCategories: [],
           divisions: [],
           leagueScoringConfigs: [],
         },
@@ -252,6 +265,9 @@ export default function AdminConstantsClient({ initialAdminEmail }: AdminConstan
               <Tabs value={activeTab} onChange={(value) => setActiveTab((value as ConstantKind) || 'sports')}>
                 <Tabs.List mb="md">
                   <Tabs.Tab value="sports">Sports ({constants.sports.length})</Tabs.Tab>
+                  <Tabs.Tab value="sportCategories">
+                    Sport Categories ({constants.sportCategories.length})
+                  </Tabs.Tab>
                   <Tabs.Tab value="divisions">Divisions ({constants.divisions.length})</Tabs.Tab>
                   <Tabs.Tab value="leagueScoringConfigs">
                     League Configs ({constants.leagueScoringConfigs.length})

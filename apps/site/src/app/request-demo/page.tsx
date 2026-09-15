@@ -49,7 +49,7 @@ export default function RequestDemoPage() {
       <main className="relative">
         <section className="marketing-page-hero container-responsive relative grid gap-10 pb-16 pt-12 lg:grid-cols-[0.82fr_1.18fr] lg:items-start lg:pb-24 lg:pt-16">
           <div className="marketing-hero-copy space-y-7" data-reveal>
-            <p className="landing-kicker inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em]">
+            <p className="landing-kicker inline-flex items-center gap-2 rounded-md px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em]">
               <MessageSquareText aria-hidden="true" className="h-4 w-4" />
               Request Demo
             </p>

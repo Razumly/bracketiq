@@ -23,7 +23,7 @@ export default function PrivacyPolicyPage() {
       <div className="container-responsive py-10 sm:py-14">
         <div className="mx-auto max-w-4xl">
           <div className="mb-10 space-y-4">
-            <p className="landing-kicker inline-flex rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em]">
+            <p className="landing-kicker inline-flex rounded-md px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em]">
               Privacy Policy
             </p>
             <h1 className="text-4xl font-bold text-slate-900 sm:text-5xl">Privacy Policy</h1>
@@ -31,14 +31,14 @@ export default function PrivacyPolicyPage() {
           </div>
 
           <div className="space-y-6">
-            <section className="landing-surface rounded-3xl p-6 sm:p-7">
+            <section className="landing-surface rounded-md p-6 sm:p-7">
               <h2 className="text-2xl font-semibold text-slate-900">Introduction</h2>
               <p className="mt-4 text-sm leading-7 text-slate-700 sm:text-base">
                 Welcome to <strong>BracketIQ by Razumly</strong> (&ldquo;we,&rdquo; &ldquo;our,&rdquo; or &ldquo;us&rdquo;). This Privacy Policy explains how we collect, use, protect, retain, and disclose information when you use BracketIQ to discover events, register for leagues and tournaments, manage teams, communicate with participants, sign documents, and process payments.
               </p>
             </section>
 
-            <section className="landing-surface rounded-3xl p-6 sm:p-7">
+            <section className="landing-surface rounded-md p-6 sm:p-7">
               <h2 className="text-2xl font-semibold text-slate-900">Information We Collect</h2>
               <ul className="mt-4 space-y-3 text-sm leading-7 text-slate-700 sm:text-base">
                 <li><strong>Account information:</strong> Name, username, email address, date of birth, profile image, and other profile details you provide.</li>
@@ -50,7 +50,7 @@ export default function PrivacyPolicyPage() {
               </ul>
             </section>
 
-            <section className="landing-surface rounded-3xl p-6 sm:p-7">
+            <section className="landing-surface rounded-md p-6 sm:p-7">
               <h2 className="text-2xl font-semibold text-slate-900">How We Use Information</h2>
               <ul className="mt-4 space-y-3 text-sm leading-7 text-slate-700 sm:text-base">
                 <li>Provide and maintain BracketIQ features and user accounts.</li>
@@ -62,7 +62,7 @@ export default function PrivacyPolicyPage() {
               </ul>
             </section>
 
-            <section className="landing-surface rounded-3xl p-6 sm:p-7">
+            <section className="landing-surface rounded-md p-6 sm:p-7">
               <h2 className="text-2xl font-semibold text-slate-900">Data Sharing</h2>
               <p className="mt-4 text-sm leading-7 text-slate-700 sm:text-base">
                 We do not sell your personal information. We may share limited information in the following situations:
@@ -74,7 +74,7 @@ export default function PrivacyPolicyPage() {
               </ul>
             </section>
 
-            <section className="landing-surface rounded-3xl p-6 sm:p-7">
+            <section className="landing-surface rounded-md p-6 sm:p-7">
               <h2 className="text-2xl font-semibold text-slate-900">Data Retention and Account Deletion</h2>
               <div className="mt-4 space-y-4 text-sm leading-7 text-slate-700 sm:text-base">
                 <p>
@@ -99,7 +99,7 @@ export default function PrivacyPolicyPage() {
               </div>
             </section>
 
-            <section className="landing-surface rounded-3xl p-6 sm:p-7">
+            <section className="landing-surface rounded-md p-6 sm:p-7">
               <h2 className="text-2xl font-semibold text-slate-900">Your Rights</h2>
               <ul className="mt-4 space-y-3 text-sm leading-7 text-slate-700 sm:text-base">
                 <li>Access information we maintain about your account.</li>
@@ -109,30 +109,30 @@ export default function PrivacyPolicyPage() {
               </ul>
             </section>
 
-            <section className="landing-surface rounded-3xl p-6 sm:p-7">
+            <section className="landing-surface rounded-md p-6 sm:p-7">
               <h2 className="text-2xl font-semibold text-slate-900">Security</h2>
               <p className="mt-4 text-sm leading-7 text-slate-700 sm:text-base">
                 We use administrative, technical, and organizational safeguards designed to protect personal information. No method of transmission or storage is completely secure, but we take reasonable steps to limit unauthorized access, disclosure, or misuse.
               </p>
             </section>
 
-            <section className="landing-surface rounded-3xl p-6 sm:p-7">
+            <section className="landing-surface rounded-md p-6 sm:p-7">
               <h2 className="text-2xl font-semibold text-slate-900">Children&apos;s Privacy</h2>
               <p className="mt-4 text-sm leading-7 text-slate-700 sm:text-base">
                 Some BracketIQ workflows support parent, guardian, and family registration scenarios. If you believe information was provided inappropriately or have a privacy concern involving a minor, contact us and we will review the matter.
               </p>
             </section>
 
-            <section className="landing-surface rounded-3xl p-6 sm:p-7">
+            <section className="landing-surface rounded-md p-6 sm:p-7">
               <h2 className="text-2xl font-semibold text-slate-900">Changes to This Policy</h2>
               <p className="mt-4 text-sm leading-7 text-slate-700 sm:text-base">
                 We may update this Privacy Policy from time to time. If material changes are made, we will update the date on this page and may provide additional notice where appropriate.
               </p>
             </section>
 
-            <section className="landing-surface rounded-3xl p-6 sm:p-7">
+            <section className="landing-surface rounded-md p-6 sm:p-7">
               <h2 className="text-2xl font-semibold text-slate-900">Contact</h2>
-              <div className="mt-4 rounded-2xl bg-slate-100 p-4 text-sm text-slate-700">
+              <div className="mt-4 rounded-md bg-slate-100 p-4 text-sm text-slate-700">
                 <p className="font-semibold text-slate-900">Questions about privacy or data requests</p>
                 <p className="mt-2">
                   Email:{' '}

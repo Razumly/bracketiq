@@ -67,6 +67,7 @@ describe('SportCategoryMultiSelect', () => {
     await user.click(screen.getByRole('option', { name: 'All sports' }));
     expect(onChange).toHaveBeenLastCalledWith([]);
 
+
     fireEvent.keyDown(screen.getByRole('combobox', { name: 'Sports' }), { key: 'Escape' });
     rerender(
       <SportCategoryMultiSelect

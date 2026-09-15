@@ -171,10 +171,10 @@ export async function GET(request: NextRequest, context: RouteContext) {
   <style>
     :root{color-scheme:light;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f8fafc;color:#0f172a}
     body{min-height:100vh;margin:0;display:grid;place-items:center;padding:24px;box-sizing:border-box}
-    main{width:min(100%,460px);padding:32px;border:1px solid #dbe3ee;border-radius:20px;background:#fff;box-shadow:0 18px 45px rgba(15,23,42,.08);text-align:center}
-    .mark{display:inline-grid;place-items:center;width:48px;height:48px;border-radius:14px;background:#0f766e;color:#fff;font-weight:800;font-size:20px}
+    main{width:min(100%,460px);padding:32px;border:1px solid #dbe3ee;border-radius:8px;background:#fff;box-shadow:0 18px 45px rgba(15,23,42,.08);text-align:center}
+    .mark{display:inline-grid;place-items:center;width:48px;height:48px;border-radius:8px;background:#0f766e;color:#fff;font-weight:800;font-size:20px}
     h1{font-size:24px;margin:18px 0 8px}p{line-height:1.55;color:#475569;margin:0 0 20px}
-    button{width:100%;border:0;border-radius:12px;background:#0f766e;color:#fff;padding:13px 18px;font:inherit;font-weight:700;cursor:pointer}
+    button{width:100%;border:0;border-radius:8px;background:#0f766e;color:#fff;padding:13px 18px;font:inherit;font-weight:700;cursor:pointer}
     button:focus-visible{outline:3px solid #5eead4;outline-offset:3px}.fine{font-size:12px;margin-top:16px;color:#64748b}
   </style>
 </head>

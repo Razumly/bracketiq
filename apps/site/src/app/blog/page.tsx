@@ -45,7 +45,7 @@ export default function BlogIndexPage() {
       <main className="relative">
         <section className="marketing-page-hero container-responsive relative grid gap-10 pb-14 pt-12 lg:grid-cols-[0.92fr_0.72fr] lg:items-center lg:pb-20 lg:pt-16">
           <div className="max-w-4xl space-y-6" data-reveal>
-            <p className="landing-kicker inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em]">
+            <p className="landing-kicker inline-flex items-center gap-2 rounded-md px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em]">
               <Sparkles aria-hidden="true" className="h-4 w-4" />
               BracketIQ Blog
             </p>

@@ -8,9 +8,9 @@ export default function BlogCard({ post }: { post: BlogPostEntry }) {
   const actionLabel = post.contentType === 'guide' ? 'Open guide' : 'Read article';
 
   return (
-    <article className="landing-surface-strong marketing-blog-card rounded-3xl p-6">
+    <article className="landing-surface-strong marketing-blog-card rounded-md p-6">
       <div className="flex flex-wrap items-center gap-3 text-sm text-slate-500">
-        <span className="landing-kicker rounded-full px-3 py-1 text-[0.7rem] font-semibold uppercase tracking-[0.14em]">
+        <span className="landing-kicker rounded-md px-3 py-1 text-[0.7rem] font-semibold uppercase tracking-[0.14em]">
           {contentLabel}
         </span>
         <span>{post.primaryKeyword}</span>

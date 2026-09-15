@@ -30,10 +30,12 @@ describe('GET /api/admin/constants', () => {
     requireRazumlyAdminMock.mockResolvedValue({ userId: 'admin_1', adminEmail: 'admin@razumly.com' });
     loadAdminConstantsMock.mockResolvedValue({
       sports: [{ id: 'sport_1', name: 'Soccer' }],
+      sportCategories: [{ id: 'category_1', name: 'Soccer', sportIds: ['sport_1'], displayOrder: 10 }],
       divisions: [{ id: 'division_1', name: 'Open', key: 'open' }],
       leagueScoringConfigs: [{ id: 'cfg_1', pointsForWin: 3 }],
       editableFields: {
         sports: ['name'],
+        sportCategories: ['name', 'sportIds', 'displayOrder'],
         divisions: ['name', 'key'],
         leagueScoringConfigs: ['pointsForWin'],
       },
@@ -46,6 +48,7 @@ describe('GET /api/admin/constants', () => {
     expect(json.adminEmail).toBe('admin@razumly.com');
     expect(Array.isArray(json.sports)).toBe(true);
     expect(Array.isArray(json.divisions)).toBe(true);
+    expect(Array.isArray(json.sportCategories)).toBe(true);
     expect(Array.isArray(json.leagueScoringConfigs)).toBe(true);
   });
 });

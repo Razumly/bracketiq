@@ -371,12 +371,12 @@ export function ChatDrawer() {
 
 function getFloatingChatButtonClassName(mobile: boolean, mobileFallback: boolean) {
     if (!mobile) {
-        return 'pointer-events-auto fixed right-4 bottom-4 z-[60] rounded-full bg-transparent p-3 text-foreground shadow-lg transition-shadow hover:bg-transparent';
+        return 'pointer-events-auto fixed right-4 bottom-4 z-[60] rounded-md bg-transparent p-3 text-foreground shadow-lg transition-shadow hover:bg-transparent';
     }
     if (mobileFallback) {
-        return 'pointer-events-auto fixed top-2.5 right-16 z-[60] flex size-11 items-center justify-center rounded-full bg-transparent text-foreground shadow-lg transition-shadow hover:bg-transparent';
+        return 'pointer-events-auto fixed top-2.5 right-16 z-[60] flex size-11 items-center justify-center rounded-md bg-transparent text-foreground shadow-lg transition-shadow hover:bg-transparent';
     }
-    return 'pointer-events-auto relative flex size-11 items-center justify-center rounded-full bg-transparent text-foreground shadow-lg transition-shadow hover:bg-transparent';
+    return 'pointer-events-auto relative flex size-11 items-center justify-center rounded-md bg-transparent text-foreground shadow-lg transition-shadow hover:bg-transparent';
 }
 
 function playChatAnimation(
@@ -439,7 +439,7 @@ function FloatingChatUnreadBadge({ unreadCount }: { unreadCount: number }) {
     }
 
     return (
-        <span className="absolute top-0 right-0 inline-flex min-w-5 -translate-y-0.5 translate-x-0.5 items-center justify-center rounded-full bg-destructive px-1.5 py-0.5 text-[10px] font-semibold text-destructive-foreground">
+        <span className="absolute top-0 right-0 inline-flex min-w-5 -translate-y-0.5 translate-x-0.5 items-center justify-center rounded-md bg-destructive px-1.5 py-0.5 text-[10px] font-semibold text-destructive-foreground">
             {unreadCount > 99 ? '99+' : unreadCount}
         </span>
     );

@@ -1670,7 +1670,7 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
 
     return (
       <div className="space-y-5">
-        <div className="sm:sticky sm:top-4 z-30 rounded-2xl border border-slate-200 bg-white/95 px-4 py-4 shadow-sm backdrop-blur sm:px-6">
+        <div className="sm:sticky sm:top-4 z-30 rounded-md border border-slate-200 bg-white/95 px-4 py-4 shadow-sm backdrop-blur sm:px-6">
           <div className="flex justify-center">
             <SetupModeControl value={setupMode} onChange={setSetupMode} />
           </div>

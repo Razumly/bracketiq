@@ -266,12 +266,38 @@ const generatedMobileSharedIcons = [
     (icon) =>
       `import com.razumly.mvp.icons.generated.shared.Product${toKotlinName(icon.key)}`,
   ),
+  ...sportIcons.map(
+    (icon) =>
+      `import com.razumly.mvp.icons.generated.shared.Sports${toKotlinName(icon.key)}`,
+  ),
   "",
   "public object SharedIcons {",
   ...productIcons.flatMap((icon) => [
     `    public val ${toKotlinName(icon.key)}: ImageVector`,
     `        get() = Images.Shared.Product${toKotlinName(icon.key)}`,
   ]),
+  "}",
+  "",
+  "public object SportIcons {",
+  ...sportIcons.flatMap((icon) => [
+    `    public val ${toKotlinName(icon.key)}: ImageVector`,
+    `        get() = Images.Shared.Sports${toKotlinName(icon.key)}`,
+  ]),
+  "",
+  "    internal fun keyForName(name: String): String? = when (name) {",
+  ...sportIcons.map(
+    (icon) =>
+      `        ${JSON.stringify(icon.key.replaceAll("-", " "))} -> ${JSON.stringify(icon.key)}`,
+  ),
+  "        else -> null",
+  "    }",
+  "",
+  "    public operator fun get(key: String): ImageVector = when (key) {",
+  ...sportIcons.map(
+    (icon) => `        ${JSON.stringify(icon.key)} -> ${toKotlinName(icon.key)}`,
+  ),
+  "        else -> Other",
+  "    }",
   "}",
   "",
 ].join("\n");

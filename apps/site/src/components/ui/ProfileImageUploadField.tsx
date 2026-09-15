@@ -96,7 +96,7 @@ export function ProfileImageUploadField({
   };
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+    <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
       <div className="flex items-center gap-4">
         <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full border border-slate-200 bg-white text-sm font-semibold text-slate-500">
           {file ? (

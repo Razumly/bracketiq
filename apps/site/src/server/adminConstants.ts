@@ -1,10 +1,14 @@
 import { prisma } from '@/lib/prisma';
 
-export type AdminConstantKind = 'sports' | 'divisions' | 'league-scoring-configs';
-export type AdminConstantResponseKey = 'sports' | 'divisions' | 'leagueScoringConfigs';
+export type AdminConstantKind = 'sports' | 'sport-categories' | 'divisions' | 'league-scoring-configs';
+export type AdminConstantResponseKey = 'sports' | 'sportCategories' | 'divisions' | 'leagueScoringConfigs';
 
 type PrismaClientLike = {
   sports: {
+    findMany: (args?: any) => Promise<any[]>;
+    update: (args: any) => Promise<any>;
+  };
+  sportCategories: {
     findMany: (args?: any) => Promise<any[]>;
     update: (args: any) => Promise<any>;
   };
@@ -97,6 +101,7 @@ const LEAGUE_NUMBER_FIELDS = [
 
 export const editableFieldsByKind: Record<AdminConstantResponseKey, string[]> = {
   sports: ['name', ...SPORT_BOOLEAN_FIELDS, ...SPORT_JSON_FIELDS],
+  sportCategories: ['name', 'sportIds', 'displayOrder'],
   divisions: [
     ...DIVISION_STRING_FIELDS,
     ...DIVISION_ENUM_FIELDS,
@@ -177,6 +182,40 @@ const toStringArray = (value: unknown): string[] | undefined => {
     ),
   );
 };
+const toSportCategoryIds = (value: unknown): string[] | undefined => {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    throw new AdminConstantsInputError('Expected an array of sport IDs.');
+  }
+  const seen = new Set<string>();
+  return value.map((entry) => {
+    if (typeof entry !== 'string') {
+      throw new AdminConstantsInputError('Sport category IDs must be strings.');
+    }
+    const id = entry.trim();
+    if (!id) {
+      throw new AdminConstantsInputError('Sport category IDs cannot be blank.');
+    }
+    if (seen.has(id)) {
+      throw new AdminConstantsInputError(`Duplicate sport category member: ${id}`);
+    }
+    seen.add(id);
+    return id;
+  });
+};
+
+const toNonNegativeInteger = (value: unknown): number | undefined => {
+  if (value === undefined) return undefined;
+  const parsed = typeof value === 'number'
+    ? value
+    : typeof value === 'string' && value.trim()
+      ? Number(value.trim())
+      : Number.NaN;
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 0) {
+    throw new AdminConstantsInputError('Expected a non-negative integer.');
+  }
+  return parsed;
+};
 
 const toDivisionTypeParameterOptions = (value: unknown): Array<{ id: string; name: string }> | undefined => {
   if (value === undefined) return undefined;
@@ -250,7 +289,7 @@ const normalizeRawPatch = (input: unknown): Record<string, unknown> => {
 };
 
 export const parseAdminConstantKind = (value: string): AdminConstantKind => {
-  if (value === 'sports' || value === 'divisions' || value === 'league-scoring-configs') {
+  if (value === 'sports' || value === 'sport-categories' || value === 'divisions' || value === 'league-scoring-configs') {
     return value;
   }
   throw new AdminConstantsInputError(`Unsupported constant kind: ${value}`, 404);
@@ -279,6 +318,25 @@ export const normalizePatchForKind = (
         return;
       }
       normalized[key] = toNullableBoolean(value);
+    });
+  } else if (kind === 'sport-categories') {
+    const allowed = new Set(editableFieldsByKind.sportCategories);
+    Object.entries(rawPatch).forEach(([key, value]) => {
+      if (!allowed.has(key)) {
+        throw new AdminConstantsInputError(`Unsupported sport category field: ${key}`);
+      }
+      if (key === 'name') {
+        const parsed = toNullableString(value, { required: true });
+        if (parsed !== undefined) normalized[key] = parsed;
+        return;
+      }
+      if (key === 'sportIds') {
+        normalized[key] = toSportCategoryIds(value);
+        return;
+      }
+      if (key === 'displayOrder') {
+        normalized[key] = toNonNegativeInteger(value);
+      }
     });
   } else if (kind === 'divisions') {
     const allowed = new Set(editableFieldsByKind.divisions);
@@ -337,12 +395,14 @@ export const normalizePatchForKind = (
 
 export const loadAdminConstants = async (client: PrismaClientLike = prisma): Promise<{
   sports: any[];
+  sportCategories: any[];
   divisions: any[];
   leagueScoringConfigs: any[];
   editableFields: Record<AdminConstantResponseKey, string[]>;
 }> => {
-  const [sports, divisions, leagueScoringConfigs] = await Promise.all([
+  const [sports, sportCategories, divisions, leagueScoringConfigs] = await Promise.all([
     client.sports.findMany({ orderBy: { name: 'asc' } }),
+    client.sportCategories.findMany({ orderBy: [{ displayOrder: 'asc' }, { name: 'asc' }] }),
     client.divisions.findMany({
       where: { eventId: null, organizationId: null },
       orderBy: [{ sportId: 'asc' }, { name: 'asc' }],
@@ -352,6 +412,7 @@ export const loadAdminConstants = async (client: PrismaClientLike = prisma): Pro
 
   return {
     sports,
+    sportCategories,
     divisions,
     leagueScoringConfigs,
     editableFields: editableFieldsByKind,
@@ -369,13 +430,35 @@ export const updateAdminConstantByKind = async (
     if (kind === 'sports') {
       return await client.sports.update({ where: { id }, data });
     }
+    if (kind === 'sport-categories') {
+      if (Array.isArray(patch.sportIds)) {
+        const sports = await client.sports.findMany({
+          where: { id: { in: patch.sportIds } },
+          select: { id: true },
+        });
+        const existingIds = new Set(sports.map((sport) => String(sport.id)));
+        const missingIds = patch.sportIds.filter((sportId): sportId is string => (
+          typeof sportId === 'string' && !existingIds.has(sportId)
+        ));
+        if (missingIds.length > 0) {
+          throw new AdminConstantsInputError(`Unknown sport IDs: ${missingIds.join(', ')}`);
+        }
+      }
+      return await client.sportCategories.update({ where: { id }, data });
+    }
     if (kind === 'divisions') {
       return await client.divisions.update({ where: { id }, data });
     }
     return await client.leagueScoringConfigs.update({ where: { id }, data });
   } catch (error: any) {
+    if (error instanceof AdminConstantsInputError) {
+      throw error;
+    }
     if (error && typeof error === 'object' && error.code === 'P2025') {
       throw new AdminConstantsInputError('Record not found.', 404);
+    }
+    if (error && typeof error === 'object' && error.code === 'P2002') {
+      throw new AdminConstantsInputError('A record with that name already exists.', 409);
     }
     throw error;
   }

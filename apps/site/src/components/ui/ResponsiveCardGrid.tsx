@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { ReactNode, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 type ResponsiveCardGridProps = {
   children: ReactNode;
@@ -18,7 +18,7 @@ export default function ResponsiveCardGrid({
   const gridRef = useRef<HTMLDivElement | null>(null);
   const [columnCount, setColumnCount] = useState(1);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const element = gridRef.current;
     if (!element) {
       return;

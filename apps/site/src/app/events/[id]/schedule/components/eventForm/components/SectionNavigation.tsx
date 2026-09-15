@@ -63,7 +63,7 @@ export const SectionNavigation = ({
     if (variant === 'desktop') {
         return (
             <aside className="hidden xl:block xl:sticky xl:top-20 xl:self-start">
-                <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+                <div className="rounded-md border border-slate-200 bg-white p-3 shadow-sm">
                     <Text fw={700} size="sm" c="gray.8" mb="xs">
                         Sections
                     </Text>
@@ -89,7 +89,7 @@ export const SectionNavigation = ({
                                         {section.errorCount ? (
                                             <span
                                                 aria-label={`${section.label}: ${section.errorCount} ${section.errorCount === 1 ? 'error' : 'errors'}`}
-                                                className={`rounded-full px-2 py-0.5 text-xs font-semibold ${isActive
+                                                className={`rounded-md px-2 py-0.5 text-xs font-semibold ${isActive
                                                     ? 'bg-red-100 text-red-800'
                                                     : 'bg-red-50 text-red-700'}`}
                                             >
@@ -116,7 +116,7 @@ export const SectionNavigation = ({
                             key={`mobile-${section.id}`}
                             type="button"
                             onClick={() => onSelectSection(section.id)}
-                            className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                            className={`rounded-md border px-3 py-1.5 text-xs font-medium transition ${
                                 isActive
                                     ? 'border-slate-900 bg-slate-900 text-white'
                                     : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-100'
@@ -127,7 +127,7 @@ export const SectionNavigation = ({
                                 {section.errorCount ? (
                                     <span
                                         aria-label={`${section.label}: ${section.errorCount} ${section.errorCount === 1 ? 'error' : 'errors'}`}
-                                        className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${isActive
+                                        className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${isActive
                                             ? 'bg-red-100 text-red-800'
                                             : 'bg-red-50 text-red-700'}`}
                                     >

@@ -815,10 +815,10 @@ const renderWidgetDocument = (
     strong { margin-top: auto; color: var(--primary); }
     .team-capacity { display: grid; gap: 6px; }
     .team-capacity-text { color: #53645d; font-size: 0.84rem; font-weight: 700; }
-    .team-capacity-track { height: 8px; overflow: hidden; border-radius: 999px; background: #dbe6df; }
+    .team-capacity-track { height: 8px; overflow: hidden; border-radius: 8px; background: #dbe6df; }
     .team-capacity-fill { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--primary), color-mix(in srgb, var(--accent) 42%, var(--primary))); }
     .card-action-link { margin-top: auto; color: var(--primary); font-weight: 800; }
-    .card-action-button { margin-top: auto; align-self: flex-start; border: 0; border-radius: 999px; padding: 8px 12px; background: #e6ece9; color: #73847c; font: inherit; font-weight: 800; }
+    .card-action-button { margin-top: auto; align-self: flex-start; border: 0; border-radius: 8px; padding: 8px 12px; background: #e6ece9; color: #73847c; font: inherit; font-weight: 800; }
     .card-action-button:disabled { cursor: not-allowed; }
     .empty { grid-column: 1 / -1; }
     .empty[hidden] { display: none; }
@@ -833,7 +833,7 @@ const renderWidgetDocument = (
     .widget-select-group { display: grid; gap: 6px; min-width: 220px; color: #53645d; font-size: 0.76rem; font-weight: 800; text-transform: uppercase; }
     .widget-select { min-height: 40px; border: 1px solid #c8d8d0; border-radius: 8px; padding: 0 12px; background: white; color: #17211d; font: inherit; font-size: 0.92rem; text-transform: none; }
     .standings-table-wrap { overflow-x: auto; }
-    .standings-table { width: 100%; border-collapse: collapse; background: white; border: 1px solid #d7e3dd; border-radius: 10px; overflow: hidden; }
+    .standings-table { width: 100%; border-collapse: collapse; background: white; border: 1px solid #d7e3dd; border-radius: 8px; overflow: hidden; }
     .standings-table th, .standings-table td { padding: 12px 14px; border-bottom: 1px solid #e6eeea; text-align: left; }
     .standings-table th { color: #53645d; font-size: 0.78rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
     .standings-table td { font-size: 0.92rem; color: #17211d; }
@@ -858,7 +858,7 @@ const renderWidgetDocument = (
       max-width: calc(100% - 20px);
       align-items: center;
       justify-content: center;
-      border-radius: 999px;
+      border-radius: 8px;
       padding: 5px 12px;
       background: color-mix(in srgb, var(--primary) 92%, #0f172a);
       color: white;
@@ -879,7 +879,7 @@ const renderWidgetDocument = (
       flex-direction: column;
       gap: 12px;
       border: 2px solid color-mix(in srgb, var(--primary) 22%, #cbd5e1);
-      border-radius: 16px;
+      border-radius: 8px;
       background: white;
       box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
       padding: 18px 16px 16px;
@@ -911,7 +911,7 @@ const renderWidgetDocument = (
       justify-content: space-between;
       gap: 10px;
       min-height: 48px;
-      border-radius: 10px;
+      border-radius: 8px;
       background: #f7faf8;
       padding: 12px 14px;
     }

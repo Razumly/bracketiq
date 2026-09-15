@@ -139,7 +139,7 @@ export default function TermsPage() {
       <div className="container-responsive py-10 sm:py-14">
         <div className="mx-auto max-w-4xl">
           <div className="mb-10 space-y-4">
-            <p className="landing-kicker inline-flex rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em]">
+            <p className="landing-kicker inline-flex rounded-md px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em]">
               Terms and EULA
             </p>
             <h1 className="text-4xl font-bold text-slate-900 sm:text-5xl">
@@ -155,7 +155,7 @@ export default function TermsPage() {
 
           <div className="space-y-6">
             {sections.map((section) => (
-              <section key={section.title} className="landing-surface rounded-3xl p-6 sm:p-7">
+              <section key={section.title} className="landing-surface rounded-md p-6 sm:p-7">
                 <h2 className="text-2xl font-semibold text-slate-900">{section.title}</h2>
                 <div className="mt-4 space-y-4 text-sm leading-7 text-slate-700 sm:text-base">
                   {section.body.map((paragraph) => (
@@ -165,7 +165,7 @@ export default function TermsPage() {
               </section>
             ))}
 
-            <section className="landing-surface rounded-3xl p-6 sm:p-7">
+            <section className="landing-surface rounded-md p-6 sm:p-7">
               <h2 className="text-2xl font-semibold text-slate-900">Provider terms and resources</h2>
               <p className="mt-4 text-sm leading-7 text-slate-700 sm:text-base">
                 These links may help you review terms for external products you choose to connect or use
@@ -187,17 +187,17 @@ export default function TermsPage() {
               </ul>
             </section>
 
-            <section className="landing-surface rounded-3xl p-6 sm:p-7">
+            <section className="landing-surface rounded-md p-6 sm:p-7">
               <h2 className="text-2xl font-semibold text-slate-900">Related BracketIQ policies</h2>
               <div className="mt-4 flex flex-wrap gap-3 text-sm font-semibold sm:text-base">
                 <Link
-                  className="rounded-full border border-slate-200 px-4 py-2 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                  className="rounded-md border border-slate-200 px-4 py-2 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
                   href="/privacy-policy"
                 >
                   Privacy Policy
                 </Link>
                 <Link
-                  className="rounded-full border border-slate-200 px-4 py-2 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                  className="rounded-md border border-slate-200 px-4 py-2 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
                   href="/delete-data"
                 >
                   Delete Data

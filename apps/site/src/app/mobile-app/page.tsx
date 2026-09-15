@@ -61,7 +61,7 @@ export default function MobileAppPage() {
       <main className="relative">
         <section className="marketing-page-hero container-responsive relative grid gap-12 pb-16 pt-12 lg:grid-cols-[minmax(0,0.88fr)_minmax(20rem,0.58fr)] lg:items-center lg:pb-24">
           <div className="marketing-hero-copy space-y-7">
-            <p className="landing-kicker inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em]">
+            <p className="landing-kicker inline-flex items-center gap-2 rounded-md px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em]">
               <MonitorSmartphone aria-hidden="true" className="h-4 w-4" />
               Mobile App
             </p>
@@ -136,7 +136,7 @@ export default function MobileAppPage() {
         </section>
 
         <section className="container-responsive relative pb-20">
-          <div className="grid gap-5 rounded-[1.35rem] bg-slate-950 p-6 text-white shadow-[0_28px_80px_-62px_rgba(14,14,16,0.55)] md:grid-cols-[minmax(0,0.86fr)_auto] md:items-center md:p-8">
+          <div className="grid gap-5 rounded-md bg-slate-950 p-6 text-white shadow-[0_28px_80px_-62px_rgba(14,14,16,0.55)] md:grid-cols-[minmax(0,0.86fr)_auto] md:items-center md:p-8">
             <div>
               <p className="landing-label-alt text-xs uppercase tracking-[0.16em] text-blue-200">
                 Web + mobile

@@ -8,6 +8,7 @@ export async function GET(req: NextRequest) {
     const constants = await loadAdminConstants();
     return NextResponse.json({
       sports: constants.sports,
+      sportCategories: constants.sportCategories,
       divisions: constants.divisions,
       leagueScoringConfigs: constants.leagueScoringConfigs,
       editableFields: constants.editableFields,

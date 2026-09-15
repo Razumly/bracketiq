@@ -88,7 +88,7 @@ export default function GuidesPage() {
       <main className="relative">
         <section className="marketing-page-hero container-responsive relative pb-10 pt-12 lg:pb-12 lg:pt-16">
           <div className="max-w-4xl space-y-6" data-reveal>
-            <p className="landing-kicker inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em]">
+            <p className="landing-kicker inline-flex items-center gap-2 rounded-md px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em]">
               <BookOpen aria-hidden="true" className="h-4 w-4" />
               BracketIQ Guides
             </p>

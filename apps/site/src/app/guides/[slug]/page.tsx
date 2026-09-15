@@ -103,7 +103,7 @@ export default async function GuidePostPage({ params }: GuidePostPageProps) {
               Back to guides
             </Link>
             <div className="mt-6 space-y-5">
-              <p className="landing-kicker inline-flex rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em]">
+              <p className="landing-kicker inline-flex rounded-md px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em]">
                 {post.primaryKeyword}
               </p>
               <h1 className="landing-title text-4xl font-semibold leading-tight sm:text-5xl">{post.title}</h1>
@@ -115,7 +115,7 @@ export default async function GuidePostPage({ params }: GuidePostPageProps) {
             </div>
           </div>
 
-          <aside className="landing-surface-strong marketing-article-brief rounded-3xl p-6" data-reveal data-delay="1">
+          <aside className="landing-surface-strong marketing-article-brief rounded-md p-6" data-reveal data-delay="1">
             <p className="landing-label-alt text-xs uppercase tracking-[0.16em]">Guide brief</p>
             <div className="mt-5 grid gap-4">
               <div>
@@ -138,7 +138,7 @@ export default async function GuidePostPage({ params }: GuidePostPageProps) {
           <div className="guide-shell guide-article-shell">
             <GuideTopicNav topics={topics} activeSlug={post.slug} />
             <div className="guide-main space-y-8">
-              <div className="landing-surface-strong marketing-article-shell rounded-3xl px-6 py-8 sm:px-10 sm:py-10">
+              <div className="landing-surface-strong marketing-article-shell rounded-md px-6 py-8 sm:px-10 sm:py-10">
                 <article className="blog-article mx-auto max-w-3xl">
                   <ArticleContent />
                 </article>

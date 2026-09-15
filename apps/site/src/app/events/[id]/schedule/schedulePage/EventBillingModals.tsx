@@ -208,7 +208,7 @@ export function RefundTeamModal({
                                                   alt="Payment proof"
                                                   width={96}
                                                   height={96}
-                                                  style={{ objectFit: 'cover', borderRadius: 6 }}
+                                                  style={{ objectFit: 'cover', borderRadius: 8 }}
                                                 />
                                               </a>
                                               <Stack gap={2}>

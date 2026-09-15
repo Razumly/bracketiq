@@ -175,7 +175,7 @@ function ChatGroupRow({
                         </span>
                         <span className="ml-2 flex shrink-0 items-center gap-2">
                             {unreadCount > 0 ? (
-                                <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-destructive px-1.5 py-0.5 text-[10px] font-semibold text-destructive-foreground">
+                                <span className="inline-flex min-w-5 items-center justify-center rounded-md bg-destructive px-1.5 py-0.5 text-[10px] font-semibold text-destructive-foreground">
                                     {unreadCount}
                                 </span>
                             ) : null}

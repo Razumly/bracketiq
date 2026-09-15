@@ -384,7 +384,7 @@ function AuthenticatedDesktopActions({
         aria-current={isProfileActive ? 'page' : undefined}
         aria-label={`Profile: ${userDisplayName}`}
         title={`Profile: ${userDisplayName}`}
-        className={`inline-flex size-11 items-center justify-center rounded-full border border-[var(--bq-ink-muted)] outline-none transition-colors motion-reduce:transition-none focus-visible:ring-[3px] focus-visible:ring-[var(--bq-on-action)] ${
+        className={`inline-flex size-11 items-center justify-center rounded-md border border-[var(--bq-ink-muted)] outline-none transition-colors motion-reduce:transition-none focus-visible:ring-[3px] focus-visible:ring-[var(--bq-on-action)] ${
           isProfileActive
             ? 'bg-[var(--bq-ink-muted)] ring-2 ring-inset ring-[var(--bq-brand)]'
             : 'hover:bg-[var(--bq-ink-muted)]'

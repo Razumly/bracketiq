@@ -693,6 +693,64 @@ const SPORT_DIVISION_TYPES: SportDivisionTypeCatalog[] = [
     ],
   },
 ];
+export const DIVISION_AGE_GROUP_OPTIONS: readonly DivisionTypeParameterOption[] = [
+  { id: 'u4', name: 'U4' },
+  { id: 'u5', name: 'U5' },
+  { id: 'u6', name: 'U6' },
+  { id: 'u7', name: 'U7' },
+  { id: 'u8', name: 'U8' },
+  { id: 'u9', name: 'U9' },
+  { id: 'u10', name: 'U10' },
+  { id: 'u11', name: 'U11' },
+  { id: 'u12', name: 'U12' },
+  { id: 'u13', name: 'U13' },
+  { id: 'u14', name: 'U14' },
+  { id: 'u15', name: 'U15' },
+  { id: 'u16', name: 'U16' },
+  { id: 'u17', name: 'U17' },
+  { id: 'u18', name: 'U18' },
+  { id: 'u19', name: 'U19' },
+  { id: 'u20', name: 'U20' },
+  { id: '8u', name: 'U8' },
+  { id: '9u', name: 'U9' },
+  { id: '10u', name: 'U10' },
+  { id: '11u', name: 'U11' },
+  { id: '12u', name: 'U12' },
+  { id: '13u', name: 'U13' },
+  { id: '14u', name: 'U14' },
+  { id: '15u', name: 'U15' },
+  { id: '16u', name: 'U16' },
+  { id: '17u', name: 'U17' },
+  { id: '18u', name: 'U18' },
+  { id: '19u', name: 'U19' },
+  { id: '13o', name: '13O' },
+  { id: '15o', name: '15O' },
+  { id: 'tee_ball', name: 'Tee Ball' },
+  { id: 'minor', name: 'Minor League' },
+  { id: 'major', name: 'Major Division' },
+  { id: 'intermediate', name: 'Intermediate (50/70)' },
+  { id: 'junior', name: 'Junior League' },
+  { id: 'senior', name: 'Senior League' },
+  { id: '14plus', name: '14+' },
+  { id: '15plus', name: '15+' },
+  { id: '16plus', name: '16+' },
+  { id: '17plus', name: '17+' },
+  { id: '18plus', name: '18+' },
+  { id: '19plus', name: '19+' },
+  { id: '25plus', name: '25+' },
+  { id: '30plus', name: '30+' },
+  { id: '33plus', name: '33+' },
+  { id: '35plus', name: '35+' },
+  { id: '40plus', name: '40+' },
+  { id: '45plus', name: '45+' },
+  { id: '50plus', name: '50+' },
+  { id: '55plus', name: '55+' },
+  { id: '60plus', name: '60+' },
+  { id: '65plus', name: '65+' },
+  { id: '70plus', name: '70+' },
+  { id: '75plus', name: '75+' },
+  { id: '80plus', name: '80+' },
+];
 
 const sanitizeTokenPart = (value: string): string => value
   .trim()
@@ -782,12 +840,7 @@ export const getGenderDivisionTypeOptions = (): DivisionTypeParameterOption[] =>
 );
 
 export const getGlobalAgeDivisionTypeOptions = (): DivisionTypeParameterOption[] => (
-  uniqueOptions([
-    ...buildCatalogOptions(GENERIC_SPORT_KEY, GENERIC_DIVISION_TYPES),
-    ...SPORT_DIVISION_TYPES.flatMap((catalog) => buildCatalogOptions(catalog.sportKey, catalog.options)),
-  ])
-    .filter((option) => option.ratingType === 'AGE')
-    .map(toParameterOption)
+  DIVISION_AGE_GROUP_OPTIONS.map((option) => ({ ...option }))
 );
 
 export const getSkillDivisionTypeOptionsForSport = (sportInput?: string | null): DivisionTypeParameterOption[] => (

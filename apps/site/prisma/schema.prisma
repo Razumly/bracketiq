@@ -4053,6 +4053,18 @@ model Sports {
   officialPositionTemplates         Json?
   matchRulesTemplate                Json?
 }
+model SportCategories {
+  id           String   @id
+  createdAt    DateTime? @default(now())
+  updatedAt    DateTime? @updatedAt
+  /// Trimmed and unique case-insensitively by the migration-enforced SportCategories_name_ci_key expression index, which Prisma schema syntax cannot represent.
+  name         String
+  sportIds     String[] @default([])
+  displayOrder Int      @default(0)
+
+  @@index([displayOrder, name])
+}
+
 
 model SportCategories {
   id           String   @id

@@ -80,11 +80,12 @@ function PopoverContent({
   anchor: anchorProp,
   side = "bottom",
   sideOffset = 4,
+  collisionAvoidance,
   ...props
 }: PopoverPrimitive.Popup.Props &
   Pick<
     PopoverPrimitive.Positioner.Props,
-    "align" | "alignOffset" | "anchor" | "side" | "sideOffset"
+    "align" | "alignOffset" | "anchor" | "side" | "sideOffset" | "collisionAvoidance"
   >) {
   const anchorContext = React.useContext(PopoverAnchorContext)
   const anchor =
@@ -98,6 +99,7 @@ function PopoverContent({
         anchor={anchor}
         side={side}
         sideOffset={sideOffset}
+        collisionAvoidance={collisionAvoidance}
         className="isolate z-50 max-w-[calc(100dvw-1rem)]"
       >
         <PopoverPrimitive.Popup

@@ -3335,7 +3335,7 @@ export default function ScoreUpdateModal({
                 <div
                   key={`${eventTeamId}-${segment.id}`}
                   style={{
-                    borderRadius: 6,
+                    borderRadius: 8,
                     padding: "6px 4px",
                     textAlign: "center",
                     background: active
@@ -3365,7 +3365,7 @@ export default function ScoreUpdateModal({
             })}
             <div
               style={{
-                borderRadius: 6,
+                borderRadius: 8,
                 padding: "6px 4px",
                 textAlign: "center",
               }}

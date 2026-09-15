@@ -236,6 +236,14 @@ _Avoid_: Affiliate Event Type
 An Event with an externally completed registration journey. Affiliate Event is a commercial context independent of Event Type.
 _Avoid_: Affiliate Event Type
 
+**Sport**:
+An activity that an Event, Team, Organization, or Resource can use. An Event uses one or more Sports from the supported sport catalog.
+_Avoid_: Sport Category
+
+**Sport Category**:
+A user-facing grouping of related Sports. Selecting a Sport Category in search selects all of its current member Sports. A Sport Category is not an Event Sport.
+_Avoid_: Generic Sport, umbrella Sport
+
 **Discovery Coverage**:
 Evidence that a Coverage Cell has at least one qualified direct source and has completed the required independent search strategies without unresolved discovery or capture work. It does not mean the source is mapped, approved, or published.
 _Avoid_: Coverage, supply coverage, queue drained

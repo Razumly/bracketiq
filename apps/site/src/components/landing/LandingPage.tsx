@@ -685,7 +685,7 @@ function FeatureStoryPage({
 
         <div className="relative flex min-h-[34rem] flex-col justify-end pb-2">
           <div className="relative h-[min(48vh,500px)] min-h-[26rem]">
-            <div className="landing-feature-visual-label absolute top-0 left-[2%] z-20 flex items-center gap-2 rounded-full border border-white/18 bg-white/12 px-5 py-2.5 text-xs font-black tracking-wide text-white uppercase shadow-sm backdrop-blur">
+            <div className="landing-feature-visual-label absolute top-0 left-[2%] z-20 flex items-center gap-2 rounded-md border border-white/18 bg-white/12 px-5 py-2.5 text-xs font-black tracking-wide text-white uppercase shadow-sm backdrop-blur">
               {feature.visualLabel}
             </div>
 
@@ -711,17 +711,17 @@ function FeatureBracketProgress({
 
   return (
     <div
-      className="mx-auto w-full rounded-full bg-slate-950 px-7 py-5 shadow-[0_34px_90px_-52px_rgba(0,0,0,0.86)]"
+      className="mx-auto w-full rounded-md bg-slate-950 px-7 py-5 shadow-[0_34px_90px_-52px_rgba(0,0,0,0.86)]"
       role="img"
       aria-label="BracketIQ feature progress toward the final"
     >
       <div className="relative flex min-h-16 items-center justify-between">
         <div
-          className="absolute top-7 right-8 left-8 h-1 rounded-full bg-white/18"
+          className="absolute top-7 right-8 left-8 h-1 rounded-md bg-white/18"
           aria-hidden="true"
         />
         <motion.div
-          className="absolute top-7 left-8 h-1 origin-left rounded-full bg-white"
+          className="absolute top-7 left-8 h-1 origin-left rounded-md bg-white"
           style={{ right: "2rem", scaleX: progressScale }}
           aria-hidden="true"
         />
@@ -738,7 +738,7 @@ function FeatureBracketProgress({
                 className="relative z-10 flex min-w-16 flex-col items-center gap-2"
               >
                 <span
-                  className={`grid min-h-9 min-w-16 place-items-center rounded-full border px-3 text-[0.62rem] font-black transition ${
+                  className={`grid min-h-9 min-w-16 place-items-center rounded-md border px-3 text-[0.62rem] font-black transition ${
                     isActive
                       ? "border-white bg-white text-slate-950"
                       : "border-white/24 bg-slate-950 text-white/70"
@@ -793,7 +793,7 @@ function FeatureScene({
 }) {
   return (
     <div className="absolute inset-0">
-      <div className="absolute top-[13%] left-[2%] w-[74%] overflow-hidden rounded-[2.2rem] bg-white shadow-[0_46px_120px_-72px_rgba(15,23,42,0.82)] ring-1 ring-slate-200/80 2xl:w-[78%] 2xl:rounded-[2.6rem]">
+      <div className="absolute top-[13%] left-[2%] w-[74%] overflow-hidden rounded-md bg-white shadow-[0_46px_120px_-72px_rgba(15,23,42,0.82)] ring-1 ring-slate-200/80 2xl:w-[78%]">
         <Image
           {...landingImageProps}
           src={feature.webImage.src}
@@ -806,7 +806,7 @@ function FeatureScene({
       </div>
 
       {feature.mobileImage ? (
-        <div className="absolute top-[5%] right-[1%] w-40 overflow-hidden rounded-[2.25rem] border-[7px] border-slate-950 bg-slate-950 shadow-[0_38px_86px_-48px_rgba(15,23,42,0.84)] 2xl:w-48">
+        <div className="absolute top-[5%] right-[1%] w-40 overflow-hidden rounded-md border-4 border-slate-950 bg-slate-950 shadow-[0_38px_86px_-48px_rgba(15,23,42,0.84)] 2xl:w-48">
           <Image
             {...landingImageProps}
             src={feature.mobileImage.src}
@@ -917,7 +917,7 @@ function StaticOperationsContent({
       className="landing-static-operations mx-auto w-full max-w-7xl px-5 py-20 lg:px-8"
     >
       <div className="max-w-3xl">
-        <p className="landing-static-operations-kicker inline-flex w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-black tracking-wide text-blue-800 uppercase">
+        <p className="landing-static-operations-kicker inline-flex w-fit rounded-md bg-blue-50 px-3 py-1 text-xs font-black tracking-wide text-blue-800 uppercase">
           Features
         </p>
 
@@ -944,7 +944,7 @@ function StaticOperationsContent({
               key={feature.id}
               style={featureCardStyle}
               data-mobile-feature-card="true"
-              className="landing-operation-scroll-panel landing-operation-static-panel overflow-hidden rounded-[2rem] border border-white/80 bg-white/80 p-5 shadow-[0_34px_86px_-68px_rgba(15,23,42,0.78)] ring-1 ring-slate-200/70 backdrop-blur-xl"
+              className="landing-operation-scroll-panel landing-operation-static-panel overflow-hidden rounded-md border border-white/80 bg-white/80 p-5 shadow-[0_34px_86px_-68px_rgba(15,23,42,0.78)] ring-1 ring-slate-200/70 backdrop-blur-xl"
             >
               <span
                 className="landing-operation-mobile-index"
@@ -955,7 +955,7 @@ function StaticOperationsContent({
 
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <div className="landing-operation-static-icon grid h-11 w-11 place-items-center rounded-2xl bg-blue-50 text-blue-800 ring-1 ring-blue-100">
+                  <div className="landing-operation-static-icon grid h-11 w-11 place-items-center rounded-md bg-blue-50 text-blue-800 ring-1 ring-blue-100">
                     <Icon className="h-5 w-5" aria-hidden="true" />
                   </div>
 
@@ -990,7 +990,7 @@ function StaticOperationsContent({
               </ul>
 
               <div className="landing-operation-scroll-media landing-operation-static-media mt-6 grid min-w-0 items-center gap-3 sm:grid-cols-[1fr_auto]">
-                <div className="landing-operation-preview-crop overflow-hidden rounded-2xl bg-white shadow-[0_24px_64px_-54px_rgba(15,23,42,0.72)] ring-1 ring-slate-200">
+                <div className="landing-operation-preview-crop overflow-hidden rounded-md bg-white shadow-[0_24px_64px_-54px_rgba(15,23,42,0.72)] ring-1 ring-slate-200">
                   <Image
                     {...landingImageProps}
                     src={feature.webImage.src}
@@ -1003,7 +1003,7 @@ function StaticOperationsContent({
                 </div>
 
                 {feature.mobileImage ? (
-                  <div className="hidden w-28 overflow-hidden rounded-[1.75rem] border-4 border-slate-950 bg-slate-950 shadow-xl sm:block">
+                  <div className="hidden w-28 overflow-hidden rounded-md border-4 border-slate-950 bg-slate-950 shadow-xl sm:block">
                     <Image
                       {...landingImageProps}
                       src={feature.mobileImage.src}
@@ -1637,14 +1637,14 @@ export default function LandingPage({
               <>
                 <Link
                   href={appHref}
-                  className="inline-flex min-h-12 items-center gap-2 rounded-full bg-white px-7 py-4 text-sm font-black text-slate-950 transition hover:bg-white/90"
+                  className="inline-flex min-h-12 items-center gap-2 rounded-md bg-white px-7 py-4 text-sm font-black text-slate-950 transition hover:bg-white/90"
                 >
                   Go to app
                   <ArrowRight aria-hidden="true" className="h-4 w-4" />
                 </Link>
                 <Link
                   href="/request-demo"
-                  className="inline-flex min-h-12 items-center rounded-full border border-white/15 px-7 py-4 text-sm font-black text-white transition hover:bg-white/10"
+                  className="inline-flex min-h-12 items-center rounded-md border border-white/15 px-7 py-4 text-sm font-black text-white transition hover:bg-white/10"
                 >
                   Request demo
                 </Link>
@@ -1653,14 +1653,14 @@ export default function LandingPage({
               <>
                 <Link
                   href="/login"
-                  className="inline-flex min-h-12 items-center gap-2 rounded-full bg-white px-7 py-4 text-sm font-black text-slate-950 transition hover:bg-white/90"
+                  className="inline-flex min-h-12 items-center gap-2 rounded-md bg-white px-7 py-4 text-sm font-black text-slate-950 transition hover:bg-white/90"
                 >
                   Sign up
                   <ArrowRight aria-hidden="true" className="h-4 w-4" />
                 </Link>
                 <Link
                   href="/request-demo"
-                  className="inline-flex min-h-12 items-center rounded-full border border-white/15 px-7 py-4 text-sm font-black text-white transition hover:bg-white/10"
+                  className="inline-flex min-h-12 items-center rounded-md border border-white/15 px-7 py-4 text-sm font-black text-white transition hover:bg-white/10"
                 >
                   Request demo
                 </Link>
@@ -1668,7 +1668,7 @@ export default function LandingPage({
                   type="button"
                   onClick={handleContinueAsGuest}
                   disabled={startingGuestSession}
-                  className="inline-flex min-h-12 items-center rounded-full border border-white/15 px-7 py-4 text-sm font-black text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex min-h-12 items-center rounded-md border border-white/15 px-7 py-4 text-sm font-black text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {startingGuestSession
                     ? "Opening options..."

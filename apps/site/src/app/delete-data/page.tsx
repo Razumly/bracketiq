@@ -53,7 +53,7 @@ const additionalNotes = [
 
 function SectionCard({ title, items }: { title: string; items: string[] }) {
   return (
-    <section className="landing-surface rounded-3xl p-6 sm:p-7">
+    <section className="landing-surface rounded-md p-6 sm:p-7">
       <h2 className="landing-section-title text-2xl font-semibold">{title}</h2>
       <ul className="landing-section-copy mt-4 space-y-3 text-sm sm:text-base">
         {items.map((item) => (
@@ -94,7 +94,7 @@ export default function DeleteDataPage() {
           </Link>
           <Link
             href="/login"
-            className="landing-btn-secondary inline-flex min-h-11 items-center justify-center rounded-full px-4 text-sm font-semibold transition"
+            className="landing-btn-secondary inline-flex min-h-11 items-center justify-center rounded-md px-4 text-sm font-semibold transition"
           >
             Login
           </Link>
@@ -104,7 +104,7 @@ export default function DeleteDataPage() {
       <section className="container-responsive relative py-16 sm:py-20">
         <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
           <div className="space-y-6">
-            <p className="landing-kicker inline-flex rounded-full px-3 py-1 text-xs font-semibold tracking-[0.14em] uppercase">
+            <p className="landing-kicker inline-flex rounded-md px-3 py-1 text-xs font-semibold tracking-[0.14em] uppercase">
               Data Deletion Instructions
             </p>
             <div className="space-y-4">
@@ -118,7 +118,7 @@ export default function DeleteDataPage() {
                 retention periods that apply.
               </p>
             </div>
-            <div className="landing-surface-strong rounded-3xl p-6 sm:p-7">
+            <div className="landing-surface-strong rounded-md p-6 sm:p-7">
               <p className="landing-label text-xs tracking-[0.16em] uppercase">
                 How To Request Deletion
               </p>
@@ -132,7 +132,7 @@ export default function DeleteDataPage() {
                   </li>
                 ))}
               </ol>
-              <div className="landing-note-secondary mt-5 rounded-2xl p-4 text-sm">
+              <div className="landing-note-secondary mt-5 rounded-md p-4 text-sm">
                 Support fallback:{" "}
                 <a
                   className="font-semibold text-[var(--landing-accent-text)] underline underline-offset-4"
@@ -144,7 +144,7 @@ export default function DeleteDataPage() {
             </div>
           </div>
 
-          <aside className="landing-cta rounded-3xl p-6 sm:p-7">
+          <aside className="landing-cta rounded-md p-6 sm:p-7">
             <p className="landing-label-alt text-xs tracking-[0.16em] uppercase">
               Before Deletion Can Finish
             </p>

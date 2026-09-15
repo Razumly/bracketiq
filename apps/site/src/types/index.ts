@@ -503,6 +503,15 @@ export interface Sport {
   $createdAt: string;
   $updatedAt: string;
 }
+export interface SportCategory {
+  $id: string;
+  name: string;
+  sportIds: string[];
+  displayOrder: number;
+  $createdAt: string;
+  $updatedAt: string;
+}
+
 
 export interface SportCategory {
   $id: string;

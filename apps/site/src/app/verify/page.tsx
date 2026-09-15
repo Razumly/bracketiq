@@ -7,7 +7,7 @@ export default function VerifyPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-8 text-center">
+      <div className="bg-white rounded-md shadow-xl w-full max-w-md p-8 text-center">
         <div className="w-16 h-16 bg-blue-600 rounded-xl flex items-center justify-center mx-auto mb-4">
           <span className="text-2xl font-bold text-white">M</span>
         </div>

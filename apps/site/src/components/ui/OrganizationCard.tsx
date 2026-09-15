@@ -103,7 +103,7 @@ export default function OrganizationCard({ organization, onClick, actions }: Org
                   .map(({ feature, label, Icon }) => (
                     <span
                       key={feature}
-                      className="inline-flex items-center gap-1 rounded-full border border-blue-100 bg-blue-50 px-2 py-1 text-xs font-medium text-slate-700"
+                      className="inline-flex items-center gap-1 rounded-md border border-blue-100 bg-blue-50 px-2 py-1 text-xs font-medium text-slate-700"
                     >
                       <Icon aria-hidden="true" className="h-3.5 w-3.5 text-[#294c70]" strokeWidth={2} />
                       {label}

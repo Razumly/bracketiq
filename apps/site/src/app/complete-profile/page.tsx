@@ -143,9 +143,9 @@ function CompleteProfilePageContent() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-100 via-white to-blue-50 px-4 py-10">
-      <div className="mx-auto w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-8 shadow-xl shadow-slate-200/70">
+      <div className="mx-auto w-full max-w-lg rounded-md border border-slate-200 bg-white p-8 shadow-xl shadow-slate-200/70">
         <div className="mb-8">
-          <p className="mb-3 inline-flex rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-blue-700">
+          <p className="mb-3 inline-flex rounded-md bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-blue-700">
             One More Step
           </p>
           <h1 className="text-3xl font-semibold text-slate-900">Complete your profile</h1>
@@ -153,7 +153,7 @@ function CompleteProfilePageContent() {
             We need your first name, last name, and birthday before you can continue.
           </p>
           {missingSummary ? (
-            <p className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
               Missing: {missingSummary}.
             </p>
           ) : null}
@@ -185,7 +185,7 @@ function CompleteProfilePageContent() {
               value={firstName}
               onChange={(event) => setFirstName(event.target.value)}
               required
-              className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+              className="w-full rounded-md border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
               placeholder="Enter your first name"
             />
           </div>
@@ -201,7 +201,7 @@ function CompleteProfilePageContent() {
               value={lastName}
               onChange={(event) => setLastName(event.target.value)}
               required
-              className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+              className="w-full rounded-md border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
               placeholder="Enter your last name"
             />
           </div>
@@ -217,12 +217,12 @@ function CompleteProfilePageContent() {
               onChange={(event) => setDateOfBirth(event.target.value)}
               required
               max={maxDob}
-              className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+              className="w-full rounded-md border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
             />
           </div>
 
           {error ? (
-            <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+            <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
               {error}
             </div>
           ) : null}
@@ -230,7 +230,7 @@ function CompleteProfilePageContent() {
           <button
             type="submit"
             disabled={saving}
-            className="w-full rounded-2xl bg-blue-600 px-4 py-3 font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+            className="w-full rounded-md bg-blue-600 px-4 py-3 font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {saving ? 'Saving...' : 'Continue'}
           </button>
@@ -240,7 +240,7 @@ function CompleteProfilePageContent() {
           type="button"
           onClick={handleLogout}
           disabled={saving}
-          className="mt-4 w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+          className="mt-4 w-full rounded-md border border-slate-300 px-4 py-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
         >
           Log Out
         </button>

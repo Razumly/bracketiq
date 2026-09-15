@@ -54,6 +54,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FabPosition
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -142,6 +143,7 @@ import com.razumly.mvp.eventSearch.util.EventFilter
 import com.razumly.mvp.core.data.repositories.EventSearchSort
 import com.razumly.mvp.icons.Jersey
 import com.razumly.mvp.icons.MVPIcons
+import com.razumly.mvp.icons.SportIcon
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
@@ -295,13 +297,26 @@ private fun DiscoverFilterSportSection(
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Text(
-                    text = selectedSummary,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    selectedSports.singleOrNull()?.let { sport ->
+                        SportIcon(
+                            sport = sport.name,
+                            modifier = Modifier.size(16.dp),
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text(
+                        text = selectedSummary,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             IconButton(onClick = { sportsExpanded = !sportsExpanded }) {
                 Icon(
@@ -328,6 +343,13 @@ private fun DiscoverFilterSportSection(
                     FilterChip(
                         selected = sport.id in selectedSportIds,
                         onClick = { onSportToggled(sport) },
+                        leadingIcon = {
+                            SportIcon(
+                                sport = sport.name,
+                                modifier = Modifier.size(FilterChipDefaults.IconSize),
+                                contentDescription = null,
+                            )
+                        },
                         label = {
                             Text(
                                 text = sport.name,

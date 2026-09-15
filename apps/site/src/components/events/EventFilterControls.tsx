@@ -14,6 +14,8 @@ import {
   Text,
   TextInput,
 } from '@/components/organization/organization-operation-ui';
+import SportCategoryMultiSelect from '@/components/ui/SportCategoryMultiSelect';
+import type { SportCategory } from '@/types';
 
 const KM_PER_MILE = 1.60934;
 const DISTANCE_SLIDER_MIN_MILES = 10;
@@ -37,6 +39,7 @@ export type EventFilterPanelProps<TEventType extends string> = {
   selectedSports: string[];
   setSelectedSports: Dispatch<SetStateAction<string[]>>;
   sportsData: Array<{ value: string; label: string }>;
+  sportCategories?: SportCategory[];
   sportsLoading: boolean;
   selectedEventTypes: TEventType[];
   setSelectedEventTypes: (value: TEventType[]) => void;
@@ -64,6 +67,7 @@ type EventFilterControlsProps<TEventType extends string> = Pick<
   | 'selectedSports'
   | 'setSelectedSports'
   | 'sportsData'
+  | 'sportCategories'
   | 'sportsLoading'
   | 'selectedEventTypes'
   | 'setSelectedEventTypes'
@@ -99,6 +103,7 @@ export function EventFilterPanel<TEventType extends string>({
   selectedSports,
   setSelectedSports,
   sportsData,
+  sportCategories = [],
   sportsLoading,
   selectedEventTypes,
   setSelectedEventTypes,
@@ -130,10 +135,11 @@ export function EventFilterPanel<TEventType extends string>({
       {showSports && (
         <>
           {sportsHeading && <Text size="xs" fw={700} c="dimmed" tt="uppercase">{sportsHeading}</Text>}
-          <MultiSelect
+          <SportCategoryMultiSelect
             aria-label="Filter by sports"
             placeholder="All sports"
             data={sportsData}
+            categories={sportCategories}
             value={selectedSports}
             onChange={setSelectedSports}
             disabled={sportsLoading}
@@ -220,10 +226,11 @@ export function EventFilterControls<TEventType extends string>({
           className="min-w-0 flex-1"
         />
       )}
-      <MultiSelect
+      <SportCategoryMultiSelect
         aria-label="Filter by sports"
         placeholder="Sports"
         data={filterProps.sportsData}
+        categories={filterProps.sportCategories}
         value={filterProps.selectedSports}
         onChange={filterProps.setSelectedSports}
         disabled={filterProps.sportsLoading}
@@ -284,7 +291,7 @@ export function ActiveEventFilters({
           key={filter.key}
           type="button"
           onClick={filter.onRemove}
-          className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-border bg-muted px-3 py-1 text-sm text-foreground hover:bg-accent/10"
+          className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-border bg-muted px-3 py-1 text-sm text-foreground hover:bg-accent/10"
         >
           <span>{filter.label}</span>
           <X aria-hidden="true" className="size-3.5" />

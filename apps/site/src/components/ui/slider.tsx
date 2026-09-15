@@ -114,7 +114,7 @@ function Slider<Value extends readonly number[] = readonly number[]>({
       <SliderPrimitive.Control className="relative flex min-w-0 touch-none items-center select-none data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-disabled:opacity-50 data-[orientation=horizontal]:min-h-11 data-[orientation=horizontal]:w-full data-[orientation=vertical]:h-full data-[orientation=vertical]:min-h-44 data-[orientation=vertical]:w-11 data-[orientation=vertical]:min-w-11 data-[orientation=vertical]:flex-col group-data-[readonly]/slider:pointer-events-none group-data-[readonly]/slider:cursor-default group-data-[readonly]/slider:opacity-70">
         <SliderPrimitive.Track
           data-slot="slider-track"
-          className="relative grow overflow-hidden rounded-full bg-control-track select-none data-[orientation=horizontal]:h-1.5 data-[orientation=horizontal]:w-full data-[orientation=vertical]:h-full data-[orientation=vertical]:w-1.5"
+          className="relative grow overflow-hidden rounded-md bg-control-track select-none data-[orientation=horizontal]:h-1.5 data-[orientation=horizontal]:w-full data-[orientation=vertical]:h-full data-[orientation=vertical]:w-1.5"
         >
           <SliderPrimitive.Indicator
             data-slot="slider-range"

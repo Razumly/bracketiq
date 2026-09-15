@@ -5,13 +5,15 @@ import { ClipboardList, Plus, Search, UserRound, Users, ShieldCheck } from 'luci
 import { Button, Select, TextInput } from '@/components/organization/organization-operation-ui';
 import { OrganizationStatStrip, OrganizationTabHeading } from '@/components/organization/OrganizationTabLayout';
 import { OrganizationDataRegion } from '@/components/organization/OrganizationDataLoading';
-import type { Team, Division } from '@/types';
+import SportCategoryMultiSelect from '@/components/ui/SportCategoryMultiSelect';
+import type { Team, Division, SportCategory } from '@/types';
 import OrganizationTeamSummaryCard, { teamRosterSize } from './OrganizationTeamSummaryCard';
 import { teamDivisionLabel } from './organizationTeamLabels';
 
 export type OrganizationTeamsTabContentProps = {
   teams?: Team[] | null;
   divisionDetails?: Division[];
+  sportCategories?: SportCategory[];
   isTeamManagementAllowed?: boolean;
   onCreateTeam: () => void;
   onTeamClick: (team: Team) => void;
@@ -21,9 +23,16 @@ function teamCoachIds(team: Team): string[] {
   return [team.headCoachId, ...(team.assistantCoachIds ?? [])].filter((id): id is string => Boolean(id));
 }
 
-export default function OrganizationTeamsTabContent({ teams, divisionDetails, isTeamManagementAllowed = false, onCreateTeam, onTeamClick }: OrganizationTeamsTabContentProps) {
+export default function OrganizationTeamsTabContent({
+  teams,
+  divisionDetails,
+  sportCategories = [],
+  isTeamManagementAllowed = false,
+  onCreateTeam,
+  onTeamClick,
+}: OrganizationTeamsTabContentProps) {
   const [search, setSearch] = useState('');
-  const [sport, setSport] = useState('');
+  const [selectedSports, setSelectedSports] = useState<string[]>([]);
   const [division, setDivision] = useState('');
   const [roster, setRoster] = useState('');
   const source = useMemo(() => teams ?? [], [teams]);
@@ -31,7 +40,7 @@ export default function OrganizationTeamsTabContent({ teams, divisionDetails, is
   const divisions = [...new Set(source.map((team) => teamDivisionLabel(team, divisionDetails)))];
   const filtered = source.filter((team) => {
     if (!team.name.toLowerCase().includes(search.toLowerCase())) return false;
-    if (sport && team.sport !== sport) return false;
+    if (selectedSports.length && !selectedSports.includes(team.sport ?? '')) return false;
     if (division && teamDivisionLabel(team, divisionDetails) !== division) return false;
     return !roster || (roster === 'open' ? team.openRegistration && !team.isFull : team.isFull);
   });
@@ -48,10 +57,17 @@ export default function OrganizationTeamsTabContent({ teams, divisionDetails, is
       ]} />
       <div className="org-filter-toolbar org-team-filters">
         <TextInput aria-label="Search teams" placeholder="Search" value={search} onChange={(event) => setSearch(event.currentTarget.value)} leftSection={<Search className="size-4" />} />
-        <Select aria-label="Sport" placeholder="Sport" data={sports} value={sport} onChange={(value) => setSport(value ?? '')} clearable />
+        <SportCategoryMultiSelect
+          aria-label="Sport"
+          placeholder="Sport"
+          data={sports}
+          categories={sportCategories}
+          value={selectedSports}
+          onChange={setSelectedSports}
+        />
         <Select aria-label="Division" placeholder="Division" data={divisions} value={division} onChange={(value) => setDivision(value ?? '')} clearable />
         <Select aria-label="Roster status" placeholder="Roster status" data={[{ value: 'open', label: 'Registration open' }, { value: 'full', label: 'Roster full' }]} value={roster} onChange={(value) => setRoster(value ?? '')} clearable />
-        <Button variant="subtle" onClick={() => { setSearch(''); setSport(''); setDivision(''); setRoster(''); }}>Clear all</Button>
+        <Button variant="subtle" onClick={() => { setSearch(''); setSelectedSports([]); setDivision(''); setRoster(''); }}>Clear all</Button>
       </div>
       <OrganizationDataRegion label="teams" layout="cards">
       <div className="org-team-grid">{filtered.map((team) => <OrganizationTeamSummaryCard key={team.$id} team={team} divisions={divisionDetails} onClick={() => onTeamClick(team)} />)}</div>

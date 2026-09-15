@@ -46,6 +46,16 @@ describe('organization operation filters', () => {
     await user.click(input);
     expect(screen.getByRole('option', { name: 'EVENT' })).toBeVisible();
   });
+  it('keeps non-searchable Select controls read-only', async () => {
+    const user = userEvent.setup();
+    render(<Select aria-label="Event type" value="EVENT" data={['EVENT', 'TOURNAMENT']} searchable={false} />);
+    const input = screen.getByRole('combobox', { name: 'Event type' });
+
+    expect(input).toHaveAttribute('readonly');
+    expect(input).toHaveAttribute('aria-autocomplete', 'none');
+    await user.click(input);
+    expect(screen.getByRole('option', { name: 'TOURNAMENT' })).toBeVisible();
+  });
 
   it('reopens a dismissed Select when typing resumes in the focused input', async () => {
     const user = userEvent.setup();

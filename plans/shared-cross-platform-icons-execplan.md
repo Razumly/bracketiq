@@ -2,9 +2,9 @@
 
 ## Purpose and Big Picture
 
-The BracketIQ site and mobile app currently keep icon sources in separate trees. The site has a generated projection for sport SVGs under `shared/icons/sports`, `apps/site/public/icons/sports`, and `apps/site/src/components/ui/sharedIconManifest.generated.ts`. The mobile app has product vectors under `apps/mobile/core/ui/src/commonMain/kotlin/com/razumly/mvp/icons` and several unused SVG resources under `apps/mobile/composeApp/src/commonMain/composeResources/drawable`.
+The BracketIQ site and mobile app use separate client projections from one shared icon source. The site has generated projections for sport SVGs under `shared/icons/sports`, `apps/site/public/icons/sports`, and `apps/site/src/components/ui/sharedIconManifest.generated.ts`. The mobile app consumes generated XML inputs under `apps/mobile/core/ui/xml-images/shared` and generated semantic adapters in `core:ui`.
 
-This change creates one shared icon manifest and one canonical SVG source tree. The first product-icon slice covers `Trophy`, `TournamentBracket`, and `Groups`. The generator projects the canonical assets to site public SVGs, a generated site manifest, generated mobile `xml-images` inputs, and a generated semantic mobile adapter for the existing Compose Vectorize plugin. The mobile app migrates the current product-icon callers to that adapter. The site exposes a matching `SharedIcon` adapter without changing unrelated page design.
+This change creates one shared icon manifest and one canonical SVG source tree. The first product-icon slice covers `Trophy`, `TournamentBracket`, and `Groups`. The generator projects the canonical assets to site public SVGs, a generated site manifest, generated mobile `xml-images` inputs, and generated mobile semantic adapters for product and sport icons. Product callers use `SharedIcons`. Discover sport surfaces use `SportIcon`.
 
 The seam is the manifest and its generated asset map. Web code consumes public SVG hrefs. Mobile code consumes generated `ImageVector` projections. Neither client imports the other platform's source or types.
 
@@ -22,6 +22,10 @@ The seam is the manifest and its generated asset map. Web code consumes public S
 - [x] 2026-09-10T13:24:37-07:00 Add cross-platform icon checks.
 - [x] 2026-09-10T13:24:37-07:00 Run site and mobile verification.
 - [x] 2026-09-10T13:27:36-07:00 Review scoped changes and report.
+- [x] 2026-09-10T16:06:01-07:00 Rebased the workstream on `dev` and resolved the replayed mobile test conflict with the corrected `dev` version.
+- [x] 2026-09-10T16:06:01-07:00 Added the generated mobile sport adapter and migrated mobile Discover sport chips, summaries, and team subtitles to `SportIcon`.
+- [x] 2026-09-10T16:06:01-07:00 Restricted Discover skill-level filtering to one normalized selected sport and cleared stale skill selections for zero or multiple sports.
+- [x] 2026-09-10T16:06:01-07:00 Rebuilt and restarted the authorized site runtime. Browser verification confirmed the skill filter appears for one sport and disappears for two sports.
 
 The worktree already contains unrelated unstaged changes. Preserve them. The earlier sport-icon migration is part of this change and must remain intact.
 
@@ -40,17 +44,17 @@ The worktree already contains unrelated unstaged changes. Preserve them. The ear
 - Use a single root manifest at `shared/icons/manifest.json`. Keep the existing flat sport keys and add a `category` field for product keys. Generated adapters expose the category-specific API shapes.
 - Keep existing sport public URLs and `#sport-icon` fragments stable. Product assets use `#shared-icon`. The generated href map owns this detail.
 - Use the existing mobile product geometry for the first product slice. Record the existing-mobile provenance and review-required license status in the manifest instead of claiming an unverified external license.
-- Keep the mobile adapter in `core:ui`. Do not import generated vector classes from feature code. Feature code depends on the generated `SharedIcons` semantic object.
-- Do not migrate every Material icon in the mobile app. Search results show many unrelated utility icons. This slice migrates only the three named product icons and every current caller of those icons.
+- Keep the mobile adapters in `core:ui`. Do not import generated vector classes from feature code. Product feature code depends on `SharedIcons`; Discover sport code depends on `SportIcon`.
+- Do not migrate every Material icon in the mobile app. Search results show many unrelated utility icons. The product slice migrates the three named product icons and every current caller. The sport slice migrates only the named Discover sport surfaces.
 - Do not add new product icons to unrelated site pages. The site adapter and focused behavior test establish the consumer seam for later page work without inventing product design changes.
 
 ## Outcomes & Retrospective
 
-The implementation now uses one 27-entry manifest for the migrated shared set. It generates 27 site SVGs, 27 mobile XML inputs, typed site metadata, and a semantic mobile adapter. The three migrated mobile callers use `SharedIcons`, and the old duplicate Kotlin vectors and unused duplicate SVG resources are removed. Other mobile-only icons remain outside this first slice by decision.
+The implementation now uses one 27-entry manifest for the migrated shared set. It generates 27 site SVGs, 27 mobile XML inputs, typed site metadata, and semantic mobile adapters for product and sport icons. The three migrated mobile product callers use `SharedIcons`. Mobile Discover sport chips, summaries, and team subtitles use `SportIcon`. Other mobile-only icons remain outside this slice by decision.
 
 The product sources retain the existing mobile attribution where it is known. Their manifest license status remains `review-required`; this change does not claim an external license that the repository cannot prove.
 
-The new site adapter is covered by DOM behavior tests. It is not mounted on an existing site page in this slice, so no unrelated page design changed.
+The site adapter is covered by DOM behavior tests. It is not mounted on an existing site page in the shared-icon slice, so no unrelated page design changed. Discover retains its existing site sport adapter.
 
 ## Context and Orientation
 
@@ -67,6 +71,10 @@ Relevant files:
 - `apps/mobile/core/ui/build.gradle.kts`: KMP UI module build and generated vector configuration.
 - `apps/mobile/core/ui/xml-images/shared/*.xml`: generated mobile vector inputs.
 - `apps/mobile/core/ui/src/commonMain/kotlin/com/razumly/mvp/icons/sharedIcons.generated.kt`: generated mobile semantic adapter.
+- `apps/mobile/core/ui/src/commonMain/kotlin/com/razumly/mvp/icons/SportIcon.kt`: semantic sport-name normalization and Compose rendering boundary.
+- `apps/mobile/core/ui/src/commonTest/kotlin/com/razumly/mvp/icons/SportIconTest.kt`: canonical, alias, and fallback behavior checks.
+- `apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventSearch/EventSearchScreen.kt`: Discover sport filter controls.
+- `apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventSearch/tabs/teams/DiscoverTeamList.kt`: Discover team sport labels.
 - `apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailTabNavigation.kt`: tab icon callers.
 - `apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetailFloatingActions.kt`: participant action caller.
 - `apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/profile/ProfileHomeScreen.kt`: profile action caller.
@@ -75,15 +83,15 @@ The site uses Next.js, React, TypeScript, and external SVG `<use>` references. T
 
 ## Context Boundary
 
-Read only the root policy, `PLANS.md`, the site and mobile policy files, the named icon sources, their direct callers, and the build/test files needed for the projection. Do not inspect or edit unrelated site components, backend code, Prisma output, deployment files, or mobile features that do not use the three migrated icons.
+- Read only the root policy, `PLANS.md`, the site and mobile policy files, the named icon sources, their direct callers, and the build/test files needed for the projection. Do not inspect or edit unrelated site components, backend code, Prisma output, deployment files, or mobile features that do not use the three product icons or the named Discover sport surfaces.
 
 ## Plan of Work
 
 1. Finish the source and caller inventory. Confirm the exact Compose Vectorize configuration and the type expected by each mobile caller.
 2. Move the sport manifest to the root manifest and add product entries. Add canonical product SVGs that preserve the selected mobile geometry and identify provenance.
 3. Extend the sync script. Validate all entries, preserve stable sport output, write product web assets, write generated site key/href data, and write mobile XML vector inputs.
-4. Apply Compose Vectorize to `core:ui`. Add a semantic mobile adapter over generated vectors. Migrate all three product icon call paths without exposing generated names to feature code.
-5. Add site adapter behavior checks and mobile common tests for key-to-vector selection. Remove the migrated duplicate Kotlin vectors and unused duplicate resource references only when no caller remains.
+4. Apply Compose Vectorize to `core:ui`. Add semantic mobile adapters over generated vectors. Migrate product callers to `SharedIcons` and Discover sport surfaces to `SportIcon`. Do not expose generated vector names to feature code.
+5. Add site adapter behavior checks and mobile common tests for key-to-vector selection. Remove migrated duplicate Kotlin vectors and unused duplicate resource references only when no caller remains.
 6. Run focused site checks, TypeScript and lint checks, the mobile compile/test commands, and the shared icon sync check. Inspect the final scoped diff without resetting unrelated work.
 
 ## Concrete Steps
@@ -167,7 +175,7 @@ The generated Compose Vectorize Kotlin files remain under `apps/mobile/core/ui/b
 
 ## Interfaces and Dependencies
 
-The manifest entry shape includes a stable semantic key, category, canonical source path, generated output path, SVG fragment id, and provenance/license metadata. The site generated module exposes typed all-icon keys, viewBoxes, and hrefs plus sport-only keys. The mobile generated adapter exposes product names and returns `ImageVector` values without leaking generated category names.
+The manifest entry shape includes a stable semantic key, category, canonical source path, generated output path, SVG fragment id, and provenance/license metadata. The site generated module exposes typed all-icon keys, viewBoxes, and hrefs plus sport-only keys. The mobile generated adapters expose product and sport names and return `ImageVector` values without leaking generated category names.
 
 Dependencies remain platform-local. Site code uses React and SVG. Mobile code uses Compose UI, Compose Vectorize core, and generated common Kotlin vectors. No server or API dependency changes.
 
@@ -176,3 +184,6 @@ Dependencies remain platform-local. Site code uses React and SVG. Mobile code us
 - 2026-09-10T13:02:42-07:00 Initial plan created after repository, policy, and mobile icon inventory. LSP references were attempted but no mobile language server was available; exact repository search is required before deletion.
 - 2026-09-10T13:24:37-07:00 Implemented the root manifest, product sources, deterministic site/mobile projections, adapters, caller migration, duplicate cleanup, and focused checks. The sync command manages only generated icon directories so existing unrelated public icons remain untouched.
 - 2026-09-10T13:27:36-07:00 Verification passed: shared projection check, two site icon suites with eight tests, site TypeScript, scoped ESLint, Prettier, mobile core UI unit tests, and mobile Compose compilation. Gradle emitted existing Windows/iOS and deprecation warnings only.
+- 2026-09-10T16:06:01-07:00 Extended the integration to consume all 24 generated sport vectors through a semantic `SportIcon` boundary. Discover skill-level controls now render only for one normalized sport selection; focused site tests cover hide, show, clear, and stale-selection cases.
+- 2026-09-10T16:06:01-07:00 Verification before the later current-`dev` rebase passed: shared projection check, six Discover suites with 65 tests, site TypeScript, scoped ESLint, Prettier, production build, mobile core UI unit tests, mobile Compose compilation, and browser smoke verification. Existing React `act`, Next.js lockfile, and Gradle deprecation warnings remain.
+- 2026-09-10T16:29:33-07:00 Rebased again onto current `dev` (`c4be75e12`); ancestry check passed. Post-rebase Discover tests, shared icon check, scoped ESLint, mobile core UI unit tests, and Compose compilation passed. Full site typecheck after Prisma regeneration still reports the current-`dev` `protectEventResponse` error at `apps/site/src/app/api/events/[eventId]/route.ts:1231`; generated Prisma output was restored as unrelated.
