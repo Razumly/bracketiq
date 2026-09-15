@@ -3728,3 +3728,201 @@ Evidence is stored at `local://pickleball-catalog-fix-verification.json`.
 No provider calls, production writes, runtime changes, deployment, or live
 job retry occurred. The deployed version-11 code and stopped-worker state
 remain unchanged. Keep this source-only fix on its workstream branch.
+
+## Authorized fifty-job existing-backlog batch
+
+
+The user asked to continue with the larger batch after local catalog-fix
+verification. Use the previously proposed limit of fifty existing-backlog
+mapping jobs. This authorizes integration, image publication, and deployment
+of the verified catalog fix to the same seven runtimes. It authorizes bounded
+known-source capture, normal repair admission, and producer/reviewer work.
+It does not authorize discovery, activation, listing publication, or changes
+to unrelated runtimes. Do not bypass the previous twenty jobs' pending or
+correction holds.
+
+Advance the deployment contract from version 11 to 12. Keep role and prompt
+versions at 11 because their schemas and instructions do not change. Keep the
+active Supply Contract, model selection, account identities, and credentials.
+The source fix is commit `b1caeaeee289ca987b5c318709a2cd8d722a6852`.
+
+Select fifty distinct existing human-review jobs through read-only inventory.
+Record the complete selection before capture or admission. Reuse complete
+stored evidence when it is sufficient. Refresh only known source pages that
+need current evidence and pass the existing policy/capture gate. Do not retry
+historical failed capture intakes. Retain explicit held outcomes in the fifty
+job accounting; do not replace them silently with other jobs.
+
+Use admission groups of at most twenty, with a final group of ten. Every APPLY
+must match its reviewed PREVIEW hash. The controller must bind each Gateway
+root to its original mapping job, source, Supply Source, admission hash, and
+deployment contract. Open one exact producer/reviewer lease at a time. Stop
+on an unreviewed process failure or unresolved effect. At completion, close
+admission, stop the runner/producer/reviewer, and verify public data and
+historical records against the pre-batch hashes.
+
+Source review, selection, deployment, and execution are pending. The prior
+version-11 runtime state remains authoritative until its replacement succeeds.
+
+The source review passed both Standards and Spec axes. Source TypeScript and
+six integration suites passed with 251 tests. Site CI run `34988458382` failed
+once on an unchanged EventForm Cash App field test. The isolated test passed;
+attempt two of the exact-commit CI run passed without a source change.
+
+Site publication run `34990663390` and governed publication run `34990663322`
+passed. The immutable deployment images are:
+
+    ghcr.io/razumly/bracketiq-affiliate-governed@sha256:61fa7e6b0caef09631732babfa941bab9cce3e9d69035fa88cac724d8c3a2320
+    ghcr.io/razumly/bracketiq-affiliate-gateway@sha256:dd958cd873abd2f7ac3338a366ccf79cf9099de692f968ff985d5270fc57c8fc
+    ghcr.io/razumly/bracketiq-site@sha256:4f24d33d16ecdc4455599131364af2bb708c55e306cdcab62f61af0295e3c657
+
+The six governed runtimes and site were replaced within the named scope.
+Credential values, adjacent runtime identities, and legacy disabled units
+were preserved. No migration ran. Site readiness returned HTTP 200, and the
+browser rendered the homepage/onboarding surface without horizontal overflow.
+The previously observed onboarding icon failure is unchanged.
+
+The private tool root is
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v12-repair-tools-b1caeaeee`.
+The private workload root is
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v12-existing-repair-fifty-b1caeaeee`.
+Deployment version 12 has hash
+`067500307713e2c3d511de2870a6daa97a4c0edeb52da01cb72ecd5dc03f3d2e`.
+The initial preflight is ready, with hash
+`febeb654de27eaea577fc80d6631eae350a919668952022481095d53916c49a7`.
+Gateway started with closed admission; repair workers remain stopped during
+known-source capture.
+
+The immutable `selected-fifty.json` records all fifty original jobs. A
+preliminary admission check found ten existing identity, page-role, or
+ownership holds. These remain in `v12-held-jobs.json` and are not silently
+replaced. Forty members use sixty-four known pages for current evidence.
+Capture APPLY groups contain sixteen, sixteen, and eight runs. Capture
+processing checkpoints each terminal run and pauses before preflight expiry.
+Resume only unfinished admitted run IDs after a fresh stopped-fleet preflight;
+do not issue a second provider request for a completed run.
+
+All forty capture attempts reached terminal state: twenty-three SUCCEEDED,
+fourteen PARTIAL, and three FAILED. Each of the thirty-seven nonfailed runs
+has a paired primary HTML/Markdown artifact. Only successfully paired known
+supporting pages enter admission. The three failed sources stay held without
+a provider retry.
+
+Fresh admission selected thirty-one mapping jobs in groups of twelve, twelve,
+and seven. Six further members have evidence-URL identity conflicts. With the
+ten earlier structural holds and three capture failures, nineteen originals
+remain held before producer execution. The exact APPLY report hashes are:
+
+    1aabbbbf00eb2dd0d750251fb57a27d1b25df457e0748db288cdabcde8392c05
+    8ce228430fab73247d277d23604bd01fa9e3b60a0d2b15629be154771ce0dc82
+    18676269e838c89aef6808e150dbceaa66975ebc58ddf1cb5a3c02ccbe100396
+
+`backlog-batch-v12.json` in the private tool root binds the thirty-one new
+Gateway roots and nineteen held members to the original fifty-job selection.
+A read-only live check verified every queued root's source, intake, evidence,
+admission, and deployment identity before the first lease opened. Public
+candidate and Supply Target hashes remain equal to the pre-batch baseline.
+
+The operator-only controller needed three verification fixes before use:
+the compiled contract path is `omp-workload-compiled.v12.json`; its read-only
+status query splits JSON construction below PostgreSQL's function-argument
+limit; and it explicitly returns the repair kind and next-attempt eligibility.
+The retry guard continues to permit only a named failed claim while the
+server-scheduled retry waits; a new failed claim stops the controller.
+These helper fixes do not change application images or production records.
+
+Controller `repair-v12-backlog-controller` is running. Producer and reviewer
+readiness and both sandbox modes passed. It opens one exact root/descendant
+lease at a time and will close admission and stop the three repair workers
+at completion or a safe failure checkpoint. No automatic retry is authorized.
+
+After six admitted sources completed, the Pickleball Court Rentals producer
+crashed after committing a STAGED inactive mapping but before terminal
+submission. The failed Gateway job is
+`8c60dbb7-78ae-4e42-95ca-be85c0438a57`; its failed claim is
+`agw-claim-b150b1f0-a459-41c2-9edf-40c66de3fae3`. The pending mapping is
+`agw-artifact-d45100fb-e88a-41d0-a7ab-b9f7ef7ecb75`, with package hash
+`f90ad1a1009d4d269a82085222a1f1011baac89262f30c0f4fcc2b7287f0654c`.
+There are no unresolved receipts or active claims, but this is not safe for
+a normal producer retry. Existing recovery covers reviewer effects, not
+an absent producer terminal result after commit.
+
+The user selected `Hold it; finish the other 24`. Preserve this job, failed
+claim, and pending mapping unchanged. Do not invent a terminal result or
+rewrite its state. `operator-held-roots.json` records the exact source, root,
+claim, mapping, package hash, and user decision. The original admission
+manifest remains unchanged and still accounts for all fifty members.
+
+The operator controller accepts that explicit hold file. It checks the held
+root on every status read and excludes it from further leases. A changed
+claim, package, pending state, or unexpected child stops execution. A
+read-only check proved the hold binding and rejected a changed package hash.
+Controller `repair-v12-backlog-continue24` resumes only the twenty-four
+remaining queued jobs. Six completed sources are not rerun. Final accounting
+must distinguish the nineteen pre-execution holds from this post-commit hold.
+
+### Final fifty-job outcome
+
+
+Controller `repair-v12-backlog-continue24` completed the remaining twenty-four
+jobs and exited with code zero. It retained the one post-commit operator hold.
+All fifty original members are accounted for: fourteen independently approved
+packages, fourteen producer CONTRACT_GAP results, two reviewer
+HUMAN_REVIEW_REQUIRED results, nineteen pre-execution holds, and one
+post-commit operator hold. Thirty admitted source workflows reached terminal
+results. The held Gateway job was not retried or given an invented terminal
+result.
+
+The fourteen approved mappings contain twenty-five extracted candidates.
+They remain inactive and have current valid entityActionQuality reports.
+The approved sources are Artistic Sports Complex basketball rentals,
+Socceroof, NYC Pickleball Leagues, Prospect Park Tennis Center, the selected
+Youth Development Program, Cunningham Tennis, Impact Youth League, Five-Star
+Basketball Camp, New York Tennis Club, Sports Rental, Eastcoast Mavericks,
+Avon Football Club, Albion Hurricanes FC, and the selected Football source.
+The exact original job names and mapping IDs are in the final report.
+
+The two reviewer holds concern the Pier 25 volleyball rental page and
+Commonpoint Turf and Court Rentals. Their reviewers accepted the cited
+activity and booking evidence but held approval because the source document
+was classified as ARTICLE. Record this as a review-policy/source-type question,
+not as missing booking evidence. Do not override those reviews automatically.
+
+The selected legacy mapping-job statuses are fourteen COMPLETED, thirty-five
+HUMAN_REVIEW_REQUIRED, and one GOVERNED_REPAIR_PENDING. The last status belongs
+to the explicitly held post-commit failure. Its complete Gateway job, failed
+claim, and inactive pending mapping retain their exact pre-continuation row
+hashes. A later audited producer post-commit recovery path is still required
+for that source; do not open an unbounded claim lease to bypass it.
+
+Final verification found zero active claims, zero active job pointers, zero
+unresolved receipts, and zero running captures. Admission is closed. The
+runner, mapping-producer-1, and supply-reviewer-1 are stopped. Site, Gateway,
+model auth broker, and model gateway are healthy. Adjacent runtime identities
+and states, credential values, and disabled inactive legacy units remain
+unchanged.
+
+The final preflight was evaluated at `2026-09-15T19:34:36.959Z`. It is ready
+with hash
+`13646e7418495be3a4a9615f13753feaafb48b5834ecb89201e7f5a53c3fbf9f`.
+Site readiness returned `status: ok` and `database: ready`. Source and working
+mapping/organization state match each admitted baseline; only admitted private
+UNCLASSIFIED-to-supported-kind changes were permitted.
+
+Published candidates remain 2821 with hash
+`858274b7dec7d070f8d2f1665e672b22`. Supply Targets remain zero with hash
+`d41d8cd98f00b204e9800998ecf8427e`. All previous-batch protected source states
+and recorded historical mapping/job/claim/receipt/artifact/event hashes are
+unchanged. No new source discovery, activation, listing publication, or
+production migration occurred.
+
+Outside both original batches, the untouched mapping queues contain 332
+HUMAN_REVIEW_REQUIRED jobs, 453 QUEUED jobs, and one REVIEW_REQUIRED job.
+These are status counts, not eligibility claims.
+
+The final evidence is `final-verification.json` in the version-12 private
+tool root. Local records are `local://v12-final-verification.json`,
+`local://v12-final-batch-results.json`, and
+`local://v12-final-preservation.json`. The deployed source remains
+`b1caeaeee289ca987b5c318709a2cd8d722a6852`. This final plan checkpoint records
+execution only; it does not imply another application deployment.
