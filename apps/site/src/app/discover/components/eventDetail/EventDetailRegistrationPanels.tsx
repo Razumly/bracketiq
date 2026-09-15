@@ -195,6 +195,7 @@ export const EventDetailRegistrationPanels = ({
         return (
             <EventTeamRegistrationPanel
                 eventHasStarted={divisionModel.eventHasStarted}
+                eventName={currentEvent.name}
                 selectedWeeklySession={Boolean(weeklyModel.isWeeklyParentEvent && weeklyModel.selectedWeeklyOccurrenceOption)}
                 showTeamJoinOptions={true}
                 isLoadingTeams={isLoadingTeams}
@@ -224,8 +225,6 @@ export const EventDetailRegistrationPanels = ({
                     : currentEvent.sport?.name}
                 totalParticipants={participantModel.totalParticipants}
                 participantCapacity={participantModel.participantCapacity}
-                comboboxProps={sharedComboboxProps}
-                onToggleTeamOptions={presentationController.toggleTeamJoinOptions}
                 onSelectedTeamChange={onSelectedTeamChange}
                 onManageTeams={onManageTeams}
                 onAddPlayers={onAddPlayers}

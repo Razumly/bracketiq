@@ -1,12 +1,13 @@
-import { useState, type ReactNode } from 'react';
-import { Alert, Button, Paper, Select, Text } from '@/components/organization/organization-operation-ui';
+import { useId, type ReactNode } from 'react';
+import { Alert, Avatar, Badge, Button, Paper, Radio, Text } from '@/components/organization/organization-operation-ui';
 
 import type { Team } from '@/types';
-import { formatPrice } from '@/types';
-import TeamCard from '@/components/ui/TeamCard';
+import { getTeamAvatarUrl } from '@/types';
+import { cn } from '@/lib/utils';
 
 type EventTeamRegistrationPanelProps = {
     eventHasStarted: boolean;
+    eventName: string;
     selectedWeeklySession: boolean;
     showTeamJoinOptions: boolean;
     isLoadingTeams: boolean;
@@ -34,8 +35,6 @@ type EventTeamRegistrationPanelProps = {
     sportName?: string;
     totalParticipants: number;
     participantCapacity: number;
-    comboboxProps: React.ComponentProps<typeof Select>['comboboxProps'];
-    onToggleTeamOptions: () => void;
     onSelectedTeamChange: (teamId: string) => void;
     onManageTeams: () => void;
     onAddPlayers?: () => void;
@@ -51,6 +50,7 @@ type EventTeamRegistrationPanelProps = {
 
 export function EventTeamRegistrationPanel({
     eventHasStarted,
+    eventName,
     selectedWeeklySession,
     showTeamJoinOptions,
     isLoadingTeams,
@@ -78,8 +78,6 @@ export function EventTeamRegistrationPanel({
     sportName,
     totalParticipants,
     participantCapacity,
-    comboboxProps,
-    onToggleTeamOptions,
     onSelectedTeamChange,
     onManageTeams,
     onAddPlayers,
@@ -92,7 +90,13 @@ export function EventTeamRegistrationPanel({
     onJoinFreeAgents,
     onViewBracket,
 }: EventTeamRegistrationPanelProps) {
-    const [changingTeam, setChangingTeam] = useState(false);
+    const selectionId = useId();
+    const selectedTeam = userTeams.find((team) => team.$id === selectedTeamId);
+    const selectionDisabled = joining || confirmingPurchase || eventHasStarted || weeklySelectionRequired;
+    const selectionReason = weeklySelectionRequired
+        ? 'Select a weekly session before choosing a team.'
+        : !selectedTeam ? 'Choose a team or create one to continue.'
+            : isDivisionSelectionMissing ? 'Select a division before continuing registration.' : null;
     return (
         <div className="space-y-6">
             {eventHasStarted ? (
@@ -106,37 +110,47 @@ export function EventTeamRegistrationPanel({
 
             {showTeamJoinOptions ? (
                 <Paper withBorder p="md" radius="md" className="space-y-4">
+                    <div>
+                        <Text component="h2" size="xl" fw={700}>Choose a team</Text>
+                        <Text c="dimmed" size="sm">Register for {eventName}. Choose a team you manage or create a new team{sportName ? ` for ${sportName}` : ''}.</Text>
+                    </div>
                     {isLoadingTeams ? (
-                        <div className="text-sm text-gray-600">Loading your teams...</div>
+                        <Text role="status" size="sm" c="dimmed">Loading eligible teams...</Text>
                     ) : userTeams.length > 0 ? (
                         <div className="space-y-4">
-                            {!selectedTeamId || changingTeam ? <div>
-                                <label className="mb-2 block text-sm font-medium text-gray-700">
-                                    Select your team
-                                </label>
-                                <Select
-                                    placeholder="Choose a team"
-                                    data={userTeams.map((team) => ({
-                                        value: team.$id,
-                                        label: team.name || 'Team',
-                                    }))}
-                                    value={selectedTeamId}
-                                    onChange={(value) => { onSelectedTeamChange(value || ''); setChangingTeam(false); }}
-                                    searchable
-                                    comboboxProps={comboboxProps}
-                                />
-                            </div> : userTeams.filter((team) => team.$id === selectedTeamId).map((team) => (
-                                <TeamCard key={team.$id} team={team} showTeamMetadata={false} />
-                            ))}
+                            <Radio.Group label="Eligible teams" value={selectedTeamId} onChange={onSelectedTeamChange}>
+                                <div className="mt-3 space-y-3">
+                                    {userTeams.map((team) => (
+                                        <label key={team.$id} className={cn(
+                                            'flex min-h-20 items-center gap-3 rounded-xl border p-4 focus-within:ring-2 focus-within:ring-ring',
+                                            team.$id === selectedTeamId ? 'border-primary bg-primary/5' : 'border-border bg-background',
+                                            selectionDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:border-primary',
+                                        )}>
+                                            <Radio value={team.$id} aria-label={team.name} aria-describedby={`${selectionId}-help`} disabled={selectionDisabled} />
+                                            <Avatar src={getTeamAvatarUrl(team, 48)} name={team.name} alt="" />
+                                            <span className="min-w-0 flex-1">
+                                                <span className="block font-semibold text-foreground">{team.name}</span>
+                                                <span className="block text-sm text-muted-foreground">
+                                                    {team.sport}{team.sport ? ' · ' : ''}{team.playerIds.length} of {team.teamSize} players
+                                                    {team.pending.length > 0 ? ` · ${team.pending.length} pending` : ''}
+                                                </span>
+                                            </span>
+                                            {team.$id === selectedTeamId ? <Badge className="shrink-0">Selected</Badge> : null}
+                                        </label>
+                                    ))}
+                                </div>
+                            </Radio.Group>
 
                             <div className="flex flex-wrap gap-2">
-                                <Button variant="subtle" onClick={() => setChangingTeam(true)}>Change team</Button>
-                                {onEditTeam ? <Button variant="default" onClick={onEditTeam} disabled={!selectedTeamId || joining || eventHasStarted}>Edit team</Button> : null}
+                                {onEditTeam ? <Button variant="default" onClick={onEditTeam} disabled={!selectedTeam || selectionDisabled}>Manage team</Button> : null}
                                 <Button variant="default" onClick={onAddPlayers} disabled={!selectedTeamId || joining || eventHasStarted || weeklySelectionRequired}>Add players</Button>
                                 <Button variant="subtle" onClick={onManageTeams} disabled={joining || eventHasStarted || weeklySelectionRequired}>Create team</Button>
                             </div>
 
-                            <div className="flex flex-col items-center gap-2 pt-2">
+                            <Text id={`${selectionId}-help`} size="sm" c="dimmed">
+                                {selectionReason ?? 'Players are optional. Invitations remain pending until each person accepts.'}
+                            </Text>
+                            <div className="flex flex-col items-stretch gap-2 pt-2 sm:items-end">
                                 {showTeamWaitlistActions ? (
                                     <Button
                                         onClick={onJoinTeamWaitlist}
@@ -181,11 +195,9 @@ export function EventTeamRegistrationPanel({
                                                         ? 'Joining...'
                                                         : !selectedTeamId
                                                             ? 'Choose a team'
-                                                            : (!isFreeForUser && priceCents > 0)
-                                                                ? (selectedTeamPaymentFailed
-                                                                    ? 'Complete payment'
-                                                                    : `Join for ${formatPrice(priceCents)}`)
-                                                                : hasDraft ? 'Continue registration' : 'Join Event'}
+                                                            : selectedTeamPaymentFailed
+                                                                ? 'Complete payment'
+                                                                : hasDraft ? 'Continue registration' : 'Continue with this team'}
                                     </Button>
                                 )}
                                 {selectedTeamIsRegistered ? (
@@ -211,11 +223,12 @@ export function EventTeamRegistrationPanel({
                                 You have no managed teams{sportName ? ` for ${sportName}` : ''}.
                             </p>
                             <Button variant="default" onClick={onManageTeams} disabled={joining || eventHasStarted || weeklySelectionRequired}>
-                                Create Team
+                                Create team
                             </Button>
                             <div className="text-center">
                                 <Text size="sm" c="dimmed">
                                     {totalParticipants} / {participantCapacity} total participants
+                                    {selectionReason ? <span className="block">{selectionReason}</span> : null}
                                 </Text>
                             </div>
                         </div>
@@ -237,7 +250,7 @@ export function EventTeamRegistrationPanel({
                         type="button"
                         onClick={onLeaveFreeAgents}
                         disabled={joining || eventHasStarted}
-                        className={`w-full rounded-lg px-4 py-2 font-medium text-white transition-colors ${
+                        className={`min-h-11 w-full rounded-lg px-4 py-2 font-medium text-white transition-colors ${
                             joining || eventHasStarted
                                 ? 'cursor-not-allowed bg-gray-400'
                                 : 'bg-red-600 hover:bg-red-700'
@@ -253,7 +266,7 @@ export function EventTeamRegistrationPanel({
                     type="button"
                     onClick={onJoinFreeAgents}
                     disabled={joining || Boolean(freeAgentJoinBlockedReason)}
-                    className={`w-full rounded-lg px-4 py-2 font-medium text-white transition-colors ${
+                    className={`min-h-11 w-full rounded-lg px-4 py-2 font-medium text-white transition-colors ${
                         joining || freeAgentJoinBlockedReason
                             ? 'cursor-not-allowed bg-gray-400'
                             : 'bg-purple-600 hover:bg-purple-700'
@@ -268,6 +281,7 @@ export function EventTeamRegistrationPanel({
                                 : 'Join as Free Agent (Free)'}
                 </button>
             )}
+            {freeAgentJoinBlockedReason ? <Text size="sm" c="dimmed">{freeAgentJoinBlockedReason}</Text> : null}
 
             {childRegistrationPanel}
 
@@ -279,7 +293,7 @@ export function EventTeamRegistrationPanel({
                 <button
                     type="button"
                     onClick={onViewBracket}
-                    className="mt-2 w-full rounded-lg bg-green-600 px-4 py-2 text-white hover:bg-green-700"
+                    className="mt-2 min-h-11 w-full rounded-lg bg-green-600 px-4 py-2 text-white hover:bg-green-700"
                 >
                     View Tournament Bracket
                 </button>

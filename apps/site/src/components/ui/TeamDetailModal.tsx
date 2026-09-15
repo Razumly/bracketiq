@@ -1,8 +1,8 @@
 // components/ui/TeamDetailModal.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import TeamInvitationManager from '@/components/ui/TeamInvitationManager';
-import { notifications } from '@mantine/notifications';
-import { Modal, Group, Text, Title, Button, Paper, SimpleGrid, Avatar, Badge, Alert, TextInput, ScrollArea, SegmentedControl, NumberInput, Select as MantineSelect, Checkbox, MultiSelect, Loader, Stack, Collapse } from '@mantine/core';
+import { appNotifications } from '@/lib/notifications';
+import { Modal, Group, Text, Title, Button, Paper, SimpleGrid, Avatar, Badge, Alert, TextInput, ScrollArea, SegmentedControl, NumberInput, Select, Checkbox, MultiSelect, Loader, Stack, Collapse } from '@/components/organization/organization-operation-ui';
 import { Invite, Team, UserData, Event, SPORTS_LIST, getUserFullName, getUserAvatarUrl, getTeamAvatarUrl, getUserHandle, formatPrice } from '@/types';
 import type { RegistrationQuestionDraft, TeamJoinPolicy, TeamJoinRequest, TeamPlayerRegistration } from '@/types';
 import type { TeamComplianceSummary, TeamComplianceUserSummary, TeamMemberComplianceResponse } from '@/lib/eventTeamCompliance';
@@ -25,6 +25,7 @@ import { type PaymentEventSummary } from './PaymentModal';
 import InvitePlayersModal from '@/app/teams/components/InvitePlayersModal';
 import { describeDeleteOutcome } from '@/lib/deleteOutcome';
 import { normalizeExternalHttpUrl } from '@/lib/externalUrl';
+import type { EventRegistrationScope } from '@/lib/contracts/eventRegistrationDraft';
 
 export type TeamDetailPageTab = 'roster' | 'schedule' | 'finance' | 'invitations';
 
@@ -41,6 +42,7 @@ interface TeamDetailModalProps {
     variant?: 'modal' | 'page' | 'edit';
     activeTab?: TeamDetailPageTab;
     onActiveTabChange?: (tab: TeamDetailPageTab) => void;
+    eventRegistration?: EventRegistrationScope;
 }
 
 type TeamInviteRoleType = 'player' | 'team_manager' | 'team_head_coach' | 'team_assistant_coach';
@@ -250,6 +252,7 @@ export default function TeamDetailModal({
     variant = 'modal',
     activeTab,
     onActiveTabChange,
+    eventRegistration,
 }: TeamDetailModalProps) {
     const { user } = useApp();
     const isTeamCaptain = currentTeam.captainId === user?.$id || currentTeam.managerId === user?.$id;
@@ -257,7 +260,7 @@ export default function TeamDetailModal({
     const isPageMode = variant === 'page';
     const isEditMode = variant === 'edit';
     const detailIsActive = isPageMode || isOpen;
-    const showTeamDetailTabs = isPageMode;
+    const showTeamDetailTabs = isPageMode || activeTab !== undefined;
     const financeTabAvailable = showTeamDetailTabs && Boolean(currentTeam.organizationId);
     const invitationsTabAvailable = showTeamDetailTabs && canManageTeam;
     const requestedDetailTab = showTeamDetailTabs ? activeTab ?? 'roster' : 'roster';
@@ -298,6 +301,7 @@ export default function TeamDetailModal({
     const [editingName, setEditingName] = useState(false);
     const [newName, setNewName] = useState(currentTeam.name || '');
     const [editingDetails, setEditingDetails] = useState(false);
+    const [savingDetails, setSavingDetails] = useState(false);
     const [draftSport, setDraftSport] = useState(currentTeam.sport || '');
     const [draftDivision, setDraftDivision] = useState('');
     const [draftDivisionGender, setDraftDivisionGender] = useState<DivisionGenderInput>('');
@@ -1104,6 +1108,7 @@ export default function TeamDetailModal({
     ), [activePlayerRegistrationByUserId, currentTeam.$id, jerseyNumbersByUserId, teamPlayers]);
 
     const handleCloseDetails = () => {
+        if (savingDetails) return;
         setEditingDetails(false);
         if (isEditMode) {
             onClose();
@@ -1111,6 +1116,7 @@ export default function TeamDetailModal({
     };
 
     const handleSaveDetails = async () => {
+        if (savingDetails) return;
         const nextName = newName.trim();
         const nextSport = draftSport.trim();
         const nextTeamSize = Number(draftTeamSize) || 0;
@@ -1179,29 +1185,34 @@ export default function TeamDetailModal({
             return;
         }
 
-        const updated = await teamService.updateTeamDetails(currentTeam.$id, {
-            ...(isEditMode ? { name: nextName } : {}),
-            sport: nextSport,
-            division: nextDivision,
-            divisionTypeId: nextDivisionTypeId,
-            teamSize: nextTeamSize,
-            captainId: nextCaptainId,
-            joinPolicy: nextJoinPolicy,
-            openRegistration: nextJoinPolicy === 'OPEN_REGISTRATION',
-            registrationPriceCents: nextRegistrationPriceCents,
-            affiliateUrl: nextAffiliateUrl || null,
-            requiredTemplateIds: currentTeam.organizationId ? draftRequiredTemplateIds : [],
-            playerRegistrations: buildPlayerRegistrationPayload(nextCaptainId),
-        });
-        if (!updated) {
-            setError('Failed to update team details');
-            return;
+        setSavingDetails(true);
+        setError(null);
+        try {
+            const updated = await teamService.updateTeamDetails(currentTeam.$id, {
+                ...(isEditMode ? { name: nextName } : {}),
+                sport: nextSport,
+                division: nextDivision,
+                divisionTypeId: nextDivisionTypeId,
+                teamSize: nextTeamSize,
+                captainId: nextCaptainId,
+                joinPolicy: nextJoinPolicy,
+                openRegistration: nextJoinPolicy === 'OPEN_REGISTRATION',
+                registrationPriceCents: nextRegistrationPriceCents,
+                affiliateUrl: nextAffiliateUrl || null,
+                requiredTemplateIds: currentTeam.organizationId ? draftRequiredTemplateIds : [],
+                playerRegistrations: buildPlayerRegistrationPayload(nextCaptainId),
+            });
+            if (!updated) throw new Error('Failed to update team details.');
+            onTeamUpdated?.(updated);
+            await teamService.saveRegistrationQuestions('TEAM', currentTeam.$id, nextQuestions);
+            await fetchRegistrationQuestions();
+            setEditingDetails(false);
+            if (isEditMode) onClose();
+        } catch (saveError) {
+            setError(saveError instanceof Error ? saveError.message : 'Team details could not be saved. Try again.');
+        } finally {
+            setSavingDetails(false);
         }
-        await teamService.saveRegistrationQuestions('TEAM', currentTeam.$id, nextQuestions);
-        await fetchRegistrationQuestions();
-
-        onTeamUpdated?.(updated);
-        handleCloseDetails();
     };
 
     const handleSaveJerseyNumber = async (playerId: string) => {
@@ -1229,7 +1240,7 @@ export default function TeamDetailModal({
                 return;
             }
             onTeamUpdated?.(updated);
-            notifications.show({ color: 'green', message: 'Jersey number updated.' });
+            appNotifications.success('Jersey number updated.');
         } catch (saveError) {
             console.error('Failed to update jersey number:', saveError);
             setError('Failed to update jersey number');
@@ -1328,11 +1339,11 @@ export default function TeamDetailModal({
         const email = editingAccountlessInvite.email.trim();
         const phone = editingAccountlessInvite.phone.trim();
         if (!firstName || !lastName) {
-            notifications.show({ color: 'red', message: 'First name and last name are required.' });
+            appNotifications.error('First name and last name are required.');
             return;
         }
         if (email && !isValidInviteEmail(email)) {
-            notifications.show({ color: 'red', message: 'Enter a valid email address.' });
+            appNotifications.error('Enter a valid email address.');
             return;
         }
         setSavingAccountlessInvite(true);
@@ -1370,10 +1381,10 @@ export default function TeamDetailModal({
                     : entry
             )));
             setEditingAccountlessInvite(null);
-            notifications.show({ color: 'green', message: 'Player invite updated.' });
+            appNotifications.success('Player invite updated.');
         } catch (saveError) {
             const message = saveError instanceof Error ? saveError.message : 'Failed to update player invite.';
-            notifications.show({ color: 'red', message });
+            appNotifications.error(message);
         } finally {
             setSavingAccountlessInvite(false);
         }
@@ -1390,10 +1401,11 @@ export default function TeamDetailModal({
             reminderKeys.current.set(invite.$id, key);
             const result = await userService.remindTeamInvitation(invite.$id, key);
             reminderKeys.current.delete(invite.$id);
-            notifications.show({ color: result.delivery.failed ? 'yellow' : 'green', message: result.delivery.failed ? 'Invitation saved. Delivery failed.' : 'Reminder request saved.' });
+            if (result.delivery.failed) appNotifications.warning('Invitation saved. Delivery failed.');
+            else appNotifications.success('Reminder request saved.');
         } catch (resendError) {
             const message = resendError instanceof Error ? resendError.message : 'Failed to resend invite email.';
-            notifications.show({ color: 'red', message });
+            appNotifications.error(message);
         } finally {
             setResendingAccountlessInviteId(null);
         }
@@ -1411,10 +1423,10 @@ export default function TeamDetailModal({
             );
             setPendingRoleInvites((previous) => previous.filter((entry) => entry.invite.$id !== inviteId));
             setEditingAccountlessInvite((current) => current?.inviteId === inviteId ? null : current);
-            notifications.show({ color: 'green', message: 'Player invite removed.' });
+            appNotifications.success('Player invite removed.');
         } catch (removeError) {
             const message = removeError instanceof Error ? removeError.message : 'Failed to remove player invite.';
-            notifications.show({ color: 'red', message });
+            appNotifications.error(message);
         } finally {
             setRemovingAccountlessInviteId(null);
         }
@@ -1423,15 +1435,15 @@ export default function TeamDetailModal({
     const handleCopyAccountlessInvite = async (invite: Invite) => {
         const shareUrl = getInviteContactValue(invite, 'shareUrl');
         if (!shareUrl || typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
-            notifications.show({ color: 'red', message: 'Invite link is unavailable.' });
+            appNotifications.error('Invite link is unavailable.');
             return;
         }
         try {
             await navigator.clipboard.writeText(shareUrl);
-            notifications.show({ color: 'green', message: 'Invite link copied.' });
+            appNotifications.success('Invite link copied.');
         } catch (copyError) {
             console.error('Failed to copy invite link:', copyError);
-            notifications.show({ color: 'red', message: 'Failed to copy invite link.' });
+            appNotifications.error('Failed to copy invite link.');
         }
     };
 
@@ -1493,16 +1505,12 @@ export default function TeamDetailModal({
             if (refreshed) {
                 onTeamUpdated?.(refreshed);
             }
-            notifications.show({
-                color: action === 'APPROVE' ? 'green' : 'blue',
-                message: action === 'APPROVE'
-                    ? 'Request approved. Use the player actions to send a bill.'
-                    : 'Request declined.',
-            });
+            if (action === 'APPROVE') appNotifications.success('Request approved. Use the player actions to send a bill.');
+            else appNotifications.info('Request declined.');
         } catch (reviewError) {
             const message = reviewError instanceof Error ? reviewError.message : 'Failed to review join request.';
             setError(message);
-            notifications.show({ color: 'red', message });
+            appNotifications.error(message);
         } finally {
             setReviewingRequestIds((previous) => {
                 const next = new Set(previous);
@@ -1529,13 +1537,13 @@ export default function TeamDetailModal({
                 amountCents,
                 label: `Team registration - ${currentTeam.name}`,
             });
-            notifications.show({ color: 'green', message: 'Bill sent.' });
+            appNotifications.success('Bill sent.');
             const response = await apiRequest<TeamMemberComplianceResponse>(`/api/teams/${currentTeam.$id}/compliance`);
             setMemberCompliance(response.team ?? null);
         } catch (billError) {
             const message = billError instanceof Error ? billError.message : 'Failed to send bill.';
             setError(message);
-            notifications.show({ color: 'red', message });
+            appNotifications.error(message);
         } finally {
             setBillingPlayerIds((previous) => {
                 const next = new Set(previous);
@@ -1556,11 +1564,11 @@ export default function TeamDetailModal({
             if (updated) {
                 onTeamUpdated?.(updated);
             }
-            notifications.show({ color: 'green', message: 'You left the team.' });
+            appNotifications.success('You left the team.');
         } catch (leaveError) {
             const message = leaveError instanceof Error ? leaveError.message : 'Failed to leave team.';
             setError(message);
-            notifications.show({ color: 'red', message });
+            appNotifications.error(message);
         } finally {
             setLeavingTeam(false);
         }
@@ -1698,14 +1706,11 @@ export default function TeamDetailModal({
         try {
             const outcome = await teamService.deleteTeamResult(currentTeam.$id);
             if (outcome.deleted || outcome.archived || outcome.action) {
-                notifications.show({
-                    color: 'green',
-                    message: describeDeleteOutcome(outcome, {
-                        deleted: 'Team deleted.',
-                        archived: 'Team archived because it has history.',
-                        fallback: 'Team removed from active lists.',
-                    }),
-                });
+                appNotifications.success(describeDeleteOutcome(outcome, {
+                    deleted: 'Team deleted.',
+                    archived: 'Team archived because it has history.',
+                    fallback: 'Team removed from active lists.',
+                }));
                 onTeamDeleted?.(currentTeam.$id);
                 onClose();
             }
@@ -2075,6 +2080,7 @@ export default function TeamDetailModal({
             isOpen={showAddPlayers}
             onClose={() => setShowAddPlayers(false)}
             team={currentTeam}
+            eventRegistration={eventRegistration}
             freeAgentContext={inviteFreeAgentContext}
             selectedFreeAgentId={selectedFreeAgentId}
             selectedFreeAgentUser={selectedFreeAgentUser}
@@ -2088,15 +2094,15 @@ export default function TeamDetailModal({
 
     const editDetailsModal = canManageTeam ? (
         <Modal
-            opened={isEditMode ? isOpen : editingDetails}
+            opened={!showAddPlayers && (isEditMode ? isOpen : editingDetails)}
             onClose={handleCloseDetails}
             title="Edit Team Details"
             size="lg"
             centered
-            scrollAreaComponent={ScrollArea.Autosize}
+            styles={{ content: { zIndex: 1950 } }}
         >
             <Stack gap="md">
-                {isEditMode && error && (
+                {error && (
                     <Alert color="red" variant="light" withCloseButton onClose={() => setError(null)}>{error}</Alert>
                 )}
                 {isEditMode && (
@@ -2114,15 +2120,13 @@ export default function TeamDetailModal({
                         value={draftTeamSize}
                         onChange={(value) => setDraftTeamSize(Number(value) || 1)}
                     />
-                    <MantineSelect
-                        label="Sport"
-                        data={sportOptions}
-                        value={draftSport || null}
-                        onChange={(value) => setDraftSport(value || '')}
-                        searchable
-                        clearable
-                        nothingFoundMessage="No sports found"
-                    />
+                    <Select label="Sport"
+                    data={sportOptions}
+                    value={draftSport || null}
+                    onChange={(value) => setDraftSport(value || '')}
+                    searchable
+                    clearable
+                    nothingFoundMessage="No sports found" />
                     <div>
                         <Text size="sm" fw={500} mb={4}>Join mode</Text>
                         <SegmentedControl
@@ -2149,18 +2153,16 @@ export default function TeamDetailModal({
                                     : 'Players cannot join from the team view.'}
                         </Text>
                     </div>
-                    <MantineSelect
-                        label="Team Captain"
-                        placeholder={teamPlayers.length > 0 ? 'Select a captain' : 'No team players available'}
-                        data={teamPlayers.map((player) => ({
-                            value: player.$id,
-                            label: getUserFullName(player),
-                        }))}
-                        value={draftCaptainId || null}
-                        onChange={(value) => setDraftCaptainId(value || '')}
-                        disabled={teamPlayers.length === 0}
-                        allowDeselect={false}
-                    />
+                    <Select label="Team Captain"
+                    placeholder={teamPlayers.length > 0 ? 'Select a captain' : 'No team players available'}
+                    data={teamPlayers.map((player) => ({
+                        value: player.$id,
+                        label: getUserFullName(player),
+                    }))}
+                    value={draftCaptainId || null}
+                    onChange={(value) => setDraftCaptainId(value || '')}
+                    disabled={teamPlayers.length === 0}
+                    allowDeselect={false} />
                     {draftRegistrationEnabled ? (
                         <>
                             {!draftAffiliateUrl.trim() ? (
@@ -2202,29 +2204,23 @@ export default function TeamDetailModal({
                     ) : null}
                     {draftShowDivisionFields ? (
                         <>
-                            <MantineSelect
-                                label="Gender"
-                                data={DIVISION_GENDER_OPTIONS.map((option) => ({ ...option }))}
-                                value={draftDivisionGender || null}
-                                onChange={(value) => setDraftDivisionGender((value as DivisionGenderInput) || '')}
-                                clearable
-                            />
-                            <MantineSelect
-                                label="Skill Division"
-                                data={skillDivisionOptions}
-                                value={draftSkillDivisionTypeId || null}
-                                onChange={(value) => setDraftSkillDivisionTypeId(value || '')}
-                                searchable
-                                clearable
-                            />
-                            <MantineSelect
-                                label="Age Division"
-                                data={ageDivisionOptions}
-                                value={draftAgeDivisionTypeId || null}
-                                onChange={(value) => setDraftAgeDivisionTypeId(value || '')}
-                                searchable
-                                clearable
-                            />
+                            <Select label="Gender"
+                            data={DIVISION_GENDER_OPTIONS.map((option) => ({ ...option }))}
+                            value={draftDivisionGender || null}
+                            onChange={(value) => setDraftDivisionGender((value as DivisionGenderInput) || '')}
+                            clearable />
+                            <Select label="Skill Division"
+                            data={skillDivisionOptions}
+                            value={draftSkillDivisionTypeId || null}
+                            onChange={(value) => setDraftSkillDivisionTypeId(value || '')}
+                            searchable
+                            clearable />
+                            <Select label="Age Division"
+                            data={ageDivisionOptions}
+                            value={draftAgeDivisionTypeId || null}
+                            onChange={(value) => setDraftAgeDivisionTypeId(value || '')}
+                            searchable
+                            clearable />
                             <TextInput
                                 label="Division Preview"
                                 value={draftDivision}
@@ -2353,11 +2349,11 @@ export default function TeamDetailModal({
                 {isEditMode && renderRosterSection()}
 
                 <Group justify="flex-end">
-                    <Button variant="default" onClick={handleCloseDetails}>Cancel</Button>
+                    <Button variant="default" disabled={savingDetails} onClick={handleCloseDetails}>Cancel</Button>
                     {isEditMode && (
                         <Button variant="default" onClick={() => setShowAddPlayers(true)}>Invite Roster Members</Button>
                     )}
-                    <Button onClick={() => { void handleSaveDetails(); }}>Save Team Details</Button>
+                    <Button loading={savingDetails} onClick={() => { void handleSaveDetails(); }}>Save Team Details</Button>
                 </Group>
             </Stack>
         </Modal>
@@ -2380,23 +2376,9 @@ export default function TeamDetailModal({
         phone: '',
     };
     const accountlessInviteModal = canManageTeam && editingAccountlessInvite ? (
-        <div
-            role="dialog"
-            aria-label="Edit player invite"
-            style={{
-                position: 'fixed',
-                inset: 0,
-                zIndex: 300,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: 24,
-                background: 'rgba(15, 23, 42, 0.45)',
-            }}
-        >
-            <Paper withBorder radius="md" p="lg" style={{ width: 'min(38rem, 100%)', maxHeight: '90vh', overflowY: 'auto' }}>
+        <Modal opened title="Edit player invite" onClose={() => { if (!savingAccountlessInvite) setEditingAccountlessInvite(null); }}
+            size="lg" styles={{ content: { zIndex: 1950 } }}>
                 <Stack gap="md">
-                    <Title order={4}>Edit player invite</Title>
                     <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
                         <TextInput
                             label="First name"
@@ -2429,8 +2411,7 @@ export default function TeamDetailModal({
                         </Button>
                     </Group>
                 </Stack>
-            </Paper>
-        </div>
+        </Modal>
     ) : null;
 
 
@@ -2491,7 +2472,6 @@ export default function TeamDetailModal({
                             data={detailTabs}
                             className="org-tab-segmented"
                             radius="xl"
-                            mb="lg"
                         />
                     )}
 
@@ -2889,7 +2869,6 @@ export default function TeamDetailModal({
                             <Button onClick={() => setShowAddPlayers(true)} mb="sm">
                                 Invite Roster Members
                             </Button>
-                            {invitePlayersModal}
                         </div>
                     )}
 
@@ -2920,7 +2899,7 @@ export default function TeamDetailModal({
                                 user={user}
                                 paymentSummary={teamPaymentSummary}
                                 onRequireAuth={() => {
-                                    notifications.show({ color: 'red', message: 'Sign in to register for this team.' });
+                                    appNotifications.error('Sign in to register for this team.');
                                 }}
                                 onTeamUpdated={(updatedTeam) => {
                                     onTeamUpdated?.(updatedTeam);
@@ -3026,10 +3005,12 @@ export default function TeamDetailModal({
             {isPageMode ? (
                 detailContent
             ) : (
-                <Modal opened={isOpen} onClose={onClose} size="xl" centered withCloseButton>
+                <Modal opened={isOpen && !editingDetails && !showAddPlayers && !editingAccountlessInvite && !imagePickerOpen} onClose={onClose} size="xl" centered withCloseButton
+                    title={currentTeam.name} styles={{ content: { zIndex: 1900 } }}>
                     {detailContent}
                 </Modal>
             )}
+            {invitePlayersModal}
             {editDetailsModal}
             {accountlessInviteModal}
             <ImageSelectionModal

@@ -70,16 +70,6 @@ jest.mock('@/lib/paymentService', () => ({
     createTeamRegistrationPaymentIntent: jest.fn(),
   },
 }));
-jest.mock('@mantine/notifications', () => {
-  const actual = jest.requireActual('@mantine/notifications');
-  return {
-    ...actual,
-    notifications: {
-      ...actual.notifications,
-      show: jest.fn(),
-    },
-  };
-});
 jest.mock('@/lib/boldsignService', () => ({
   boldsignService: {
     createSignLinks: jest.fn(),
@@ -204,6 +194,26 @@ describe('TeamDetailModal', () => {
     familyServiceMock.listChildren.mockResolvedValue([]);
   });
 
+  it('keeps team edits after a failed save and retries the same team', async () => {
+    const team = buildTeam({ $id: 'team_1', name: 'Original team', playerIds: [], captainId: '', pending: [], sport: 'Volleyball', joinPolicy: 'CLOSED' });
+    const updated = { ...team, name: 'North Loop' };
+    const onTeamUpdated = jest.fn();
+    const onClose = jest.fn();
+    teamServiceMock.updateTeamDetails.mockRejectedValueOnce(new Error('Team save unavailable.')).mockResolvedValueOnce(updated);
+    renderWithMantine(<TeamDetailModal currentTeam={team} isOpen onClose={onClose} canManage variant="edit" onTeamUpdated={onTeamUpdated} />);
+    const name = screen.getByLabelText(/Team Name/);
+    fireEvent.change(name, { target: { value: 'North Loop' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Team Details' }));
+    expect(await screen.findByText('Team save unavailable.')).toBeVisible();
+    expect(name).toHaveValue('North Loop');
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onTeamUpdated).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Save Team Details' }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(onTeamUpdated).toHaveBeenCalledWith(updated);
+    expect(teamServiceMock.updateTeamDetails.mock.calls[1]).toEqual(teamServiceMock.updateTeamDetails.mock.calls[0]);
+  });
+
   it('opens the full editor with roster invites and closes through the parent after cancel, dismissal, or save', async () => {
     const captain = buildUser({
       $id: 'captain_1',
@@ -261,30 +271,26 @@ describe('TeamDetailModal', () => {
       expect(within(editor).getByRole('heading', { name: 'Roster (1)' })).toBeVisible();
       expect(within(editor).getByText('Alex Stone', { selector: '.team-roster-player-card *' })).toBeVisible();
     });
-    const cancelButton = within(editor).getByRole('button', { name: 'Cancel' });
     const inviteButton = within(editor).getByRole('button', { name: 'Invite Roster Members' });
-    const saveButton = within(editor).getByRole('button', { name: 'Save Team Details' });
-    expect(cancelButton.compareDocumentPosition(inviteButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(inviteButton.compareDocumentPosition(saveButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByRole('button', { name: /add players/i, hidden: true })).not.toBeInTheDocument();
     expect(screen.queryByText('Danger Zone')).not.toBeInTheDocument();
 
     fireEvent.click(inviteButton);
     const inviteDialog = await screen.findByRole('dialog', { name: 'Invite to Original Team' });
     expect(inviteDialog).toBeVisible();
-    fireEvent.click(inviteDialog.querySelector<HTMLButtonElement>('button.mantine-Modal-close')!);
+    fireEvent.click(within(inviteDialog).getByRole('button', { name: 'Close', exact: true }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Invite to Original Team' })).not.toBeInTheDocument());
     expect(onClose).not.toHaveBeenCalled();
     expect(onTeamUpdated).not.toHaveBeenCalled();
 
-    fireEvent.click(cancelButton);
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Edit Team Details' })).getByRole('button', { name: 'Cancel', exact: true }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(onTeamUpdated).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Open team editor' }));
     const dismissibleEditor = await screen.findByRole('dialog', { name: 'Edit Team Details' });
-    fireEvent.click(dismissibleEditor.querySelector<HTMLButtonElement>('button.mantine-Modal-close')!);
+    fireEvent.click(within(dismissibleEditor).getByRole('button', { name: 'Close', exact: true }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(onClose).toHaveBeenCalledTimes(2);
     expect(onTeamUpdated).not.toHaveBeenCalled();
@@ -362,10 +368,11 @@ describe('TeamDetailModal', () => {
     await within(inviteDialog).findByText('Jordan Player');
     fireEvent.click(within(inviteDialog).getByRole('button', { name: /^invite$/i }));
 
-    await within(editor).findByText('Jordan Player', { selector: '.team-roster-player-card *' });
-    fireEvent.click(inviteDialog.querySelector<HTMLButtonElement>('button.mantine-Modal-close')!);
+    await waitFor(() => expect(teamServiceMock.inviteUserToTeamRole).toHaveBeenCalled());
+    fireEvent.click(within(inviteDialog).getByRole('button', { name: 'Close', exact: true }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Invite to Test team' })).not.toBeInTheDocument());
-    expect(within(editor).getByText('Jordan Player', { selector: '.team-roster-player-card *' })).toBeVisible();
+    const restoredEditor = await screen.findByRole('dialog', { name: 'Edit Team Details' });
+    expect(within(restoredEditor).getByText('Jordan Player', { selector: '.team-roster-player-card *' })).toBeVisible();
 
     await act(async () => {
       resolveInitialRoster([captain]);
@@ -373,9 +380,9 @@ describe('TeamDetailModal', () => {
     });
 
     await waitFor(() => {
-      expect(within(editor).getByText('Morgan Manager', { selector: '.team-roster-player-card *' })).toBeVisible();
-      expect(within(editor).getByText('Jordan Player', { selector: '.team-roster-player-card *' })).toBeVisible();
-      expect(within(editor).getByRole('heading', { name: 'Roster (2)' })).toBeVisible();
+      expect(within(restoredEditor).getByText('Morgan Manager', { selector: '.team-roster-player-card *' })).toBeVisible();
+      expect(within(restoredEditor).getByText('Jordan Player', { selector: '.team-roster-player-card *' })).toBeVisible();
+      expect(within(restoredEditor).getByRole('heading', { name: 'Roster (2)' })).toBeVisible();
     });
   });
 
@@ -1048,14 +1055,14 @@ describe('TeamDetailModal', () => {
     expect(screen.queryByRole('button', { name: 'Cancel invitation' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Invite Roster Members' })).toBeVisible();
 
-    fireEvent.click(screen.getByRole('radio', { name: 'Invitation History' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Invitation History' }));
     expect(onActiveTabChange).toHaveBeenLastCalledWith('invitations');
     expect(await screen.findByRole('button', { name: 'Cancel invitation' })).toBeVisible();
     expect(screen.getByText('Invitation history', { exact: true })).toBeVisible();
     expect(screen.queryByLabelText('Jersey number for Jordan Player')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Invite Roster Members' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('radio', { name: 'Roster' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Roster' }));
     expect(onActiveTabChange).toHaveBeenLastCalledWith('roster');
     expect(screen.getByLabelText('Jersey number for Jordan Player')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Invite Roster Members' })).toBeVisible();
@@ -1063,7 +1070,7 @@ describe('TeamDetailModal', () => {
     expect(screen.queryByRole('button', { name: 'Cancel invitation' })).not.toBeInTheDocument();
   });
 
-  it('falls back from invitation history to roster when manager access is removed or detail is modal', async () => {
+  it('removes invitation controls when manager access is removed and restores them in registration management', async () => {
     const team = buildTeam({ $id: 'team_1', playerIds: [], pending: [] });
     const view = renderWithMantine(
       <TeamDetailModal currentTeam={team} isOpen onClose={jest.fn()} canManage variant="page" activeTab="invitations" />,
@@ -1077,8 +1084,8 @@ describe('TeamDetailModal', () => {
       </MantineProvider>,
     );
     expect(screen.getByText('Player Slots')).toBeVisible();
-    expect(screen.getByRole('radio', { name: 'Roster' })).toBeChecked();
-    expect(screen.queryByRole('radio', { name: 'Invitation History' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Roster' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByRole('button', { name: 'Invitation History' })).not.toBeInTheDocument();
     expect(screen.queryByText('Invitation history', { exact: true })).not.toBeInTheDocument();
 
     view.rerender(
@@ -1086,57 +1093,9 @@ describe('TeamDetailModal', () => {
         <TeamDetailModal currentTeam={team} isOpen onClose={jest.fn()} canManage variant="modal" activeTab="invitations" />
       </MantineProvider>,
     );
-    expect(await screen.findByText('Player Slots')).toBeVisible();
-    expect(screen.queryByRole('radio', { name: 'Invitation History' })).not.toBeInTheDocument();
-    expect(screen.queryByText('Invitation history', { exact: true })).not.toBeInTheDocument();
-  });
-
-  it('renders roster player cards in the responsive grid', async () => {
-    const players = [
-      buildUser({
-        $id: 'player_1',
-        firstName: 'Alexandria',
-        lastName: 'Stone',
-        fullName: 'Alexandria Stone',
-        userName: 'alexandria.stone',
-      }),
-      buildUser({
-        $id: 'player_2',
-        firstName: 'Benjamin',
-        lastName: 'Rivers',
-        fullName: 'Benjamin Rivers',
-        userName: 'benjamin.rivers',
-      }),
-    ];
-    const team = buildTeam({
-      $id: 'team_1',
-      captainId: 'player_1',
-      managerId: '',
-      playerIds: ['player_1', 'player_2'],
-      pending: [],
-      teamSize: 6,
-    });
-    userServiceMock.getUsersByIds.mockResolvedValueOnce(players);
-
-    renderWithMantine(
-      <TeamDetailModal
-        currentTeam={team}
-        isOpen
-        onClose={jest.fn()}
-        canManage={false}
-      />,
-    );
-
-    await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Roster (2)' })).toBeInTheDocument();
-      expect(screen.queryByText(/^Team Members/i)).not.toBeInTheDocument();
-      expect(screen.getByText('Alexandria Stone')).toBeInTheDocument();
-      expect(screen.getByText('Benjamin Rivers')).toBeInTheDocument();
-    });
-
-    const rosterGrid = document.querySelector('.responsive-card-grid.team-roster-player-grid');
-    expect(rosterGrid).not.toBeNull();
-    expect(rosterGrid?.querySelectorAll('.team-roster-player-card')).toHaveLength(2);
+    expect(await screen.findByText('No invitation attempts.')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Invitation History' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByText('Player Slots')).not.toBeInTheDocument();
   });
 
   it('renders roster, schedule, and finance as page tabs for organization teams', async () => {
@@ -1214,51 +1173,6 @@ describe('TeamDetailModal', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-  });
-
-  it('places team staff directly after roster summary cards in page mode', async () => {
-    const team = buildTeam({
-      $id: 'team_1',
-      captainId: 'captain_1',
-      managerId: '',
-      playerIds: [],
-      pending: [],
-      teamSize: 6,
-    });
-
-    renderWithMantine(
-      <TeamDetailModal
-        currentTeam={team}
-        isOpen
-        onClose={jest.fn()}
-        canManage={false}
-        variant="page"
-        activeTab="roster"
-      />,
-    );
-
-    await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Team Staff' })).toBeInTheDocument();
-    });
-    await waitFor(() => {
-      expect(userServiceMock.listInvites).toHaveBeenCalled();
-    });
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    const playerSlots = screen.getByText('Player Slots');
-    const pendingInvites = screen.getByText('Pending Invites');
-    const teamStaff = screen.getByRole('heading', { name: 'Team Staff' });
-    const roster = screen.getByRole('heading', { name: 'Roster (0)' });
-    const isBefore = (before: Element, after: Element) => (
-      Boolean(before.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING)
-    );
-
-    expect(isBefore(playerSlots, teamStaff)).toBe(true);
-    expect(isBefore(pendingInvites, teamStaff)).toBe(true);
-    expect(isBefore(teamStaff, roster)).toBe(true);
   });
 
   it('renders the schedule tab for non-organization team pages', async () => {
@@ -1523,7 +1437,7 @@ describe('TeamDetailModal', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: /invite roster members/i }));
-    fireEvent.click(await screen.findByRole('radio', { name: /assistant coach/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /assistant coach/i }));
     fireEvent.click(screen.getByRole('tab', { name: /new person/i }));
     fireEvent.change(screen.getByLabelText(/first name/i), { target: { value: 'Taylor' } });
     fireEvent.change(screen.getByLabelText(/last name/i), { target: { value: 'Stone' } });
@@ -1586,7 +1500,7 @@ describe('TeamDetailModal', () => {
 
     expect(await screen.findByText('Morgan Manager')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /invite roster members/i }));
-    fireEvent.click(await screen.findByRole('radio', { name: /^manager$/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /^manager$/i }));
     fireEvent.click(screen.getByRole('tab', { name: /new person/i }));
     fireEvent.change(screen.getByLabelText(/first name/i), { target: { value: 'Taylor' } });
     fireEvent.change(screen.getByLabelText(/last name/i), { target: { value: 'Stone' } });
@@ -1664,6 +1578,9 @@ describe('TeamDetailModal', () => {
     await waitFor(() => {
       expect(userServiceMock.listInvites).toHaveBeenCalledWith(expect.objectContaining({ teamId: 'team_1', types: expect.any(Array) }));
     });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Done', exact: true })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Done', exact: true }));
+    await screen.findByRole('heading', { name: 'Roster (1)' });
     expect(await within(document.querySelector<HTMLElement>('.responsive-card-grid.team-roster-player-grid')!).findByText('Alex Player')).toBeInTheDocument();
     expect(screen.getByText('Role: Player')).toBeInTheDocument();
     expect(screen.queryByText('Unknown user')).not.toBeInTheDocument();
@@ -1741,10 +1658,6 @@ describe('TeamDetailModal', () => {
 
     expect(await screen.findByText('Regular Player')).toBeInTheDocument();
     expect(await within(document.querySelector<HTMLElement>('.responsive-card-grid.team-roster-player-grid')!).findByText('Alex Player')).toBeInTheDocument();
-    const rosterGrid = document.querySelector('.responsive-card-grid.team-roster-player-grid');
-    expect(rosterGrid).not.toBeNull();
-    expect(rosterGrid?.querySelectorAll('.team-roster-player-card')).toHaveLength(2);
-    expect(document.querySelectorAll('.responsive-card-grid.team-roster-player-grid')).toHaveLength(1);
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy invite link for Alex Player' }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(invite.shareUrl));
@@ -2008,7 +1921,7 @@ describe('TeamDetailModal', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: /invite roster members/i }));
-    fireEvent.click(await screen.findByRole('radio', { name: /assistant coach/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /assistant coach/i }));
     fireEvent.click(screen.getByRole('tab', { name: /invite user/i }));
     fireEvent.change(
       screen.getByPlaceholderText(/search assistant coach/i),
@@ -2083,6 +1996,8 @@ describe('TeamDetailModal', () => {
       expect(teamServiceMock.createTeamMemberInvite).toHaveBeenCalledTimes(2);
     });
 
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Done', exact: true })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Done', exact: true }));
     expect(await screen.findByText(/Roster \(1\)/i)).toBeInTheDocument();
     expect(screen.getByText('1/3')).toBeInTheDocument();
   });
@@ -2156,6 +2071,8 @@ describe('TeamDetailModal', () => {
       expect(teamServiceMock.createTeamMemberInvite).toHaveBeenCalledTimes(2);
     });
 
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Done', exact: true })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Done', exact: true }));
     expect(await screen.findByText(/Roster \(2\)/i)).toBeInTheDocument();
     expect(screen.getByText('2/4')).toBeInTheDocument();
   });

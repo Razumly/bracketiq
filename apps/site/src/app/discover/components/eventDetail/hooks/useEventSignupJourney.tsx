@@ -1,23 +1,28 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Alert, Button, Group, Stack, Text } from '@mantine/core';
+import { Alert, Button, Group, Stack, Text } from '@/components/organization/organization-operation-ui';
 import TeamBuilderModal from '@/components/ui/TeamBuilderModal';
 import InvitePlayersModal from '@/app/teams/components/InvitePlayersModal';
 import { teamService } from '@/lib/teamService';
 import type { Event, Team, UserData } from '@/types';
 import type { useEventRegistrationProgress } from './useEventRegistrationProgress';
-import { CheckoutTeamEditor } from '../CheckoutTeamEditor';
+import TeamDetailModal, { type TeamDetailPageTab } from '@/components/ui/TeamDetailModal';
+import TeamInvitationManager from '@/components/ui/TeamInvitationManager';
 import { EventCheckoutModal } from '../EventCheckoutLayout';
 
 type Progress = ReturnType<typeof useEventRegistrationProgress>;
 
-export function useEventSignupJourney({ event, user, progress, selectedTeamId }: {
+export function useEventSignupJourney({ event, user, progress, selectedTeamId, onTeamSelected, onContinueToReview }: {
     event: Event; user: UserData | null | undefined; progress: Progress; selectedTeamId: string;
+    onTeamSelected: (teamId: string) => void;
+    onContinueToReview: (team: Team) => void;
 }) {
     const [teamResult, setTeamResult] = useState<{ key: string; teams: Team[]; error: string | null } | null>(null);
     const [teamReload, setTeamReload] = useState(0);
     const [mode, setMode] = useState<'idle' | 'team' | 'players' | 'edit'>('idle');
     const [inviting, setInviting] = useState(false);
     const [dialogScope, setDialogScope] = useState(progress.progressKey);
+    const [managementTab, setManagementTab] = useState<TeamDetailPageTab>('roster');
+    const onInvitesLoaded = useCallback(() => undefined, []);
     const eligibleIds = JSON.stringify(progress.state?.eligibleTeams.map((team) => team.id) ?? []);
     const teamKey = JSON.stringify([progress.progressKey, eligibleIds, teamReload]);
     const activeTeamKey = useRef(teamKey);
@@ -63,24 +68,34 @@ export function useEventSignupJourney({ event, user, progress, selectedTeamId }:
             step: 'team', selectedTeamId: null,
             teamCreationId: progress.state?.draft?.step === 'team' ? progress.state.draft.teamCreationId ?? crypto.randomUUID() : crypto.randomUUID(),
         });
-        if (saved) setMode('team');
-    }, [progress]);
+        if (saved && activeProgressKey.current === progress.progressKey) {
+            onTeamSelected('');
+            setMode('team');
+        }
+    }, [onTeamSelected, progress]);
 
     const addPlayers = useCallback(async () => {
         if (!selectedTeamId) return;
         const saved = await progress.save({ selectedTeamId, step: 'players' });
-        if (saved) setMode('players');
+        if (saved && activeProgressKey.current === progress.progressKey) setMode('players');
     }, [progress, selectedTeamId]);
 
     const continueToEvent = async () => {
+        if (!selectedTeam || loadingTeams) return;
         const saved = await progress.save({
+            selectedTeamId: selectedTeam.$id,
             step: 'review', completedSteps: [...new Set([...(progress.state?.draft?.completedSteps ?? []), 'team' as const, 'players' as const])],
         });
-        if (saved) setMode('idle');
+        if (saved && activeProgressKey.current === progress.progressKey) {
+            setMode('idle');
+            onContinueToReview(selectedTeam);
+        }
     };
 
     const savedTeam = async (team: Team) => {
+        if (activeProgressKey.current !== progress.progressKey) return;
         setTeams((current) => [...current.filter((candidate) => candidate.$id !== team.$id), team]);
+        onTeamSelected(team.$id);
         await progress.reload();
         if (activeProgressKey.current === progress.progressKey) setMode('players');
     };
@@ -92,14 +107,25 @@ export function useEventSignupJourney({ event, user, progress, selectedTeamId }:
         else if (refreshed.draft?.step === 'players') setMode('players');
     };
 
+    const updateTeam = (updated: Team) => {
+        setTeams((current) => current.map((team) => team.$id === updated.$id ? updated : team));
+    };
+    const refreshTeam = async () => {
+        if (!selectedTeam) return;
+        const refreshed = await teamService.getTeamById(selectedTeam.$id);
+        if (!refreshed) throw new Error('The invitation is saved, but the roster could not be loaded. Reload saved progress.');
+        updateTeam(refreshed);
+    };
+
     const draft = progress.state?.draft;
     const preparationStep = draft?.step === 'team' || draft?.step === 'players';
     const dialogs = <>
-        {mode === 'edit' && selectedTeam ? <CheckoutTeamEditor key={selectedTeam.$id} team={selectedTeam}
-            onClose={() => setMode('idle')} onSaved={(updated) => {
-                setTeams((current) => current.map((team) => team.$id === updated.$id ? updated : team));
-                setMode('idle');
-            }} /> : null}
+        {mode === 'edit' && selectedTeam ? <TeamDetailModal key={selectedTeam.$id} currentTeam={selectedTeam}
+            isOpen activeTab={managementTab} onActiveTabChange={setManagementTab}
+            eventRegistration={{ eventId: event.$id, slotId: progress.state?.draft?.slotId, occurrenceDate: progress.state?.draft?.occurrenceDate }}
+            onClose={() => { setMode(progress.state?.draft?.step === 'players' ? 'players' : 'idle'); void reload(); }}
+            onTeamUpdated={updateTeam}
+            onTeamDeleted={() => { setMode('idle'); void reload(); }} /> : null}
         {user && draft?.teamCreationId ? <TeamBuilderModal
             isOpen={mode === 'team'} currentUser={user} eventId={event.$id}
             registrationDraft={{ eventId: event.$id, teamId: draft.teamCreationId, baseRevision: draft.revision,
@@ -107,29 +133,40 @@ export function useEventSignupJourney({ event, user, progress, selectedTeamId }:
             onTeamCreated={savedTeam}
             onClose={() => setMode((current) => current === 'team' ? 'idle' : current)}
         /> : null}
-        <EventCheckoutModal step="Entry" opened={mode === 'players' && !inviting} onClose={() => setMode('idle')}
+        <EventCheckoutModal step="Players" opened={mode === 'players' && !inviting} onClose={() => setMode('idle')}
             title="Add players (optional)" centered zIndex={1900}>
             <Stack>
-                <Text>{selectedTeam?.name ?? 'Your Team'} is saved. You can add Players now or later.</Text>
-                <Text size="sm" c="dimmed">Continue to review the Event requirements and confirm registration.</Text>
-                {progress.error ? <Alert color="red">{progress.error}</Alert> : null}
+                {selectedTeam ? <>
+                    <Text component="h2" fw={700}>{selectedTeam.name}</Text>
+                    <Text size="sm" c="dimmed">{selectedTeam.playerIds.length} of {selectedTeam.teamSize} players · {selectedTeam.pending.length} pending</Text>
+                    <Text>Your team is saved. Add players now or skip this step. Each invitation stays pending until the player accepts.</Text>
+                </> : <Text role="status">Loading your saved team...</Text>}
+                {progress.error || error ? <Alert color="red">
+                    {progress.error || error}
+                    <Button variant="subtle" onClick={() => { void reload(); }}>Reload saved progress</Button>
+                </Alert> : null}
                 <Group>
-                    <Button variant="default" disabled={!selectedTeam} onClick={() => setInviting(true)}>Add players</Button>
-                    <Button loading={progress.saving} onClick={() => { void continueToEvent(); }}>Continue to event</Button>
+                    <Button variant="default" disabled={!selectedTeam || loadingTeams} onClick={() => setInviting(true)}>Add players</Button>
+                    <Button variant="default" disabled={!selectedTeam || loadingTeams} onClick={() => setMode('edit')}>Manage team</Button>
+                </Group>
+                {selectedTeam ? <details>
+                    <summary className="flex min-h-11 cursor-pointer items-center font-semibold">Invitation history and recovery</summary>
+                    <TeamInvitationManager teamId={selectedTeam.$id} onChanged={refreshTeam} onInvitesLoaded={onInvitesLoaded} />
+                </details> : null}
+                <Group justify="space-between">
+                    <Button variant="default" disabled={progress.saving} onClick={() => setMode('idle')}>Back to teams</Button>
+                    <Button loading={progress.saving}
+                        disabled={!selectedTeam || loadingTeams || Boolean(progress.error) || progress.state?.available === false}
+                        onClick={() => { void continueToEvent(); }}>Continue to review</Button>
                 </Group>
             </Stack>
         </EventCheckoutModal>
-        {selectedTeam && inviting ? <InvitePlayersModal isOpen={true} team={selectedTeam}
+        {selectedTeam && inviting ? <InvitePlayersModal key={selectedTeam.$id} isOpen={true} team={selectedTeam}
             eventRegistration={{ eventId: event.$id, slotId: draft?.slotId, occurrenceDate: draft?.occurrenceDate }}
             onClose={() => setInviting(false)}
-            onPlayerInviteSent={async () => {
-                const refreshed = await teamService.getTeamById(selectedTeam.$id);
-                if (refreshed) setTeams((current) => current.map((team) => team.$id === refreshed.$id ? refreshed : team));
-            }}
-            onInvitesSent={async () => {
-                const refreshed = await teamService.getTeamById(selectedTeam.$id);
-                if (refreshed) setTeams((current) => current.map((team) => team.$id === refreshed.$id ? refreshed : team));
-            }}
+            onTeamUpdated={updateTeam}
+            onPlayerInviteSent={refreshTeam}
+            onInvitesSent={refreshTeam}
         /> : null}
     </>;
     return { teams, loadingTeams, error, reload, createTeam, addPlayers, editTeam: () => setMode('edit'),
