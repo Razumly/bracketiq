@@ -29,6 +29,8 @@ The change is a visual and interaction migration. It must not change prices, fee
 
 - [x] (2026-09-15) Corrected the event registration presentation after visual review. The public event route now uses a full-page reference layout. Discover callers keep the modal presentation.
 - [x] (2026-09-15) Re-ran the four focused event suites. They pass 24 tests. The isolated checkout preview passed at 1536x1024, 390x844, and 320x740 with no horizontal overflow.
+- [x] (2026-09-15) Corrected the event registration action placement after visual specification review. The page summary now owns the existing primary action beside the registration price on desktop and in a fixed bottom action bar on mobile. Modal callers remain unchanged.
+- [x] (2026-09-15) Re-ran the four focused event suites. They pass 28 tests. The isolated action preview covered 1536x1024 and 320x568, all 14 action states, no horizontal overflow, and clear controls at 200% text size.
 
 ## Surprises & Discoveries
 
@@ -66,6 +68,8 @@ The change is a visual and interaction migration. It must not change prices, fee
 
 - Observation: The approved event-registration references are full-page checkout surfaces, but the first implementation still presented the public registration state in a modal.
   Evidence: `commerce-registration--team-selection--desktop-1536x1024.png` shows a page header, stepper, split cards, and a sticky summary. The visual review found the modal did not match this hierarchy.
+- Observation: The first full-page correction still placed the Continue action inside the left content card.
+  Evidence: The specification review compared the implementation with `commerce-registration--team-selection--desktop-1536x1024.png` and found that the approved desktop reference places Continue beside the price in the summary and the mobile reference uses a fixed bottom action bar.
 
 ## Decision Log
 
@@ -91,15 +95,18 @@ The change is a visual and interaction migration. It must not change prices, fee
 - Decision: Use a page presentation for the public event registration client and keep `EventCheckoutModal` as the default for discover and other existing callers.
   Rationale: The public route can match the approved references without changing event, registration, payment, or recovery contracts. Existing modal callers keep their established interaction model.
   Date/Author: 2026-09-15 / implementation coordinator
+- Decision: Render the existing team action through an optional summary action slot.
+  Rationale: One React action node keeps the existing callback, label, disabled state, loading state, waitlist state, and registered state in sync while CSS places it in the desktop summary or mobile bottom bar.
+  Date/Author: 2026-09-15 / implementation coordinator
 
 
 ## Outcomes & Retrospective
 
-The migration now covers event team selection and creation, optional player invitations, shared team management, invitation recovery, product selection and detail, checkout billing and Stripe handoff, finance categories and journal preview, refund review and recovery, rental availability, and reservation checkout. The public event registration entry now uses a centered full-page shell with a responsive stepper, split registration and summary cards, teal selection states, and coral primary action styling. Completed surfaces use BracketIQ-owned primitives and keep loading, validation, disabled, permission, error, and recovery states visible.
+The migration now covers event team selection and creation, optional player invitations, shared team management, invitation recovery, product selection and detail, checkout billing and Stripe handoff, finance categories and journal preview, refund review and recovery, rental availability, and reservation checkout. The public event registration entry now uses a centered full-page shell with a responsive stepper, split registration and summary cards, teal selection states, and coral primary action styling. The registration summary owns the primary action beside the price on desktop and exposes the same action in a fixed bottom bar on mobile. Team creation and player invitation remain existing inner workflow dialogs. Completed surfaces use BracketIQ-owned primitives and keep loading, validation, disabled, permission, error, and recovery states visible.
 
 The HTTP paths, request fields, response fields, registration rules, prices, fee calculations, permissions, and Stripe payment-detail ownership stayed unchanged. BracketIQ does not collect card number, expiry, or CVC fields. No provider simulation was added.
 
-The focused event suites pass. The isolated checkout preview passed at desktop and narrow mobile widths. Standards review found one stale registration-test helper and no other actionable standards issue. Specification review found no issue. The public route and discover modal now use the intended separate presentation modes.
+The focused event suites pass 4 suites and 28 tests. The isolated checkout preview passed at desktop and narrow mobile widths, and the action-placement preview covered 1536x1024 and 320x568 with all 14 action states, no horizontal overflow, and clear controls at 200% text size. Standards and specification review found no actionable issue in the latest correction. The public route and discover modal use the intended separate presentation modes.
 
 The complete suite, TypeScript check, production build, provider sandbox, and seeded commerce browser flow remain environment or baseline limits. The exact failures and missing prerequisites are recorded above and in the PR.
 
@@ -190,7 +197,7 @@ A reviewer can select a product, open product details without entering checkout 
 
 A reviewer can observe explicit loading text, field-level validation, readable disabled prerequisites, permission-safe actions, recoverable errors, and restored saved progress. No state presents an unpaid registration as paid. Prices and totals match the existing services and route responses.
 
-Focused Jest checks pass: 4 suites and 24 tests for the event checkout and registration paths. Changed-file lint reports 0 errors and 20 warnings; the warnings are the existing complexity and hook-dependency findings plus the new checkout layout complexity warning. The complete site suite reports 34 failed suites, 146 failed tests, 863 passed tests, and 14 skipped suites in unrelated baseline areas. TypeScript reports 81 diagnostics in 27 unrelated files, with no issue #126 commerce file in the diagnostic output. The build passes the icon check but stops at Prisma validation because `DATABASE_URL` is unavailable. The isolated checkout preview covered 1536x1024, 390x844, and 320x740. It did not exercise the full public route, backend, payment provider, or seeded commerce data. A provider sandbox check was not run because no authorized provider test environment was available, and no provider simulation was added.
+Focused Jest checks pass: 4 suites and 28 tests for the event checkout and registration paths. Changed-file lint reports 0 errors and 20 warnings; the warnings are complexity and hook-dependency findings. The complete site suite reports 34 failed suites, 146 failed tests, 863 passed tests, and 14 skipped suites in unrelated baseline areas. TypeScript reports 81 diagnostics in 27 unrelated files, with no issue #126 commerce file in the diagnostic output. The build passes the icon check but stops at Prisma validation because `DATABASE_URL` is unavailable. The isolated checkout preview covered 1536x1024, 390x844, and 320x740. The action-placement preview covered 1536x1024 and 320x568, exercised 14 action states, showed no horizontal overflow, and kept controls clear at 200% text size. It did not exercise the full public route, backend, payment provider, or seeded commerce data. A provider sandbox check was not run because no authorized provider test environment was available, and no provider simulation was added.
 
 
 ## Idempotence and Recovery
@@ -211,7 +218,7 @@ Approved desktop reference groups:
 
     State/recovery: `commerce-flow--loading--desktop-1536x1024.png`, `commerce-checkout--validation-error--desktop-1536x1024.png`, `commerce-flow--disabled--desktop-1536x1024.png`, `commerce-flow--permission--desktop-1536x1024.png`, `commerce-flow--error--desktop-1536x1024.png`, `commerce-flow--recovery--desktop-1536x1024.png`.
 
-The issue body contains the full approved desktop and mobile reference list. Current evidence: focused event Jest checks pass 4/4 suites and 24/24 tests; changed-file lint has 0 errors; icon projections pass for 27 icons; and the isolated checkout preview passes at desktop and narrow mobile widths. TypeScript, build, full-suite, provider-sandbox, and seeded-commerce-browser limitations are recorded in `Surprises & Discoveries` and `Validation and Acceptance`. Code review reports one fixed standards finding and no specification findings.
+The issue body contains the full approved desktop and mobile reference list. Current evidence: focused event Jest checks pass 4/4 suites and 28/28 tests; changed-file lint has 0 errors; icon projections pass for 27 icons; and the isolated checkout previews pass at desktop and narrow mobile widths. The action-placement preview covers the desktop summary action and mobile fixed action bar across 14 states with no horizontal overflow. TypeScript, build, full-suite, provider-sandbox, and seeded-commerce-browser limitations are recorded in `Surprises & Discoveries` and `Validation and Acceptance`. Standards and specification review found no actionable issue in the latest correction.
 
 ## Interfaces and Dependencies
 
