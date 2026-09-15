@@ -3292,9 +3292,9 @@ approval to make it look as if the reviewer rejected it.
 - [x] Add audited operator correction admission and a protected correction hold.
 - [x] Integrate validation, commit, approval, and version-11 role instructions.
 - [x] Pass source tests and both independent code-review axes.
-- [ ] Publish and deploy the revised images with fresh stopped-fleet evidence.
-- [ ] Re-run the fourteen prior pending packages and the three unprocessed jobs.
-- [ ] Stop workers and record final state and remaining human holds.
+- [x] Publish and deploy the revised images with fresh stopped-fleet evidence.
+- [x] Re-run the fourteen prior pending packages and the three unprocessed jobs.
+- [x] Stop workers and record final state and remaining human holds.
 
 ### Surprises and discoveries
 
@@ -3513,3 +3513,167 @@ The final live correction PREVIEW freshness scenario belongs to the controlled
 rollout smoke. Exercise stale rejection before a fresh preflight renewal.
 Then require a fresh zero-write PREVIEW before correction APPLY. No version-11
 production job has been admitted or processed at this checkpoint.
+
+### Version-11 production rollout checkpoint
+
+
+The source commit is `0a0311bcfe5259b64c9bb5d02288bd11021ec96c`. It was
+fast-forwarded into canonical main. A clean `bracketiq_e2e_integration`
+database passed the same 491 tests. Site CI run `34930833897` passed for that
+exact commit. Site image run `34931446340` and governed image run
+`34931446378` passed after their production environment approvals.
+
+The immutable images are:
+
+    ghcr.io/razumly/bracketiq-affiliate-governed@sha256:3be1f999d68a9ca16fab8f5c50ac44a6bc5968f9a9e3c8904a024c4e4491b121
+    ghcr.io/razumly/bracketiq-affiliate-gateway@sha256:141cb4181080353af4172229379aa0ebd6c55f1e43982586dc18088339889fb6
+    ghcr.io/razumly/bracketiq-site@sha256:609b75874ce45264de9eafb9b6216bc98cb5fa391d43038a315b7c2675d52c44
+
+Both governed images carry the exact OCI source revision. The site image is
+bound to the exact successful publication run and SHA tag; it has no OCI
+revision label. All images are Linux amd64. The observed Docker image IDs
+match the digest references on this VPS.
+
+The protected tool root is
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v11-repair-tools-0a0311bcf`.
+The protected workload root is
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v11-existing-repair-first20-0a0311bcf`.
+The workload environment remains root-owned with private permissions. Use the
+authorized Ubuntu operator through `sudo -n` for these helpers. Do not change
+the old version-10 environment.
+
+The model replacement preserved credential values and adjacent runtime
+identities. Both model services became healthy. The app-only deployment
+preserved adjacent containers and legacy timers. It ran no migrations. The
+site readiness endpoint returned HTTP 200. A browser rendered the site and
+onboarding surface without horizontal overflow. The previously observed
+optimized onboarding icon request still failed; no UI source changed here.
+
+The initial stopped-fleet preflight was evaluated at
+`2026-09-15T05:28:34.539Z`. Its report hash is
+`31a33717855221b6b2fd6a174a6f42bf509e61153def676e4517367a39bcb745`.
+It has no blocking or warning findings. The deployment version is 11 with
+hash `8ca2c385bf9b89505ed3798a1b6e28226e37ed2996093f8cf09d18ed516e20ac`.
+The active Supply Contract remains version 1. Gateway started healthy with
+closed admission. Producer, reviewer, and runner passed readiness and sandbox
+checks while admission stayed closed.
+
+The live correction PREVIEW selected all seventeen intended mapping jobs and
+reported zero writes. Its hash is
+`c69ef6430e95f728351a7f85f780298345560ef2578f978893ff61907b634375`.
+APPLY installed seventeen correction holds and current-contract producer jobs.
+It superseded exactly the three never-claimed old producers. Exact replay
+returned zero writes and the same seventeen job IDs. The new controller
+manifest is `first20-batch-v11.json` in the tool root. It keeps the original
+twenty-member accounting and starts with the flagged article.
+
+The post-admission checks preserved all fourteen old pending mapping rows,
+31 completed Gateway jobs, 34 Gateway job identities, 32 claims, 239 receipts,
+145 Gateway artifacts, and 288 original events. Published candidates remain
+at 2821 with hash `858274b7dec7d070f8d2f1665e672b22`. Supply Targets remain
+at zero with hash `d41d8cd98f00b204e9800998ecf8427e`.
+
+Controller `repair-v11-first20-controller` opens one exact producer/reviewer
+lease at a time. The article correction job
+`a1bd053b-74ba-49ed-ba98-93008492491a` completed as CONTRACT_GAP. It identified
+the multi-college article and missing club-level action. It created no new
+package. The next Beach Volleyball camp also reported CONTRACT_GAP with
+NO_QUALIFIED_ACTION. Its stored page has Kajabi resource-redirect CTAs such as
+`Save My Spot!` and `Sign Me Up for Camp!`; no direct target was captured or
+invented. Keep that contract limitation distinct from an invalid event entity.
+The batch continues through the remaining admitted jobs.
+
+After the initial preflight expired, correction PREVIEW returned HTTP 503
+without a report. Gateway logs identify `assertStartupPreflight` at the new
+correction PREVIEW branch as the cause. The fresh-after-renewal half of this
+smoke remains pending. Do not interrupt an active claim to renew the report.
+
+### Final version-11 batch outcome
+
+
+All seventeen admitted correction jobs reached a terminal result. Four
+packages passed independent review. Twelve producers reported CONTRACT_GAP.
+One package reached HUMAN_REVIEW_REQUIRED after the third reviewer pass.
+With the two unchanged capture holds and the original Football & Cheer hold,
+the original twenty-job selection ends with four COMPLETED mapping jobs and
+sixteen HUMAN_REVIEW_REQUIRED mapping jobs. This is a completed bounded run,
+not a claim that the full backlog is repaired.
+
+The four approved, inactive pending mappings are Phoenix Hockey Club Hockey
+Programs, Jacksonville Hockey Academy, Pickleball League with Long Beach
+Boot Camp, and the Westchester Ultimate Frisbee event source. They contain
+five extracted candidates in total. Each has a server-derived valid
+entityActionQuality report and independent reviewer approval. None is active.
+The only source-kind change is the permitted private Westchester source
+transition from UNCLASSIFIED to EVENT. Working mappings, organizations,
+public state, source status, and automation fields remain unchanged.
+
+Dugout Baseball remains held after review pass three. Its evidence and action
+belong to a U.S. Baseball Academy camp, not clearly to the declared CLUB
+entity. The article remains a correction hold. Other contract gaps concern
+unsupported opaque CTAs, missing registration hrefs, inline forms/widgets,
+generic program pages, source prose, or source-kind constraints. Keep these
+distinct from invalid organization identity.
+
+One producer explanation is incorrect. Fort Worth Senior National Tour
+reported that Pickleball was absent from its injected catalog. The exact
+completed claim `agw-claim-2f7e5bf4-23df-4fd1-872b-c211ec8d03b9` contains
+Pickleball in catalog
+`e4c4adada1e0b73f071ff367713e3c0d777cf22df846618edda81e9e01059c66`.
+Treat this as a producer catalog-reading error, not a missing catalog entry.
+Do not rewrite the completed result. The source remains held for a later
+governed correction. `operator-hold-observations.json` in the protected tool
+root records the verified contradiction.
+
+The Athletics producer failed once with PROCESS_CRASH before any package
+commit or terminal effect. Its failed claim
+`agw-claim-9e0dcbe9-c280-46c9-8d09-82a563ca3614` remains intact. The Gateway
+scheduled RETRY_WAIT with no pipeline block. An operator reviewed the exact
+failure and permitted only that scheduled retry. The retry completed as
+CONTRACT_GAP. It reported the broad City of Mesa athletics page,
+EVENT-only scope, unresolved soccer/volleyball variants, missing Kickball
+catalog entry, and excluded cheer activity.
+
+The retry used `first20-batch-v11-retry1.json`. The original controller helper
+incorrectly rejected every non-empty retry approval list. Its local-only
+manifest validation was corrected to allow at most one explicit failed claim
+with a matching operator reason. An offline check proved initial acceptance,
+exact retry acceptance, and rejection of a mismatched claim. No automatic
+retry approval was added. Use the current protected controller file, not the
+initial helper archive, for this behavior.
+
+Controller `repair-v11-first20-controller-retry1` emitted BATCH_COMPLETE and
+exited with code zero. It closed admission and stopped the runner, producer,
+and reviewer. The final stopped-fleet report is in `preflight-v11-final`.
+It is ready and was evaluated at `2026-09-15T07:21:50.583Z`, with hash
+`f10eebaa985b23aaedb4475d57d3afc07045024fe8896cf63ded7ad706784ecd`.
+The stale/fresh correction PREVIEW smoke passed: expired evidence returned
+HTTP 503 with no report; a renewed preflight returned HTTP 200 and zero writes.
+
+Final checks found zero active claims, zero active pointers, zero unresolved
+receipts, and zero running captures. The four core services are healthy:
+site, Gateway, model auth broker, and model gateway. The three repair workers
+are stopped. Adjacent container identities/states and the disabled inactive
+legacy units are unchanged. Credential values were preserved. Site readiness
+returned `status: ok` and `database: ready`.
+
+All fourteen old pending mappings, 31 completed Gateway jobs, 34 Gateway job
+identities, 32 old claims, 239 receipts, 145 Gateway artifacts, and 288 original
+events retain their exact recorded hashes. The failed Athletics claim is also
+retained, with two claim generations on that job. Published candidates remain
+2821 with hash `858274b7dec7d070f8d2f1665e672b22`; Supply Targets remain zero
+with hash `d41d8cd98f00b204e9800998ecf8427e`. No listing publication, activation,
+new source discovery, or production migration occurred.
+
+The untouched mapping backlog outside this original twenty-job selection
+contains 382 HUMAN_REVIEW_REQUIRED jobs, 453 QUEUED jobs, and one
+REVIEW_REQUIRED job. These status counts do not assert eligibility. A new
+bounded authorization and the required source/contract decisions must precede
+more repair work. New collection remains outside the authorized scope.
+
+The durable final report is `final-verification.json` in the protected tool
+root. Local evidence is available at `local://v11-final-verification.json`,
+`local://v11-final-batch-results.json`, and
+`local://v11-final-preservation.json`. The application image/source revision
+remains `0a0311bcfe5259b64c9bb5d02288bd11021ec96c`; later plan-only checkpoint
+commits do not imply another deployment.
