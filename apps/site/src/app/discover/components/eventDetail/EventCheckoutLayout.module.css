@@ -210,6 +210,25 @@
   margin-top: 0.15rem;
 }
 
+.summaryAction {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.summaryAction > button {
+  min-width: 0;
+  max-width: 100%;
+  min-height: 2.75rem;
+  height: auto;
+  padding-block: 0.75rem;
+  white-space: normal;
+}
+
+.mobileTotal {
+  display: none;
+}
+
 .teamPanel {
   padding: 0;
   border: 0;
@@ -282,6 +301,41 @@
 
   .summary {
     position: static;
+  }
+
+  .pageWithAction {
+    padding-bottom: calc(var(--checkout-action-height, 8rem) + 1.5rem);
+  }
+
+  .pageWithAction :is(button, input, select, textarea, a[href]) {
+    scroll-margin-bottom: calc(var(--checkout-action-height, 8rem) + 1.5rem);
+  }
+
+  .summaryAction {
+    position: fixed;
+    inset-inline: 0;
+    bottom: 0;
+    z-index: 30;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem;
+    padding-right: max(1rem, env(safe-area-inset-right, 0px));
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+    padding-left: max(1rem, env(safe-area-inset-left, 0px));
+    border-top: 1px solid var(--bq-border);
+    background: var(--bq-surface);
+    box-shadow: 0 -3px 12px color-mix(in srgb, var(--bq-ink) 4%, transparent);
+  }
+
+  .summaryAction > button {
+    justify-self: end;
+  }
+
+  .mobileTotal {
+    display: block;
+    min-width: 0;
   }
 }
 
