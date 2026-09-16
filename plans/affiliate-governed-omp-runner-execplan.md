@@ -47,6 +47,7 @@ The operator selected OMP with two ChatGPT accounts. The governed affiliate work
 - [x] (2026-09-16) Complete ownership review fixes and the final source-only gate.
 - [x] (2026-09-16) Integrate the guard fixes and deploy matched version-13 runtimes.
 - [x] (2026-09-16) Account for all six canary sources and verify the stopped-fleet outcome.
+- [x] (2026-09-16) Deploy finite commit diagnostics and complete one Fort Greene retry.
 ## Current approval record
 
 Conditional `AUTH SETUP` approval (recorded 2026-09-07): after source
@@ -4292,3 +4293,86 @@ five approved sources. Follow any new committed package through independent
 review. Stop on another process failure or unresolved effect. Activation,
 publication, recurring imports, and the separate Pickleball recovery stay
 outside scope.
+
+### Diagnostic deployment checkpoint
+
+
+Source `d48c03e28ad866a9f7cf6574965eec7933370fa1` is integrated and pushed.
+Standards and Spec reviews passed. The final local and integrated focused
+gate passed 166 tests in three suites. Source TypeScript and targeted ESLint
+passed. Exact-commit Site CI `35116103574` also passed.
+
+Site publication `35117242434` and governed publication `35117242869` passed
+after the authorized environment approval. The matched immutable images are:
+
+    ghcr.io/razumly/bracketiq-site@sha256:1cef0baed9ad6b9d4f001a4ad70527fa968a31b3aa8767fb972ac5fa8c2785d2
+    ghcr.io/razumly/bracketiq-affiliate-governed@sha256:a1bef3cca3c51e0a9b4c268001123faab11e6cd403a89ea43a4d2a745f95d1c9
+    ghcr.io/razumly/bracketiq-affiliate-gateway@sha256:71ba5ca8d3dd7559936bf56caabb99964e2c52625b868fcf954f5f13288abdc2
+
+The new private tool root is
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v13-commit-diagnostic-tools-d48c03e28`.
+The workload root is
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v13-fort-diagnostic-retry-d48c03e28`.
+Preparation verified exact equality of the old and new authority bundles.
+Deployment contract 13 retains hash
+`cc6c992e333c73dce975f31f6aba9f09355451005000b5de1b60057e75ab6459`.
+All seven matched runtime images were replaced with credentials and adjacent
+runtime state preserved. No migration ran.
+
+The retry coordinator is bound to the diagnostic revision, exact private
+roots, current image identities, and unchanged compiled authority. Its
+read-only inspection rejected the old diagnostic-free release. Fresh
+stopped-fleet preflight and worker/sandbox readiness passed before admission.
+
+Controller `fort-commit-diagnostic-retry` opened one exact lease. Fort Greene
+now has generation 2 claim
+`agw-claim-dc8efbd5-d8dc-49ad-8da3-ca5c5e387490`. Generation 1 is preserved.
+No other original source can enter this retry. Completion and the precise
+diagnostic result are pending.
+
+### Diagnostic retry outcome
+
+
+The authorized generation-2 retry completed. Producer claim
+`agw-claim-dc8efbd5-d8dc-49ad-8da3-ca5c5e387490` returned PACKAGE_COMMITTED.
+Independent reviewer claim `agw-claim-df7f1c72-09bc-480f-9256-e77b2876c8f0`
+returned APPROVED. The new inactive mapping is
+`agw-artifact-5301fff8-17cc-4181-93bf-da5e9f45b238`. It contains one
+source-backed Doubles Tournament 2026 candidate and a valid entityActionQuality
+report. The legacy mapping job is now COMPLETED.
+
+Validation receipt `agw-receipt-5abb474f-0a7c-4098-8de7-74c960138b83` and commit
+receipt `agw-receipt-8eb9e583-40db-4ac9-a661-22c0df80248f` both succeeded.
+They returned the same package hash:
+`19a692df7831d2317718c4c2bfc984b2cef1ba0df1e514f9b25933842be585c9`.
+
+The prior commit-manifest failure did not recur. Twelve bounded diagnostic
+records show local-schema, entity/action, and sport-evidence corrections during
+validation, but zero COMMIT_DECLARATIVE_PACKAGE rejections. This run therefore
+does not identify the precise bad field from generation 1. The nine distinct
+commit reason codes remain deployed for any later occurrence; do not claim
+that an unobserved original cause was fixed.
+
+The previous failed claim and its receipts are unchanged. The five earlier
+approved mappings retain their exact row fingerprints. The separate
+Pickleball post-commit hold is unchanged. Fort Greene's working mapping and
+pre-existing automatic-scraping flag are preserved; the new approved mapping
+is inactive and no recurring-import runtime was started.
+
+Published candidates remain 2821 with the same before/after JSONB-row hash
+`b336fdc153f599755befb82930ff7672`. Supply Targets remain zero. Final
+verification found no active claims or pointers, reconciliation claims,
+unresolved receipts, or running captures. Admission is closed. The runner,
+producer, and reviewer are stopped. The four serving runtimes are healthy.
+
+Final preflight hash:
+`cdb4119fe855a1d13d9a43c67dfa08828b0f6e92440e2890968ff4730a1eb08f`.
+Evidence is `local://commit-diagnostic-final-verification.json` and the
+diagnostic tool root's `final-verification.json`. A new inspection rejects a
+repeat because the authorized generation has been consumed. No further
+retry, activation, publication, or batch expansion occurred.
+
+Change note: Record deployed diagnostic source `d48c03e28`, successful
+validation-to-commit matching, independent approval, and the remaining
+uncertainty about the old failure. This documentation checkpoint does not
+authorize another deployment or execution.
