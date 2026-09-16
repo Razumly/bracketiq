@@ -49,6 +49,7 @@ The operator selected OMP with two ChatGPT accounts. The governed affiliate work
 - [x] (2026-09-16) Account for all six canary sources and verify the stopped-fleet outcome.
 - [x] (2026-09-16) Deploy finite commit diagnostics and complete one Fort Greene retry.
 - [x] (2026-09-16) Add durable agent error history and verify the read-only review report.
+- [x] (2026-09-16) Deploy durable error history and stop the bounded trial after the canary contract gap.
 
 ## Current approval record
 
@@ -4614,3 +4615,197 @@ passed for every changed TypeScript file. Its only output was the existing
 Babel notice for the large Prisma Gateway file.
 
 Plan revision: record completed cleanup and the reproducible source gate.
+
+## Authorized error-history rollout and five-source trial
+
+
+The user approved deployment of source
+`ca9032ba57f711793fa7baa6ce7c70daf25f5813`, followed by one canary and up to
+four additional eligible sources. The user then explicitly approved
+replacement of the auth broker and model gateway because the current
+preflight requires their reviewed image to match the governed worker image.
+Preserve their credentials, persistent volumes, model selection, and settings.
+
+The authorized runtime set is the site, affiliate Gateway, model auth broker,
+model gateway, root runner, `mapping-producer-1`, and `supply-reviewer-1`.
+Keep admission closed during deployment. Start only the named producer and
+reviewer for the trial. Preserve all adjacent runtime identities and states.
+Do not start coverage, replenishment, second workers, or legacy services.
+
+Use fresh normal existing-data admissions with stored evidence. Do not use
+historical retry, continuation, correction, or capture routes. Do not admit
+Pickleball job `8c60dbb7-78ae-4e42-95ca-be85c0438a57`. Preserve every existing
+hold. Do not activate or publish a mapping, candidate, source, or organization.
+Do not enable recurring scraping.
+
+Before the first state change, the production census showed zero active
+claims, zero active job pointers, zero reconciliation jobs, and zero unresolved
+receipts. It showed 2,821 published candidates, zero Supply Targets, five
+`LEGACY_SPORT_REPAIR` holds, and two unrelated queued captures. The only
+waiting Gateway job was the protected Pickleball retry. The site, Gateway,
+auth broker, and model gateway were healthy. The runner and both trial workers
+were stopped.
+
+The read-only baselines are
+`local://agent-error-rollout-runtime-baseline.json` and
+`local://agent-error-rollout-database-baseline.json`. Published-candidate
+fingerprint is `3f450ea26b40a9cb25593c8d1231cf67`. Hold fingerprint is
+`c9d6ef7be3be8715c7695d1f351f8bbe`. Preserve queued capture IDs
+`3ebb31d6-7894-491a-bf0e-810f1d9c2600` and
+`e32e7b30-1c49-45ca-9aa0-363565817c31`.
+
+Preview one explicit mapping job at a time through the current Gateway.
+Require an eligible, unheld, not-yet-admitted result with verified stored
+HTML and Markdown. Apply only its reviewed report hash. Open one exact,
+short producer lease. Open one exact reviewer lease only after that producer
+commits. A passing canary requires `PACKAGE_COMMITTED` and independent
+`APPROVED`. Do not enter a child repair loop without a new approval.
+
+Stop further admission on an unconfirmed operation, reconciliation requirement,
+diagnostic delivery failure, or non-passing canary. Close admission before
+stopping the named trial workers. Preserve active work until it reaches a
+safe terminal boundary, or report its unresolved state without a retry.
+Compare protected state and inspect the durable error report before delivery.
+
+Plan revision: record the current rollout authorization, the approved
+model-service scope change, and the bounded trial safety conditions.
+
+### Rollout preflight and publication
+
+
+The reviewed commit was fast-forwarded to canonical `main` and pushed.
+Exact-commit Site CI `35155187049` passed. Publication runs
+`35156341648` (governed images) and `35156340847` (site image) received the
+authorized production-environment approval and completed successfully.
+
+Read-only Gateway previews selected five never-attempted queued mapping jobs.
+Each preview has one eligible row, zero holds, and no prior admission.
+The canary is NYC Beach Volleyball,
+`01c49362-0ba0-4483-a9b7-7a69f9bc9f52`. Optional sources are Houston Select FC
+(`26ce6094-29b6-4a52-8bc7-3d1c39af75b7`), Atlantic Volleyball Academy
+(`369c79d8-53e2-4cd2-a096-856610377e25`), Chicago Central Hockey Club
+(`d63acdc6-b287-4a55-86da-48eeca493a56`), and Sports Zone Academy Softball
+(`9de89788-b33b-4255-9506-5fc649fd996e`). Re-preview each exact job after the
+rollout. Do not reuse an old hash after a state change.
+
+These admissions reuse existing working sources and create missing governed
+roots. They do not replace the current public mapping. Preserve the selected
+sources' active mapping IDs, mapping content, active flags, validation state,
+and recurring-scrape flags. The protected baseline is
+`local://agent-error-trial-protected-baseline.json`. The preview evidence is
+`local://agent-error-trial-initial-previews.json`.
+
+The host had 8.3 GiB free. Docker reported 24.22 GB of reclaimable build cache
+and zero active build-cache entries. The user explicitly approved pruning
+only unused Docker build cache. Preserve all images, containers, volumes,
+databases, credentials, and source/evidence archives. Verify those identities
+after cleanup and recheck free space before pulling the new images.
+
+The exact source archive is staged under the new revision cache. Its SHA-256
+is `b5fa201fbda9d716601b666e1d934bd898574ccfaa753a793294adc3b5d28ca7`.
+The local and remote checksums match. The new tool root is
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v13-agent-error-tools-ca9032ba5`.
+The new workload root will be
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v13-agent-error-trial-ca9032ba5`.
+Only unchanged, previously used guarded deployment helpers were copied.
+
+Plan revision: record publication, the bounded source list, and the separately
+authorized unused-cache cleanup.
+
+### Deployed error history and stopped canary outcome
+
+
+The authorized rollout is complete. The immutable images for source
+`ca9032ba57f711793fa7baa6ce7c70daf25f5813` are:
+
+    ghcr.io/razumly/bracketiq-site@sha256:302f54b4062e8897d85306a90a297f77c911899648561c4264629100dc506ddc
+    ghcr.io/razumly/bracketiq-affiliate-governed@sha256:ff42c267bc632d983b5523f4ef0c19638aa23e282fb105de45175b83b998c4b9
+    ghcr.io/razumly/bracketiq-affiliate-gateway@sha256:dcb094a9e85f5ccf0ca0e25322dd4583c5f745a4b4f7f864060b0b767c36db40
+
+Registry digests and Docker image identities were inspected separately.
+The compiled role and prompt exports match the prior deployment exactly.
+Supply Contract 1, deployment contract 13, and role/prompt version 12 remain
+unchanged. No migration ran.
+
+Unused build-cache cleanup preserved all 75 existing images, 32 container
+identities and states, and 8 volumes. Free space increased to 34 GiB.
+The image pulls left 20 GiB free. No image, volume, database, credential,
+source archive, or evidence archive was deleted.
+
+Fresh stopped-fleet preflight passed without a warning or blocking finding.
+Its report hash is
+`d1175e77879a200abf05d166441d360c63eed730b39166f400be0110cdffe62b`.
+The evidence directory is
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v13-agent-error-trial-ca9032ba5/preflight-error-history-initial`.
+The Gateway started with admission closed. Producer and reviewer sandbox
+probes passed. Only the runner, producer 1, and reviewer 1 started.
+
+The first bounded-open request omitted the worker credential. The Gateway
+rejected it with HTTP 400 before opening a lease. The corrected request used
+the existing credential-safe RPC pattern, which injects the reviewed worker
+credential inside the Gateway container. No credential was printed or stored
+in the operator evidence.
+
+NYC Beach Volleyball was admitted as Gateway job
+`b1bed229-5ac8-4890-a3b1-1a5da8c7a2c4` and Supply Source
+`7dd8b2c9-a42c-4a0d-b26d-1630dbd82073`. Producer generation 1 used claim
+`agw-claim-826b6c8c-1865-447c-9e77-2ddce1065094`. It completed with
+`CONTRACT_GAP`, zero invocation failures, and terminal receipt
+`agw-receipt-ce8747d5-bc07-426a-a7e5-37a8d8f30402`.
+
+The producer resolved Beach Volleyball from stored first-party evidence.
+It reported that the available registration-labelled link was the header
+navigation link “Junior Player Registration” to `/schedule`. The Gateway
+rejected that proposed official action. The producer requested qualified
+claim-owned official-action evidence and returned `MAPPING_EVIDENCE` rather
+than bypassing the guard. This is a producer-reported evidence gap, not an
+independent mapping approval.
+
+The new history retained two immutable `INDEFINITE` observations:
+`agw-event-9c54a467-f126-4070-b801-948f021d9905` records
+`LOCAL_SCHEMA_INVALID` at `command.data.candidatePackage`;
+`agw-event-5112ed6a-ecd3-4cc5-bf0a-2fb715d6dfaa` records
+`PACKAGE_ENTITY_ACTION_INVALID` for `VALIDATE_DECLARATIVE_PACKAGE`.
+The observations remain readable after worker shutdown. No diagnostic
+delivery failure or limit marker was recorded.
+
+No package was committed and no reviewer job was created. The legacy mapping
+job is now `HUMAN_REVIEW_REQUIRED`. The new governed root remains `PRE_MAPPED`,
+with automation disabled and zero target contribution. The working source
+and mapping remain unchanged. The canary did not pass, so the other four
+sources were not admitted. All four remain queued with attempt count zero,
+no lease, and no Gateway job. No retry, correction, capture, or substitution
+was performed.
+
+Admission is closed. The runner, producer 1, and reviewer 1 are stopped.
+The site, Gateway, auth broker, and model gateway are healthy on the new
+images. Adjacent container identities and states are preserved. Legacy
+affiliate timers and services remain disabled and inactive. The external
+site readiness endpoint reports `status: ok` and `database: ready`.
+
+Final checks found zero active claims, active job pointers, reconciliation
+claims/jobs, unresolved receipts, and running captures. All five pre-existing
+holds and the protected Pickleball job/claim/receipt hashes match the baseline.
+The two unrelated queued captures are unchanged. Published candidates remain
+2,821 with fingerprint `3f450ea26b40a9cb25593c8d1231cf67`. Supply Targets remain
+zero. The five selected working mappings retain their prior active IDs,
+content, active flags, validation state, and recurring-scrape flags.
+
+Service images package service entry points, not every operator CLI script.
+The deployed Gateway uses `AFFILIATE_GATEWAY_DATABASE_URL`, not `DATABASE_URL`.
+The private read-only wrapper binds that existing connection only inside
+its reporting process and invokes the reviewed packaged report module:
+
+    ssh bracketiq-prod python3 /home/bracketiq/.config/bracketiq-affiliate-agents/omp-v13-agent-error-tools-ca9032ba5/report-agent-errors.py --source-id 7dd8b2c9-a42c-4a0d-b26d-1630dbd82073
+
+The complete redacted checkpoint is stored in that tool root as
+`trial-final-evidence.json`. Local copies are
+`local://agent-error-rollout-final-evidence.json`,
+`local://agent-error-trial-canary-outcome.json`,
+`local://agent-error-trial-live-error-history.json`, and
+`local://agent-error-trial-final-verification.json`. The local transfer
+archive was removed. The active private workload, guarded tools, and remote
+source export remain for operation and audit.
+
+Plan revision: record the matched deployment, live durable-error proof,
+non-passing canary, conditional batch stop, and verified preserved state.
