@@ -5492,6 +5492,16 @@ const refreshRunRecovered = (
   );
 };
 
+const invocationRecoveryReceiptRecorded = (
+  receipt: Readonly<{ operationKind: unknown; status: unknown }>,
+): boolean => {
+  const operationKind = upper(receipt.operationKind);
+  return (
+    ["SUCCEEDED", "SUCCESS", "COMPLETED"].includes(upper(receipt.status)) &&
+    !["CLAIM", "HEARTBEAT", "RECORD_FAILURE", "RECORD_ERROR"].includes(operationKind)
+  );
+};
+
 const receiptRecovered = (
   receipt: ProjectionRows["receipts"][number],
   recoveryRows: ProjectionRows,
@@ -5503,10 +5513,10 @@ const receiptRecovered = (
   const recoveredByReceipt = recoveryRows.receipts.some(
     (candidate) =>
       candidate.jobId === receipt.jobId &&
+      invocationRecoveryReceiptRecorded(candidate) &&
       (dateValue(
         candidate.completedAt ?? candidate.updatedAt ?? candidate.createdAt,
-      )?.getTime() ?? 0) > receiptAt &&
-      isSuccessfulRefreshStatus(candidate.status),
+      )?.getTime() ?? 0) > receiptAt,
   );
   const job = recoveryRows.gatewayJobs.find(
     (candidate) => candidate.id === receipt.jobId,
@@ -5587,15 +5597,6 @@ const alertDeliveryFailureRecovered = (
   recoveryRows: OperationalAlertRecoveryRows,
 ): boolean =>
   alertDeliveryFailureRecoveryIdsFor(payload, recoveryRows).length > 0;
-const invocationRecoveryReceiptRecorded = (
-  receipt: Readonly<{ operationKind: unknown; status: unknown }>,
-): boolean => {
-  const operationKind = upper(receipt.operationKind);
-  return (
-    ["SUCCEEDED", "SUCCESS", "COMPLETED"].includes(upper(receipt.status)) &&
-    !["CLAIM", "HEARTBEAT", "RECORD_FAILURE"].includes(operationKind)
-  );
-};
 
 const invocationRecoveryEventRecorded = (
   event: Readonly<{ eventType: unknown }>,

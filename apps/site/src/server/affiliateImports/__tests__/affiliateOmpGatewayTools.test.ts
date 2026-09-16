@@ -12,7 +12,9 @@ import {
   type AffiliateAgentSourceSportScope,
 } from "../agentGatewayContracts";
 import { createAffiliateOmpGatewayTools, type AffiliateOmpToolResult } from "../affiliateOmpGatewayTools";
+import type { AffiliateAgentErrorObservation } from "../affiliateAgentErrorObservations";
 import { buildAffiliateSportsCatalogSnapshot } from "../affiliateSportsCatalog";
+import type { AffiliateAgentCommandRejectionDiagnostic } from "../affiliateAgentCommandDiagnostics";
 
 const legacyRepairFixture = (html: string | Buffer = '<p>Outdoor&nbsp;soccer on grass fields</p>') => {
   const bytes = typeof html === "string" ? Buffer.from(html, "utf8") : html;
@@ -202,6 +204,21 @@ const textValue = (result: AffiliateOmpToolResult) => {
   if (block.type !== "text") throw new Error("Expected a text result.");
   return JSON.parse(block.text);
 };
+const nonRecordingOperationsFor = (perform: jest.Mock): AffiliateAgentClaimOperation[] => (
+  perform.mock.calls
+    .map(([operation]) => operation as AffiliateAgentClaimOperation)
+    .filter((operation) => operation.kind !== "RECORD_ERROR")
+);
+const recordingOperationsFor = (perform: jest.Mock): Extract<
+  AffiliateAgentClaimOperation,
+  { kind: "RECORD_ERROR" }
+>[] => (
+  perform.mock.calls
+    .map(([operation]) => operation as AffiliateAgentClaimOperation)
+    .filter((operation): operation is Extract<AffiliateAgentClaimOperation, { kind: "RECORD_ERROR" }> => (
+      operation.kind === "RECORD_ERROR"
+    ))
+);
 
 it.each(["check_result", "submit_result"])("redacts top-level %s draft errors", async (toolName) => {
   const perform = jest.fn();
@@ -218,10 +235,179 @@ it.each(["check_result", "submit_result"])("redacts top-level %s draft errors", 
   });
   expect(JSON.stringify(response)).not.toContain(privateKey);
   expect(JSON.stringify(response)).not.toContain(privateValue);
-  expect(perform).not.toHaveBeenCalled();
+  expect(nonRecordingOperationsFor(perform)).toHaveLength(0);
   expect(onTerminal).not.toHaveBeenCalled();
   expect(tools.isClosed).toBe(false);
 });
+it("records redacted local errors without exposing a recorder tool", async () => {
+  const secret = "private-local-error-value";
+  const records: AffiliateAgentErrorObservation[] = [];
+  const mimeFixture = legacyRepairFixture();
+  mimeFixture.artifact.mimeType = "application/octet-stream";
+  mimeFixture.claim.evidenceManifest.entries[0].mimeType = "application/octet-stream";
+  mimeFixture.claim.evidenceManifest.hash = hashAffiliateAgentValue({
+    schemaVersion: 1,
+    entries: mimeFixture.claim.evidenceManifest.entries,
+  });
+  const perform = jest.fn(async (operation: AffiliateAgentClaimOperation) => {
+    if (operation.kind === "RECORD_ERROR") {
+      records.push(operation.observation);
+      return {
+        kind: "AGENT_ERROR_RECORDED" as const,
+        eventId: `agent-error-${records.length}`,
+        replayed: false,
+      };
+    }
+    if (operation.kind === "READ_ARTIFACT") return mimeFixture.artifact;
+    throw new Error("Unexpected Gateway operation.");
+  });
+  const tools = createAffiliateOmpGatewayTools({
+    claim: claimFor("MAPPING_PRODUCER"),
+    token: "private-claim-token",
+    gateway: { perform },
+    onTerminal: jest.fn(),
+  });
+
+  expect((await tools.execute("unlisted_tool", { secret })).isError).toBe(true);
+  expect((await tools.execute("execute_command", {
+    command: { type: "CAPTURE_CLAIM_URL", data: { urlRef: secret, captureProfileRef: "" } },
+  })).isError).toBe(true);
+  expect((await tools.execute("check_result", { ...terminalFields, payload: {} })).isError).toBe(true);
+
+  const mimeTools = createAffiliateOmpGatewayTools({
+    claim: mimeFixture.claim,
+    token: "private-claim-token",
+    gateway: { perform },
+    onTerminal: jest.fn(),
+  });
+  expect((await mimeTools.execute("read_artifact", { evidenceRef: "evidence-1" })).isError).toBe(true);
+
+  const errorOperations = recordingOperationsFor(perform);
+  expect(errorOperations).toHaveLength(4);
+  expect(errorOperations.map(({ observation }) => observation)).toEqual(expect.arrayContaining([
+    expect.objectContaining({ tool: "UNKNOWN", errorCode: "TOOL_NOT_PERMITTED" }),
+    expect.objectContaining({ tool: "execute_command", errorCode: "COMMAND_SCHEMA_INVALID" }),
+    expect.objectContaining({ tool: "check_result", errorCode: "LOCAL_DRAFT_INVALID" }),
+    expect.objectContaining({ tool: "read_artifact", errorCode: "ARTIFACT_MIME_UNSUPPORTED" }),
+  ]));
+  expect(new Set(errorOperations.map((operation) => operation.idempotencyKey)).size).toBe(4);
+  expect(JSON.stringify(errorOperations)).not.toContain(secret);
+  expect(tools.definitions.map((definition) => definition.name)).not.toContain("record_error");
+});
+
+it("preserves the original local error when recording fails", async () => {
+  const secret = "private-recorder-failure-value";
+  const diagnostics: AffiliateAgentCommandRejectionDiagnostic[] = [];
+  const perform = jest.fn(async (operation: AffiliateAgentClaimOperation) => {
+    if (operation.kind === "RECORD_ERROR") throw new Error(secret);
+    throw new Error("Unexpected Gateway operation.");
+  });
+  const tools = createAffiliateOmpGatewayTools({
+    claim: claimFor("MAPPING_PRODUCER"),
+    token: "private-claim-token",
+    gateway: { perform },
+    onTerminal: jest.fn(),
+    onCommandRejection: (diagnostic) => {
+      diagnostics.push(diagnostic);
+    },
+  });
+
+  const response = await tools.execute("unlisted_tool", { secret });
+  expect(response).toEqual({
+    content: [{ type: "text", text: "This tool is not permitted for the claim." }],
+    details: {},
+    isError: true,
+  });
+  expect(JSON.stringify(response)).not.toContain(secret);
+  expect(diagnostics).toEqual([{
+    version: 1,
+    event: "affiliate-agent-command-rejection",
+    stage: "GATEWAY",
+    command: "UNKNOWN",
+    errorCode: "INTERNAL_ERROR",
+    reasonCode: "ERROR_RECORDING_FAILED",
+    issueCodes: [],
+    issuePaths: [],
+    isRetryable: false,
+  }]);
+  expect(JSON.stringify(diagnostics)).not.toContain(secret);
+  expect(perform).toHaveBeenCalledTimes(1);
+});
+
+it("stops recording attempts after a durable error limit acknowledgement", async () => {
+  const diagnostics: AffiliateAgentCommandRejectionDiagnostic[] = [];
+  const perform = jest.fn(async (operation: AffiliateAgentClaimOperation) => {
+    if (operation.kind === "RECORD_ERROR") {
+      return { kind: "AGENT_ERROR_LIMIT_REACHED" as const, eventId: "limit-event" };
+    }
+    throw new Error("Unexpected Gateway operation.");
+  });
+  const tools = createAffiliateOmpGatewayTools({
+    claim: claimFor("MAPPING_PRODUCER"),
+    token: "private-claim-token",
+    gateway: { perform },
+    onTerminal: jest.fn(),
+    onCommandRejection: diagnostic => diagnostics.push(diagnostic),
+  });
+
+  expect((await tools.execute("unlisted_tool", {})).isError).toBe(true);
+  expect((await tools.execute("unlisted_tool", {})).isError).toBe(true);
+  expect(recordingOperationsFor(perform)).toHaveLength(1);
+  expect(diagnostics).toHaveLength(0);
+});
+it("records aborted and closed tool calls without changing closure behavior", async () => {
+  const observations: AffiliateAgentErrorObservation[] = [];
+  const perform = jest.fn(async (operation: AffiliateAgentClaimOperation) => {
+    if (operation.kind === "RECORD_ERROR") {
+      observations.push(operation.observation);
+      return { kind: "AGENT_ERROR_RECORDED" as const, eventId: "agent-error-event", replayed: false };
+    }
+    if (operation.kind === "SUBMIT_RESULT") return accepted(operation);
+    throw new Error("Unexpected Gateway operation.");
+  });
+  const aborted = createAffiliateOmpGatewayTools({
+    claim: claimFor("MAPPING_PRODUCER"),
+    token: "private-claim-token",
+    gateway: { perform },
+    onTerminal: jest.fn(),
+  });
+  const controller = new AbortController();
+  controller.abort();
+  const abortedResult = await aborted.execute("read_artifact", { evidenceRef: "evidence-1" }, controller.signal);
+  expect(abortedResult).toMatchObject({
+    isError: true,
+    content: [{ type: "text", text: "The invocation is closed." }],
+  });
+  expect(aborted.isClosed).toBe(false);
+
+  const closed = createAffiliateOmpGatewayTools({
+    claim: claimFor("MAPPING_PRODUCER"),
+    token: "private-claim-token",
+    gateway: { perform },
+    onTerminal: jest.fn(),
+  });
+  expect((await closed.execute("submit_result", terminalFields)).isError).toBeUndefined();
+  expect(closed.isClosed).toBe(true);
+  const closedResult = await closed.execute("read_artifact", { evidenceRef: "evidence-1" });
+  expect(closedResult).toMatchObject({
+    isError: true,
+    content: [{ type: "text", text: "The invocation is closed." }],
+  });
+  expect(observations.map(({ errorCode }) => errorCode)).toEqual([
+    "TOOL_ABORTED",
+    "INVOCATION_CLOSED",
+  ]);
+  const closedFrame = closed.terminalFrame;
+  if (closedFrame === null) throw new Error("Expected a terminal frame.");
+  expect(recordingOperationsFor(perform)[1]).toMatchObject({
+    terminalProof: {
+      idempotencyKey: closedFrame.idempotencyKey,
+      resultHash: hashAffiliateAgentValue(closedFrame.result),
+    },
+  });
+
+});
+
 
 it("checks a fresh source-only assessment before one terminal exclusion submission", async () => {
   const fixture = sourceExclusionFixture();
@@ -237,14 +423,14 @@ it("checks a fresh source-only assessment before one terminal exclusion submissi
     kind: "DRAFT_INVALID",
     issues: [{ path: ["payload", "sportEvidence", "sportDeterminations", 0, "status"] }],
   });
-  expect(perform).not.toHaveBeenCalled();
+  expect(nonRecordingOperationsFor(perform)).toHaveLength(0);
   fixture.draft.payload.sportEvidence.sportDeterminations[0].status = "BLACKLISTED";
   expect(textValue(await tools.execute("check_result", fixture.draft))).toMatchObject({
     kind: "DRAFT_VALID", authoritative: false,
   });
   expect(onTerminal).not.toHaveBeenCalled();
   expect(textValue(await tools.execute("submit_result", fixture.draft))).toMatchObject({ kind: "TERMINAL_ACCEPTED" });
-  expect(perform.mock.calls.map(([operation]) => operation.kind)).toEqual(["READ_ARTIFACT", "SUBMIT_RESULT"]);
+  expect(nonRecordingOperationsFor(perform).map((operation) => operation.kind)).toEqual(["READ_ARTIFACT", "SUBMIT_RESULT"]);
   expect(onTerminal).toHaveBeenCalledTimes(1);
 });
 it("rejects a reintroduced excluded activity before terminal Gateway effects", async () => {
@@ -287,7 +473,7 @@ it("rejects a reintroduced excluded activity before terminal Gateway effects", a
       path: ["payload", "sportEvidence", "sportDeterminations", 0, "sourceLabels"],
     }],
   });
-  expect(perform).not.toHaveBeenCalled();
+  expect(nonRecordingOperationsFor(perform)).toHaveLength(0);
   expect(tools.isClosed).toBe(false);
 });
 
@@ -308,7 +494,7 @@ it("denies source-only package approval and mixed-sport exclusion before Gateway
     kind: "DRAFT_INVALID",
     issues: [{ path: ["payload", "sportEvidence", "sportDeterminations", 0, "sourceLabels"] }],
   });
-  expect(perform).not.toHaveBeenCalled();
+  expect(nonRecordingOperationsFor(perform)).toHaveLength(0);
   expect(tools.isClosed).toBe(false);
 });
 
@@ -326,7 +512,7 @@ it("uses verifier decoding for malformed UTF-8 without decoding SOURCE first", a
   expect(tools.isClosed).toBe(false);
   expect((await tools.execute("read_artifact", { evidenceRef: "evidence-1", view: "SOURCE" })).isError).toBe(true);
   expect(tools.isClosed).toBe(true);
-  expect(perform).toHaveBeenCalledTimes(1);
+  expect(nonRecordingOperationsFor(perform)).toHaveLength(1);
 });
 
 it.each(["application/octet-stream", "image/png"])("uses claim kind for citation text with %s MIME", async (mimeType) => {
@@ -421,7 +607,7 @@ it("repairs a draft from claim citation text before one terminal submission", as
   expect(textValue(await tools.execute("check_result", fixture.draft))).toMatchObject({
     kind: "DRAFT_INVALID", authoritative: false, issues: [{ path: ["reasonCodes", 1] }],
   });
-  expect(perform).not.toHaveBeenCalled();
+  expect(nonRecordingOperationsFor(perform)).toHaveLength(0);
   fixture.draft.reasonCodes = ["CONTRACT_REQUIREMENT_MISSING"];
   fixture.draft.payload.sportEvidence.sportDeterminations[0].evidence[0].excerpt = "Invented source quotation";
   for (let attempt = 0; attempt < 4; attempt += 1) {
@@ -430,7 +616,7 @@ it("repairs a draft from claim citation text before one terminal submission", as
       issues: [{ path: ["payload", "sportEvidence", "sportDeterminations", 0, "evidence", 0, "excerpt"] }],
     });
   }
-  expect(perform.mock.calls.map(([operation]) => operation.kind)).toEqual(["READ_ARTIFACT"]);
+  expect(nonRecordingOperationsFor(perform).map((operation) => operation.kind)).toEqual(["READ_ARTIFACT"]);
   expect(onTerminal).not.toHaveBeenCalled();
   expect(tools.isClosed).toBe(false);
   const raw = textValue(await tools.execute("read_artifact", { evidenceRef: "evidence-1" }));
@@ -443,7 +629,7 @@ it("repairs a draft from claim citation text before one terminal submission", as
   });
   expect(onTerminal).not.toHaveBeenCalled();
   expect(textValue(await tools.execute("submit_result", fixture.draft))).toMatchObject({ kind: "TERMINAL_ACCEPTED" });
-  expect(perform.mock.calls.map(([operation]) => operation.kind)).toEqual(["READ_ARTIFACT", "SUBMIT_RESULT"]);
+  expect(nonRecordingOperationsFor(perform).map((operation) => operation.kind)).toEqual(["READ_ARTIFACT", "SUBMIT_RESULT"]);
   expect(onTerminal).toHaveBeenCalledTimes(1);
   expect(tools.isClosed).toBe(true);
 });
@@ -464,7 +650,7 @@ it("denies foreign citations and model-supplied draft authority without a read",
   expect((await tools.execute("read_artifact", {
     evidenceRef: "foreign-artifact", view: "CITATION_TEXT",
   })).isError).toBe(true);
-  expect(perform).not.toHaveBeenCalled();
+  expect(nonRecordingOperationsFor(perform)).toHaveLength(0);
   expect(tools.isClosed).toBe(false);
 });
 
@@ -483,6 +669,141 @@ it("keeps Gateway authority after a successful local draft check", async () => {
   });
   expect(textValue(await tools.execute("submit_result", fixture.draft))).toMatchObject({ code: "CLAIM_NOT_ACTIVE" });
   expect(onTerminal).not.toHaveBeenCalled();
+  expect(recordingOperationsFor(perform)).toHaveLength(0);
+});
+it("records typed transport failures without changing the command result", async () => {
+  const records: AffiliateAgentErrorObservation[] = [];
+  const diagnostics: AffiliateAgentCommandRejectionDiagnostic[] = [];
+  const transportError = new AffiliateAgentGatewayError({
+    code: "INTERNAL_ERROR",
+    isRetryable: true,
+    safeMessage: "The affiliate gateway returned an invalid response.",
+    origin: "TRANSPORT",
+  });
+  const perform = jest.fn(async (operation: AffiliateAgentClaimOperation) => {
+    if (operation.kind === "RECORD_ERROR") {
+      records.push(operation.observation);
+      return { kind: "AGENT_ERROR_RECORDED" as const, eventId: "agent-error-event", replayed: false };
+    }
+    throw transportError;
+  });
+  const tools = createAffiliateOmpGatewayTools({
+    claim: claimFor("MAPPING_PRODUCER"),
+    token: "private-claim-token",
+    gateway: { perform },
+    onTerminal: jest.fn(),
+    onCommandRejection: diagnostic => diagnostics.push(diagnostic),
+  });
+  const response = await tools.execute("execute_command", {
+    command: { type: "CAPTURE_CLAIM_URL", data: { urlRef: "url-1", captureProfileRef: "profile-1" } },
+  });
+  expect(response.isError).toBe(true);
+  expect(textValue(response)).toEqual({
+    code: "INTERNAL_ERROR",
+    message: "The affiliate gateway returned an invalid response.",
+    isRetryable: true,
+  });
+  expect(records).toEqual([
+    expect.objectContaining({
+      tool: "execute_command",
+      stage: "TOOL_RUNTIME",
+      command: "CAPTURE_CLAIM_URL",
+      errorCode: "GATEWAY_OPERATION_UNVERIFIED",
+      reasonCode: "GATEWAY_OPERATION_UNVERIFIED",
+      isRetryable: true,
+    }),
+  ]);
+  expect(diagnostics).toHaveLength(0);
+});
+
+it("keeps a replayable terminal frame for typed transport failure", async () => {
+  const records: AffiliateAgentErrorObservation[] = [];
+  const recordingOperations: Extract<AffiliateAgentClaimOperation, { kind: "RECORD_ERROR" }>[] = [];
+  const transportError = new AffiliateAgentGatewayError({
+    code: "INTERNAL_ERROR",
+    isRetryable: true,
+    safeMessage: "The affiliate gateway returned an invalid response.",
+    origin: "TRANSPORT",
+  });
+  const perform = jest.fn(async (operation: AffiliateAgentClaimOperation) => {
+    if (operation.kind === "RECORD_ERROR") {
+      recordingOperations.push(operation);
+      records.push(operation.observation);
+      return { kind: "AGENT_ERROR_RECORDED" as const, eventId: "agent-error-event", replayed: false };
+    }
+    if (operation.kind === "SUBMIT_RESULT") throw transportError;
+    throw new Error("Unexpected Gateway operation.");
+  });
+  const onTerminal = jest.fn();
+  const tools = createAffiliateOmpGatewayTools({
+    claim: claimFor("MAPPING_PRODUCER"),
+    token: "private-claim-token",
+    gateway: { perform },
+    onTerminal,
+  });
+  const response = await tools.execute("submit_result", terminalFields);
+  expect(textValue(response)).toEqual({
+    code: "TERMINAL_SUBMISSION_UNCONFIRMED",
+    message: "The terminal result submission response could not be confirmed.",
+    isRetryable: true,
+  });
+  expect(onTerminal).toHaveBeenCalledTimes(1);
+  expect(tools.isClosed).toBe(true);
+  expect(tools.terminalFrame).toEqual(expect.objectContaining({
+    kind: "TERMINAL_SUBMISSION",
+    result: expect.objectContaining({ disposition: terminalFields.disposition }),
+  }));
+  expect(records).toEqual([
+    expect.objectContaining({
+      tool: "submit_result",
+      stage: "TOOL_RUNTIME",
+      errorCode: "GATEWAY_OPERATION_UNVERIFIED",
+      reasonCode: "GATEWAY_OPERATION_UNVERIFIED",
+      isRetryable: true,
+    }),
+  ]);
+  const terminalFrame = tools.terminalFrame;
+  if (terminalFrame === null) throw new Error("Expected a terminal frame.");
+  expect(recordingOperations[0]?.terminalProof).toEqual({
+    idempotencyKey: terminalFrame.idempotencyKey,
+    resultHash: hashAffiliateAgentValue(terminalFrame.result),
+  });
+});
+it("retains terminal proof when an accepted response does not match the submitted result", async () => {
+  const recordingOperations: Extract<AffiliateAgentClaimOperation, { kind: "RECORD_ERROR" }>[] = [];
+  let submitted: Extract<AffiliateAgentClaimOperation, { kind: "SUBMIT_RESULT" }> | undefined;
+  const perform = jest.fn(async (operation: AffiliateAgentClaimOperation) => {
+    if (operation.kind === "RECORD_ERROR") {
+      recordingOperations.push(operation);
+      return { kind: "AGENT_ERROR_RECORDED" as const, eventId: "agent-error-event", replayed: false };
+    }
+    if (operation.kind === "SUBMIT_RESULT") {
+      submitted = operation;
+      return { ...accepted(operation), resultHash: "f".repeat(64) };
+    }
+    throw new Error("Unexpected Gateway operation.");
+  });
+  const onTerminal = jest.fn();
+  const tools = createAffiliateOmpGatewayTools({
+    claim: claimFor("MAPPING_PRODUCER"),
+    token: "private-claim-token",
+    gateway: { perform },
+    onTerminal,
+  });
+  const response = await tools.execute("submit_result", terminalFields);
+
+  expect(response).toMatchObject({
+    isError: true,
+    content: [{ type: "text", text: "The Gateway operation could not be verified." }],
+  });
+  expect(onTerminal).not.toHaveBeenCalled();
+  expect(tools.terminalFrame).toBeNull();
+  if (submitted === undefined) throw new Error("Expected a terminal submission.");
+  expect(recordingOperations).toHaveLength(1);
+  expect(recordingOperations[0]?.terminalProof).toEqual({
+    idempotencyKey: submitted.idempotencyKey,
+    resultHash: hashAffiliateAgentValue(submitted.result),
+  });
 });
 
 it("pages canonical citation text within the existing byte and Unicode limits", async () => {
@@ -522,7 +843,7 @@ it("rejects reviewer writes and model-supplied claim authority before a Gateway 
   });
   const forged = await producer.execute("submit_result", { ...terminalFields, jobId: "another-job", authorization: { token: "another-token" } });
   expect(forged.isError).toBe(true);
-  expect(perform).not.toHaveBeenCalled();
+  expect(nonRecordingOperationsFor(perform)).toHaveLength(0);
 });
 
 it("serializes an in-flight effect before terminal acceptance and denies later effects", async () => {
@@ -531,6 +852,9 @@ it("serializes an in-flight effect before terminal acceptance and denies later e
   const effects: string[] = [];
   const perform = jest.fn();
   perform.mockImplementation(async (operation: AffiliateAgentClaimOperation) => {
+    if (operation.kind === "RECORD_ERROR") {
+      return { kind: "AGENT_ERROR_RECORDED", eventId: "agent-error-event", replayed: false };
+    }
     if (operation.kind === "EXECUTE_COMMAND") {
       effects.push("capture-start");
       await capture;
@@ -557,6 +881,46 @@ it("serializes an in-flight effect before terminal acceptance and denies later e
   expect((await tools.execute("execute_command", command)).isError).toBe(true);
   expect(effects).toEqual(["capture-start", "capture-end", "terminal"]);
 });
+it("keeps local error recording inside the terminal serialization lock", async () => {
+  const events: string[] = [];
+  const records: AffiliateAgentErrorObservation[] = [];
+  let releaseRecord!: () => void;
+  const recordGate = new Promise<void>((resolve) => { releaseRecord = resolve; });
+  const perform = jest.fn(async (operation: AffiliateAgentClaimOperation) => {
+    if (operation.kind === "RECORD_ERROR") {
+      events.push("record-start");
+      records.push(operation.observation);
+      await recordGate;
+      events.push("record-end");
+      return { kind: "AGENT_ERROR_RECORDED" as const, eventId: "agent-error-event", replayed: false };
+    }
+    if (operation.kind === "SUBMIT_RESULT") {
+      events.push("terminal");
+      return accepted(operation);
+    }
+    throw new Error("Unexpected Gateway operation.");
+  });
+  const onTerminal = jest.fn();
+  const tools = createAffiliateOmpGatewayTools({
+    claim: claimFor("MAPPING_PRODUCER"),
+    token: "private-claim-token",
+    gateway: { perform },
+    onTerminal,
+  });
+  const local = tools.execute("unlisted_tool", {});
+  const terminal = tools.execute("submit_result", terminalFields);
+  await new Promise<void>((resolve) => { setImmediate(resolve); });
+  expect(events).toEqual(["record-start"]);
+  expect(onTerminal).not.toHaveBeenCalled();
+
+  releaseRecord();
+  expect((await local).isError).toBe(true);
+  expect((await terminal).isError).toBeUndefined();
+  expect(records).toHaveLength(1);
+  expect(events).toEqual(["record-start", "record-end", "terminal"]);
+  expect(onTerminal).toHaveBeenCalledTimes(1);
+});
+
 
 it("keeps correction feedback in the invocation without replaying the rejected submission", async () => {
   const correction = {
@@ -630,6 +994,9 @@ it("replays the exact terminal operation after a durable invocation failure lose
   let durableOperation: Extract<AffiliateAgentClaimOperation, { kind: "SUBMIT_RESULT" }> | null = null;
   let loseFirstResponse = true;
   const perform = jest.fn(async (operation: AffiliateAgentClaimOperation) => {
+    if (operation.kind === "RECORD_ERROR") {
+      return { kind: "AGENT_ERROR_RECORDED" as const, eventId: "agent-error-event", replayed: false };
+    }
     if (operation.kind !== "SUBMIT_RESULT") throw new Error("Expected terminal operation.");
     if (loseFirstResponse) {
       loseFirstResponse = false;
@@ -672,7 +1039,7 @@ it("replays the exact terminal operation after a durable invocation failure lose
     result: frame.result,
   });
   expect(replay).toEqual(durableOutcome);
-  expect(perform).toHaveBeenCalledTimes(2);
+  expect(nonRecordingOperationsFor(perform)).toHaveLength(2);
 });
 it("forwards a maximal valid result body with its framing overhead", async () => {
   const fixture = legacyRepairFixture();
@@ -742,7 +1109,7 @@ it("rejects a terminal frame that exceeds the trusted transport bound before Gat
   });
   expect(outcome.isError).toBe(true);
   expect(textValue(outcome).code).toBe("TERMINAL_RESULT_TOO_LARGE");
-  expect(perform).not.toHaveBeenCalled();
+  expect(nonRecordingOperationsFor(perform)).toHaveLength(0);
   expect(onTerminal).not.toHaveBeenCalled();
 });
 
@@ -756,7 +1123,7 @@ it("returns a local payload correction without terminal Gateway I/O", async () =
     kind: "DRAFT_INVALID",
     issues: [{ path: ["payload", "incompatibilityCode"] }],
   });
-  expect(perform).not.toHaveBeenCalled();
+  expect(nonRecordingOperationsFor(perform)).toHaveLength(0);
   expect(onTerminal).not.toHaveBeenCalled();
   expect(tools.isClosed).toBe(false);
 });
@@ -941,11 +1308,16 @@ it("reuses pending command authority instead of starting a duplicate effect", as
 it("emits bounded redacted diagnostics for local and Gateway command rejection", async () => {
   const secret = "https://secret.example/credential?token=not-a-log";
   const diagnostics: Array<Record<string, unknown>> = [];
-  const perform = jest.fn().mockRejectedValue(new AffiliateAgentGatewayError({
-    code: "COMMAND_NOT_PERMITTED",
-    isRetryable: false,
-    safeMessage: `unsafe implementation detail ${secret}`,
-  }));
+  const perform = jest.fn(async (operation: AffiliateAgentClaimOperation) => {
+    if (operation.kind === "RECORD_ERROR") {
+      return { kind: "AGENT_ERROR_RECORDED" as const, eventId: "agent-error-event", replayed: false };
+    }
+    throw new AffiliateAgentGatewayError({
+      code: "COMMAND_NOT_PERMITTED",
+      isRetryable: false,
+      safeMessage: `unsafe implementation detail ${secret}`,
+    });
+  });
   const tools = createAffiliateOmpGatewayTools({
     claim: claimFor("MAPPING_PRODUCER"),
     token: "private-claim-token",

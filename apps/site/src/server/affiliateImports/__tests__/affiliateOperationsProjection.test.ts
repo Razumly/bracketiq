@@ -1698,6 +1698,28 @@ describe("affiliate operations projection cutover evidence", () => {
       retentionClass: "INDEFINITE",
       retentionDeadline: null,
     };
+    const failedReceipt = {
+      ...heartbeatReceipt,
+      id: "failed-receipt",
+      idempotencyKey: "execute-command-1",
+      operationKind: "EXECUTE_COMMAND",
+      status: "FAILED",
+      safeErrorCode: "COMMAND_NOT_PERMITTED",
+      createdAt: new Date("2026-08-29T00:01:00.000Z"),
+      updatedAt: new Date("2026-08-29T00:01:00.000Z"),
+      startedAt: new Date("2026-08-29T00:01:00.000Z"),
+      completedAt: new Date("2026-08-29T00:01:00.000Z"),
+    };
+    const diagnosticReceipt = {
+      ...heartbeatReceipt,
+      id: "diagnostic-receipt",
+      idempotencyKey: "record-error-1",
+      operationKind: "RECORD_ERROR",
+      createdAt: new Date("2026-08-29T00:03:00.000Z"),
+      updatedAt: new Date("2026-08-29T00:03:00.000Z"),
+      startedAt: new Date("2026-08-29T00:03:00.000Z"),
+      completedAt: new Date("2026-08-29T00:03:00.000Z"),
+    };
     const heartbeatEvent = {
       id: "heartbeat-event",
       createdAt: new Date("2026-08-29T00:02:00.000Z"),
@@ -1717,6 +1739,15 @@ describe("affiliate operations projection cutover evidence", () => {
       payload: {},
       retentionClass: "INDEFINITE",
       retentionDeadline: null,
+    };
+    const diagnosticEvent = {
+      ...heartbeatEvent,
+      id: "diagnostic-event",
+      eventKey: "diagnostic-event-key",
+      receiptId: diagnosticReceipt.id,
+      sequence: 3,
+      eventType: "CLAIM_AGENT_ERROR_RECORDED",
+      createdAt: new Date("2026-08-29T00:03:00.000Z"),
     };
     const root = {
       id: "root-invocation",
@@ -1739,8 +1770,12 @@ describe("affiliate operations projection cutover evidence", () => {
       affiliateSupplySources: [root],
       affiliateOperationalAlerts: [alert],
       affiliateAgentGatewayJobs: [job],
-      affiliateAgentGatewayOperationReceipts: [heartbeatReceipt],
-      affiliateAgentGatewayEvents: [heartbeatEvent],
+      affiliateAgentGatewayOperationReceipts: [
+        heartbeatReceipt,
+        failedReceipt,
+        diagnosticReceipt,
+      ],
+      affiliateAgentGatewayEvents: [heartbeatEvent, diagnosticEvent],
       affiliateAgentWorkerHealth: [worker],
     };
 
@@ -1752,6 +1787,14 @@ describe("affiliate operations projection cutover evidence", () => {
       active: true,
       recovered: false,
     }));
+    expect(heartbeatProjection.overview.exceptions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: `receipt:${failedReceipt.id}`,
+          kind: "OPERATION",
+        }),
+      ]),
+    );
 
     const successReceipt = {
       ...heartbeatReceipt,
@@ -1768,7 +1811,7 @@ describe("affiliate operations projection cutover evidence", () => {
       id: "success-event",
       eventKey: "success-event-key",
       receiptId: successReceipt.id,
-      sequence: 3,
+      sequence: 4,
       eventType: "CLAIM_TERMINAL_RESULT_ACCEPTED",
       createdAt: new Date("2026-08-29T00:04:00.000Z"),
     };
@@ -1776,9 +1819,15 @@ describe("affiliate operations projection cutover evidence", () => {
       ...projectionRows,
       affiliateAgentGatewayOperationReceipts: [
         heartbeatReceipt,
+        failedReceipt,
+        diagnosticReceipt,
         successReceipt,
       ],
-      affiliateAgentGatewayEvents: [heartbeatEvent, successEvent],
+      affiliateAgentGatewayEvents: [
+        heartbeatEvent,
+        diagnosticEvent,
+        successEvent,
+      ],
     });
     const successProjection = await loadAffiliateOperationsProjection(inputFor({
       view: "alerts",
@@ -1791,6 +1840,11 @@ describe("affiliate operations projection cutover evidence", () => {
       recoveryDetail: "A later successful gateway receipt or event was recorded for this job.",
       recoveryEvidenceRefs: ["success-receipt", "success-event"],
     }));
+    expect(successProjection.overview.exceptions).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: `receipt:${failedReceipt.id}` }),
+      ]),
+    );
     expect(successProjection.selected?.related).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

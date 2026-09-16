@@ -48,6 +48,8 @@ The operator selected OMP with two ChatGPT accounts. The governed affiliate work
 - [x] (2026-09-16) Integrate the guard fixes and deploy matched version-13 runtimes.
 - [x] (2026-09-16) Account for all six canary sources and verify the stopped-fleet outcome.
 - [x] (2026-09-16) Deploy finite commit diagnostics and complete one Fort Greene retry.
+- [x] (2026-09-16) Add durable agent error history and verify the read-only review report.
+
 ## Current approval record
 
 Conditional `AUTH SETUP` approval (recorded 2026-09-07): after source
@@ -116,6 +118,10 @@ both failures. Review also found missing legacy metadata and reverse-intake
 ownership reads in the exact-source resolver. Those two regressions returned
 eligible sources before correction. Their required outcome is a no-write hold.
 
+The error-history regression fails before implementation. A trusted
+`RECORD_ERROR` request returns `The claim operation is invalid.`
+Existing command rejection diagnostics do not create a durable error event.
+
 ## Decision Log
 
 
@@ -148,6 +154,13 @@ Put the relevant evidence rules in the generated production prompt rather than
 loading arbitrary repository context. Forward only bounded allowlisted command
 diagnostic fields from the child to the root runner's structured logger.
 Container log retention is not a permanent database audit.
+
+Decision (2026-09-16): Add an internal `RECORD_ERROR` Gateway operation.
+The trusted tool bridge uses it for local errors. The Gateway records its
+own rejected operations after the failed transaction ends. Reuse immutable
+Gateway events and verified claim authority. Do not expose a model tool,
+store raw input, or change work state. Keep one explicit limit event when a
+claim reaches 32 observations or 16 KiB. This makes bounded retention visible.
 
 ## Outcomes & Retrospective
 
@@ -4376,3 +4389,228 @@ Change note: Record deployed diagnostic source `d48c03e28`, successful
 validation-to-commit matching, independent approval, and the remaining
 uncertainty about the old failure. This documentation checkpoint does not
 authorize another deployment or execution.
+
+## Source-only durable agent error history
+
+
+The user asked to record agent errors for later review and prevention guidance.
+Use workstream `workstream/affiliate-agent-error-history` from documentation
+checkpoint `73657cab2ea1743d36ed5dfd34e8c39033e800fa`. This request authorizes
+source changes and local verification only. Do not deploy, start workers,
+retry jobs, capture pages, activate mappings, or publish records.
+
+Current Gateway receipts and invocation/schema-failure events are durable.
+Local tool-input errors and several rejected Gateway commands are retained
+only in bounded container diagnostics. A later successful claim does not make
+those mistakes irrelevant. Keep them available after workspace cleanup and
+log rotation.
+
+Use the existing governed audit structures where possible. Bind each record
+to verified claim, generation, worker, role, invocation, source/job, and
+contract identity. Record finite error/reason codes and safe field paths,
+not raw commands, tokens, source text, arbitrary error prose, or other claims'
+data. Preserve useful distinctions between agent input mistakes, source
+evidence gaps, authority failures, and infrastructure/runtime failures.
+Recorded observations are evidence for review, never permission to change
+source data or instructions automatically.
+
+Cover command-schema errors, rejected validation/commit commands, artifact
+and citation mistakes, local terminal-draft errors, and existing authoritative
+terminal/runtime failures. Keep recording bounded and make any truncation or
+delivery gap explicit. Replayed delivery must not create duplicate records.
+Error recording must not alter the original tool result, claim progress,
+commit/retry acceptance, lifecycle state, or publication authority.
+
+Provide a bounded read-only report that links errors to their source/claim
+and final outcome. Operators must be able to identify repeated failure
+patterns and review examples before writing prevention instructions.
+
+Verify successful durable delivery, attribution, duplicate delivery,
+redaction, recording limits, failure isolation, rollback survival, and
+read-only review access. Keep regression tests at the real trusted interfaces.
+Record the final source gate and review before delivery; a production rollout
+requires a separate current authorization.
+
+The source work has three parts. `affiliateAgentErrorObservations.ts` defines
+the finite error vocabulary and safe field paths. `prismaAgentGateway.ts`
+stores claim-bound observations and records Gateway rejections after rollback.
+`affiliateOmpGatewayTools.ts` records local tool errors without changing their
+results. The read-only `affiliateAgentErrorHistory.ts` report joins stored
+events to claim, job, and source records. It groups safe signatures for review.
+An audit receipt must not count as successful business work.
+
+Run source commands from `apps/site`. The first regression command was
+`npx jest --runInBand --runTestsByPath src/server/affiliateImports/__tests__/agentGateway.test.ts --testNamePattern 'retains a claim-bound error'`.
+It failed at the unsupported `RECORD_ERROR` operation, before any persistence
+assertion. This is the pre-change proof for the missing durable path.
+
+Plan revision: add the source-only recording design and its pre-change proof.
+The user needs errors to remain available after log rotation and claim success.
+
+### Error-history source gate and review
+
+
+The integrated source gate passed all 366 tests in nine focused suites.
+Site TypeScript passed. Targeted ESLint passed; Babel printed its existing
+large-file styling notice. The pinned Bun 1.3.14 SDK probe passed the
+`execute_command`, `check_result`, and `submit_result` checks without a
+provider call.
+
+Use `npm run affiliate:agent-errors:report -- --job-id=<job-id>` from
+`apps/site` to review a stored job. The report also accepts `--claim-id`,
+`--source-id`, and `--max-results`. It defaults to 100 records and permits
+at most 500. `--help` works without database configuration. `--live` uses
+the existing live-database guard. The report runs in a PostgreSQL read-only
+transaction. Counts refer to audit records, not unique agent mistakes.
+
+A disposable database on an existing local PostgreSQL runtime passed all
+219 repository migrations. `prisma migrate status` reported no pending
+migration. No runtime was started or stopped.
+
+The real Gateway and tool bridge retained 32 redacted error observations
+and one limit marker. Identical delivery reused the first event. Further
+delivery after the marker created no receipt. The immutable event trigger
+rejected an update. Claim status, lease, token validity, and retry count
+remained unchanged.
+
+A forced receipt-write failure rolled back the audit transaction. The
+original artifact rejection remained unchanged. Only the fixed
+`ERROR_RECORDING_FAILED` warning was emitted. PostgreSQL also rejected an
+attempted write through the report's read-only guard. The real report CLI
+returned all 33 stored history records and the explicit storage-limit marker.
+
+Evidence is retained in
+`local://affiliate-agent-errors-migrations.log`,
+`local://affiliate-agent-errors-postgres-smoke.log`,
+`local://affiliate-agent-errors-failure-smoke.log`, and
+`local://affiliate-agent-errors-report-smoke.json`.
+
+The independent review uses fixed base
+`73657cab2ea1743d36ed5dfd34e8c39033e800fa`. Capture Standards, Capture Spec,
+Report Standards, and Report Spec all pass. No finding remains open.
+Source, job, and claim filters now intersect. One filter cannot replace
+another filter.
+
+Plan revision: record source-only verification and the active review.
+Production remains unchanged. A matched Gateway and runner rollout requires
+separate current authorization.
+
+Review finding R1 is fixed, re-reviewed, and verified. The filters were not always
+combined. A real CLI check with contradictory source and job filters returned
+34 records instead of zero. A contradictory claim and job filter returned
+one failed-receipt record instead of zero. The fix applies every supplied
+constraint to event rows and receipt-only rows. The reproduction is retained
+in `local://affiliate-agent-errors-filter-repro.json`.
+
+Review finding R2 is fixed, re-reviewed, and verified. The admin projection's
+general receipt-recovery check treated a successful `RECORD_ERROR` receipt
+as work recovery. That could hide an earlier failed or unresolved receipt.
+The exception now remains until meaningful work supplies recovery evidence.
+
+The capture and report fixes had separate file owners. Focused re-review
+and verification closed all findings before delivery.
+
+R2 is fixed, re-reviewed, and verified. Both receipt recovery paths now use
+the meaningful-work predicate. All 32 projection tests pass. A successful
+diagnostic receipt leaves an earlier failed receipt visible. A later real
+terminal success can resolve it.
+
+The report review also found R3 through R9. R3 concerns newest-record
+selection across events and receipt-only rows. The real CLI selected an older
+event when a newer failed receipt existed. R4 concerns an unbounded legacy
+source read. R5 concerns a lost finite receipt code and incorrect error
+categories. R6 concerns missing final receipts on receipt-only rows. R7
+concerns unusable group references for receipts. R8 concerns discarded
+terminal-effect reason codes. R9 concerns invalid storage-limit markers
+being accepted as valid history. R3 through R9 are fixed, re-reviewed, and
+verified by the report regressions and the real CLI checks.
+
+Capture review found R10 through R15. R10 concerns errors after a terminal
+commit. R11 concerns a tool lock released before error delivery completes.
+R12 and R13 concern SDK-rejected unknown and aborted calls that never enter
+the bridge. R14 concerns artifact input rejected by SDK validation before
+the recorder runs. R15 concerns transport failures also being labelled as
+Gateway rejections. R10 through R15 are fixed, re-reviewed, and verified
+through the real SDK and HTTP paths as well as the direct bridge tests.
+
+The R10 fix uses an optional trusted `terminalProof` on `RECORD_ERROR`.
+It contains the original terminal idempotency key and result hash. The
+Gateway must verify the exact successful terminal receipt, completed claim
+and job, current generation, original token, and original token/deadline
+window. It must reject failed, expired, revoked, stale, or mismatched claims.
+This proof permits only bounded audit writes. It does not renew a lease,
+reopen a claim, or permit a business operation.
+
+The shared terminal-effect reason-code list moved unchanged into
+`affiliateAgentErrorObservations.ts`. Both the writer and the report use
+this one list. The new report uses reason-code arrays and typed record
+references so it does not discard safe historical detail.
+
+The final integrated gate passed 377 tests in nine suites. Site TypeScript
+and targeted ESLint passed. The formatter checked the moved probe declarations.
+
+R16 is also fixed, re-reviewed, and verified. A terminal transport failure
+can occur before the Gateway receives or commits the result. A proof-bearing
+error record must then use ordinary active-claim authorization and its active
+compare-and-set. Only a completed claim uses the exact terminal-proof path.
+The recorder does not infer completion from the presence of a proof.
+
+All six pinned SDK probes passed without a provider or network call. They
+cover command input, local draft check, local draft submission, artifact
+input, unknown tools, and SDK-skipped aborted calls. The cancellation probe
+uses the public `beforeToolCall` hook. Tool-start event subscribers run too
+late to guarantee a skipped call. The two skipped calls produced exactly
+two redacted observations and entered no custom tool callback. Production
+SDK scheduling did not change.
+
+The final real PostgreSQL and HTTP smoke passed both transport positions.
+Before commit, the bridge retained the transport and closed-tool errors,
+created no terminal receipt, and preserved the active claim and lease.
+After commit, the bridge computed the proof itself and retained both errors.
+Missing or forged proof, an invalid token, and an expired deadline were
+rejected. Business authority stayed closed and the terminal result stayed
+unchanged. No transport error was labelled as a Gateway rejection.
+
+The operator report checks now return zero records for contradictory
+source/job and claim/job filters. The newest-only report selects the newer
+failed receipt rather than an older event. The full fixture report retains
+34 records, including a receipt-only failure, with usable typed references.
+Evidence is retained in
+`local://affiliate-agent-errors-filter-verified.json`,
+`local://affiliate-agent-errors-terminal-before-smoke.log`, and
+`local://affiliate-agent-errors-terminal-after-smoke.log`.
+
+No database migration, prompt edit, model permission, automatic instruction
+update, worker start, job retry, production image, or production deployment
+is part of this source checkpoint. Production continues to use its existing
+logging until a separately authorized matched rollout. Details that were
+never saved cannot be reconstructed by this change.
+
+Plan revision: close the review findings and record the final source gate.
+
+The disposable verification database, three throwaway smoke programs, and
+the empty SDK workspace left by an earlier probe failure were removed.
+No temporary debug trace remains. The structured verification artifacts
+remain available for review.
+
+To repeat the final source checks, run these commands from `apps/site`:
+
+    npx tsc --noEmit --pretty false
+    npm exec --yes --package=bun@1.3.14 -- bun scripts/test-affiliate-omp-agent-sdk-schema.ts
+    npx jest --runInBand --silent --runTestsByPath \
+      src/server/affiliateImports/__tests__/agentGateway.test.ts \
+      src/server/affiliateImports/__tests__/agentGatewayAdapters.test.ts \
+      src/server/affiliateImports/__tests__/affiliateOmpGatewayTools.test.ts \
+      src/server/affiliateImports/__tests__/affiliateAgentErrorObservations.test.ts \
+      src/server/affiliateImports/__tests__/affiliateAgentErrorHistory.test.ts \
+      src/server/affiliateImports/__tests__/affiliateOperationsProjection.test.ts \
+      src/server/affiliateImports/__tests__/runAffiliateAgentGateway.test.ts \
+      scripts/__tests__/runAffiliateAgentSupervisor.test.ts \
+      scripts/__tests__/runAffiliateAgentRunnerDiagnostics.test.ts
+
+Expected result: TypeScript succeeds, all six SDK scenarios pass without
+provider calls, and all 377 tests in nine suites pass. Targeted ESLint also
+passed for every changed TypeScript file. Its only output was the existing
+Babel notice for the large Prisma Gateway file.
+
+Plan revision: record completed cleanup and the reproducible source gate.

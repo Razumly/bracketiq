@@ -21,7 +21,12 @@ export const enableAffiliateOmpBridgeArgValidation = (
   session: Pick<AgentSession, "agent">,
 ): void => {
   for (const tool of session.agent.state.tools) {
-    if (tool.name === "execute_command" || tool.name === "check_result" || tool.name === "submit_result") {
+    if (
+      tool.name === "read_artifact"
+      || tool.name === "execute_command"
+      || tool.name === "check_result"
+      || tool.name === "submit_result"
+    ) {
       tool.lenientArgValidation = true;
     }
   }
@@ -56,14 +61,22 @@ const readPrompt = async (): Promise<string> => {
   }
   return new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks, size));
 };
+const pendingCommandRejectionDiagnostics = new Set<Promise<void>>();
 const emitCommandRejectionDiagnostic = (
   diagnostic: AffiliateAgentCommandRejectionDiagnostic,
 ): void => {
   try {
-    process.stderr.write(`${serializeAffiliateAgentCommandRejectionDiagnostic(diagnostic)}\n`);
+    const write = new Promise<void>((resolve) => {
+      process.stderr.write(`${serializeAffiliateAgentCommandRejectionDiagnostic(diagnostic)}\n`, () => resolve());
+    });
+    pendingCommandRejectionDiagnostics.add(write);
+    void write.finally(() => pendingCommandRejectionDiagnostics.delete(write)).catch(() => undefined);
   } catch {
     // Diagnostics must not alter the terminal stdout protocol or invocation result.
   }
+};
+const drainCommandRejectionDiagnostics = async (): Promise<void> => {
+  await Promise.allSettled([...pendingCommandRejectionDiagnostics]);
 };
 
 
@@ -142,6 +155,12 @@ const run = async (): Promise<void> => {
     || resolve(requiredEnvironment("PI_CODING_AGENT_DIR")) !== agentDir
   ) throw new Error("OMP_WORKSPACE_CONFIGURATION_INVALID");
 
+  let unsubscribeBoundaryEvents: (() => void) | undefined;
+  const enteredCustomToolCalls = new Set<string>();
+  const boundaryRecordings: Promise<void>[] = [];
+  const trackBoundaryRecording = (recording: Promise<void>): void => {
+    boundaryRecordings.push(recording.catch(() => undefined));
+  };
   process.env.PI_NO_TITLE = "1";
   const { AuthStorage, ModelRegistry, SessionManager, Settings, createAgentSession } = await import("@oh-my-pi/pi-coding-agent");
   const authStorage = await AuthStorage.create(":memory:", { configValueResolver: async () => undefined });
@@ -210,6 +229,7 @@ const run = async (): Promise<void> => {
       parameters: fromJsonSchema(z.toJSONSchema(definition.parameters)),
       strict: false,
       async execute(_toolCallId, params, _onUpdate, _context, signal) {
+        enteredCustomToolCalls.add(_toolCallId);
         const result = await bridge.execute(definition.name, params, signal);
         if (bridge.isClosed) stop();
         return result;
@@ -262,6 +282,15 @@ const run = async (): Promise<void> => {
       || created.modelFallbackMessage
     ) throw new Error("OMP_SESSION_ISOLATION_INVALID");
     enableAffiliateOmpBridgeArgValidation(session);
+    unsubscribeBoundaryEvents = session.subscribe(event => {
+      if (event.type !== "tool_execution_end" || event.isError !== true) return;
+      if (enteredCustomToolCalls.has(event.toolCallId)) return;
+      const isKnownTool = toolNames.includes(event.toolName);
+      trackBoundaryRecording(bridge.recordBoundaryError({
+        tool: isKnownTool ? event.toolName : "UNKNOWN",
+        errorCode: isKnownTool ? "TOOL_ABORTED" : "TOOL_NOT_PERMITTED",
+      }));
+    });
     timeout = setTimeout(stop, Math.max(1, deadline - Date.now()));
     timeout.unref();
     try {
@@ -274,6 +303,10 @@ const run = async (): Promise<void> => {
     clearTimeout(timeout);
     process.removeListener("SIGTERM", stop);
     process.removeListener("SIGINT", stop);
+    unsubscribeBoundaryEvents?.();
+    unsubscribeBoundaryEvents = undefined;
+    await Promise.allSettled(boundaryRecordings);
+    await drainCommandRejectionDiagnostics();
     session?.beginDispose();
     try {
       await session?.dispose();

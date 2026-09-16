@@ -114,6 +114,7 @@ export const AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_REASON_CODES = [
   "SPORT_CATALOG_MISMATCH",
   "SPORT_OUTPUT_MISMATCH",
   "SPORT_EVIDENCE_INVALID",
+  "ERROR_RECORDING_FAILED",
 ] as const;
 export type AffiliateAgentCommandDiagnosticReasonCode =
   typeof AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_REASON_CODES[number];
@@ -428,6 +429,8 @@ const gatewayReasonCodeFor = (
     case "The committed mapping package source sport scope changed after producer commit.":
     case "The committed mapping package has an unexpected source sport scope.":
       return "SPORT_EVIDENCE_INVALID";
+    case "The agent error record could not be saved.":
+      return "ERROR_RECORDING_FAILED";
     default:
       return "UNKNOWN";
   }

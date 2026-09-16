@@ -45,7 +45,9 @@ import {
   AFFILIATE_AGENT_WORKSPACE_ATTESTATION_LIFETIME_SECONDS,
   AffiliateAgentGatewayError,
   affiliateAgentReviewerEffectRecoveryRequestSchema,
+  affiliateAgentTerminalProofSchema,
 } from '../src/server/affiliateImports/agentGateway';
+import { affiliateAgentErrorObservationSchema } from '../src/server/affiliateImports/affiliateAgentErrorObservations';
 import type {
   AffiliateAgentClaimOperation,
   AffiliateAgentClaimRequest,
@@ -1556,6 +1558,24 @@ const handlePostRoute = async (
     return;
   }
   if (httpRequest.route === '/perform') {
+    const bodyRecord = body !== null && typeof body === 'object' && !Array.isArray(body)
+      ? body as Record<string, unknown>
+      : null;
+    if (
+      bodyRecord?.kind === 'RECORD_ERROR'
+      && !affiliateAgentErrorObservationSchema.safeParse(bodyRecord.observation).success
+    ) {
+      sendJson(response, 400, { error: 'Invalid agent error observation.' });
+      return;
+    }
+    if (
+      bodyRecord?.kind === 'RECORD_ERROR'
+      && 'terminalProof' in bodyRecord
+      && !affiliateAgentTerminalProofSchema.safeParse(bodyRecord.terminalProof).success
+    ) {
+      sendJson(response, 400, { error: 'Invalid agent terminal proof.' });
+      return;
+    }
     const result = await input.gateway.perform(body as AffiliateAgentClaimOperation);
     sendGatewayResult(response, result);
     return;

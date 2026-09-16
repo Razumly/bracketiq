@@ -394,6 +394,19 @@ const isFailureOperationResult = (value: JsonRecord): boolean => (
   && (value.nextAttemptAt === null || isTimestamp(value.nextAttemptAt))
   && typeof value.isPipelineBlocked === "boolean"
 );
+const isErrorRecordOperationResult = (value: JsonRecord): boolean => {
+  if (value.kind === "AGENT_ERROR_RECORDED") {
+    return hasExactKeys(value, ["kind", "eventId", "replayed"])
+      && hasNonEmptyStrings(value, ["eventId"])
+      && typeof value.replayed === "boolean";
+  }
+  if (value.kind === "AGENT_ERROR_LIMIT_REACHED") {
+    return hasExactKeys(value, ["kind", "eventId"])
+      && hasNonEmptyStrings(value, ["eventId"]);
+  }
+  return false;
+};
+
 
 const isSubmitResultOperationResult = (value: JsonRecord): boolean => (
   isCorrectionOperationResult(value)
@@ -408,6 +421,7 @@ const claimOperationResultValidators: Readonly<
   READ_ARTIFACT: isArtifactOperationResult,
   EXECUTE_COMMAND: isCommandOperationResult,
   SUBMIT_RESULT: isSubmitResultOperationResult,
+  RECORD_ERROR: isErrorRecordOperationResult,
   RECORD_FAILURE: isFailureOperationResult,
 };
 
@@ -508,6 +522,7 @@ const invalidGatewayResponse = (): AffiliateAgentGatewayError =>
     code: "INTERNAL_ERROR",
     isRetryable: true,
     safeMessage: "The affiliate gateway returned an invalid response.",
+    origin: "TRANSPORT",
   });
 
 const decodeGatewayResult = (value: unknown): unknown => {
@@ -658,6 +673,7 @@ const gatewayErrorFrom = (
       ? payload.safeMessage
       : `The affiliate gateway returned HTTP ${status}.`,
     receiptId: typeof payload.receiptId === "string" ? payload.receiptId : undefined,
+    origin: isGatewayErrorPayload(payload) ? "GATEWAY" : "TRANSPORT",
   });
 };
 
@@ -852,6 +868,7 @@ const decodeGatewayResponse = <T>(
       code: "INTERNAL_ERROR",
       isRetryable: true,
       safeMessage: "The affiliate gateway returned no result.",
+      origin: "TRANSPORT",
     });
   }
   if (!validateResult(payload.result)) {

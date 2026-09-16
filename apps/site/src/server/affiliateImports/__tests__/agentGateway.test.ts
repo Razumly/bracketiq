@@ -10,6 +10,12 @@ import {
   parseAffiliateAgentCommandRejectionDiagnostic,
   serializeAffiliateAgentCommandRejectionDiagnostic,
 } from "../affiliateAgentCommandDiagnostics";
+import {
+  AFFILIATE_AGENT_ERROR_EVENT,
+  AFFILIATE_AGENT_ERROR_LIMIT_EVENT,
+  AFFILIATE_AGENT_ERROR_MAX_TOTAL_BYTES,
+  affiliateAgentErrorObservationFor,
+} from "../affiliateAgentErrorObservations";
 
 import {
   AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX,
@@ -1452,6 +1458,10 @@ type GatewayClaimTestPrisma = {
       where: GatewayTestRow;
       orderBy?: readonly GatewayTestRow[];
     }): Promise<GatewayTestRow | null>;
+    findMany(input: {
+      where: GatewayTestRow;
+      take?: number;
+    }): Promise<GatewayTestRow[]>;
   };
   affiliateOperationalAlerts: {
     findUnique(input: {
@@ -2021,6 +2031,12 @@ const reviewerEffectRows = (): Array<{ id: unknown }> =>
           );
         }
         return matches[0] ?? null;
+      },
+      findMany: async ({ where, take }) => {
+        const matches = state.events.filter((event) =>
+          gatewayTestMatchesWhere(event, where),
+        );
+        return take === undefined ? matches : matches.slice(0, take);
       },
     },
     affiliateOperationalAlerts: {
@@ -2926,6 +2942,19 @@ const gatewayOperationFor = (
       result: coverageTerminalResultFor(grant),
     };
   }
+  if (kind === "RECORD_ERROR") {
+    return {
+      kind,
+      idempotencyKey: `scope-${kind}`,
+      authorization,
+      observation: affiliateAgentErrorObservationFor({
+        tool: "execute_command",
+        stage: "LOCAL_VALIDATION",
+        command: { type: "RUN_DISCOVERY_QUERY" },
+        errorCode: "COMMAND_SCHEMA_INVALID",
+      }),
+    };
+  }
   throw new Error(`Unsupported operation kind: ${kind}`);
 };
 
@@ -3086,6 +3115,273 @@ const standaloneReviewerTerminalFor = (
 });
 
 describe("Prisma affiliate Agent Gateway", () => {
+  it("retains a claim-bound error without failing the claim or duplicating delivery", async () => {
+    const { gateway, request, state } = createGatewayClaimHarness();
+    const grant = await gateway.claim(request);
+    if (!grant) throw new Error("Expected an active claim.");
+    const leaseBefore = state.claims[0].leaseExpiresAt;
+    const observation = affiliateAgentErrorObservationFor({
+      tool: "execute_command",
+      stage: "LOCAL_SCHEMA",
+      command: { type: "RUN_DISCOVERY_QUERY" },
+      errorCode: "COMMAND_SCHEMA_INVALID",
+      reasonCode: "LOCAL_SCHEMA_INVALID",
+      issues: [{ code: "too_small", path: ["command", "data", "queryRef"], message: "private-input-not-for-audit" }],
+    });
+    const operation = {
+      kind: "RECORD_ERROR" as const,
+      idempotencyKey: "retained-agent-error-1",
+      authorization: gatewayAuthorizationFor(grant),
+      observation,
+    };
+    const first = await gateway.perform(operation);
+    const replayed = await gateway.perform(operation);
+    expect(first).toMatchObject({ kind: "AGENT_ERROR_RECORDED", replayed: false });
+    expect(replayed).toMatchObject({ kind: "AGENT_ERROR_RECORDED", replayed: true });
+    const errors = state.events.filter((event) => event.eventType === AFFILIATE_AGENT_ERROR_EVENT);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({
+      jobId: grant.envelope.jobId,
+      claimId: grant.envelope.claimId,
+      actorId: grant.envelope.invocationId,
+      payload: { observation },
+    });
+    expect(JSON.stringify(errors)).not.toContain("private-input-not-for-audit");
+    await expect(
+      gateway.perform({
+        ...operation,
+        observation: {
+          ...observation,
+          isRetryable: !observation.isRetryable,
+        },
+      }),
+    ).rejects.toMatchObject({ code: "IDEMPOTENCY_KEY_REUSED" });
+    expect(
+      state.events.filter((event) => event.eventType === AFFILIATE_AGENT_ERROR_EVENT),
+    ).toHaveLength(1);
+    expect(state.claims[0]).toMatchObject({ status: "ACTIVE", leaseExpiresAt: leaseBefore, tokenInvalidatedAt: null });
+    expect(state.jobs[0]).toMatchObject({ status: "CLAIMED", invocationFailureCount: 0 });
+  });
+
+  it("stops error history at the claim bound without adding a receipt after the marker", async () => {
+    const harness = createGatewayClaimHarness();
+    const grant = await harness.gateway.claim(harness.request);
+    if (!grant) throw new Error("Expected an active claim.");
+    const authorization = gatewayAuthorizationFor(grant);
+    const observation = affiliateAgentErrorObservationFor({
+      tool: "execute_command",
+      stage: "LOCAL_SCHEMA",
+      command: { type: "RUN_DISCOVERY_QUERY" },
+      errorCode: "COMMAND_SCHEMA_INVALID",
+      reasonCode: "LOCAL_SCHEMA_INVALID",
+    });
+    for (let index = 0; index < 32; index += 1) {
+      await expect(
+        harness.gateway.perform({
+          kind: "RECORD_ERROR",
+          idempotencyKey: `bounded-agent-error-${index}`,
+          authorization,
+          observation,
+        }),
+      ).resolves.toMatchObject({
+        kind: "AGENT_ERROR_RECORDED",
+        replayed: false,
+      });
+    }
+    const marker = await harness.gateway.perform({
+      kind: "RECORD_ERROR",
+      idempotencyKey: "bounded-agent-error-marker",
+      authorization,
+      observation,
+    });
+    expect(marker).toMatchObject({
+      kind: "AGENT_ERROR_LIMIT_REACHED",
+      eventId: expect.any(String),
+    });
+    expect(
+      harness.state.events.filter((event) => event.eventType === AFFILIATE_AGENT_ERROR_EVENT),
+    ).toHaveLength(32);
+    expect(
+      harness.state.events.filter((event) => event.eventType === AFFILIATE_AGENT_ERROR_LIMIT_EVENT),
+    ).toHaveLength(1);
+    expect(
+      harness.state.receipts.filter((receipt) => receipt.operationKind === "RECORD_ERROR"),
+    ).toHaveLength(32);
+    await expect(
+      harness.gateway.perform({
+        kind: "RECORD_ERROR",
+        idempotencyKey: "bounded-agent-error-after-marker",
+        authorization,
+        observation,
+      }),
+    ).resolves.toEqual(marker);
+    expect(
+      harness.state.receipts.filter((receipt) => receipt.operationKind === "RECORD_ERROR"),
+    ).toHaveLength(32);
+    expect(harness.state.claims[0]).toMatchObject({
+      status: "ACTIVE",
+      tokenInvalidatedAt: null,
+    });
+    expect(harness.state.jobs[0]).toMatchObject({
+      status: "CLAIMED",
+      invocationFailureCount: 0,
+    });
+  });
+
+  it("records a byte-limit marker before the record-count limit for large safe observations", async () => {
+    const harness = createGatewayClaimHarness();
+    const grant = await harness.gateway.claim(harness.request);
+    if (!grant) throw new Error("Expected an active claim.");
+    const observation = affiliateAgentErrorObservationFor({
+      tool: "check_result",
+      stage: "LOCAL_VALIDATION",
+      errorCode: "LOCAL_DRAFT_INVALID",
+      reasonCode: "LOCAL_DRAFT_INVALID",
+      issues: [
+        "sourceLabels",
+        "status",
+        "canonicalSportNames",
+        "rationale",
+        "evidence",
+      ].map((field) => ({
+        code: "invalid_type",
+        path: ["payload", "sportEvidence", "sportDeterminations", 0, field],
+      })).concat([
+        { code: "invalid_type", path: ["payload", "sportEvidence", "evidenceRunId"] },
+        { code: "invalid_type", path: ["payload", "sportEvidence", "sportsCatalogSha256"] },
+        { code: "invalid_type", path: ["payload", "sportEvidence", "sportDeterminations"] },
+      ]),
+    });
+    let marker;
+    for (let index = 0; index <= 32; index += 1) {
+      const result = await harness.gateway.perform({
+        kind: "RECORD_ERROR",
+        idempotencyKey: `byte-bound-agent-error-${index}`,
+        authorization: gatewayAuthorizationFor(grant),
+        observation,
+      });
+      if (result.kind === "AGENT_ERROR_LIMIT_REACHED") {
+        marker = result;
+        break;
+      }
+    }
+    expect(marker?.kind).toBe("AGENT_ERROR_LIMIT_REACHED");
+    const errors = harness.state.events.filter((event) => event.eventType === AFFILIATE_AGENT_ERROR_EVENT);
+    const bytes = errors.reduce((total, event) => total + Buffer.byteLength(JSON.stringify(event.payload)), 0);
+    expect(errors.length).toBeLessThan(32);
+    expect(bytes).toBeLessThanOrEqual(AFFILIATE_AGENT_ERROR_MAX_TOTAL_BYTES);
+    expect(bytes + Buffer.byteLength(JSON.stringify(errors[0].payload))).toBeGreaterThan(AFFILIATE_AGENT_ERROR_MAX_TOTAL_BYTES);
+    expect(harness.state.events.filter((event) => event.eventType === AFFILIATE_AGENT_ERROR_LIMIT_EVENT)).toEqual([
+      expect.objectContaining({
+        id: marker?.eventId,
+        payload: expect.objectContaining({ recordedCount: errors.length, recordedBytes: bytes }),
+      }),
+    ]);
+  });
+
+  it("preserves the rejected operation when the separate audit transaction fails", async () => {
+    const harness = createGatewayClaimHarness();
+    const grant = await harness.gateway.claim(harness.request);
+    if (!grant) throw new Error("Expected an active claim.");
+    const log = jest.spyOn(console, "error").mockImplementation(() => undefined);
+    harness.setOperationReceiptCreateConflict(new Error("private-audit-storage-detail"));
+    try {
+      await expect(harness.gateway.perform({
+        kind: "READ_ARTIFACT",
+        idempotencyKey: "rejection-with-audit-failure",
+        authorization: gatewayAuthorizationFor(grant),
+        evidenceRef: "outside-the-claim",
+      })).rejects.toMatchObject({ code: "ARTIFACT_NOT_PERMITTED" });
+      expect(harness.state.events.filter((event) => event.eventType === AFFILIATE_AGENT_ERROR_EVENT)).toEqual([]);
+      expect(harness.state.receipts.filter((receipt) => receipt.operationKind === "RECORD_ERROR")).toEqual([]);
+      expect(harness.state.jobs[0]).toMatchObject({
+        status: "CLAIMED",
+        invocationFailureCount: 0,
+      });
+      expect(harness.state.claims[0]).toMatchObject({ status: "ACTIVE", tokenInvalidatedAt: null });
+      expect(log).toHaveBeenCalledWith("[affiliate:gateway] ERROR_RECORDING_FAILED");
+      expect(JSON.stringify(log.mock.calls)).not.toContain("private-audit-storage-detail");
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("retains distinct Gateway rejection observations while deduplicating exact delivery", async () => {
+    const harness = createGatewayClaimHarness();
+    harness.setArtifactReadError(new Error("unsafe storage implementation detail"));
+    const grant = await harness.gateway.claim(harness.request);
+    if (!grant) throw new Error("Expected an active claim.");
+    const operation = {
+      kind: "READ_ARTIFACT" as const,
+      idempotencyKey: "gateway-error-capture-1",
+      authorization: gatewayAuthorizationFor(grant),
+      evidenceRef: "evidence-1",
+    };
+
+    await expect(harness.gateway.perform(operation)).rejects.toMatchObject({
+      code: "ARTIFACT_INTEGRITY_FAILED",
+      safeMessage: expect.not.stringContaining("unsafe storage"),
+    });
+    await expect(harness.gateway.perform(operation)).rejects.toMatchObject({
+      code: "ARTIFACT_INTEGRITY_FAILED",
+      safeMessage: expect.not.stringContaining("unsafe storage"),
+    });
+    await expect(
+      harness.gateway.perform({
+        ...operation,
+        evidenceRef: "evidence-2",
+      }),
+    ).rejects.toMatchObject({
+      code: "IDEMPOTENCY_KEY_REUSED",
+      safeMessage: expect.not.stringContaining("unsafe storage"),
+    });
+
+    const errors = harness.state.events.filter(
+      (event) => event.eventType === AFFILIATE_AGENT_ERROR_EVENT,
+    );
+    expect(errors).toHaveLength(2);
+    expect(errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          schemaVersion: 1,
+          origin: "GATEWAY",
+          category: "EVIDENCE",
+          observation: expect.objectContaining({
+            tool: "read_artifact",
+            stage: "GATEWAY",
+            errorCode: "ARTIFACT_INTEGRITY_FAILED",
+          }),
+        }),
+      }),
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          schemaVersion: 1,
+          origin: "GATEWAY",
+          observation: expect.objectContaining({
+            tool: "read_artifact",
+            stage: "GATEWAY",
+            errorCode: "IDEMPOTENCY_KEY_REUSED",
+          }),
+        }),
+      }),
+    ]));
+    expect(JSON.stringify(errors)).not.toContain("unsafe storage implementation detail");
+    expect(
+      harness.state.receipts.filter((receipt) => receipt.operationKind === "RECORD_ERROR"),
+    ).toHaveLength(2);
+    expect(
+      harness.state.receipts.filter((receipt) => receipt.operationKind !== "RECORD_ERROR"),
+    ).toHaveLength(1);
+    expect(harness.state.claims[0]).toMatchObject({
+      status: "ACTIVE",
+      tokenInvalidatedAt: null,
+    });
+    expect(harness.state.jobs[0]).toMatchObject({
+      status: "CLAIMED",
+      invocationFailureCount: 0,
+    });
+  });
+
   it("rejects hash-consistent historical producer identity tampering at admission", async () => {
     const malformedOverrides: readonly GatewayTestRow[] = [
       { supplySourceId: "other-source" },
@@ -8216,7 +8512,11 @@ describe("Prisma affiliate Agent Gateway", () => {
         evidenceRef: "evidence-1",
       }),
     ).rejects.toMatchObject({ code: "IDEMPOTENCY_KEY_REUSED" });
-    expect(heartbeatHarness.state.receipts).toHaveLength(1);
+    expect(
+      heartbeatHarness.state.receipts.filter(
+        (receipt) => receipt.operationKind !== "RECORD_ERROR",
+      ),
+    ).toHaveLength(1);
 
     const artifactHarness = createGatewayClaimHarness();
     const artifactGrant = await artifactHarness.gateway.claim(
@@ -8240,7 +8540,11 @@ describe("Prisma affiliate Agent Gateway", () => {
         evidenceRef: "different-evidence",
       }),
     ).rejects.toMatchObject({ code: "IDEMPOTENCY_KEY_REUSED" });
-    expect(artifactHarness.state.receipts).toHaveLength(1);
+    expect(
+      artifactHarness.state.receipts.filter(
+        (receipt) => receipt.operationKind !== "RECORD_ERROR",
+      ),
+    ).toHaveLength(1);
     artifactHarness.setNow("2026-08-20T18:05:00.000Z");
     await expect(
       artifactHarness.gateway.perform(artifactRead),
@@ -8279,7 +8583,11 @@ describe("Prisma affiliate Agent Gateway", () => {
         },
       }),
     ).rejects.toMatchObject({ code: "IDEMPOTENCY_KEY_REUSED" });
-    expect(commandHarness.state.receipts).toHaveLength(1);
+    expect(
+      commandHarness.state.receipts.filter(
+        (receipt) => receipt.operationKind !== "RECORD_ERROR",
+      ),
+    ).toHaveLength(1);
   });
 
   it("authorizes a result submission before returning schema feedback", async () => {
@@ -8505,6 +8813,195 @@ describe("Prisma affiliate Agent Gateway", () => {
     } finally {
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     }
+  });
+  it("distinguishes malformed transport responses from typed gateway rejections", async () => {
+    const harness = createGatewayClaimHarness();
+    const grant = await harness.gateway.claim(harness.request);
+    if (!grant) throw new Error("Expected a claim for the HTTP client.");
+    const operation = captureOperationFor(grant, "http-client-origin");
+    let responseMode: "INVALID" | "ERROR" = "INVALID";
+    const server = createHttpServer((request, response) => {
+      response.setHeader("content-type", "application/json");
+      if (request.url?.endsWith("/readiness")) {
+        response.statusCode = 500;
+        response.end("{}");
+        return;
+      }
+      response.end(JSON.stringify(
+        responseMode === "INVALID"
+          ? { unexpected: true }
+          : {
+              error: {
+                code: "TOKEN_INVALID",
+                safeMessage: "The claim token is invalid.",
+                isRetryable: false,
+              },
+            },
+      ));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Expected a TCP test server.");
+      }
+      const client = new AffiliateAgentHttpGateway(`http://127.0.0.1:${address.port}`);
+      await expect(client.perform(operation)).rejects.toMatchObject({
+        code: "INTERNAL_ERROR",
+        origin: "TRANSPORT",
+        safeMessage: "The affiliate gateway returned an invalid response.",
+      });
+      await expect(client.isDownstreamCapacityHealthy()).rejects.toMatchObject({
+        code: "INTERNAL_ERROR",
+        origin: "TRANSPORT",
+      });
+
+      responseMode = "ERROR";
+      await expect(client.perform(operation)).rejects.toMatchObject({
+        code: "TOKEN_INVALID",
+        origin: "GATEWAY",
+        safeMessage: "The claim token is invalid.",
+      });
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => (
+        error ? reject(error) : resolve()
+      )));
+    }
+  });
+  it("retains an unverified terminal submission after a malformed supervisor response", async () => {
+    const harness = createGatewayClaimHarness();
+    const grant = await harness.gateway.claim(harness.request);
+    if (!grant) throw new Error("Expected a claim for the HTTP client.");
+    const terminalOperation = {
+      kind: "SUBMIT_RESULT" as const,
+      idempotencyKey: "terminal-http-loss",
+      authorization: gatewayAuthorizationFor(grant),
+      result: coverageTerminalResultFor(grant),
+    };
+    let committedTerminal: { kind: "TERMINAL_ACCEPTED"; resultHash: string } | undefined;
+    const server = createHttpServer(async (_request, response) => {
+      const result = await harness.gateway.perform(terminalOperation);
+      if (result.kind !== "TERMINAL_ACCEPTED") {
+        throw new Error("Expected the terminal result to commit.");
+      }
+      committedTerminal = result;
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ malformed: true }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Expected a TCP test server.");
+      }
+      const client = new AffiliateAgentHttpGateway(`http://127.0.0.1:${address.port}`);
+      await expect(client.perform(terminalOperation)).rejects.toMatchObject({
+        code: "INTERNAL_ERROR",
+        origin: "TRANSPORT",
+      });
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => (
+        error ? reject(error) : resolve()
+      )));
+    }
+    if (!committedTerminal) throw new Error("Expected the terminal result to commit.");
+    const retained = await harness.gateway.perform({
+      kind: "RECORD_ERROR",
+      idempotencyKey: "terminal-http-audit",
+      authorization: gatewayAuthorizationFor(grant),
+      observation: affiliateAgentErrorObservationFor({
+        tool: "submit_result",
+        stage: "GATEWAY",
+        command: { type: "SUBMIT_TERMINAL_RESULT" },
+        errorCode: "GATEWAY_OPERATION_UNVERIFIED",
+      }),
+      terminalProof: {
+        idempotencyKey: terminalOperation.idempotencyKey,
+        resultHash: committedTerminal.resultHash,
+      },
+    });
+    expect(retained).toMatchObject({
+      kind: "AGENT_ERROR_RECORDED",
+      replayed: false,
+    });
+    expect(harness.state.events.filter(
+      (event) => event.eventType === AFFILIATE_AGENT_ERROR_EVENT,
+    )).toHaveLength(1);
+    const errorEvent = harness.state.events.find(
+      (event) => event.eventType === AFFILIATE_AGENT_ERROR_EVENT,
+    );
+    expect(errorEvent).toMatchObject({
+      payload: {
+        origin: "TOOL_BRIDGE",
+        observation: { errorCode: "GATEWAY_OPERATION_UNVERIFIED" },
+      },
+    });
+  });
+  it("retains an attempted terminal error on the active claim after a malformed response", async () => {
+    const harness = createGatewayClaimHarness();
+    const grant = await harness.gateway.claim(harness.request);
+    if (!grant) throw new Error("Expected a claim for the HTTP client.");
+    const terminalOperation = {
+      kind: "SUBMIT_RESULT" as const,
+      idempotencyKey: "terminal-http-before-core",
+      authorization: gatewayAuthorizationFor(grant),
+      result: coverageTerminalResultFor(grant),
+    };
+    const server = createHttpServer((_request, response) => {
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ malformed: true }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Expected a TCP test server.");
+      }
+      const client = new AffiliateAgentHttpGateway(`http://127.0.0.1:${address.port}`);
+      await expect(client.perform(terminalOperation)).rejects.toMatchObject({
+        code: "INTERNAL_ERROR",
+        origin: "TRANSPORT",
+      });
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => (
+        error ? reject(error) : resolve()
+      )));
+    }
+
+    const retained = await harness.gateway.perform({
+      kind: "RECORD_ERROR",
+      idempotencyKey: "terminal-http-before-core-audit",
+      authorization: gatewayAuthorizationFor(grant),
+      observation: affiliateAgentErrorObservationFor({
+        tool: "submit_result",
+        stage: "GATEWAY",
+        command: { type: "SUBMIT_TERMINAL_RESULT" },
+        errorCode: "GATEWAY_OPERATION_UNVERIFIED",
+      }),
+      terminalProof: {
+        idempotencyKey: terminalOperation.idempotencyKey,
+        resultHash: hashAffiliateAgentValue(terminalOperation.result),
+      },
+    });
+    expect(retained).toMatchObject({
+      kind: "AGENT_ERROR_RECORDED",
+      replayed: false,
+    });
+    expect(harness.state.receipts.filter(
+      (receipt) => receipt.operationKind === "SUBMIT_RESULT",
+    )).toHaveLength(0);
+    expect(harness.state.events.filter(
+      (event) => event.eventType === AFFILIATE_AGENT_ERROR_EVENT,
+    )).toHaveLength(1);
+    expect(harness.state.claims[0]).toMatchObject({
+      status: "ACTIVE",
+      tokenInvalidatedAt: null,
+    });
+    expect(harness.state.jobs[0]).toMatchObject({
+      status: "CLAIMED",
+      activeClaimId: grant.envelope.claimId,
+      invocationFailureCount: 0,
+    });
   });
 
   it("validates invocation reconciliation input before Prisma access", async () => {
@@ -8921,7 +9418,7 @@ describe("Prisma affiliate Agent Gateway", () => {
     expect(state.jobs[0]?.invocationFailureCount).toBe(0);
     expect(state.jobs[0]?.status).toBe("COMPLETED");
     const deniedAfterTerminal: readonly AffiliateAgentClaimOperation["kind"][] =
-      ["HEARTBEAT", "READ_ARTIFACT", "EXECUTE_COMMAND", "SUBMIT_RESULT"];
+      ["HEARTBEAT", "READ_ARTIFACT", "EXECUTE_COMMAND", "SUBMIT_RESULT", "RECORD_ERROR"];
     for (const operationKind of deniedAfterTerminal) {
       await expect(
         gateway.perform(
@@ -8932,6 +9429,95 @@ describe("Prisma affiliate Agent Gateway", () => {
         safeMessage: expect.any(String),
       });
     }
+  });
+  it("records a terminal-bound error without reopening the completed claim", async () => {
+    const harness = createGatewayClaimHarness();
+    const grant = await harness.gateway.claim(harness.request);
+    if (!grant) throw new Error("Expected one Coverage Planner claim.");
+    const authorization = gatewayAuthorizationFor(grant);
+    const terminalOperation = {
+      kind: "SUBMIT_RESULT" as const,
+      idempotencyKey: "terminal-proof-source",
+      authorization,
+      result: coverageTerminalResultFor(grant),
+    };
+    const terminalResult = await harness.gateway.perform(terminalOperation);
+    if (terminalResult.kind !== "TERMINAL_ACCEPTED") {
+      throw new Error("Expected a terminal result.");
+    }
+    const observation = affiliateAgentErrorObservationFor({
+      tool: "submit_result",
+      stage: "GATEWAY",
+      command: { type: "SUBMIT_TERMINAL_RESULT" },
+      errorCode: "GATEWAY_OPERATION_UNVERIFIED",
+    });
+    const operation = {
+      kind: "RECORD_ERROR" as const,
+      idempotencyKey: "terminal-audit-1",
+      authorization,
+      observation,
+      terminalProof: {
+        idempotencyKey: terminalOperation.idempotencyKey,
+        resultHash: terminalResult.resultHash,
+      },
+    };
+    const recorded = await harness.gateway.perform(operation);
+    const replayed = await harness.gateway.perform(operation);
+    expect(recorded).toMatchObject({ kind: "AGENT_ERROR_RECORDED", replayed: false });
+    expect(replayed).toMatchObject({ kind: "AGENT_ERROR_RECORDED", replayed: true });
+    expect(harness.state.events.filter(
+      (event) => event.eventType === AFFILIATE_AGENT_ERROR_EVENT,
+    )).toHaveLength(1);
+    expect(harness.state.receipts.filter(
+      (receipt) => receipt.operationKind === "RECORD_ERROR",
+    )).toHaveLength(1);
+    expect(harness.state.claims[0]).toMatchObject({
+      status: "COMPLETED",
+      tokenInvalidatedAt: expect.any(Date),
+    });
+    expect(harness.state.jobs[0]).toMatchObject({
+      status: "COMPLETED",
+      activeClaimId: null,
+      invocationFailureCount: 0,
+      resultHash: terminalResult.resultHash,
+    });
+
+    const eventCount = harness.state.events.length;
+    const receiptCount = harness.state.receipts.length;
+    const differentHash = `${terminalResult.resultHash[0] === "0" ? "1" : "0"}${terminalResult.resultHash.slice(1)}`;
+    await expect(
+      harness.gateway.perform({
+        ...operation,
+        idempotencyKey: "terminal-audit-wrong-proof",
+        terminalProof: {
+          ...operation.terminalProof,
+          resultHash: differentHash,
+        },
+      }),
+    ).rejects.toMatchObject({ code: "IDEMPOTENCY_KEY_REUSED" });
+    await expect(
+      harness.gateway.perform({
+        ...operation,
+        idempotencyKey: "terminal-audit-wrong-token",
+        authorization: { ...authorization, token: "wrong-token" },
+      }),
+    ).rejects.toMatchObject({ code: "TOKEN_INVALID" });
+    await expect(
+      harness.gateway.perform({
+        ...operation,
+        idempotencyKey: "terminal-audit-wrong-worker",
+        authorization: { ...authorization, workerId: "other-worker" },
+      }),
+    ).rejects.toMatchObject({ code: "WORKER_MISMATCH" });
+    harness.setNow("2026-08-20T18:21:00.000Z");
+    await expect(
+      harness.gateway.perform({
+        ...operation,
+        idempotencyKey: "terminal-audit-expired",
+      }),
+    ).rejects.toMatchObject({ code: "HARD_DEADLINE_EXCEEDED" });
+    expect(harness.state.events).toHaveLength(eventCount);
+    expect(harness.state.receipts).toHaveLength(receiptCount);
   });
   it("does not accept a terminal result while an external effect is pending", async () => {
     const harness = createGatewayClaimHarness();
@@ -9049,6 +9635,7 @@ describe("Prisma affiliate Agent Gateway", () => {
       "READ_ARTIFACT",
       "EXECUTE_COMMAND",
       "SUBMIT_RESULT",
+      "RECORD_ERROR",
     ];
     const scopeCases: readonly {
       name: string;

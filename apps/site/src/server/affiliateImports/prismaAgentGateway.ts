@@ -19,6 +19,7 @@ import {
   AFFILIATE_AGENT_WORKSPACE_ATTESTATION_ADMISSION_MARGIN_SECONDS,
   AffiliateAgentGatewayError,
   affiliateAgentReviewerEffectRecoveryRequestSchema,
+  affiliateAgentTerminalProofSchema,
   type AffiliateAgentClaimGrant,
   type AffiliateAgentArtifactReadResult,
   type AffiliateAgentCommandResult,
@@ -40,6 +41,7 @@ import {
   type AffiliateAgentSchemaCorrectionResult,
   type AffiliateAgentSubmitResultOutcome,
   type AffiliateAgentTerminalAcceptedResult,
+  type AffiliateAgentTerminalProof,
 } from "./agentGateway";
 import type {
   AffiliateAgentClaimAdmission,
@@ -63,6 +65,18 @@ import {
   verifyAffiliateAgentSourceExclusionAssessment,
 } from "./agentGatewayAdapters";
 import { terminalResultSchemaCorrectionIssues } from "./affiliateAgentTerminalValidation";
+import {
+  AFFILIATE_AGENT_ERROR_EVENT,
+  AFFILIATE_AGENT_ERROR_LIMIT_EVENT,
+  AFFILIATE_AGENT_ERROR_MAX_RECORDS,
+  AFFILIATE_AGENT_ERROR_MAX_TOTAL_BYTES,
+  affiliateAgentErrorCategoryFor,
+  affiliateAgentGatewayErrorObservationFor,
+  affiliateAgentErrorObservationSchema,
+  REVIEWER_TERMINAL_EFFECT_FAILURE_REASON_CODES,
+  type AffiliateAgentErrorObservation,
+  type AffiliateAgentErrorRecordResult,
+} from "./affiliateAgentErrorObservations";
 import {
   AffiliateSourceExclusionAdmissionError,
   assertAffiliateSourceExclusionClaimBinding,
@@ -782,6 +796,15 @@ const isOperationReceiptUniqueConflict = (error: unknown): boolean => {
     )
   );
 };
+const isGatewayEventUniqueConflict = (error: unknown): boolean => {
+  if (prismaErrorCode(error) !== "P2002") return false;
+  return prismaUniqueTarget(error).some(
+    (value) =>
+      value === "eventKey"
+      || value.includes("eventKey")
+      || value.includes("jobId_sequence"),
+  );
+};
 
 const asPrismaJson = (value: unknown): Prisma.InputJsonValue =>
   // The canonicalizer rejects every value outside Prisma's JSON input domain.
@@ -810,7 +833,8 @@ const runSerializableEffectTransaction = async <T>(
       const retryableConflict =
         cause instanceof AffiliateAgentClaimRaceError ||
         isSerializableTransactionConflict(cause) ||
-        isOperationReceiptUniqueConflict(cause);
+        isOperationReceiptUniqueConflict(cause) ||
+        isGatewayEventUniqueConflict(cause);
       if (retryableConflict) {
         if (attempt < SERIALIZABLE_TRANSACTION_ATTEMPTS) {
           continue;
@@ -1056,6 +1080,15 @@ const claimOperationInputSchema = z.discriminatedUnion("kind", [
     .strict(),
   z
     .object({
+      kind: z.literal("RECORD_ERROR"),
+      idempotencyKey: gatewayIdentifierSchema,
+      authorization: claimAuthorizationInputSchema,
+      observation: affiliateAgentErrorObservationSchema,
+      terminalProof: affiliateAgentTerminalProofSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
       kind: z.literal("RECORD_FAILURE"),
       idempotencyKey: gatewayIdentifierSchema,
       authorization: claimAuthorizationInputSchema,
@@ -1105,10 +1138,29 @@ function assertClaimOperationInput(
   const rawRecord = isGatewayRecord(value) ? value : null;
   if (!parsed.success) {
     if (
-      rawRecord?.kind === "EXECUTE_COMMAND" &&
-      !affiliateAgentCommandSchema.safeParse(rawRecord.command).success
+      rawRecord?.kind === "EXECUTE_COMMAND"
+      && !affiliateAgentCommandSchema.safeParse(rawRecord.command).success
     ) {
       rejectMalformedCommandInput();
+    }
+    if (
+      rawRecord?.kind === "RECORD_ERROR"
+      && !affiliateAgentErrorObservationSchema.safeParse(rawRecord.observation).success
+    ) {
+      throw gatewayError(
+        "RESULT_SCHEMA_INVALID",
+        "The agent error observation is invalid.",
+      );
+    }
+    if (
+      rawRecord?.kind === "RECORD_ERROR"
+      && "terminalProof" in rawRecord
+      && !affiliateAgentTerminalProofSchema.safeParse(rawRecord.terminalProof).success
+    ) {
+      throw gatewayError(
+        "RESULT_SCHEMA_INVALID",
+        "The agent terminal proof is invalid.",
+      );
     }
     rejectMalformedGatewayInput("The claim operation is invalid.");
     return;
@@ -3653,6 +3705,659 @@ const authorizeClaimOperation = async (
     bundle,
     roleContract,
   };
+};
+const terminalProofMismatchError = (): AffiliateAgentGatewayError =>
+  gatewayError(
+    "IDEMPOTENCY_KEY_REUSED",
+    "The terminal proof does not match the completed terminal result.",
+  );
+
+const assertOriginalTerminalProofWindow = (
+  claim: AffiliateAgentGatewayClaims,
+  now: Date,
+): void => {
+  if (claim.hardDeadlineAt < now) {
+    throw gatewayError(
+      "HARD_DEADLINE_EXCEEDED",
+      "The claim hard deadline has passed.",
+    );
+  }
+  if (claim.tokenExpiresAt <= now) {
+    throw gatewayError("TOKEN_EXPIRED", "The claim token has expired.");
+  }
+};
+
+const assertCompletedErrorRecordProof = async (
+  transaction: Prisma.TransactionClient,
+  authorized: AuthorizedClaim,
+  terminalProof: AffiliateAgentTerminalProof,
+): Promise<void> => {
+  const { claim, job } = authorized;
+  if (
+    claim.status !== "COMPLETED"
+    || job.status !== "COMPLETED"
+    || job.activeClaimId !== null
+    || job.claimGeneration !== claim.claimGeneration
+    || claim.terminalReceiptId === null
+    || job.terminalReceiptId !== claim.terminalReceiptId
+    || job.resultHash !== terminalProof.resultHash
+  ) {
+    throw terminalProofMismatchError();
+  }
+  const terminalReceipt =
+    await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
+      where: { id: claim.terminalReceiptId },
+    });
+  if (
+    !terminalReceipt
+    || terminalReceipt.status !== "SUCCEEDED"
+    || terminalReceipt.operationKind !== "SUBMIT_RESULT"
+    || terminalReceipt.claimId !== claim.id
+    || terminalReceipt.jobId !== job.id
+    || terminalReceipt.claimGeneration !== claim.claimGeneration
+    || terminalReceipt.idempotencyKey !== terminalProof.idempotencyKey
+  ) {
+    throw terminalProofMismatchError();
+  }
+  const terminalResult = replayTerminalResult(terminalReceipt.responseJson);
+  if (
+    terminalResult.receiptId !== terminalReceipt.id
+    || terminalResult.resultHash !== terminalProof.resultHash
+    || terminalReceipt.responseHash === null
+    || terminalReceipt.responseHash !== hashAffiliateAgentValue(terminalResult)
+  ) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The stored terminal receipt is invalid.",
+    );
+  }
+  const storedResult = affiliateAgentTerminalResultEnvelopeSchema.safeParse(
+    job.resultJson,
+  );
+  if (
+    !storedResult.success
+    || hashAffiliateAgentValue(storedResult.data) !== terminalProof.resultHash
+  ) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The stored terminal result is invalid.",
+    );
+  }
+};
+
+const authorizeCompletedErrorRecord = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  authorization: AffiliateAgentClaimAuthorization,
+  terminalProof: AffiliateAgentTerminalProof,
+  now: Date,
+  transaction: Prisma.TransactionClient,
+): Promise<AuthorizedClaim> => {
+  const claim = await transaction.affiliateAgentGatewayClaims.findUnique({
+    where: { id: authorization.claimId },
+  });
+  if (!claim) {
+    throw gatewayError("CLAIM_NOT_FOUND", "The claim does not exist.");
+  }
+  const terminalReplayReceiptId =
+    claim.status === "COMPLETED" ? claim.terminalReceiptId ?? undefined : undefined;
+  const authorized = await authorizeClaimOperation(
+    dependencies,
+    authorization,
+    now,
+    transaction,
+    terminalReplayReceiptId === undefined
+      ? undefined
+      : { terminalReplayReceiptId },
+  );
+  assertOriginalTerminalProofWindow(authorized.claim, dependencies.clock.now());
+  await assertCompletedErrorRecordProof(transaction, authorized, terminalProof);
+  return authorized;
+};
+const authorizeErrorRecordOperation = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  authorization: AffiliateAgentClaimAuthorization,
+  terminalProof: AffiliateAgentTerminalProof | undefined,
+  now: Date,
+  transaction: Prisma.TransactionClient,
+): Promise<AuthorizedClaim> => {
+  if (terminalProof !== undefined) {
+    const claim = await transaction.affiliateAgentGatewayClaims.findUnique({
+      where: { id: authorization.claimId },
+    });
+    if (claim?.status === "COMPLETED") {
+      return authorizeCompletedErrorRecord(
+        dependencies,
+        authorization,
+        terminalProof,
+        now,
+        transaction,
+      );
+    }
+  }
+  return authorizeClaimOperation(
+    dependencies,
+    authorization,
+    now,
+    transaction,
+  );
+};
+
+type AffiliateAgentErrorOrigin = "GATEWAY" | "TOOL_BRIDGE";
+
+type AffiliateAgentErrorRecordInput = Readonly<{
+  idempotencyKey: string;
+  requestHash: string;
+  observation: AffiliateAgentErrorObservation;
+  origin: AffiliateAgentErrorOrigin;
+  isCompletedAudit?: boolean;
+}>;
+
+const errorRecordEventKeyFor = (
+  claimId: string,
+  idempotencyKey: string,
+): string => `claim-agent-error:${claimId}:${hashAffiliateAgentValue(idempotencyKey)}`;
+
+const errorLimitEventKeyFor = (claimId: string): string =>
+  `claim-agent-error-limit:${claimId}`;
+
+const errorRecordPayloadFor = (
+  observation: AffiliateAgentErrorObservation,
+  origin: AffiliateAgentErrorOrigin,
+) => ({
+  schemaVersion: 1 as const,
+  origin,
+  category: affiliateAgentErrorCategoryFor(observation),
+  observation,
+});
+
+const parseErrorRecordResult = (
+  response: unknown,
+): AffiliateAgentErrorRecordResult => {
+  if (!isGatewayRecord(response) || typeof response.kind !== "string") {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The stored agent error receipt is invalid.",
+    );
+  }
+  if (
+    response.kind === "AGENT_ERROR_RECORDED"
+    && typeof response.eventId === "string"
+    && typeof response.replayed === "boolean"
+  ) {
+    return {
+      kind: "AGENT_ERROR_RECORDED",
+      eventId: response.eventId,
+      replayed: response.replayed,
+    };
+  }
+  if (
+    response.kind === "AGENT_ERROR_LIMIT_REACHED"
+    && typeof response.eventId === "string"
+  ) {
+    return {
+      kind: "AGENT_ERROR_LIMIT_REACHED",
+      eventId: response.eventId,
+    };
+  }
+  throw gatewayError(
+    "INTERNAL_ERROR",
+    "The stored agent error receipt is invalid.",
+  );
+};
+
+const assertErrorLimitPayload = (
+  value: unknown,
+): void => {
+  if (
+    !isGatewayRecord(value)
+    || ![
+      "schemaVersion",
+      "maxRecords",
+      "maxTotalBytes",
+      "recordedCount",
+      "recordedBytes",
+    ].every((key) => Object.prototype.hasOwnProperty.call(value, key))
+    || Object.keys(value).length !== 5
+    || value.schemaVersion !== 1
+    || value.maxRecords !== AFFILIATE_AGENT_ERROR_MAX_RECORDS
+    || value.maxTotalBytes !== AFFILIATE_AGENT_ERROR_MAX_TOTAL_BYTES
+    || ![value.recordedCount, value.recordedBytes].every(
+      (entry) => typeof entry === "number" && Number.isSafeInteger(entry) && entry >= 0,
+    )
+  ) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The stored agent error limit event is invalid.",
+    );
+  }
+};
+
+const advanceErrorEventSequence = async (
+  transaction: Prisma.TransactionClient,
+  authorized: AuthorizedClaim,
+  isCompletedAudit = false,
+): Promise<number> => {
+  const updated = await transaction.affiliateAgentGatewayJobs.updateMany({
+    where: {
+      id: authorized.job.id,
+      ...(isCompletedAudit
+        ? {
+            status: "COMPLETED",
+            activeClaimId: null,
+            terminalReceiptId: authorized.claim.terminalReceiptId,
+          }
+        : {
+            status: "CLAIMED",
+            activeClaimId: authorized.claim.id,
+          }),
+      claimGeneration: authorized.claim.claimGeneration,
+      eventSequence: authorized.job.eventSequence,
+    },
+    data: { eventSequence: { increment: 1 } },
+  });
+  if (updated.count !== 1) throw new AffiliateAgentClaimRaceError();
+  return authorized.job.eventSequence + 1;
+};
+
+const recordAgentErrorTransaction = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  authorized: AuthorizedClaim,
+  input: AffiliateAgentErrorRecordInput,
+): Promise<AffiliateAgentErrorRecordResult> => {
+  const parsedObservation = affiliateAgentErrorObservationSchema.safeParse(
+    input.observation,
+  );
+  if (!parsedObservation.success) {
+    throw gatewayError(
+      "RESULT_SCHEMA_INVALID",
+      "The agent error observation is invalid.",
+    );
+  }
+  const observation = parsedObservation.data;
+  const eventKey = errorRecordEventKeyFor(
+    authorized.claim.id,
+    input.idempotencyKey,
+  );
+  const existingReceipt =
+    await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
+      where: {
+        claimId_idempotencyKey: {
+          claimId: authorized.claim.id,
+          idempotencyKey: input.idempotencyKey,
+        },
+      },
+    });
+  if (existingReceipt) {
+    if (
+      existingReceipt.operationKind !== "RECORD_ERROR"
+      || existingReceipt.requestHash !== input.requestHash
+      || existingReceipt.jobId !== authorized.job.id
+      || existingReceipt.claimGeneration !== authorized.claim.claimGeneration
+    ) {
+      throw gatewayError(
+        "IDEMPOTENCY_KEY_REUSED",
+        "The operation idempotency key was used for different input.",
+      );
+    }
+    if (existingReceipt.status !== "SUCCEEDED") {
+      throw gatewayError(
+        "OPERATION_IN_PROGRESS",
+        "The agent error record is still in progress.",
+        true,
+      );
+    }
+    const result = parseErrorRecordResult(existingReceipt.responseJson);
+    const event = await transaction.affiliateAgentGatewayEvents.findFirst({
+      where: { eventKey },
+    });
+    if (
+      result.kind !== "AGENT_ERROR_RECORDED"
+      || !event
+      || event.id !== result.eventId
+      || event.eventType !== AFFILIATE_AGENT_ERROR_EVENT
+      || event.jobId !== authorized.job.id
+      || event.claimId !== authorized.claim.id
+      || event.receiptId !== existingReceipt.id
+      || event.actorKind !== "AGENT_INVOCATION"
+      || event.actorId !== authorized.claim.invocationId
+      || event.role !== authorized.claim.role
+      || event.requestHash !== input.requestHash
+    ) {
+      throw gatewayError(
+        "INTERNAL_ERROR",
+        "The stored agent error event is invalid.",
+      );
+    }
+    return { ...result, replayed: true };
+  }
+
+  const existingEvent = await transaction.affiliateAgentGatewayEvents.findFirst({
+    where: { eventKey },
+  });
+  if (existingEvent) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The stored agent error event has no receipt.",
+    );
+  }
+  const limitEvent = await transaction.affiliateAgentGatewayEvents.findFirst({
+    where: { eventKey: errorLimitEventKeyFor(authorized.claim.id) },
+  });
+  if (limitEvent) {
+    if (
+      limitEvent.eventType !== AFFILIATE_AGENT_ERROR_LIMIT_EVENT
+      || limitEvent.jobId !== authorized.job.id
+      || limitEvent.claimId !== authorized.claim.id
+      || limitEvent.actorKind !== "AGENT_INVOCATION"
+      || limitEvent.actorId !== authorized.claim.invocationId
+      || limitEvent.role !== authorized.claim.role
+    ) {
+      throw gatewayError(
+        "INTERNAL_ERROR",
+        "The stored agent error limit event is invalid.",
+      );
+    }
+    assertErrorLimitPayload(limitEvent.payload);
+    return {
+      kind: "AGENT_ERROR_LIMIT_REACHED",
+      eventId: limitEvent.id,
+    };
+  }
+
+  const payload = errorRecordPayloadFor(observation, input.origin);
+  const payloadBytes = Buffer.byteLength(
+    canonicalizeAffiliateAgentValue(payload),
+    "utf8",
+  );
+  const recordedEvents = await transaction.affiliateAgentGatewayEvents.findMany({
+    where: {
+      claimId: authorized.claim.id,
+      eventType: AFFILIATE_AGENT_ERROR_EVENT,
+    },
+    take: AFFILIATE_AGENT_ERROR_MAX_RECORDS + 1,
+  });
+  const recordedBytes = recordedEvents.reduce(
+    (total, event) =>
+      total + Buffer.byteLength(
+        canonicalizeAffiliateAgentValue(event.payload),
+        "utf8",
+      ),
+    0,
+  );
+  if (
+    recordedEvents.length >= AFFILIATE_AGENT_ERROR_MAX_RECORDS
+    || recordedBytes + payloadBytes > AFFILIATE_AGENT_ERROR_MAX_TOTAL_BYTES
+  ) {
+    const sequence = await advanceErrorEventSequence(
+      transaction,
+      authorized,
+      input.isCompletedAudit === true,
+    );
+    const eventId = dependencies.identifiers.create("event");
+    await transaction.affiliateAgentGatewayEvents.create({
+      data: {
+        id: eventId,
+        eventKey: errorLimitEventKeyFor(authorized.claim.id),
+        jobId: authorized.job.id,
+        claimId: authorized.claim.id,
+        sequence,
+        eventType: AFFILIATE_AGENT_ERROR_LIMIT_EVENT,
+        actorKind: "AGENT_INVOCATION",
+        actorId: authorized.claim.invocationId,
+        role: authorized.claim.role,
+        payload: asPrismaJson({
+          schemaVersion: 1,
+          maxRecords: AFFILIATE_AGENT_ERROR_MAX_RECORDS,
+          maxTotalBytes: AFFILIATE_AGENT_ERROR_MAX_TOTAL_BYTES,
+          recordedCount: recordedEvents.length,
+          recordedBytes,
+        }),
+        retentionClass: "INDEFINITE",
+      },
+    });
+    return {
+      kind: "AGENT_ERROR_LIMIT_REACHED",
+      eventId,
+    };
+  }
+
+  const sequence = await advanceErrorEventSequence(
+    transaction,
+    authorized,
+    input.isCompletedAudit === true,
+  );
+  const now = dependencies.clock.now();
+  const receiptId = dependencies.identifiers.create("receipt");
+  const eventId = dependencies.identifiers.create("event");
+  const result: AffiliateAgentErrorRecordResult = {
+    kind: "AGENT_ERROR_RECORDED",
+    eventId,
+    replayed: false,
+  };
+  const outputHash = hashAffiliateAgentValue(payload);
+  await transaction.affiliateAgentGatewayOperationReceipts.create({
+    data: {
+      id: receiptId,
+      claimId: authorized.claim.id,
+      jobId: authorized.job.id,
+      claimGeneration: authorized.claim.claimGeneration,
+      idempotencyKey: input.idempotencyKey,
+      operationKind: "RECORD_ERROR",
+      requestHash: input.requestHash,
+      status: "SUCCEEDED",
+      responseHash: hashAffiliateAgentValue(result),
+      responseJson: asPrismaJson(result),
+      startedAt: now,
+      completedAt: now,
+      reconcileAfter: null,
+      retentionClass: "INDEFINITE",
+    },
+  });
+  await transaction.affiliateAgentGatewayEvents.create({
+    data: {
+      id: eventId,
+      eventKey,
+      jobId: authorized.job.id,
+      claimId: authorized.claim.id,
+      receiptId,
+      sequence,
+      eventType: AFFILIATE_AGENT_ERROR_EVENT,
+      actorKind: "AGENT_INVOCATION",
+      actorId: authorized.claim.invocationId,
+      role: authorized.claim.role,
+      requestHash: input.requestHash,
+      inputHash: hashAffiliateAgentValue(observation),
+      outputHash,
+      reasonCodes: [observation.reasonCode],
+      payload: asPrismaJson(payload),
+      retentionClass: "INDEFINITE",
+    },
+  });
+  return result;
+};
+const performRecordError = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "RECORD_ERROR" }>,
+): Promise<AffiliateAgentErrorRecordResult> => {
+  assertIdentifier(input.idempotencyKey, "Operation idempotency key");
+  const parsedObservation = affiliateAgentErrorObservationSchema.safeParse(
+    input.observation,
+  );
+  if (!parsedObservation.success) {
+    throw gatewayError(
+      "RESULT_SCHEMA_INVALID",
+      "The agent error observation is invalid.",
+    );
+  }
+  const {
+    terminalProof: inputTerminalProof,
+    ...inputWithoutTerminalProof
+  } = input;
+  const normalizedInput = {
+    ...inputWithoutTerminalProof,
+    observation: parsedObservation.data,
+    ...(inputTerminalProof === undefined ? {} : { terminalProof: inputTerminalProof }),
+  };
+  const requestHash = operationRequestHash(normalizedInput);
+  return runSerializableEffectTransaction(
+    dependencies,
+    async (transaction) => {
+      const terminalProof = normalizedInput.terminalProof;
+      const authorizationNow = dependencies.clock.now();
+      const authorized = await authorizeErrorRecordOperation(
+        dependencies,
+        normalizedInput.authorization,
+        terminalProof,
+        authorizationNow,
+        transaction,
+      );
+      return recordAgentErrorTransaction(
+        transaction,
+        dependencies,
+        authorized,
+        {
+          idempotencyKey: normalizedInput.idempotencyKey,
+          requestHash,
+          observation: normalizedInput.observation,
+          origin: "TOOL_BRIDGE",
+          isCompletedAudit: terminalProof !== undefined
+            && authorized.claim.status === "COMPLETED",
+        },
+      );
+    },
+    {
+      code: "INTERNAL_ERROR",
+      safeMessage: "The agent error record could not be saved.",
+    },
+  );
+};
+
+type GatewayErrorCaptureOperation = Extract<
+  AffiliateAgentClaimOperation,
+  { kind: "READ_ARTIFACT" | "EXECUTE_COMMAND" | "SUBMIT_RESULT" }
+>;
+
+const isGatewayErrorCaptureOperation = (
+  value: unknown,
+): value is GatewayErrorCaptureOperation => (
+  isGatewayRecord(value)
+  && (
+    value.kind === "READ_ARTIFACT"
+    || value.kind === "EXECUTE_COMMAND"
+    || value.kind === "SUBMIT_RESULT"
+  )
+);
+
+const gatewayErrorCaptureToolFor = (
+  operation: GatewayErrorCaptureOperation,
+): AffiliateAgentErrorObservation["tool"] =>
+  operation.kind === "READ_ARTIFACT"
+    ? "read_artifact"
+    : operation.kind === "EXECUTE_COMMAND"
+      ? "execute_command"
+      : "submit_result";
+
+const gatewayErrorCaptureCommandFor = (
+  operation: GatewayErrorCaptureOperation,
+): unknown =>
+  operation.kind === "EXECUTE_COMMAND"
+    ? operation.command
+    : operation.kind === "SUBMIT_RESULT"
+      ? { type: "SUBMIT_TERMINAL_RESULT" }
+      : undefined;
+
+const recordGatewayRejectionBestEffort = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  value: unknown,
+  cause: unknown,
+): Promise<void> => {
+  if (
+    !(cause instanceof AffiliateAgentGatewayError)
+    || !isGatewayErrorCaptureOperation(value)
+  ) return;
+  const rawAuthorization = value.authorization;
+  const rawIdempotencyKey = value.idempotencyKey;
+  if (
+    typeof rawIdempotencyKey !== "string"
+    || rawIdempotencyKey.trim().length === 0
+    || rawIdempotencyKey.length > 200
+  ) return;
+  const parsedAuthorization = claimAuthorizationInputSchema.safeParse(
+    rawAuthorization,
+  );
+  if (!parsedAuthorization.success) return;
+  let sourceRequestHash: string;
+  try {
+    sourceRequestHash = operationRequestHash(
+      value as unknown as AffiliateAgentClaimOperation,
+    );
+  } catch {
+    return;
+  }
+  let observation: AffiliateAgentErrorObservation;
+  try {
+    observation = affiliateAgentGatewayErrorObservationFor({
+      tool: gatewayErrorCaptureToolFor(value),
+      command: gatewayErrorCaptureCommandFor(value),
+      errorCode: cause.code,
+      safeMessage: cause.safeMessage,
+      isRetryable: cause.isRetryable,
+    });
+  } catch {
+    return;
+  }
+  const recordIdempotencyKey = `gateway-error:${hashAffiliateAgentValue({
+    kind: value.kind,
+    idempotencyKey: rawIdempotencyKey,
+    sourceRequestHash,
+    observation,
+  })}`;
+  const recordOperation = {
+    kind: "RECORD_ERROR" as const,
+    idempotencyKey: recordIdempotencyKey,
+    authorization: parsedAuthorization.data,
+    observation,
+  };
+  let requestHash: string;
+  try {
+    requestHash = hashAffiliateAgentValue({
+      sourceRequestHash,
+      recordRequestHash: operationRequestHash(recordOperation),
+    });
+  } catch {
+    return;
+  }
+  try {
+    await runSerializableEffectTransaction(
+      dependencies,
+      async (transaction) => {
+        const authorized = await authorizeClaimOperation(
+          dependencies,
+          parsedAuthorization.data,
+          dependencies.clock.now(),
+          transaction,
+        );
+        return recordAgentErrorTransaction(
+          transaction,
+          dependencies,
+          authorized,
+          {
+            idempotencyKey: recordIdempotencyKey,
+            requestHash,
+            observation,
+            origin: "GATEWAY",
+          },
+        );
+      },
+      {
+        code: "INTERNAL_ERROR",
+        safeMessage: "The agent error record could not be saved.",
+      },
+    );
+  } catch {
+    console.error("[affiliate:gateway] ERROR_RECORDING_FAILED");
+  }
 };
 const authorizeClaimOperationInSerializableTransaction = (
   dependencies: AffiliateAgentGatewayDependencies,
@@ -8403,22 +9108,6 @@ const hasPostEffectCompletionReceipt = async (
 
 const REVIEWER_TERMINAL_EFFECT_FAILURE_CODE =
   "REVIEWER_TERMINAL_EFFECT_FAILED" as const;
-const REVIEWER_TERMINAL_EFFECT_FAILURE_REASON_CODES = [
-  "LIFECYCLE_GENERATION_STALE",
-  "SUPPLY_CONTRACT_STALE",
-  "COMMAND_AUTHORITY_NOT_PERMITTED",
-  "LEGACY_RECONCILIATION_WRITER_REQUIRED",
-  "REVIEWER_OUTCOME_NOT_PERMITTED",
-  "EVIDENCE_REQUIRED",
-  "APPROVAL_PRECONDITION_FAILED",
-  "APPROVAL_LIFECYCLE_EVIDENCE_MISSING",
-  "ACTIVATION_PRECONDITION_FAILED",
-  "PUBLICATION_PRECONDITION_FAILED",
-  "TARGET_REJECTION_PRECONDITION_FAILED",
-  "REFRESH_PRECONDITION_FAILED",
-  "EMPTY_REFRESH_PRECONDITION_FAILED",
-  "UNCLASSIFIED",
-] as const;
 type ReviewerTerminalEffectFailureReasonCode =
   (typeof REVIEWER_TERMINAL_EFFECT_FAILURE_REASON_CODES)[number];
 const reviewerTerminalEffectFailureReasonCodeSchema = z.enum(
@@ -19209,55 +19898,71 @@ export function createPrismaAffiliateAgentGateway(
     async perform<T extends AffiliateAgentClaimOperation>(
       input: T,
     ): Promise<AffiliateAgentClaimOperationResult<T>> {
-      assertClaimOperationInput(input);
-      if (input.kind === "HEARTBEAT") {
-        return (await performHeartbeat(
-          dependencies,
-          input,
-        )) as AffiliateAgentClaimOperationResult<T>;
+      try {
+        assertClaimOperationInput(input);
+      } catch (error) {
+        await recordGatewayRejectionBestEffort(dependencies, input, error);
+        throw error;
       }
-      if (input.kind === "READ_ARTIFACT") {
-        return (await performArtifactRead(
-          dependencies,
-          input,
-        )) as AffiliateAgentClaimOperationResult<T>;
-      }
-      if (input.kind === "EXECUTE_COMMAND") {
-        return (await performCommand(
-          dependencies,
-          input,
-        )) as AffiliateAgentClaimOperationResult<T>;
-      }
-      if (input.kind === "SUBMIT_RESULT") {
-        const result = await performTerminalResult(dependencies, input);
-        if (result.kind === "INVOCATION_FAILED") {
-          await reportInvocationFailure(
+      try {
+        if (input.kind === "HEARTBEAT") {
+          return (await performHeartbeat(
             dependencies,
-            input.authorization,
-            result,
-            result.failureCode,
-            null,
-          );
+            input,
+          )) as AffiliateAgentClaimOperationResult<T>;
         }
-        return result as AffiliateAgentClaimOperationResult<T>;
-      }
-      if (input.kind === "RECORD_FAILURE") {
-        const result = await performFailure(dependencies, input);
-        if (result.kind === "INVOCATION_FAILED") {
-          await reportInvocationFailure(
+        if (input.kind === "READ_ARTIFACT") {
+          return (await performArtifactRead(
             dependencies,
-            input.authorization,
-            result,
-            input.failure.code,
-            input.failure.safeSummary,
-          );
+            input,
+          )) as AffiliateAgentClaimOperationResult<T>;
         }
-        return result as AffiliateAgentClaimOperationResult<T>;
+        if (input.kind === "EXECUTE_COMMAND") {
+          return (await performCommand(
+            dependencies,
+            input,
+          )) as AffiliateAgentClaimOperationResult<T>;
+        }
+        if (input.kind === "SUBMIT_RESULT") {
+          const result = await performTerminalResult(dependencies, input);
+          if (result.kind === "INVOCATION_FAILED") {
+            await reportInvocationFailure(
+              dependencies,
+              input.authorization,
+              result,
+              result.failureCode,
+              null,
+            );
+          }
+          return result as AffiliateAgentClaimOperationResult<T>;
+        }
+        if (input.kind === "RECORD_ERROR") {
+          return (await performRecordError(
+            dependencies,
+            input,
+          )) as AffiliateAgentClaimOperationResult<T>;
+        }
+        if (input.kind === "RECORD_FAILURE") {
+          const result = await performFailure(dependencies, input);
+          if (result.kind === "INVOCATION_FAILED") {
+            await reportInvocationFailure(
+              dependencies,
+              input.authorization,
+              result,
+              input.failure.code,
+              input.failure.safeSummary,
+            );
+          }
+          return result as AffiliateAgentClaimOperationResult<T>;
+        }
+        throw gatewayError(
+          "ROLE_NOT_ALLOWED",
+          "This claim operation is not available in the current gateway slice.",
+        );
+      } catch (error) {
+        await recordGatewayRejectionBestEffort(dependencies, input, error);
+        throw error;
       }
-      throw gatewayError(
-        "ROLE_NOT_ALLOWED",
-        "This claim operation is not available in the current gateway slice.",
-      );
     },
     async reconcile(
       input?: AffiliateAgentReconcileRequest,

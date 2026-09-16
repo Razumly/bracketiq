@@ -8,12 +8,24 @@ import type {
   AffiliateAgentSchemaIssue,
   AffiliateAgentTerminalDisposition,
 } from "./agentGatewayContracts";
+import type {
+  AffiliateAgentErrorObservation,
+  AffiliateAgentErrorRecordResult,
+} from "./affiliateAgentErrorObservations";
 
 const affiliateAgentGatewayIdentifierSchema = z
   .string()
   .trim()
   .min(1)
   .max(200);
+export const affiliateAgentTerminalProofSchema = z
+  .object({
+    idempotencyKey: affiliateAgentGatewayIdentifierSchema,
+    resultHash: z.string().regex(/^[a-f0-9]{64}$/i),
+  })
+  .strict();
+
+
 
 const affiliateAgentGatewayRecoveryReasonSchema = z
   .string()
@@ -149,6 +161,11 @@ type AffiliateAgentNonTerminalCommand = Exclude<
   Readonly<{ type: "SUBMIT_TERMINAL_RESULT" }>
 >;
 
+export type AffiliateAgentTerminalProof = Readonly<{
+  idempotencyKey: string;
+  resultHash: string;
+}>;
+
 export type AffiliateAgentClaimOperation =
   | Readonly<{
       kind: "HEARTBEAT";
@@ -172,6 +189,13 @@ export type AffiliateAgentClaimOperation =
       idempotencyKey: string;
       authorization: AffiliateAgentClaimAuthorization;
       result: unknown;
+    }>
+  | Readonly<{
+      kind: "RECORD_ERROR";
+      idempotencyKey: string;
+      authorization: AffiliateAgentClaimAuthorization;
+      observation: AffiliateAgentErrorObservation;
+      terminalProof?: AffiliateAgentTerminalProof;
     }>
   | Readonly<{
       kind: "RECORD_FAILURE";
@@ -249,9 +273,11 @@ export type AffiliateAgentClaimOperationResult<
         ? AffiliateAgentCommandResult
         : T extends Readonly<{ kind: "SUBMIT_RESULT" }>
           ? AffiliateAgentSubmitResultOutcome
-          : T extends Readonly<{ kind: "RECORD_FAILURE" }>
-            ? AffiliateAgentInvocationFailedResult
-            : never;
+          : T extends Readonly<{ kind: "RECORD_ERROR" }>
+            ? AffiliateAgentErrorRecordResult
+            : T extends Readonly<{ kind: "RECORD_FAILURE" }>
+              ? AffiliateAgentInvocationFailedResult
+              : never;
 
 export type AffiliateAgentReconcileRequest = Readonly<{
   limit?: number;
@@ -381,11 +407,14 @@ export type AffiliateAgentGatewayErrorCode =
   | "REVIEWER_EFFECT_RECOVERY_HASH_MISMATCH"
   | "INTERNAL_ERROR";
 
+export type AffiliateAgentGatewayErrorOrigin = "GATEWAY" | "TRANSPORT";
+
 export class AffiliateAgentGatewayError extends Error {
   readonly code: AffiliateAgentGatewayErrorCode;
   readonly isRetryable: boolean;
   readonly safeMessage: string;
   readonly receiptId?: string;
+  readonly origin: AffiliateAgentGatewayErrorOrigin;
 
   constructor(
     input: Readonly<{
@@ -393,6 +422,7 @@ export class AffiliateAgentGatewayError extends Error {
       isRetryable: boolean;
       safeMessage: string;
       receiptId?: string;
+      origin?: AffiliateAgentGatewayErrorOrigin;
     }>,
   ) {
     super(input.safeMessage);
@@ -401,6 +431,7 @@ export class AffiliateAgentGatewayError extends Error {
     this.isRetryable = input.isRetryable;
     this.safeMessage = input.safeMessage;
     this.receiptId = input.receiptId;
+    this.origin = input.origin ?? "GATEWAY";
   }
 }
 

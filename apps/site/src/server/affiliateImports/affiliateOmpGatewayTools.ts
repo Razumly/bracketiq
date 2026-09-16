@@ -18,6 +18,10 @@ import {
   type AffiliateAgentClaimEnvelope,
 } from "./agentGatewayContracts";
 import {
+  affiliateAgentErrorObservationFor,
+  type AffiliateAgentErrorObservation,
+} from "./affiliateAgentErrorObservations";
+import {
   AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_MAX_RECORDS,
   AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_MAX_TOTAL_BYTES,
   gatewayCommandRejectionDiagnosticFor,
@@ -47,6 +51,10 @@ export type AffiliateOmpToolResult = {
   details: Record<string, unknown>;
   isError?: boolean;
 };
+export type AffiliateOmpBoundaryErrorInput = Readonly<{
+  tool: unknown;
+  errorCode: "TOOL_NOT_PERMITTED" | "TOOL_ABORTED";
+}>;
 
 type ToolDefinition = Readonly<{
   name: string;
@@ -60,6 +68,33 @@ const textResult = (value: unknown, isError = false): AffiliateOmpToolResult => 
   details: {},
   ...(isError ? { isError: true } : {}),
 });
+const commandForErrorObservation = (value: unknown): unknown => (
+  value !== null
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && "command" in value
+    ? value.command
+    : value
+);
+const AFFILIATE_AGENT_ERROR_RECORD_TIMEOUT_MILLISECONDS = 250;
+
+type AffiliateOmpLocalErrorObservationInput = Readonly<{
+  tool: unknown;
+  stage: AffiliateAgentErrorObservation["stage"];
+  command?: unknown;
+  errorCode: unknown;
+  reasonCode?: unknown;
+  issues?: readonly unknown[];
+  isRetryable?: boolean;
+}>;
+
+class AffiliateOmpArtifactIntegrityError extends Error {
+  constructor() {
+    super();
+    this.name = "AffiliateOmpArtifactIntegrityError";
+  }
+}
+
 const MAX_TEXT_PAGE_SERIALIZED_BYTES = 48 * 1024 - 1;
 const DEFAULT_TEXT_PAGE_LIMIT = 32_768;
 const MAX_CACHED_TEXT_PAGES = 4;
@@ -158,6 +193,20 @@ export const createAffiliateOmpGatewayTools = (input: Readonly<{
   ));
   let isClosed = false;
   let terminalFrame: AffiliateOmpTerminalFrame | null = null;
+  let terminalProof: Readonly<{ idempotencyKey: string; resultHash: string }> | undefined;
+  const rememberTerminalProof = (
+    idempotencyKey: string,
+    result: Readonly<Record<string, unknown>>,
+  ): void => {
+    terminalProof = {
+      idempotencyKey,
+      resultHash: hashAffiliateAgentValue(result),
+    };
+  };
+  const rememberTerminalFrame = (frame: AffiliateOmpTerminalFrame): void => {
+    terminalFrame = frame;
+    rememberTerminalProof(frame.idempotencyKey, frame.result);
+  };
   type PendingTerminalSubmission = Readonly<{
     idempotencyKey: string;
     result: Readonly<Record<string, unknown>>;
@@ -205,6 +254,111 @@ export const createAffiliateOmpGatewayTools = (input: Readonly<{
       // A diagnostic sink must never affect the Gateway operation.
     }
   };
+  let errorRecordingLimitReached = false;
+  const recordLocalError = async (
+    observationInput: AffiliateOmpLocalErrorObservationInput,
+  ): Promise<void> => {
+    if (errorRecordingLimitReached) return;
+    const diagnosticDeliveryFailure = (): void => {
+      reportCommandRejection({
+        version: 1,
+        event: "affiliate-agent-command-rejection",
+        stage: "GATEWAY",
+        command: "UNKNOWN",
+        errorCode: "INTERNAL_ERROR",
+        reasonCode: "ERROR_RECORDING_FAILED",
+        issueCodes: [],
+        issuePaths: [],
+        isRetryable: false,
+      });
+    };
+    let observation: AffiliateAgentErrorObservation;
+    try {
+      observation = affiliateAgentErrorObservationFor(observationInput);
+    } catch {
+      diagnosticDeliveryFailure();
+      return;
+    }
+    let idempotencyKey: string;
+    try {
+      idempotencyKey = randomUUID();
+    } catch {
+      diagnosticDeliveryFailure();
+      return;
+    }
+    const operation = {
+      kind: "RECORD_ERROR" as const,
+      idempotencyKey,
+      authorization,
+      observation,
+      ...(terminalProof === undefined ? {} : { terminalProof }),
+    };
+    const timeoutMarker = Symbol("agent-error-record-timeout");
+    const delivery = Promise.resolve()
+      .then(() => input.gateway.perform(operation, {
+        signal: AbortSignal.timeout(AFFILIATE_AGENT_ERROR_RECORD_TIMEOUT_MILLISECONDS),
+      }))
+      .then(
+        value => value,
+        () => null,
+      );
+    let timeout!: NodeJS.Timeout;
+    const timeoutPromise = new Promise<typeof timeoutMarker>((resolve) => {
+      timeout = setTimeout(() => resolve(timeoutMarker), AFFILIATE_AGENT_ERROR_RECORD_TIMEOUT_MILLISECONDS);
+    });
+    const recorded = await Promise.race([delivery, timeoutPromise]);
+    clearTimeout(timeout);
+    if (
+      recorded === timeoutMarker
+      || recorded === null
+      || typeof recorded !== "object"
+      || (
+        recorded.kind !== "AGENT_ERROR_RECORDED"
+        && recorded.kind !== "AGENT_ERROR_LIMIT_REACHED"
+      )
+      || (
+        recorded.kind === "AGENT_ERROR_RECORDED"
+        && (
+          typeof recorded.eventId !== "string"
+          || typeof recorded.replayed !== "boolean"
+        )
+      )
+      || (
+        recorded.kind === "AGENT_ERROR_LIMIT_REACHED"
+        && typeof recorded.eventId !== "string"
+      )
+    ) {
+      diagnosticDeliveryFailure();
+    } else if (recorded.kind === "AGENT_ERROR_LIMIT_REACHED") {
+      errorRecordingLimitReached = true;
+    }
+  };
+  const localToolError = async (
+    result: AffiliateOmpToolResult,
+    observationInput: AffiliateOmpLocalErrorObservationInput,
+  ): Promise<AffiliateOmpToolResult> => {
+    await recordLocalError(observationInput);
+    return result;
+  };
+  const recordBoundaryError = async (
+    boundary: AffiliateOmpBoundaryErrorInput,
+  ): Promise<void> => {
+    const previous = pending;
+    let release!: () => void;
+    pending = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try {
+      await recordLocalError({
+        tool: boundary.tool,
+        stage: "TOOL_RUNTIME",
+        errorCode: boundary.errorCode,
+        reasonCode: boundary.errorCode,
+      });
+    } finally {
+      release();
+    }
+  };
+
 
   const readClaimArtifact = async (evidenceRef: string, signal?: AbortSignal): Promise<AffiliateAgentArtifactReadResult> => {
     if (cachedArtifact?.evidenceRef === evidenceRef) return cachedArtifact;
@@ -217,11 +371,11 @@ export const createAffiliateOmpGatewayTools = (input: Readonly<{
     if (artifact.evidenceRef !== evidenceRef
       || artifact.bytes.byteLength !== artifact.byteSize
       || createHash("sha256").update(artifact.bytes).digest("hex") !== artifact.sha256) {
-      throw new Error("Artifact integrity check failed.");
+      throw new AffiliateOmpArtifactIntegrityError();
     }
     const entry = claim.evidenceManifest.entries.find(candidate => candidate.evidenceRef === evidenceRef);
     if (entry && (entry.sha256 !== artifact.sha256 || entry.byteSize !== artifact.byteSize || entry.mimeType !== artifact.mimeType)) {
-      throw new Error("Artifact does not match the claim manifest.");
+      throw new AffiliateOmpArtifactIntegrityError();
     }
     cachedArtifact = artifact;
     cachedSourceText = null;
@@ -243,7 +397,15 @@ export const createAffiliateOmpGatewayTools = (input: Readonly<{
         ))
         : undefined;
       if (request.view === "CITATION_TEXT" && !citationEntry) {
-        return textResult("Citation text requires a claim-manifest HTML or Markdown artifact.", true);
+        return localToolError(
+          textResult("Citation text requires a claim-manifest HTML or Markdown artifact.", true),
+          {
+            tool: "read_artifact",
+            stage: "LOCAL_VALIDATION",
+            errorCode: "ARTIFACT_VIEW_INVALID",
+            reasonCode: "ARTIFACT_VIEW_INVALID",
+          },
+        );
       }
       const artifact = await readClaimArtifact(request.evidenceRef, signal);
       let text: string;
@@ -254,7 +416,15 @@ export const createAffiliateOmpGatewayTools = (input: Readonly<{
         const mimeType = artifact.mimeType.split(";", 1)[0].trim().toLowerCase();
         if (["image/png", "image/jpeg", "image/webp", "image/gif"].includes(mimeType)) {
           if ((request.offset ?? 0) !== 0 || request.limit !== undefined) {
-            return textResult("Image evidence does not support text offsets.", true);
+            return localToolError(
+              textResult("Image evidence does not support text offsets.", true),
+              {
+                tool: "read_artifact",
+                stage: "LOCAL_VALIDATION",
+                errorCode: "ARTIFACT_OFFSET_INVALID",
+                reasonCode: "ARTIFACT_OFFSET_INVALID",
+              },
+            );
           }
           return {
             content: [
@@ -273,15 +443,45 @@ export const createAffiliateOmpGatewayTools = (input: Readonly<{
           };
         }
         if (!(mimeType.startsWith("text/") || mimeType === "application/json" || mimeType === "application/xhtml+xml")) {
-          return textResult(`This evidence has unsupported MIME type ${mimeType}.`, true);
+          return localToolError(
+            textResult(`This evidence has unsupported MIME type ${mimeType}.`, true),
+            {
+              tool: "read_artifact",
+              stage: "LOCAL_VALIDATION",
+              errorCode: "ARTIFACT_MIME_UNSUPPORTED",
+              reasonCode: "ARTIFACT_MIME_UNSUPPORTED",
+            },
+          );
         }
-        cachedSourceText ??= new TextDecoder("utf-8", { fatal: true }).decode(artifact.bytes);
+        try {
+          cachedSourceText ??= new TextDecoder("utf-8", { fatal: true }).decode(artifact.bytes);
+        } catch {
+          throw new AffiliateOmpArtifactIntegrityError();
+        }
         text = cachedSourceText;
       }
       const offset = request.offset ?? 0;
-      if (offset > text.length) return textResult("The text offset exceeds the artifact length.", true);
+      if (offset > text.length) {
+        return localToolError(
+          textResult("The text offset exceeds the artifact length.", true),
+          {
+            tool: "read_artifact",
+            stage: "LOCAL_VALIDATION",
+            errorCode: "ARTIFACT_OFFSET_INVALID",
+            reasonCode: "ARTIFACT_OFFSET_INVALID",
+          },
+        );
+      }
       if (offset > 0 && /[\uDC00-\uDFFF]/.test(text[offset] ?? "")) {
-        return textResult("Use the previous page's nextOffset to preserve Unicode characters.", true);
+        return localToolError(
+          textResult("Use the previous page's nextOffset to preserve Unicode characters.", true),
+          {
+            tool: "read_artifact",
+            stage: "LOCAL_VALIDATION",
+            errorCode: "ARTIFACT_OFFSET_INVALID",
+            reasonCode: "ARTIFACT_OFFSET_INVALID",
+          },
+        );
       }
       const limit = request.limit ?? DEFAULT_TEXT_PAGE_LIMIT;
       const cacheKey = `${artifact.sha256}:${request.view ?? "SOURCE"}:${offset}:${limit}`;
@@ -323,7 +523,15 @@ export const createAffiliateOmpGatewayTools = (input: Readonly<{
         }
       }
       if (best === 0 && offset < text.length) {
-        return textResult("The text page cannot fit within the Gateway response bound.", true);
+        return localToolError(
+          textResult("The text page cannot fit within the Gateway response bound.", true),
+          {
+            tool: "read_artifact",
+            stage: "LOCAL_VALIDATION",
+            errorCode: "ARTIFACT_PAGE_TOO_LARGE",
+            reasonCode: "ARTIFACT_PAGE_TOO_LARGE",
+          },
+        );
       }
       const page = pageFor(best);
       const result = textResult(page);
@@ -351,10 +559,18 @@ export const createAffiliateOmpGatewayTools = (input: Readonly<{
       const idempotencyKey = operationKeyFor(operationIdentity);
       if (terminalFrameFor(idempotencyKey, result) === null) {
         isClosed = true;
-        return textResult({
-          code: "TERMINAL_RESULT_TOO_LARGE",
-          message: "The terminal result exceeds the trusted transport bound.",
-        }, true);
+        return localToolError(
+          textResult({
+            code: "TERMINAL_RESULT_TOO_LARGE",
+            message: "The terminal result exceeds the trusted transport bound.",
+          }, true),
+          {
+            tool: "submit_result",
+            stage: "LOCAL_VALIDATION",
+            errorCode: "TERMINAL_RESULT_TOO_LARGE",
+            reasonCode: "TERMINAL_RESULT_TOO_LARGE",
+          },
+        );
       }
       const draft = await checkAffiliateAgentTerminalDraft({
         claim,
@@ -363,7 +579,16 @@ export const createAffiliateOmpGatewayTools = (input: Readonly<{
       });
       if (draft.kind === "DRAFT_INVALID") {
         operationKeys.delete(operationIdentity);
-        return textResult(draft, true);
+        return localToolError(
+          textResult(draft, true),
+          {
+            tool: "submit_result",
+            stage: "LOCAL_VALIDATION",
+            errorCode: "LOCAL_DRAFT_INVALID",
+            reasonCode: "LOCAL_DRAFT_INVALID",
+            issues: draft.issues,
+          },
+        );
       }
       pendingTerminalSubmission = { idempotencyKey, result };
       const outcome = await input.gateway.perform({
@@ -374,6 +599,7 @@ export const createAffiliateOmpGatewayTools = (input: Readonly<{
       }, { signal });
       pendingTerminalSubmission = null;
       if (outcome.kind === "TERMINAL_ACCEPTED") {
+        rememberTerminalProof(idempotencyKey, result);
         isClosed = true;
         if (
           outcome.resultHash !== hashAffiliateAgentValue(result)
@@ -383,13 +609,13 @@ export const createAffiliateOmpGatewayTools = (input: Readonly<{
         }
         const frame = terminalFrameFor(idempotencyKey, result);
         if (frame === null) throw new Error("Terminal frame exceeds the trusted transport bound.");
-        terminalFrame = frame;
+        rememberTerminalFrame(frame);
         input.onTerminal(frame);
       } else if (outcome.kind === "INVOCATION_FAILED") {
         isClosed = true;
         const frame = terminalFrameFor(idempotencyKey, result);
         if (frame === null) throw new Error("Terminal frame exceeds the trusted transport bound.");
-        terminalFrame = frame;
+        rememberTerminalFrame(frame);
         input.onTerminal(frame);
       } else if (outcome.kind === "SCHEMA_CORRECTION_REQUIRED") {
         operationKeys.delete(operationIdentity);
@@ -409,7 +635,19 @@ export const createAffiliateOmpGatewayTools = (input: Readonly<{
         result: { ...affiliateAgentTerminalIdentityFor(claim), ...fields },
         readArtifact: evidenceRef => readClaimArtifact(evidenceRef, signal),
       });
-      return textResult(outcome, outcome.kind === "DRAFT_INVALID");
+      if (outcome.kind === "DRAFT_INVALID") {
+        return localToolError(
+          textResult(outcome, true),
+          {
+            tool: "check_result",
+            stage: "LOCAL_VALIDATION",
+            errorCode: "LOCAL_DRAFT_INVALID",
+            reasonCode: "LOCAL_DRAFT_INVALID",
+            issues: outcome.issues,
+          },
+        );
+      }
+      return textResult(outcome);
     },
   };
   const definitions: ToolDefinition[] = [readArtifact, checkResult];
@@ -421,7 +659,18 @@ export const createAffiliateOmpGatewayTools = (input: Readonly<{
       parameters,
       async execute(value, signal) {
         const { command } = parameters.parse(value);
-        if (command.type === "SUBMIT_TERMINAL_RESULT") return textResult("Use submit_result for terminal results.", true);
+        if (command.type === "SUBMIT_TERMINAL_RESULT") {
+          return localToolError(
+            textResult("Use submit_result for terminal results.", true),
+            {
+              tool: "execute_command",
+              stage: "LOCAL_VALIDATION",
+              command,
+              errorCode: "COMMAND_SCHEMA_INVALID",
+              reasonCode: "COMMAND_OUTSIDE_ROLE",
+            },
+          );
+        }
         return textResult(await input.gateway.perform({
           kind: "EXECUTE_COMMAND",
           idempotencyKey: operationKeyFor(`command:${hashAffiliateAgentValue(command)}`),
@@ -438,6 +687,7 @@ export const createAffiliateOmpGatewayTools = (input: Readonly<{
     definitions: definitions.map(({ name, description, parameters }) => ({ name, description, parameters })),
     get terminalFrame(): AffiliateOmpTerminalFrame | null { return terminalFrame; },
     get isClosed(): boolean { return isClosed; },
+    recordBoundaryError,
     async execute(name: string, value: unknown, signal?: AbortSignal): Promise<AffiliateOmpToolResult> {
       const previous = pending;
       let release!: () => void;
@@ -446,31 +696,121 @@ export const createAffiliateOmpGatewayTools = (input: Readonly<{
       const isCommandExecution = name === "execute_command";
       let commandForDiagnostic: unknown = null;
       try {
-        if (signal?.aborted || isClosed) return textResult("The invocation is closed.", true);
+        if (signal?.aborted) {
+          return await localToolError(
+            textResult("The invocation is closed.", true),
+            {
+              tool: name,
+              stage: "TOOL_RUNTIME",
+              errorCode: "TOOL_ABORTED",
+              reasonCode: "TOOL_ABORTED",
+            },
+          );
+        }
+        if (isClosed) {
+          return await localToolError(
+            textResult("The invocation is closed.", true),
+            {
+              tool: name,
+              stage: "TOOL_RUNTIME",
+              errorCode: "INVOCATION_CLOSED",
+              reasonCode: "INVOCATION_CLOSED",
+            },
+          );
+        }
         const definition = byName.get(name);
-        if (!definition) return textResult("This tool is not permitted for the claim.", true);
+        if (!definition) {
+          return await localToolError(
+            textResult("This tool is not permitted for the claim.", true),
+            {
+              tool: name,
+              stage: "TOOL_RUNTIME",
+              errorCode: "TOOL_NOT_PERMITTED",
+              reasonCode: "TOOL_NOT_PERMITTED",
+            },
+          );
+        }
         const parsed = definition.parameters.safeParse(value);
         if (!parsed.success) {
           if (name === "check_result" || name === "submit_result") {
-            return textResult(terminalDraftInputFailure(claim.role, value, parsed.error), true);
+            const draftFailure = terminalDraftInputFailure(claim.role, value, parsed.error);
+            return await localToolError(
+              textResult(draftFailure, true),
+              {
+                tool: name,
+                stage: "LOCAL_SCHEMA",
+                errorCode: "LOCAL_DRAFT_INVALID",
+                reasonCode: "LOCAL_DRAFT_INVALID",
+                issues: draftFailure.issues,
+              },
+            );
           }
           if (isCommandExecution) {
-            reportCommandRejection(localCommandRejectionDiagnosticFor({
+            const diagnostic = localCommandRejectionDiagnosticFor({
               command: value,
               issues: parsed.error.issues,
-            }));
+            });
+            reportCommandRejection(diagnostic);
+            return await localToolError(
+              textResult({ issues: parsed.error.issues.map(({ path, message }) => ({ path, message })) }, true),
+              {
+                tool: "execute_command",
+                stage: "LOCAL_SCHEMA",
+                command: commandForErrorObservation(value),
+                errorCode: "COMMAND_SCHEMA_INVALID",
+                reasonCode: diagnostic.reasonCode,
+                issues: parsed.error.issues,
+              },
+            );
           }
-          return textResult({ issues: parsed.error.issues.map(({ path, message }) => ({ path, message })) }, true);
+          const artifactErrorCode = parsed.error.issues.some(({ path }) => path.includes("offset"))
+            ? "ARTIFACT_OFFSET_INVALID"
+            : parsed.error.issues.some(({ path }) => path.includes("limit"))
+              ? "ARTIFACT_PAGE_TOO_LARGE"
+              : "ARTIFACT_VIEW_INVALID";
+          return await localToolError(
+            textResult({ issues: parsed.error.issues.map(({ path, message }) => ({ path, message })) }, true),
+            {
+              tool: "read_artifact",
+              stage: "LOCAL_SCHEMA",
+              errorCode: artifactErrorCode,
+              reasonCode: artifactErrorCode,
+              issues: parsed.error.issues,
+            },
+          );
         }
         if (isCommandExecution && typeof parsed.data === "object" && parsed.data !== null) {
           commandForDiagnostic = "command" in parsed.data ? parsed.data.command : null;
         }
         return await definition.execute(parsed.data, signal);
       } catch (error) {
-        if (error instanceof AffiliateSportCitationTextLimitError) {
-          return textResult({ code: "CITATION_TEXT_LIMIT", message: error.message, isRetryable: false }, true);
+        if (error instanceof AffiliateOmpArtifactIntegrityError) {
+          isClosed = true;
+          return await localToolError(
+            textResult("The Gateway operation could not be verified.", true),
+            {
+              tool: name,
+              stage: "TOOL_RUNTIME",
+              errorCode: "ARTIFACT_INTEGRITY_FAILED",
+            },
+          );
         }
-        if (isCommandExecution && error instanceof AffiliateAgentGatewayError) {
+        if (error instanceof AffiliateSportCitationTextLimitError) {
+          return await localToolError(
+            textResult({ code: "CITATION_TEXT_LIMIT", message: error.message, isRetryable: false }, true),
+            {
+              tool: name,
+              stage: "LOCAL_VALIDATION",
+              errorCode: "CITATION_TEXT_LIMIT",
+              reasonCode: "CITATION_TEXT_LIMIT",
+            },
+          );
+        }
+        if (
+          isCommandExecution
+          && error instanceof AffiliateAgentGatewayError
+          && error.origin === "GATEWAY"
+        ) {
           const diagnostic = gatewayCommandRejectionDiagnosticFor({
             command: commandForDiagnostic,
             errorCode: error.code,
@@ -479,11 +819,18 @@ export const createAffiliateOmpGatewayTools = (input: Readonly<{
           });
           if (diagnostic !== null) reportCommandRejection(diagnostic);
         }
+        const transportError = error instanceof AffiliateAgentGatewayError
+          && error.origin === "TRANSPORT"
+          ? error
+          : null;
         const pendingSubmission = pendingTerminalSubmission;
         pendingTerminalSubmission = null;
         if (
           pendingSubmission !== null
-          && (!(error instanceof AffiliateAgentGatewayError) || error.isRetryable)
+          && (
+            transportError !== null
+            || (!(error instanceof AffiliateAgentGatewayError) || error.isRetryable)
+          )
         ) {
           const frame = terminalFrameFor(
             pendingSubmission.idempotencyKey,
@@ -491,20 +838,66 @@ export const createAffiliateOmpGatewayTools = (input: Readonly<{
           );
           if (frame !== null) {
             isClosed = true;
-            terminalFrame = frame;
+            rememberTerminalFrame(frame);
             input.onTerminal(frame);
-            return textResult({
+            const unconfirmedResult = textResult({
               code: "TERMINAL_SUBMISSION_UNCONFIRMED",
               message: "The terminal result submission response could not be confirmed.",
               isRetryable: true,
             }, true);
+            if (error instanceof AffiliateAgentGatewayError && transportError === null) {
+              return unconfirmedResult;
+            }
+            return await localToolError(
+              unconfirmedResult,
+              transportError === null
+                ? {
+                  tool: "submit_result",
+                  stage: "TOOL_RUNTIME",
+                  errorCode: "TERMINAL_SUBMISSION_UNCONFIRMED",
+                  reasonCode: "TERMINAL_SUBMISSION_UNCONFIRMED",
+                  isRetryable: true,
+                }
+                : {
+                  tool: "submit_result",
+                  stage: "TOOL_RUNTIME",
+                  errorCode: "GATEWAY_OPERATION_UNVERIFIED",
+                  reasonCode: "GATEWAY_OPERATION_UNVERIFIED",
+                  isRetryable: transportError.isRetryable,
+                },
+            );
           }
+        }
+        if (transportError !== null) {
+          return await localToolError(
+            textResult({
+              code: transportError.code,
+              message: transportError.safeMessage,
+              isRetryable: transportError.isRetryable,
+            }, true),
+            {
+              tool: name,
+              stage: "TOOL_RUNTIME",
+              command: commandForDiagnostic,
+              errorCode: "GATEWAY_OPERATION_UNVERIFIED",
+              reasonCode: "GATEWAY_OPERATION_UNVERIFIED",
+              isRetryable: transportError.isRetryable,
+            },
+          );
         }
         if (error instanceof AffiliateAgentGatewayError) {
           return textResult({ code: error.code, message: error.safeMessage, isRetryable: error.isRetryable }, true);
         }
         isClosed = true;
-        return textResult("The Gateway operation could not be verified.", true);
+        return await localToolError(
+          textResult("The Gateway operation could not be verified.", true),
+          {
+            tool: name,
+            stage: "TOOL_RUNTIME",
+            errorCode: "GATEWAY_OPERATION_UNVERIFIED",
+            reasonCode: "GATEWAY_OPERATION_UNVERIFIED",
+          },
+        );
       } finally {
         release();
       }
