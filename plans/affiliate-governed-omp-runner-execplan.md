@@ -45,6 +45,8 @@ The operator selected OMP with two ChatGPT accounts. The governed affiliate work
 - [x] (2026-09-15) Reproduce audited navigation, metadata, and source-identity failures.
 - [x] (2026-09-15) Pass corrected guard regressions and all four original-byte source replays.
 - [x] (2026-09-16) Complete ownership review fixes and the final source-only gate.
+- [x] (2026-09-16) Integrate the guard fixes and deploy matched version-13 runtimes.
+- [x] (2026-09-16) Account for all six canary sources and verify the stopped-fleet outcome.
 ## Current approval record
 
 Conditional `AUTH SETUP` approval (recorded 2026-09-07): after source
@@ -4075,3 +4077,178 @@ Mapping approval still requires independent governed review.
 
 Change note: This checkpoint records the reviewed source correction and its
 measured verification. It grants no production execution authority.
+
+## Authorized guard-fix deployment and six-source canary
+
+
+The user authorized completion of the proposed five steps: integrate the
+reviewed source, deploy matching images and contracts, recheck the affected
+holds, run a six-source canary, and compare its outcomes. Source commit
+`724aa3bb3f6ffd85e1d503723b9b7f17e0871d01` is integrated and pushed to main.
+The fresh integration database passed all 219 migrations, source TypeScript,
+and 18 affected suites with 463 tests.
+
+Prepare deployment version 13 with role/prompt version 12. Preserve the active
+Supply Contract, model selection, accounts, credentials, networks, and disabled
+legacy units. The matched deployment covers the site and the same six governed
+containers used in version 12: model auth broker, model gateway, affiliate
+Gateway, agent runner, mapping-producer-1, and supply-reviewer-1. The current
+preflight requires model services to use the reviewed governed image.
+Keep workers stopped and admission closed during replacement.
+
+The six original jobs will include Fort Greene, North Carolina Tigers,
+Pier 25, and Commonpoint. Select one eligible identity-resolution case and one
+eligible primary-page-role case after checking their current ownership and
+stored evidence. Record the exact selection before mutation. Do not silently
+replace a member after that checkpoint. Use only governed, hash-matched
+PREVIEW/APPLY operations. Preserve completed history and the excluded
+Pickleball Court Rentals post-commit hold.
+
+Open one exact producer/reviewer lease at a time. Keep discovery, activation,
+publication, and recurring imports off. At completion or a safe failure,
+close admission and stop the runner, producer, and reviewer. Compare public
+and protected historical state with the pre-canary baseline. A larger batch
+needs a separate bounded authorization after the comparison.
+
+### Deployment and admission checkpoint
+
+
+Exact-commit Site CI `35043638494` passed. Publication runs `35044216499`
+(site) and `35044216693` (governed) passed after the authorized production
+environment approval. The immutable images are:
+
+    ghcr.io/razumly/bracketiq-site@sha256:0de7306acb916a1160df002f563b99c55263077f2b440908ed0d7483ada052e8
+    ghcr.io/razumly/bracketiq-affiliate-governed@sha256:1ea86dc4fca36c4bd118c46a4eda9401d91afb251aad455bf0e91897f1c0b84e
+    ghcr.io/razumly/bracketiq-affiliate-gateway@sha256:9d903cdaf50cf8f4ad47b961d4b0895f985680d9dbb3b21760edd1b3f47b8eec
+
+Deployment 13 has hash
+`cc6c992e333c73dce975f31f6aba9f09355451005000b5de1b60057e75ab6459`.
+The site, model services, and Gateway are healthy. The site rendered its
+homepage/onboarding surface without horizontal overflow. The known onboarding
+icon issue remains unchanged. Adjacent runtimes, credentials, accounts,
+disabled legacy units, and database schema were preserved.
+
+The private tool root is
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v13-repair-tools-724aa3bb3`.
+The private workload root is
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v13-guard-canary-six-724aa3bb3`.
+The original six-job selection is recorded at
+`local://v13-selected-originals.json`. The exact evidence-bound selection is
+`local://v13-selected-six.json`. No member was replaced.
+
+Sofive and Asphalt Green received bounded evidence-only refreshes. Runs
+`fdccae8c-c0c9-4403-90fb-3775260b52db` and
+`7aae6bb1-dabf-44b7-9b0f-d5ab22175cf0` finished PARTIAL with all four requested
+pages captured. Only oversized screenshots failed. The HTML/Markdown evidence
+passed admission. The other four sources reused their successful paired
+version-12 evidence.
+
+All six passed current eligibility. Normal admission applied four jobs with
+reviewed hash
+`fc788b8c5379086703ef452e2b33e8d539166b8cd128cdc943ff44da556e3611`.
+Correction applied the two staged rental packages with reviewed hash
+`6bdd5c83834cc57498e449b1453331fcda7a1d9f3a43c8daa1b66a2fb9180ff3`.
+The six new producer roots are:
+
+    Asphalt Green: a1232923-e4c9-41f2-9393-6d76f9ad7223
+    Sofive Chitown: 8c0a10ac-4fd7-4046-b352-99ddc41beaa5
+    Fort Greene: 17660388-1c26-4c49-b251-faf4f22750d6
+    North Carolina Tigers: 924bdc33-9972-4a6f-a476-1df8fb86e433
+    Pier 25: f714d293-6a1b-43d8-8d83-9c190daf2daa
+    Commonpoint: a3d60fd2-1bfa-4858-96cf-e1f00d7de893
+
+At this checkpoint all six are QUEUED. Admission is closed and repair workers
+are stopped. No model lease has opened. Private canary helpers are being
+corrected against the real PREVIEW/APPLY contracts after safety review.
+Do not repeat capture or admission. Use the recorded applied roots and reports.
+
+### Reviewed no-retry continuation
+
+
+The first run approved Pier 25 and Commonpoint through fresh independent
+reviews. Their article-metadata holds did not recur. Fort Greene then reached
+a valid package-validation receipt but failed before commit. Its producer
+ended with PROCESS_CRASH after repeated rejected commit attempts. No pending
+mapping or unresolved receipt exists. The exact child exit cause was not
+retained beyond the bounded failure diagnostics.
+
+The controller closed admission and stopped all three repair workers. The
+remaining North Carolina Tigers, Sofive, and Asphalt Green roots were still
+unclaimed. Under the original six-source scope, the operator reviewed Fort
+Greene's failed generation 1 and selected no retry. This does not approve or
+complete that source. It preserves the failed claim and its RETRY_WAIT job.
+
+`reviewed-runtime-hold-v2.json` in the private tool root records the exact
+failed job/claim generation and fingerprints of the job, claim, source, root,
+legacy mapping job, working mapping, and receipts. The continuation checks
+those values before and during execution. A changed generation, hash, pending
+mapping, child, active claim, or unresolved receipt prevents continuation.
+The original six-job manifest is unchanged.
+
+Controller `guard-v13-continue-three` resumes only the three unstarted roots.
+It never leases Fort Greene again and never reruns the two approved sources.
+Its final accounting must distinguish approved sources, evidence holds, the
+reviewed runtime hold, and any incomplete work. A new unreviewed process
+failure still stops execution.
+
+### Final six-source outcome
+
+
+The bounded canary is complete. All six originals were attempted and accounted
+for without substitution. Five packages passed independent review and contain
+five candidates. Pier 25 and Commonpoint remain RENTAL packages. North Carolina
+Tigers, Sofive Chitown, and Asphalt Green are CLUB packages. Each approved
+mapping is inactive, its source has automatic scraping disabled, and its
+current entityActionQuality report is valid.
+
+The prior article-metadata holds did not recur for Pier 25, Commonpoint, or
+North Carolina Tigers. Sofive reused the exact Chitown identity rather than
+the shared website's Brooklyn source. Asphalt Green passed the explicit HOME
+page gate and became a private CLUB source through validated evidence, not
+through a page-role default.
+
+Fort Greene is the one reviewed runtime hold. Package validation passed with
+hash `73609ae6ffb6bcd0ece77f9e3fb1681937ae65a5136dacb6cdd14070788165d3`.
+The producer then made rejected commit attempts and exited before a successful
+commit or terminal result. No pending mapping or unresolved receipt exists.
+Its failed generation 1, RETRY_WAIT Gateway job, working mapping, source,
+Supply Source, legacy job, and receipts match the reviewed hold fingerprints.
+No retry was performed. The legacy job remains GOVERNED_REPAIR_PENDING.
+The pre-existing Fort Greene automatic-scraping flag remains unchanged; all
+recurring-import runtimes remain stopped.
+
+The final controller reported five terminal approved roots, one reviewed
+runtime hold, zero incomplete originals, and six accounted originals. It
+closed admission and stopped the runner, mapping-producer-1, and
+supply-reviewer-1. The site, Gateway, model auth broker, and model gateway
+are healthy. Adjacent runtime identities and disabled legacy units are
+preserved.
+
+Final verification found zero active claims, active job pointers,
+reconciliation-required claims, unresolved receipts, and running captures.
+Two unrelated capture runs created on 2026-08-15 remain queued and unchanged;
+they are outside the six-source scope. Both authorized evidence refreshes
+finished and no canary capture remains queued.
+
+Published candidates remain 2821 with before/after hash
+`b336fdc153f599755befb82930ff7672`. This run compares ID-ordered JSONB row text
+joined by `|`; it does not reuse the previous report's hash representation.
+Supply Targets remain zero with hash `d41d8cd98f00b204e9800998ecf8427e`.
+The separate Pickleball Court Rentals post-commit hold also retains its
+original job, claim, and mapping fingerprints.
+
+The final stopped-fleet preflight is ready with hash
+`1e2bab2aad9d0be954b455ba1c994c3a4feeeb076aa359354d8939247eb8dab9`.
+Complete evidence is `local://v13-final-verification.json` and the private
+tool root's `final-verification.json`. The two local test databases are removed
+after integration. Temporary local rollout staging is removed after the
+evidence checkpoint; private production helpers and audit records are retained.
+
+Do not expand the batch yet. First investigate the Fort Greene producer's
+commit-manifest rejection and process-completion failure. The canary verifies
+the source guard/resolver fixes, but it does not establish reliable completion
+for that event-source workflow. No activation, publication, recurring imports,
+or larger retry batch was authorized or performed.
+
+Change note: Record the measured version-13 deployment, five staged approvals,
+the unchanged failed attempt, and the decision to retain the bounded scope.
