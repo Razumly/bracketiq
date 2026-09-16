@@ -1,0 +1,308 @@
+{
+  "schemaVersion": 1,
+  "tool": "image_gen.imagegen",
+  "mode": "built-in",
+  "date": "2026-09-16",
+  "sourceRevision": "7b95a754dd591883b5afb0e76c43188b57caa0dc",
+  "assembly": "sharedStyle + two newlines + viewportInstructions[viewport] + two newlines + 'Screen specification:\\n' + surfaces[].spec",
+  "inputImages": [
+    "event-operations--schedule--desktop-1536x1024.png",
+    "event-operations--participants--mobile-853x1844.png"
+  ],
+  "sharedStyle": "Use case: ui-mockup. Generate ONE new, polished BracketIQ application reference screen for a missing nested workflow. The input images are STYLE REFERENCES ONLY, not content to duplicate. Image 1 establishes desktop styling. Image 2 establishes mobile typography and component language.\nUse the current custom BracketIQ design: uniform subtle 8 px corner radius for rectangular cards, buttons, badges, inputs and dialogs (at reference scale), Roboto Flex-like sans serif, navy #071a38 headings, near-white #fafafa canvas, white surfaces, thin #dde0e5 borders, restrained shadows, burnt-orange #bb4024 primary buttons with white text, bright-orange #ff5735 tab accents, teal #078793 selected/success states, pale teal/violet/amber badges. No pill buttons. Only avatars and circular indicators are round. Flat, precise, professionally typeset UI. No artistic lighting or texture.\nUse an 8px spacing rhythm. Align all labels, columns, values, icons, baselines and control heights. Every character must be fully readable. No cut-off text, no ellipses, no overlapping labels, no borders crossing glyphs. Wrap long text. Do not cram a desktop table into mobile width. No eyebrow text above any page, team, event or organization name.\nShared shell when visible: navy header with orange top rule, white BracketIQ wordmark, menu, bell, MR avatar. Event title \"Fall Tip-Off Classic\", followed by \"Austin Hoops · Austin Sports Center · Oct 10–11, 2026\", rectangular \"Published\" badge, \"24 teams · 3 courts\". The six existing tabs are Details, Participants, Schedule, Standings, Bracket, Finance. Desktop one row; mobile 3 columns by 2 rows. Use the requested tab as active.\nFor modal screens, dim ALL of the background including the header and navigation uniformly. Foreground dialog is crisp white. Use a readable title, square close control, and complete visible footer; never make a modal so tall that its primary action is cut off. Desktop may show the related tab behind the dialog. Mobile can use a nearly full-screen responsive dialog with narrow dim margins and an internal scrollbar. Do not repeat the global header inside the modal. Render one coherent runtime state per screen. Do not add unrelated loading, error and empty examples. Do not add UI fields or actions beyond the screen specification.",
+  "viewportInstructions": {
+    "desktop": "Output exactly 1536 × 1024 landscape. Desktop text around 16px, section headings 22px, dialog title 28px. Use 32px modal padding, 24px gutters. Main modals can be 960–1200px wide; simpler dialogs 560–760px. Fit the entire dialog inside the canvas with 40px safe margins.",
+    "mobile": "Output exactly 853 × 1844 portrait. This is a mobile web reference. Body type around 24px, headings 30–36px, supporting type at least 20px. Use 24–32px card padding and 24px gaps. Use large controls and a single vertical flow. Keep action buttons and final text at least 32px above the bottom edge. For dense modal content, use a sensible scroll viewport with its footer fully visible; never clip a line halfway through."
+  },
+  "surfaces": [
+    {
+      "id": "calendar-navigation",
+      "tab": "Schedule",
+      "title": "Calendar navigation",
+      "surface": "Calendar layout, date navigation, and agenda",
+      "state": "Calendar selected with Agenda view and scheduled match selection",
+      "sources": [
+        "apps/site/src/app/events/[id]/schedule/schedulePage/ScheduleTabPanel.tsx",
+        "apps/site/src/app/events/[id]/schedule/components/LeagueCalendarView.tsx"
+      ],
+      "spec": "Show the Schedule tab in Manage mode. Page heading \"Schedule\". Filters \"Division\" value \"14U Boys\"; \"Pool\" value \"Pool A\". Secondary \"Add Match\". In a white calendar container, rectangular \"Calendar | By court\" selector with Calendar selected. On next row show square previous/next buttons, \"Today\", centered date range \"Oct 10–11, 2026\", and rectangular view tabs \"Month\", \"Week\", \"Day\", \"Agenda\", with Agenda selected. Never a visible-hours slider. One clean agenda list with two date groups \"Saturday, Oct 10\" and \"Sunday, Oct 11\". Saturday three rows: \"9:00–10:00 AM\" / \"Austin Hoops vs Northside United\" / \"Court 1 · Pool A\"; \"10:00–11:00 AM\" / \"Cedar Park vs Hill Country\" / \"Court 2 · Pool A\"; \"4:00–5:00 PM\" / \"Westlake Wolves vs Eastside Eagles\" / \"Court 3 · Pool B\". Sunday one row: \"2:30–3:30 PM\" / \"Austin Hoops vs Westlake Wolves\" / \"Court 1 · Final\". Give each match a restrained \"Scheduled\" rectangular badge. Highlight the first row with pale teal. Desktop use table columns Date, Time, Match, Court. Mobile use one tall list with time above each match title as ordinary schedule data, no small eyebrow above event/page titles. This is one Agenda state with clear day navigation, not a calendar plus unrelated state examples. Bottom subtle timezone text \"All times shown in Central time.\""
+    },
+    {
+      "id": "match-edit",
+      "tab": "Schedule",
+      "title": "Match editing and official assignments",
+      "surface": "Match setup, schedule, official assignments, and validation",
+      "state": "Manage editor with invalid end time and editable official assignments",
+      "sources": [
+        "apps/site/src/app/events/[id]/schedule/components/MatchEditModal.tsx"
+      ],
+      "spec": "Open one large match editor dialog over Schedule. Title \"Edit Match 6\"; subtitle \"Fall Tip-Off Classic · 14U Boys\". No eyebrow. Header close X. Warning banner \"End time must be after the start time.\" The first card is \"Match setup and schedule\". Labelled fields: \"Team 1\" = \"Austin Hoops\"; \"Team 2\" = \"Westlake Wolves\"; \"Division\" = \"14U Boys\"; \"Court\" = \"Court 2\"; \"Scheduled start\" = \"Oct 10, 2026 · 11:00 AM\"; \"Scheduled end\" = \"Oct 10, 2026 · 10:30 AM\" with red outline. \"Actual start\" = \"Not set\"; \"Actual end\" = \"Not set\". Next card \"Official Assignments\": dropdown \"Referee\" = \"Morgan Lee\", checked checkbox \"Checked in\"; dropdown \"Scorekeeper\" = \"Taylor Reed\", unchecked checkbox \"Checked in\". Checkbox \"Lock match (prevent auto-rescheduling)\" unchecked. Desktop also shows compact \"Rules and bracket\" panel: \"Segment label\" = \"Quarter\", \"Quarter count\" = \"4\", \"Segment length (min)\" = \"8\", \"Winner advances to\" = \"Match 15\", \"Loser advances to\" = \"No next loser match\". Desktop two columns; mobile show setup fields then official assignments; rules continue below the scroll viewport and need not be squeezed in. Keep sticky footer wholly visible with subdued red \"Delete match\", secondary \"Cancel\", primary \"Save Changes\". Do not disable Save merely for the invalid time: existing validation shows the error on save. All field labels fully separated from control borders."
+    },
+    {
+      "id": "match-operations",
+      "tab": "Bracket",
+      "title": "Live scoring and score confirmation",
+      "surface": "Score entry, segment confirmation, clock, and official check-in",
+      "state": "Manage scoring with Quarter 3 active, earlier quarters complete, and an unchecked official",
+      "sources": [
+        "apps/site/src/app/events/[id]/schedule/components/ScoreUpdateModal.tsx"
+      ],
+      "spec": "Open a wide match operations dialog from Bracket. Main title \"Austin Hoops vs Westlake Wolves\", subtitle \"Match 15 · Court 1 · Sun, Oct 11 · 2:30 PM\", close X. No tiny label above team names. Secondary \"View roster\" at header. Four rectangular segment tabs \"Quarter 1\", \"Quarter 2\", \"Quarter 3\", \"Quarter 4\"; active Quarter 3, completed checkmarks on Quarter 1 and Quarter 2. Two equal team score cards \"Austin Hoops\" and \"Westlake Wolves\". Current QUARTER scores \"8\" and \"6\" between square minus and plus buttons. Supporting segment summaries align under each card: Austin \"Q1 12 · Q2 12 · Q3 8 · Q4 —\" and \"Total 32\"; Westlake \"Q1 10 · Q2 12 · Q3 6 · Q4 —\" and \"Total 28\". Distinguish current-quarter score from total; never show 32/28 as quarter scores. \"Match Clock\" card with teal \"Running\", \"Quarter 3\", large \"06:12\", secondary \"Reset Timer\". \"Officials\" card with \"Referee · Morgan Lee\", teal \"Checked in\"; second \"Scorekeeper · Taylor Reed\", grey \"Not checked in\", outlined \"Check in\". Window is open so the Check in button is active. \"Match Log\" card with \"No match logs recorded.\"; use no fake incident data in this state. Footer secondary \"Close\" and primary \"Confirm Quarter 3\". Desktop two team cards across then clock, officials and log; mobile use two score cards side by side with short wrapped names, then full-width clock, officials and log. Every part fits without tiny text. Direct +/- scoring is enabled for this basketball fixture. No invented pause timer button or whole-match finalize button."
+    },
+    {
+      "id": "match-incident",
+      "tab": "Bracket",
+      "title": "Match incident entry",
+      "surface": "Player-attributed scoring incident and required-player state",
+      "state": "Record Incident dialog with missing required player and disabled save",
+      "sources": [
+        "apps/site/src/app/events/[id]/schedule/components/ScoreUpdateModal.tsx"
+      ],
+      "spec": "Show one compact \"Record Incident\" dialog centered over a dimmed match operations screen. The selected match uses a soccer fixture to show the existing incident scoring flow. In the dim background, title \"River City FC vs Northside United\", subtitle \"Match 8 · Field 1 · Half 1\". The background event title is \"River City Cup\" and organization \"River City Sports Club\". Retain all BracketIQ brand styling. Dialog fields: \"Log type\" dropdown with value \"Goal\"; required \"Player\" dropdown showing placeholder \"Select player\"; \"Minute\" input with value \"23\"; \"Details\" multiline textarea with placeholder \"Time, player, or note\". Do not invent a Team dropdown in this pending scoring incident dialog: the team is already selected in the score card. Give form fields large consistent hit areas and label spacing. Footer secondary \"Cancel\" and visibly disabled grey \"Save Incident\". This is the required-player disabled state. Do not fabricate an inline validation error or an already saved goal. Show a few readable blurred soccer score cards behind the dialog, no basketball data and no provider content."
+    },
+    {
+      "id": "match-roster",
+      "tab": "Participants",
+      "title": "Match roster management",
+      "surface": "Match roster, temporary players, linking, and document readiness",
+      "state": "Editable roster with registered, removed, and temporary entries",
+      "sources": [
+        "apps/site/src/app/events/[id]/schedule/schedulePage/MatchRosterModal.tsx"
+      ],
+      "spec": "Show one \"Match roster\" dialog for a match that is not complete. Subtitle \"Match 6 · Austin Hoops · Court 2\". Team dropdown label \"Team\" selected \"Austin Hoops\". Four tidy roster entries with names: \"Jordan Ellis\" / \"Signatures: 2/2\" / secondary red \"Remove\"; \"Sam Carter\" / \"Signatures: 1/2\" / amber \"Missing: Event waiver (Parent)\" / secondary red \"Remove\"; \"Alex Morgan\" / rectangular muted red \"Removed\" / muted row / action \"Add\"; \"Riley Brooks\" / violet rectangular \"Temporary\" / \"Document readiness unavailable\" / field \"Link email\" value \"riley.brooks@test.com\" / outlined \"Link\". Keep badges beside names, not above them. Bottom card \"Add temporary player\": \"First name\" = \"Casey\"; \"Last name\" = \"Reed\"; \"Email\" = \"casey.reed@test.com\"; primary \"Add Player\". Header close X. Desktop left roster list and right add-player form, within one dialog; mobile stack all rows then the form with generous spacing. No invented checkboxes for attendance, jersey numbers, bulk actions, or global roster save button. Actions are per entry. No text clipping."
+    },
+    {
+      "id": "team-check-in",
+      "tab": "Participants",
+      "title": "Event Team check-in status",
+      "surface": "Participant Event Team check-in status",
+      "state": "Event check-in enabled with one checked-in team and one team awaiting check-in",
+      "sources": [
+        "apps/site/src/app/events/[id]/schedule/page.tsx"
+      ],
+      "spec": "Show the Participants tab as an event host overview AFTER one team captain accepted the existing event check-in prompt. Heading \"Participants\"; subtitle \"24 teams registered · 2 divisions\". Manage mode selected. Filters \"Team name or contact\" search and \"All divisions\" dropdown. Two complete Event Team cards: \"Austin Hoops 12U\", \"12U Boys · Maya Rivera\", \"10 players\", teal \"Registration complete\", teal rectangular \"Checked in\"; \"Cedar Park Elite\", \"12U Boys · Jordan Brooks\", \"9 players\", amber \"Roster pending\", grey rectangular \"Not checked in\". Show a third \"Round Rock Rebels\", \"14U Boys · Elena Garcia\", \"10 players\", teal \"Registration complete\", grey \"Not checked in\". Title the card group \"Registered teams\". Desktop three roomy team cards in a grid; mobile stacked. No new check-in page or tab, no bulk check-in action, no QR scanner, no per-team check-in action buttons: current app uses a confirmation prompt for the authorized team captain. This reference shows persisted badges in the existing Participants surface. Use ample whitespace and normal-sized type, no large invented metrics or decorative empty states. Header event date Oct 10–11, 2026. The normal per-team detail link may be a simple right-chevron."
+    },
+    {
+      "id": "registration-compliance",
+      "tab": "Participants",
+      "title": "Registration compliance detail",
+      "surface": "Team payment, signatures, registration answers, and participant detail",
+      "state": "Selected team with one expanded child registration and missing parent signature",
+      "sources": [
+        "apps/site/src/app/events/[id]/schedule/schedulePage/EventComplianceModal.tsx"
+      ],
+      "spec": "Open one dialog titled \"Austin Hoops 12U\" with subtitle \"Registration details\". Close X. At top two summary fields \"Payment\" / \"Paid\"; \"Required signatures\" / \"3/4 complete\". A small \"Registration answers\" section with \"Preferred contact\" / \"Maya Rivera\". Show two participants: \"Jordan Ellis\", supporting \"Child registration\", \"Paid\", \"2/2 signed\", secondary \"Expand\"; and \"Sam Carter\", supporting \"Child registration\", \"Paid\", \"1/2 signed\", secondary \"Collapse\". Sam's details are expanded in a pale neutral region: \"Event waiver\" / \"Parent · Event-specific\" / amber \"Needs signature\"; \"Code of conduct\" / \"Parent · Event-specific\" / teal \"Signed\". Beneath, \"Registration answers\": \"Emergency contact\" / \"Maya Rivera\". Desktop a properly aligned table with User, Payment, Documents, Details columns and expansion spanning the row. Mobile vertical participant cards with labelled values and expanded Sam card. Parent and child identity and signature status must be legible. No signature pad, no forged signature, no mark-as-signed control, no payment collection button. This is read-only compliance detail."
+    },
+    {
+      "id": "send-bill",
+      "tab": "Finance",
+      "title": "Event bill creation",
+      "surface": "Bill ownership, host amount, fees, tax, split permission, and bill preview",
+      "state": "Team bill draft with fee-inclusive preview",
+      "sources": [
+        "apps/site/src/app/events/[id]/schedule/schedulePage/EventBillingModals.tsx",
+        "apps/site/src/components/ui/HostPriceInput.tsx",
+        "apps/site/src/lib/billingFees.ts"
+      ],
+      "spec": "Open a dialog titled \"Send Bill · Austin Hoops 12U\", close X. Fields: \"Bill owner\" dropdown \"Team\". Side-by-side money fields \"Host take-home\" \"$432.33\" and \"Bill amount\" \"$450.00\". Below them show the exact fee formula on at most two lines: \"$432.33 + $13.35 processing + $4.32 platform = $450.00\". Other fields \"Tax\" = \"$0.00\"; \"Primary line item label\" = \"Event registration\". Checked checkbox \"Allow team members to split this bill\". Preview card \"Bill preview\", line \"Event registration\" / \"$450.00\"; strong total \"Total bill\" / \"$450.00\". The bill amount already includes fees: do not add them again in the preview. Footer \"Cancel\" and primary \"Create Bill\". Desktop input form left and preview right within the modal; mobile stacked. Do not add card-number inputs, bank details, Send now, due-date fields or an automatic charge button. This is a bill draft, not payment completion."
+    },
+    {
+      "id": "payment-review",
+      "tab": "Finance",
+      "title": "Payment review and refunds",
+      "surface": "Team bills, refundable payment, and manual proof review",
+      "state": "Refundable card payment and submitted manual payment proof in one team billing snapshot",
+      "sources": [
+        "apps/site/src/app/events/[id]/schedule/schedulePage/EventBillingModals.tsx"
+      ],
+      "spec": "Open one dialog \"Refunds · Cedar Park Jets\", close X. Summary metrics \"Paid\" \"$450.00\", \"Refunded\" \"$0.00\", \"Refundable\" \"$450.00\". Card \"Team bill · Cedar Park Jets\", line \"Event registration · $600.00\", status \"OPEN · $450.00 paid of $600.00\". Payment #1 card: rectangular \"Paid\" badge, \"Amount $450.00 · Refunded $0.00\", \"Refundable: $450.00\"; money input label \"Refund amount\" value \"$100.00\"; primary \"Refund\". Payment #2 card: \"Amount $150.00\", \"Manual payment proof\" with amber \"SUBMITTED\" badge; a neutral document-thumbnail icon representing the already uploaded proof, NOT a fabricated bank transfer receipt; labelled money field \"Amount paid\" value \"$150.00\"; primary \"Accept\", secondary red \"Reject\". Do not label this submitted proof paid. Do not add a Refund button to the manual payment. Place existing restriction text \"This payment cannot be refunded because it is not linked to Stripe.\" beneath the manual payment. Desktop payment cards side by side; mobile stacked with enough room for the restriction sentence to wrap. No duplicated totals, no refund success toast before action, no automatic charge action."
+    }
+  ],
+  "inputImageOverrides": {
+    "registration-compliance": [
+      "event-operations--finance--desktop-1536x1024.png",
+      "event-operations--participants--mobile-853x1844.png"
+    ],
+    "send-bill": [
+      "event-operations--finance--desktop-1536x1024.png",
+      "event-operations--participants--mobile-853x1844.png"
+    ],
+    "payment-review": [
+      "event-operations--finance--desktop-1536x1024.png",
+      "event-operations--participants--mobile-853x1844.png"
+    ]
+  },
+  "outputs": [
+    {
+      "id": "calendar-navigation-desktop",
+      "file": "event-operations--calendar-navigation--desktop-1536x1024.png",
+      "sourceFile": "exec-4ae57a51-05a3-48f7-a36f-12da03c5a05e.png",
+      "sha256": "19f5f2fdf2f3a222d930c45b5dab13ec7a8b8171f34c4d760f79b5d313d5bd5d",
+      "width": 1536,
+      "height": 1024,
+      "initialSourceFile": "exec-75630e7a-352e-4ddf-aaee-5423bbdf883b.png"
+    },
+    {
+      "id": "calendar-navigation-mobile",
+      "file": "event-operations--calendar-navigation--mobile-853x1844.png",
+      "sourceFile": "exec-9823d0af-e24d-4fb2-b581-762f91fec3f2.png",
+      "sha256": "785f6bf5c6ed64805e50f045f166eeb72a8bea523c0bc75d57c32721590c05db",
+      "width": 853,
+      "height": 1844,
+      "initialSourceFile": "exec-095cf007-d516-4bd0-9fd0-c6ba9014736e.png"
+    },
+    {
+      "id": "match-edit-desktop",
+      "file": "event-operations--match-edit--desktop-1536x1024.png",
+      "sourceFile": "exec-a58e1574-4f63-4e51-b55e-7a9c6522d11c.png",
+      "sha256": "57ab15680c4e73be01654bd9c7d48e10b55fe6b0b7b1b7042647b2db90a538c1",
+      "width": 1536,
+      "height": 1024
+    },
+    {
+      "id": "match-edit-mobile",
+      "file": "event-operations--match-edit--mobile-853x1844.png",
+      "sourceFile": "exec-1e71778e-cfaf-439e-8702-671c186f0062.png",
+      "sha256": "57fef4a884dde8e0a1c1858226208a4921df68fa6803503e73c15d8f6bfb4421",
+      "width": 853,
+      "height": 1844,
+      "initialSourceFile": "exec-daa3fd67-9409-45d1-b950-dd490c341fca.png"
+    },
+    {
+      "id": "match-operations-desktop",
+      "file": "event-operations--match-operations--desktop-1536x1024.png",
+      "sourceFile": "exec-ccabd09c-5d8c-4842-80e8-3cc2fc54efff.png",
+      "sha256": "1ab1cf42b6cf4c94bc37e6b82c605f647604882732cfdbb425601188ebe52d6b",
+      "width": 1536,
+      "height": 1024
+    },
+    {
+      "id": "match-operations-mobile",
+      "file": "event-operations--match-operations--mobile-853x1844.png",
+      "sourceFile": "exec-d20fa726-3c45-4e03-b6b5-0b65655cf853.png",
+      "sha256": "062635eec2ce68438855483e4737ee2fb733c919dc4f0ddcaf58907452223f77",
+      "width": 853,
+      "height": 1844
+    },
+    {
+      "id": "match-incident-desktop",
+      "file": "event-operations--match-incident--desktop-1536x1024.png",
+      "sourceFile": "exec-545caf5f-0fb1-4f4b-aec3-fa6643da1342.png",
+      "sha256": "2ed956f54adb7b1ecd6a58c37bfbd2d6a081be126ff30bc0ca71a4d2525fd5cf",
+      "width": 1536,
+      "height": 1024
+    },
+    {
+      "id": "match-incident-mobile",
+      "file": "event-operations--match-incident--mobile-853x1844.png",
+      "sourceFile": "exec-323b9675-4e85-4c98-835c-a400703625fb.png",
+      "sha256": "a27133b08b5a73f77a3deda25a80e4d4b4614ca1249ef6ce5c0068fc117fa54d",
+      "width": 853,
+      "height": 1844
+    },
+    {
+      "id": "match-roster-desktop",
+      "file": "event-operations--match-roster--desktop-1536x1024.png",
+      "sourceFile": "exec-27d68ffc-5587-44b8-b71a-9f0ce70392ae.png",
+      "sha256": "b49bfbf9b2cb9922bbf0a67633e23a8b90546ccf014f9d734cfaec5a0f37777d",
+      "width": 1536,
+      "height": 1024
+    },
+    {
+      "id": "match-roster-mobile",
+      "file": "event-operations--match-roster--mobile-853x1844.png",
+      "sourceFile": "exec-e7eca0fd-7a77-4df6-ba3d-a239622ffeff.png",
+      "sha256": "0c6dea11782124217695ff1523d0710498edd89a818846b64a27e594acf63b06",
+      "width": 853,
+      "height": 1844
+    },
+    {
+      "id": "team-check-in-desktop",
+      "file": "event-operations--team-check-in--desktop-1536x1024.png",
+      "sourceFile": "exec-b0632c46-17cb-433f-a6dd-63ec685b1db9.png",
+      "sha256": "9554191bd61c4b9996c9b6c49d45db153d42269f57d650689e315f6f483f40bc",
+      "width": 1536,
+      "height": 1024
+    },
+    {
+      "id": "team-check-in-mobile",
+      "file": "event-operations--team-check-in--mobile-853x1844.png",
+      "sourceFile": "exec-f496b712-435a-4056-8c8c-bca83b2c40af.png",
+      "sha256": "e532b2350ab2eba38123a36ad1a13fc2b07d4fb47bf935d3c1b1084b0a45da7f",
+      "width": 853,
+      "height": 1844
+    },
+    {
+      "id": "registration-compliance-desktop",
+      "file": "event-operations--registration-compliance--desktop-1536x1024.png",
+      "sourceFile": "exec-39793530-4dbb-4aa7-bb99-ce1ef8b98114.png",
+      "sha256": "e5d95f63b37892f977ff4fa847124870643bd45cc42917dcbe7f8ac0f0c35ce5",
+      "width": 1536,
+      "height": 1024
+    },
+    {
+      "id": "registration-compliance-mobile",
+      "file": "event-operations--registration-compliance--mobile-853x1844.png",
+      "sourceFile": "exec-c4bd219e-3315-4379-9c5f-300128d6c149.png",
+      "sha256": "2accfe6a7d9ffd001b6b450b9edd9b705ec795f4683c6d9f35f98d02b8ca8768",
+      "width": 853,
+      "height": 1844,
+      "initialSourceFile": "exec-38487bcd-fc07-4b67-a39e-11251a012a76.png"
+    },
+    {
+      "id": "send-bill-desktop",
+      "file": "event-operations--send-bill--desktop-1536x1024.png",
+      "sourceFile": "exec-434425c4-c209-416f-b44a-a180e35813a8.png",
+      "sha256": "2ca33e5893277531eb4dd140f9d6f9ba38c3ab096ca8b383a9557ed8850ff683",
+      "width": 1536,
+      "height": 1024
+    },
+    {
+      "id": "send-bill-mobile",
+      "file": "event-operations--send-bill--mobile-853x1844.png",
+      "sourceFile": "exec-e206705d-14c3-411e-afc2-7290cadafedd.png",
+      "sha256": "2cf76cf888adc53a3890ba4c561e141f9a2b02e24e62df410e73f3d1b151db86",
+      "width": 853,
+      "height": 1844
+    },
+    {
+      "id": "payment-review-desktop",
+      "file": "event-operations--payment-review--desktop-1536x1024.png",
+      "sourceFile": "exec-1831230a-b592-48e4-ba14-2302c6e474ee.png",
+      "sha256": "8a2c4ba4afa0907e0caa771b6baadb8287bbba8d0c1824b259c235dde74587e2",
+      "width": 1536,
+      "height": 1024
+    },
+    {
+      "id": "payment-review-mobile",
+      "file": "event-operations--payment-review--mobile-853x1844.png",
+      "sourceFile": "exec-664c86e1-1796-4e0c-b13f-963534ecd65b.png",
+      "sha256": "b00d0b0a7df83d6aa2ce8bbd139c73668ad92f3eacbea2d73fb4c4075df71d1b",
+      "width": 853,
+      "height": 1844
+    }
+  ],
+  "corrections": [
+    {
+      "outputId": "calendar-navigation-desktop",
+      "inputSourceFile": "exec-75630e7a-352e-4ddf-aaee-5423bbdf883b.png",
+      "prompt": "Edit only the selected Pool filter in this BracketIQ reference. Change its value from \"Pool A\" to \"All pools\". This matches the list that includes Pool A, Pool B and a Final. Keep all other text, controls, dates, colors, spacing, dimensions, and the full agenda exactly the same. Output 1536 × 1024 landscape."
+    },
+    {
+      "outputId": "calendar-navigation-mobile",
+      "inputSourceFile": "exec-095cf007-d516-4bd0-9fd0-c6ba9014736e.png",
+      "prompt": "Edit only the selected Pool filter in this BracketIQ reference. Change its value from \"Pool A\" to \"All pools\". This matches the list that includes Pool A, Pool B and a Final. Keep all other text, controls, dates, colors, spacing, dimensions, and the full agenda exactly the same. Output 853 × 1844 portrait."
+    },
+    {
+      "outputId": "match-edit-mobile",
+      "inputSourceFile": "exec-daa3fd67-9409-45d1-b950-dd490c341fca.png",
+      "prompt": "Refine this mobile BracketIQ match editor. Output exactly 853 pixels wide by 1844 pixels tall, portrait. Preserve the title, validation banner, all eight Match setup and schedule fields, two Official Assignments and their checkboxes, the Lock match checkbox, and all three footer buttons. Remove the entire visible \"Rules and bracket\" panel from this mobile viewport; those controls are below the scroll position and must not be squeezed into this image. Make each scheduled-date control full-width on its own row to keep its text legible. Keep a clean scrollable dialog layout with 8px card corners. Footer must be fully visible with at least 32px outer bottom margin. No control or text may sit behind the footer or be cut by it. The dialog may start higher in the image to fit the schedule fields. Do not add new text or controls."
+    },
+    {
+      "outputId": "registration-compliance-mobile",
+      "inputSourceFile": "exec-38487bcd-fc07-4b67-a39e-11251a012a76.png",
+      "prompt": "Reformat this BracketIQ mobile reference to exactly 853 pixels wide by 1844 pixels tall. Preserve all foreground dialog content, correct spelling, values, badges, expanded Sam Carter details and document statuses, complete Close button, and the Participants tab as active. Use the additional vertical room to space this dialog clearly. Use a single column, restrained uniform 8px rectangular corner radiuses, the same navy, orange and teal style, and at least 32px outer bottom margin. Do not crop or clip any title, label, document status, or control. Do not add, remove, or change any feature or data. Keep the background uniformly dim. This is a portrait mobile screenshot, not a 935 by 1683 canvas."
+    }
+  ],
+  "assemblyNotes": "Generate each surface once per viewport. Use inputImageOverrides[surface.id] when present. Apply the listed corrections to their initial outputs. The final source files are listed in outputs."
+}

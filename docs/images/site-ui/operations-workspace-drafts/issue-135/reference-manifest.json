@@ -2,7 +2,7 @@
   "issue": 135,
   "status": "draft",
   "layoutFamily": "Operations workspace",
-  "scope": "One reference per existing Event operations tab",
+  "scope": "Six Event operations tabs with nine supplemental workflow references",
   "generation": {
     "tool": "image_gen.imagegen",
     "mode": "built-in",
@@ -143,6 +143,210 @@
       "surface": "Event finance, billing, and day-of staffing readiness",
       "state": "Manage view with payment review error and recoverable action",
       "viewport": "desktop"
+    },
+    {
+      "file": "event-operations--calendar-navigation--desktop-1536x1024.png",
+      "tab": "Schedule",
+      "mode": "manage",
+      "surface": "Calendar layout, date navigation, and agenda",
+      "state": "Calendar selected with Agenda view and scheduled match selection",
+      "viewport": "desktop",
+      "sources": [
+        "apps/site/src/app/events/[id]/schedule/schedulePage/ScheduleTabPanel.tsx",
+        "apps/site/src/app/events/[id]/schedule/components/LeagueCalendarView.tsx"
+      ]
+    },
+    {
+      "file": "event-operations--calendar-navigation--mobile-853x1844.png",
+      "tab": "Schedule",
+      "mode": "manage",
+      "surface": "Calendar layout, date navigation, and agenda",
+      "state": "Calendar selected with Agenda view and scheduled match selection",
+      "viewport": "mobile",
+      "sources": [
+        "apps/site/src/app/events/[id]/schedule/schedulePage/ScheduleTabPanel.tsx",
+        "apps/site/src/app/events/[id]/schedule/components/LeagueCalendarView.tsx"
+      ]
+    },
+    {
+      "file": "event-operations--match-edit--desktop-1536x1024.png",
+      "tab": "Schedule",
+      "mode": "manage",
+      "surface": "Match setup, schedule, official assignments, and validation",
+      "state": "Manage editor with invalid end time and editable official assignments",
+      "viewport": "desktop",
+      "sources": [
+        "apps/site/src/app/events/[id]/schedule/components/MatchEditModal.tsx"
+      ]
+    },
+    {
+      "file": "event-operations--match-edit--mobile-853x1844.png",
+      "tab": "Schedule",
+      "mode": "manage",
+      "surface": "Match setup, schedule, official assignments, and validation",
+      "state": "Manage editor with invalid end time and editable official assignments",
+      "viewport": "mobile",
+      "sources": [
+        "apps/site/src/app/events/[id]/schedule/components/MatchEditModal.tsx"
+      ]
+    },
+    {
+      "file": "event-operations--match-operations--desktop-1536x1024.png",
+      "tab": "Bracket",
+      "mode": "manage",
+      "surface": "Score entry, segment confirmation, clock, and official check-in",
+      "state": "Manage scoring with Quarter 3 active, earlier quarters complete, and an unchecked official",
+      "viewport": "desktop",
+      "sources": [
+        "apps/site/src/app/events/[id]/schedule/components/ScoreUpdateModal.tsx"
+      ]
+    },
+    {
+      "file": "event-operations--match-operations--mobile-853x1844.png",
+      "tab": "Bracket",
+      "mode": "manage",
+      "surface": "Score entry, segment confirmation, clock, and official check-in",
+      "state": "Manage scoring with Quarter 3 active, earlier quarters complete, and an unchecked official",
+      "viewport": "mobile",
+      "sources": [
+        "apps/site/src/app/events/[id]/schedule/components/ScoreUpdateModal.tsx"
+      ]
+    },
+    {
+      "file": "event-operations--match-incident--desktop-1536x1024.png",
+      "tab": "Schedule",
+      "mode": "manage",
+      "surface": "Player-attributed scoring incident and required-player state",
+      "state": "Record Incident dialog with missing required player and disabled save",
+      "viewport": "desktop",
+      "sources": [
+        "apps/site/src/app/events/[id]/schedule/components/ScoreUpdateModal.tsx"
+      ]
+    },
+    {
+      "file": "event-operations--match-incident--mobile-853x1844.png",
+      "tab": "Schedule",
+      "mode": "manage",
+      "surface": "Player-attributed scoring incident and required-player state",
+      "state": "Record Incident dialog with missing required player and disabled save",
+      "viewport": "mobile",
+      "sources": [
+        "apps/site/src/app/events/[id]/schedule/components/ScoreUpdateModal.tsx"
+      ]
+    },
+    {
+      "file": "event-operations--match-roster--desktop-1536x1024.png",
+      "tab": "Schedule",
+      "mode": "manage",
+      "surface": "Match roster, temporary players, linking, and document readiness",
+      "state": "Editable roster with registered, removed, and temporary entries",
+      "viewport": "desktop",
+      "sources": [
+        "apps/site/src/app/events/[id]/schedule/schedulePage/MatchRosterModal.tsx"
+      ]
+    },
+    {
+      "file": "event-operations--match-roster--mobile-853x1844.png",
+      "tab": "Schedule",
+      "mode": "manage",
+      "surface": "Match roster, temporary players, linking, and document readiness",
+      "state": "Editable roster with registered, removed, and temporary entries",
+      "viewport": "mobile",
+      "sources": [
+        "apps/site/src/app/events/[id]/schedule/schedulePage/MatchRosterModal.tsx"
+      ]
+    },
+    {
+      "file": "event-operations--team-check-in--desktop-1536x1024.png",
+      "tab": "Participants",
+      "mode": "manage",
+      "surface": "Participant Event Team check-in status",
+      "state": "Event check-in enabled with one checked-in team and one team awaiting check-in",
+      "viewport": "desktop",
+      "sources": [
+        "apps/site/src/app/events/[id]/schedule/page.tsx"
+      ]
+    },
+    {
+      "file": "event-operations--team-check-in--mobile-853x1844.png",
+      "tab": "Participants",
+      "mode": "manage",
+      "surface": "Participant Event Team check-in status",
+      "state": "Event check-in enabled with one checked-in team and one team awaiting check-in",
+      "viewport": "mobile",
+      "sources": [
+        "apps/site/src/app/events/[id]/schedule/page.tsx"
+      ]
+    },
+    {
+      "file": "event-operations--registration-compliance--desktop-1536x1024.png",
+      "tab": "Participants",
+      "mode": "manage",
+      "surface": "Team payment, signatures, registration answers, and participant detail",
+      "state": "Selected team with one expanded child registration and missing parent signature",
+      "viewport": "desktop",
+      "sources": [
+        "apps/site/src/app/events/[id]/schedule/schedulePage/EventComplianceModal.tsx"
+      ]
+    },
+    {
+      "file": "event-operations--registration-compliance--mobile-853x1844.png",
+      "tab": "Participants",
+      "mode": "manage",
+      "surface": "Team payment, signatures, registration answers, and participant detail",
+      "state": "Selected team with one expanded child registration and missing parent signature",
+      "viewport": "mobile",
+      "sources": [
+        "apps/site/src/app/events/[id]/schedule/schedulePage/EventComplianceModal.tsx"
+      ]
+    },
+    {
+      "file": "event-operations--send-bill--desktop-1536x1024.png",
+      "tab": "Finance",
+      "mode": "manage",
+      "surface": "Bill ownership, host amount, fees, tax, split permission, and bill preview",
+      "state": "Team bill draft with fee-inclusive preview",
+      "viewport": "desktop",
+      "sources": [
+        "apps/site/src/app/events/[id]/schedule/schedulePage/EventBillingModals.tsx",
+        "apps/site/src/components/ui/HostPriceInput.tsx",
+        "apps/site/src/lib/billingFees.ts"
+      ]
+    },
+    {
+      "file": "event-operations--send-bill--mobile-853x1844.png",
+      "tab": "Participants",
+      "mode": "manage",
+      "surface": "Bill ownership, host amount, fees, tax, split permission, and bill preview",
+      "state": "Team bill draft with fee-inclusive preview",
+      "viewport": "mobile",
+      "sources": [
+        "apps/site/src/app/events/[id]/schedule/schedulePage/EventBillingModals.tsx",
+        "apps/site/src/components/ui/HostPriceInput.tsx",
+        "apps/site/src/lib/billingFees.ts"
+      ]
+    },
+    {
+      "file": "event-operations--payment-review--desktop-1536x1024.png",
+      "tab": "Finance",
+      "mode": "manage",
+      "surface": "Team bills, refundable payment, and manual proof review",
+      "state": "Refundable card payment and submitted manual payment proof in one team billing snapshot",
+      "viewport": "desktop",
+      "sources": [
+        "apps/site/src/app/events/[id]/schedule/schedulePage/EventBillingModals.tsx"
+      ]
+    },
+    {
+      "file": "event-operations--payment-review--mobile-853x1844.png",
+      "tab": "Finance",
+      "mode": "manage",
+      "surface": "Team bills, refundable payment, and manual proof review",
+      "state": "Refundable card payment and submitted manual payment proof in one team billing snapshot",
+      "viewport": "mobile",
+      "sources": [
+        "apps/site/src/app/events/[id]/schedule/schedulePage/EventBillingModals.tsx"
+      ]
     }
   ],
   "coverage": [
@@ -150,6 +354,9 @@
       "requirement": "Schedule and calendar navigation",
       "tabs": [
         "Schedule"
+      ],
+      "supplementalSurfaces": [
+        "calendar-navigation"
       ]
     },
     {
@@ -157,6 +364,11 @@
       "tabs": [
         "Schedule",
         "Participants"
+      ],
+      "supplementalSurfaces": [
+        "match-edit",
+        "match-roster",
+        "registration-compliance"
       ]
     },
     {
@@ -164,6 +376,10 @@
       "tabs": [
         "Standings",
         "Bracket"
+      ],
+      "supplementalSurfaces": [
+        "match-operations",
+        "match-incident"
       ]
     },
     {
@@ -171,6 +387,12 @@
       "tabs": [
         "Participants",
         "Bracket"
+      ],
+      "supplementalSurfaces": [
+        "match-edit",
+        "match-roster",
+        "registration-compliance",
+        "payment-review"
       ]
     },
     {
@@ -179,6 +401,10 @@
         "Schedule",
         "Participants",
         "Finance"
+      ],
+      "supplementalSurfaces": [
+        "match-edit",
+        "match-incident"
       ]
     },
     {
@@ -189,6 +415,12 @@
         "Standings",
         "Bracket",
         "Finance"
+      ],
+      "supplementalSurfaces": [
+        "match-operations",
+        "team-check-in",
+        "send-bill",
+        "payment-review"
       ]
     }
   ],
@@ -202,6 +434,24 @@
     "Mobile references wrap the six tabs into two rows to keep every label visible.",
     "The schedule shows an available Court 3 drop target at 11:00 AM. Grey hatched Resource ranges remain unavailable.",
     "Loading, empty, error, conflict, and confirmation examples are separate reference states, not live components. Render only the state selected by current data, request outcome, and user action.",
-    "This replacement set remains unapproved. The existing commerce references for Issue #126 remain separate."
-  ]
+    "This replacement set remains unapproved. The existing commerce references for Issue #126 remain separate.",
+    "The supplemental set adds nine desktop and mobile pairs for nested workflows. It preserves the original 12 tab references.",
+    "The mobile match editor shows the upper form and a complete footer. Rules and bracket fields remain available through scrolling, as shown in the desktop reference.",
+    "Match incident and roster dialogs can open from Schedule. The shared bill dialog can open from Participants or Finance.",
+    "Team check-in is a saved status reference. The current captain confirmation flow remains in place. This reference does not add a host check-in action.",
+    "Event editing and rental checkout reuse the shared form and commerce references listed in surface-coverage.md."
+  ],
+  "supplementalGeneration": {
+    "tool": "image_gen.imagegen",
+    "mode": "built-in",
+    "date": "2026-09-16",
+    "sourceRevision": "7b95a754dd591883b5afb0e76c43188b57caa0dc",
+    "imageCount": 18,
+    "prompts": "supplemental-prompts.json",
+    "reviewIndex": "README.md",
+    "coverageAudit": "surface-coverage.md",
+    "radiusToken": "--bq-radius: 0.5rem",
+    "visualReview": "Reviewed all 18 new images for text, alignment, control shapes, visible actions, and coherent data. Corrected the calendar pool filter and two mobile layouts.",
+    "fileValidation": "All PNG dimensions match their filenames. SHA-256 hashes match the generated source files."
+  }
 }
