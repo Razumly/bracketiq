@@ -3,6 +3,18 @@
   "status": "draft",
   "layoutFamily": "Operations workspace",
   "scope": "One reference per existing Event operations tab",
+  "generation": {
+    "tool": "image_gen.imagegen",
+    "mode": "built-in",
+    "date": "2026-09-15",
+    "sourceRevision": "26698a396959f2fc4bfea978dd2fd09696af0b5c",
+    "prompts": "generation-prompts.json",
+    "reviewIndex": "README.md",
+    "styleReference": "docs/images/site-ui/commerce-flow/commerce-registration--team-selection--desktop-1536x1024.png",
+    "radiusToken": "--bq-radius: 0.5rem",
+    "visualReview": "Reviewed all 12 generated images for text, alignment, content, and control shapes.",
+    "fileValidation": "All PNG dimensions match their filenames. Saved files match the generated files."
+  },
   "viewport": {
     "width": 853,
     "height": 1844,
@@ -23,6 +35,17 @@
   "approval": {
     "releaseOwnerApproved": false,
     "canonicalDirectory": "docs/images/site-ui/operations-workspace/"
+  },
+  "referencePolicy": {
+    "assetRole": "visual reference only",
+    "stateExamples": "Loading, empty, error, conflict, and confirmation examples describe possible runtime states. They are not an instruction to render those states together or to create separate static components.",
+    "runtimeRule": "Render the state selected by current data, request outcome, and user action. Keep each state in the existing dynamic component flow.",
+    "modeStrategy": {
+      "model": "Manage and Normal are visibility modes of one shared surface.",
+      "manage": "Show host controls and operational details when the user has manage permission.",
+      "normal": "Reuse the same surface and hide host-only controls and operational details when the user lacks manage permission.",
+      "referenceCoverage": "Most references capture Manage mode. Bracket captures Normal mode as a clean read-only example. A second generated image is not required for every mode."
+    }
   },
   "references": [
     {
@@ -172,8 +195,13 @@
   "notes": [
     "Mobile references are the Issue #135 deliverable.",
     "Desktop companions support the approved desktop-reference requirement in Issue #125.",
-    "Normal Bracket view stays clean and opens match details in a modal. Host-only statistics remain in Manage view.",
+    "Manage and Normal are visibility modes of one shared surface. Normal hides host-only controls and operational details; Manage shows them when the user has permission. Most references capture Manage, while Bracket captures Normal.",
     "Manage Schedule view uses day-specific time ranges instead of a visible-hour slider. Breaks and greyed unavailable resource ranges show where a match cannot be moved.",
-    "All references use one shared six-tab shell. They remain draft assets outside the canonical directory."
+    "All references use one shared six-tab shell. They remain draft assets outside the canonical directory.",
+    "The generated replacements use the current 8 px rectangular radius and BracketIQ navy, orange, and teal design.",
+    "Mobile references wrap the six tabs into two rows to keep every label visible.",
+    "The schedule shows an available Court 3 drop target at 11:00 AM. Grey hatched Resource ranges remain unavailable.",
+    "Loading, empty, error, conflict, and confirmation examples are separate reference states, not live components. Render only the state selected by current data, request outcome, and user action.",
+    "This replacement set remains unapproved. The existing commerce references for Issue #126 remain separate."
   ]
 }
