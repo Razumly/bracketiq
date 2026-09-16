@@ -42,6 +42,9 @@ The operator selected OMP with two ChatGPT accounts. The governed affiliate work
 - [x] Use current mapping run and evidence lineage for independent review.
 - [x] Retain bounded reviewer effect failure diagnostics.
 - [x] Run focused regressions, source replays, and independent review.
+- [x] (2026-09-15) Reproduce audited navigation, metadata, and source-identity failures.
+- [x] (2026-09-15) Pass corrected guard regressions and all four original-byte source replays.
+- [x] (2026-09-16) Complete ownership review fixes and the final source-only gate.
 ## Current approval record
 
 Conditional `AUTH SETUP` approval (recorded 2026-09-07): after source
@@ -103,6 +106,12 @@ OMP 18.1.13 contains the Luna model. Its broker-backed discovery queries each ac
 The initial focused tool checks were followed by the final integrated source gate. All 440 tests now pass, including pending-command idempotency, terminal deadline replay, full evidence context, and preflight capture boundaries.
 
 The initial production status check showed the existing BracketIQ Gateway healthy and canary workers stopped. The approved auth setup later started only the OMP broker. The latest measured state is recorded in the Auth setup checkpoint below.
+
+The held-job audit found that page-template navigation classes and article
+metadata could reject supported source actions. Local regressions reproduced
+both failures. Review also found missing legacy metadata and reverse-intake
+ownership reads in the exact-source resolver. Those two regressions returned
+eligible sources before correction. Their required outcome is a no-write hold.
 
 ## Decision Log
 
@@ -3926,3 +3935,143 @@ tool root. Local records are `local://v12-final-verification.json`,
 `local://v12-final-preservation.json`. The deployed source remains
 `b1caeaeee289ca987b5c318709a2cd8d722a6852`. This final plan checkpoint records
 execution only; it does not imply another application deployment.
+
+## Source-only fixes for audited guard and resolver defects
+
+
+The user selected `Fix the guards and resolver`. Use workstream
+`workstream/affiliate-hold-guards` from
+`0d163612f1fc3729eb8d8a3300dc254070b273b9`. Fix navigation false positives,
+article-metadata overreach, exact-page source matching, supported primary-page
+roles, and the related producer/reviewer instructions. This pass does not
+authorize deployment, production requeue, hold removal, activation, or
+publication. Embedded structured descriptions, cross-page description fields,
+new action formats, and producer post-commit recovery remain outside scope.
+
+The navigation check must identify actual navigation containers, not any
+ancestor class or ID containing the word navigation. Keep semantic nav and
+ARIA navigation boundaries. Keep bounded exact container-token support where
+needed. Page-template settings on body, html, or content wrappers are not
+navigation authority. Preserve related-story, cross-candidate, in-page
+navigation, exact destination, and bounded-work checks.
+
+Article metadata does not prove that the primary content is editorial.
+Keep it informative. A CLUB must have a source-backed action for its own
+entity. An article's canonical self URL is insufficient by itself. Accept
+an evidenced registration, membership, or booking action, a distinct official
+information destination, or a same-page action supported by a matching primary
+Organization/SportsOrganization identity or bounded named official-site context.
+The original multi-college story and its canonical-self variant must fail.
+Do not infer editorial meaning from an article tag, class, or metadata type.
+
+Explicit job, intake, and mapping source links remain authoritative and must
+agree. Source-key and recorded intake provenance are strong identity evidence;
+conflicts there still block, including legacy top-level intakeSourceKey metadata.
+Reverse intake-to-source links also establish ownership. An exact URL must not
+take a source from another intake. Without a conflicting strong binding, prefer
+the exact selected primary-page listing URL. A shared website base URL must
+not merge different branches, cities, activities, or paths. If only broad
+website matches exist, do not silently reuse one of those sources.
+
+Allow explicitly selected HOME, LISTING, DETAIL, REGISTRATION, and RENTAL
+pages as primary evidence when the existing exact identity, policy, paired
+artifact, and source-kind gates pass. Do not infer a kind from the page role.
+Auxiliary POLICY, LOGO, DIRECTORY, and unsupported roles remain ineligible.
+Keep implicit page selection conservative; do not guess among several pages.
+No correction hold, active sibling, explicit ownership conflict, or protected
+working/public state check may be bypassed.
+
+Main owns role/prompt instructions and advances their source versions to 12.
+The two implementation slices own entity/action analysis and admission
+identity/page-role behavior separately. Their public API shapes stay unchanged.
+The deployed version-12 runtime still uses role/prompt version 11 until a
+separately authorized deployment.
+
+Pre-fix regressions reproduced both the generic article rejection and the
+body-template navigation rejection. The isolated PostgreSQL regression also
+reproduced a false source conflict caused by another location on the same
+website. The test database is `bracketiq_e2e_hold_guards`; all 219 migrations
+are current. No production operation ran.
+
+Verification must cover the exact stored Fort Greene, North Carolina Tigers,
+Pier 25, and Commonpoint evidence; true navigation and the original news
+article must still fail. PostgreSQL must prove exact-page and explicit-link
+precedence, real ownership conflict rejection, supported primary roles, and
+unchanged working data. Preserve genuine sport-evidence and extraction gaps.
+
+### Source-fix review decisions
+
+
+On 2026-09-15, the Standards and Spec reviews found that structured Article
+metadata plus an article tag still rejected valid CMS club pages. The same
+approach missed wrapped posts and URL-less or OG-only article records. Replace
+that attempted entity inference with the action-evidence rule above. Six new
+guard regressions failed before this correction and passed afterward. The
+four original stored HTML replays also passed without changing their bytes.
+
+The prompt schema rejected the added sport instruction at module load because
+it exceeded 1,000 characters. Shorten the instruction; do not increase the
+limit. The corrected sport instruction has 833 characters. The combined
+reviewer entity instruction has 807 characters. All four version-12 source
+role and prompt contracts now parse within the unchanged limits.
+
+The first PostgreSQL lifecycle pass succeeded. Spec review then found two
+additional ownership gaps: the snapshot omitted legacy top-level
+intakeSourceKey provenance, and exact source selection did not load reverse
+intake owners. Both require no-write conflict regressions before correction.
+The review record is local://hold-guards-review.json. Verification evidence is
+local://hold-guards-verification.json. Neither record authorizes production work.
+
+### Source-only outcome and verification
+
+
+The source-only guard and resolver fixes are complete on
+`workstream/affiliate-hold-guards`. Standards and Spec reviews both passed.
+All review findings are resolved and verified. The final source TypeScript
+and targeted ESLint checks passed. The complete affected Jest gate passed
+18 suites and 463 tests, including the PostgreSQL lifecycle workflow.
+
+The guard suite has 55 passing tests. It covers navigation container boundaries,
+CMS article metadata, canonical-self precedence, URL/headline/@id identity,
+matching organization evidence, related stories, cross-candidate links, exact
+query/hash destinations, and existing work limits. The four original HTML
+replays passed with unchanged SHA-256 values: Fort Greene, North Carolina
+Tigers, Pier 25, and Commonpoint. The replay checked entity/action behavior
+and applicable source descriptions. It did not approve a mapping package.
+
+The PostgreSQL workflow confirms that exact unowned sources remain eligible.
+An explicit current-intake owner remains eligible. Conflicting source IDs,
+source keys, recorded intake provenance, duplicate exact URLs, and reverse
+intake owners remain no-write holds. The two late ownership regressions changed
+from incorrect eligibility to conflict holds. A blocked APPLY leaves the
+selected intake unlinked and preserves the other intake's source link.
+Explicit HOME, LISTING, DETAIL, REGISTRATION, and RENTAL roles pass the primary
+evidence gate. Auxiliary roles remain blocked. HOME evidence also passed
+source creation, producer claim binding, and terminalization. Page roles do
+not choose a listing kind or alter protected working/public data.
+
+The final checks ran from `apps/site`. `DATABASE_URL` pointed only to the local
+branch database. `RUN_DATABASE_INTEGRATION=1` and
+`AFFILIATE_TEST_DATABASE_NAME=bracketiq_e2e_hold_guards` enabled the database
+scenario. All 219 migrations were current before database execution.
+
+    npx tsc --noEmit
+    npx eslint src/server/affiliateImports/{entityActionQuality,affiliateExistingDataRepairAdmission,agentGatewayContracts}.ts src/server/affiliateImports/__tests__/{entityActionQuality,affiliateExistingDataRepairAdmission,affiliateExistingDataRepair.database.integration,agentGateway}.test.ts
+    npx jest --runInBand --runTestsByPath src/server/affiliateImports/__tests__/{entityActionQuality,descriptionQuality,mappingExtractor,mappingPackageRepair,affiliateExistingDataRepairAdmission,affiliateExistingDataRepairState,agentGateway,agentGatewayAdapters,affiliateOmpGatewayTools,affiliateSportDetermination,affiliateSportMapping,sourceMappingHumanReview,affiliateMappingApproval,runAffiliateAgentGateway,affiliateGatewayHealth,sourceMappingClaimEvidence,sourceMappingQueue,affiliateExistingDataRepair.database.integration}.test.ts
+
+The temporary replay script is removed. The original audit evidence, replay
+results, and review records remain available through the local evidence links
+above. Keep the isolated logical test database with the source branch until
+integration, as required by the workstream database process.
+
+No production deployment, runtime change, capture, hold removal, or job requeue
+occurred. Genuine sport-evidence gaps, capture failures, extraction capability
+limits, mismatched primary-page selections, and ownership conflicts still
+need their own resolution. The Pickleball Court Rentals post-commit hold stays
+unchanged. Embedded/cross-page description support and new action formats
+remain outside this pass. Use of these fixes in production requires a separately
+authorized deployment. Hold removal and job retry also require authorization.
+Mapping approval still requires independent governed review.
+
+Change note: This checkpoint records the reviewed source correction and its
+measured verification. It grants no production execution authority.

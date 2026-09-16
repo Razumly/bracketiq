@@ -68,6 +68,14 @@ const TERMINAL_REPAIR_STATUSES = new Set([
   'COMPLETED', 'SUCCEEDED', 'FAILED', 'EXCLUDED', 'REJECTED', 'CANCELLED', 'APPROVED', 'DONE',
 ]);
 const SUPPORTED_KINDS = new Set<AffiliateAgentListingKind>(['CLUB', 'EVENT', 'RENTAL']);
+const SOURCE_CREATION_PRIMARY_PAGE_ROLES: Record<string, true> = {
+  HOME: true,
+  LISTING: true,
+  DETAIL: true,
+  REGISTRATION: true,
+  RENTAL: true,
+};
+const SOURCE_CREATION_PAGE_ROLE_HOLD = 'SOURCE_CREATION_PAGE_ROLE_UNSUPPORTED';
 const HASH_PATTERN = /^[a-f0-9]{64}$/i;
 const REASON_MAX_BYTES = 1_000;
 
@@ -201,6 +209,10 @@ type SourceRow = {
   lifecycleGeneration?: number;
   autoScrapeEnabled: boolean;
   metadata: unknown;
+};
+type SourceOwnerRow = {
+  id: string;
+  affiliateSourceId: string;
 };
 type MappingRow = {
   id: string;
@@ -346,6 +358,7 @@ type Snapshot = {
   pages: PageRow[];
   artifacts: ArtifactRow[];
   files: FileRow[];
+  sourceOwners: SourceOwnerRow[];
   sources: SourceRow[];
   mappings: MappingRow[];
   roots: RootRow[];
@@ -943,6 +956,18 @@ const readSnapshot = async (client: Client, selectedJobIds: readonly string[], s
       ...intakeIds.flatMap((id) => [
         { metadata: { path: ['intakeId'], equals: id } },
         { metadata: { path: ['sourceEvidence', 'intakeId'], equals: id } },
+        { metadata: { path: ['existingDataRepair', 'intakeId'], equals: id } },
+        { metadata: { path: ['existingDataRepairAdmission', 'intakeId'], equals: id } },
+      ]),
+      ...sourceKeys.flatMap((key) => [
+        { metadata: { path: ['intakeSourceKey'], equals: key } },
+        { metadata: { path: ['sourceKey'], equals: key } },
+        { metadata: { path: ['sourceEvidence', 'sourceKey'], equals: key } },
+        { metadata: { path: ['sourceEvidence', 'intakeSourceKey'], equals: key } },
+        { metadata: { path: ['existingDataRepair', 'sourceKey'], equals: key } },
+        { metadata: { path: ['existingDataRepair', 'intakeSourceKey'], equals: key } },
+        { metadata: { path: ['existingDataRepairAdmission', 'sourceKey'], equals: key } },
+        { metadata: { path: ['existingDataRepairAdmission', 'intakeSourceKey'], equals: key } },
       ]),
     ],
   };
@@ -975,6 +1000,16 @@ const readSnapshot = async (client: Client, selectedJobIds: readonly string[], s
   const typedRuns = snapshotCollection(uniqueRows<RunRow>(runs), SNAPSHOT_GLOBAL_LIMIT, 'intake runs');
   const typedPages = snapshotCollection(uniqueRows<PageRow>(pages), SNAPSHOT_GLOBAL_LIMIT, 'intake pages');
   const typedArtifacts = snapshotCollection(uniqueRows<ArtifactRow>(artifacts), SNAPSHOT_GLOBAL_LIMIT, 'intake artifacts');
+  const sourceListingUrls = sortedUnique([
+    ...typedPages.map((page) => page.url),
+    ...typedPages.map((page) => page.canonicalUrl),
+  ]);
+  const sourcesByExactListingUrl = sourceListingUrls.length
+    ? await snapshotRows<SourceRow>(db.affiliateScrapeSources, {
+      where: { listUrl: { in: sourceListingUrls } },
+      orderBy: { id: 'asc' },
+    }, SNAPSHOT_GLOBAL_LIMIT, 'exact source listing URL candidates')
+    : [];
   const sourceHosts = sortedUnique([
     ...typedPages.map((page) => page.canonicalUrl),
     ...typedIntakes.map((intake) => intake.baseUrl),
@@ -994,9 +1029,22 @@ const readSnapshot = async (client: Client, selectedJobIds: readonly string[], s
     }, SNAPSHOT_GLOBAL_LIMIT, 'canonical source URL candidates')
     : [];
   const typedSources = snapshotCollection(
-    uniqueRows<SourceRow>([...sources, ...sourcesByCanonicalUrl]),
+    uniqueRows<SourceRow>([...sources, ...sourcesByExactListingUrl, ...sourcesByCanonicalUrl]),
     SNAPSHOT_GLOBAL_LIMIT,
     'sources',
+  );
+  const sourceOwnerIds = sortedUnique(typedSources.map((source) => source.id));
+  const sourceOwners = sourceOwnerIds.length
+    ? await snapshotRows<SourceOwnerRow>(db.affiliateSourceIntakes, {
+      where: { affiliateSourceId: { in: sourceOwnerIds } },
+      select: { id: true, affiliateSourceId: true },
+      orderBy: { id: 'asc' },
+    }, SNAPSHOT_GLOBAL_LIMIT, 'source candidate intake owners')
+    : [];
+  const typedSourceOwners = snapshotCollection(
+    uniqueRows<SourceOwnerRow>(sourceOwners),
+    SNAPSHOT_GLOBAL_LIMIT,
+    'source candidate intake owners',
   );
   const mappingIds = sortedUnique([
     ...initialMappingIds,
@@ -1157,6 +1205,7 @@ const readSnapshot = async (client: Client, selectedJobIds: readonly string[], s
     artifacts: typedArtifacts,
     files: snapshotCollection(uniqueRows<FileRow>(files), SNAPSHOT_GLOBAL_LIMIT, 'artifact files'),
     sources: typedSources,
+    sourceOwners: typedSourceOwners,
     mappings: typedMappings,
     roots: typedRoots,
     organizations: snapshotCollection(uniqueRows<OrganizationRow>(organizations), SNAPSHOT_GLOBAL_LIMIT, 'source organizations'),
@@ -1224,53 +1273,84 @@ const sourceCandidatesFor = (
   intake: IntakeRow,
   requestedSourceIds: readonly string[],
   mappingSourceId: string | null = null,
+  selectedPrimaryPageUrl: string | null = null,
 ): { candidates: SourceRow[]; reasons: string[] } => {
   const reasons: string[] = [];
-  const explicitIds = sortedUnique([
-    ...(job.sourceId ? [job.sourceId] : []),
-    ...(intake.affiliateSourceId ? [intake.affiliateSourceId] : []),
-    ...(mappingSourceId ? [mappingSourceId] : []),
-  ]);
-  const exact = snapshot.sources.filter((source) => explicitIds.includes(source.id));
-  const exactIds = new Set(exact.map((source) => source.id));
-  if (explicitIds.length > 1) reasons.push('SOURCE_IDENTITY_CONFLICT');
-  if (explicitIds.some((id) => !exactIds.has(id))) {
+  const explicitValues = [job.sourceId, intake.affiliateSourceId, mappingSourceId];
+  const explicitIds = sortedUnique(
+    explicitValues
+      .map((value) => text(value))
+      .filter((value): value is string => Boolean(value)),
+  );
+  const hasMalformedExplicitId = explicitValues.some((value) => value !== null && text(value) === null);
+  const explicitCandidates = snapshot.sources.filter((source) => explicitIds.includes(source.id));
+  const explicitCandidateIds = new Set(explicitCandidates.map((source) => source.id));
+  if (hasMalformedExplicitId || explicitIds.length > 1) reasons.push('SOURCE_IDENTITY_CONFLICT');
+  if (hasMalformedExplicitId || explicitIds.some((id) => !explicitCandidateIds.has(id))) {
     reasons.push('SOURCE_IDENTITY_MISSING');
   }
   if (reasons.includes('SOURCE_IDENTITY_MISSING')) return { candidates: [], reasons };
 
-  const keyCandidates = snapshot.sources.filter((source) => source.sourceKey === intake.sourceKey);
-  const metadataCandidates = snapshot.sources.filter((source) => {
+  const provenanceFor = (source: SourceRow): { intakeIds: string[]; sourceKeys: string[] } => {
     const metadata = recordValue(source.metadata);
-    const evidence = recordValue(metadata.sourceEvidence);
-    return metadata.intakeId === intake.id
-      || evidence.intakeId === intake.id
-      || metadata.intakeSourceKey === intake.sourceKey
-      || evidence.sourceKey === intake.sourceKey;
+    const records = [
+      metadata,
+      recordValue(metadata.sourceEvidence),
+      recordValue(metadata.existingDataRepair),
+      recordValue(metadata.existingDataRepairAdmission),
+    ];
+    return {
+      intakeIds: sortedUnique(records
+        .map((record) => text(record.intakeId))
+        .filter((value): value is string => Boolean(value))),
+      sourceKeys: sortedUnique(records
+        .flatMap((record) => [text(record.sourceKey), text(record.intakeSourceKey)])
+        .filter((value): value is string => Boolean(value))),
+    };
+  };
+  const provenanceBySourceId = new Map(snapshot.sources.map((source) => [source.id, provenanceFor(source)]));
+  const strongCandidates = snapshot.sources.filter((source) => {
+    const provenance = provenanceBySourceId.get(source.id);
+    return source.sourceKey === intake.sourceKey
+      || provenance?.intakeIds.includes(intake.id) === true
+      || provenance?.sourceKeys.includes(intake.sourceKey) === true;
   });
-  const identityUrls = new Set(
-    [
-      intake.baseUrl,
-      ...snapshot.pages
-        .filter((page) => page.intakeId === intake.id && upper(page.status) === 'ACTIVE')
-        .map((page) => page.canonicalUrl),
-    ]
-      .map((value) => canonical(value))
-      .filter((value): value is string => Boolean(value)),
-  );
-  const canonicalUrlCandidates = snapshot.sources.filter((source) => {
-    const listingUrl = canonical(source.listUrl);
-    const baseUrl = canonical(source.baseUrl);
-    return (listingUrl !== null && identityUrls.has(listingUrl))
-      || (baseUrl !== null && identityUrls.has(baseUrl));
-  });
-  const byId = new Map<string, SourceRow>();
-  [...exact, ...keyCandidates, ...metadataCandidates, ...canonicalUrlCandidates]
-    .forEach((source) => byId.set(source.id, source));
-  const candidates = Array.from(byId.values()).sort(compareId);
-  if (explicitIds.length && candidates.some((source) => !explicitIds.includes(source.id))) {
+  const exactUrl = canonical(selectedPrimaryPageUrl);
+  const exactListingCandidates = exactUrl
+    ? snapshot.sources.filter((source) => canonical(source.listUrl) === exactUrl)
+    : [];
+  const anchoredById = new Map<string, SourceRow>();
+  [...explicitCandidates, ...strongCandidates, ...exactListingCandidates]
+    .forEach((source) => anchoredById.set(source.id, source));
+  const anchoredCandidates = Array.from(anchoredById.values()).sort(compareId);
+  const selectedCandidates = explicitIds.length
+    ? explicitCandidates
+    : strongCandidates.length
+      ? strongCandidates
+      : exactListingCandidates;
+  const selectedIds = new Set(selectedCandidates.map((source) => source.id));
+  const competingCandidates = anchoredCandidates.filter((source) => !selectedIds.has(source.id));
+  if (strongCandidates.length > 1 || competingCandidates.length > 0) {
     reasons.push('SOURCE_IDENTITY_CONFLICT');
   }
+  const sourceOwnerIntakeIdsBySourceId = new Map<string, Set<string>>();
+  for (const owner of snapshot.sourceOwners) {
+    const ownerIntakeIds = sourceOwnerIntakeIdsBySourceId.get(owner.affiliateSourceId);
+    if (ownerIntakeIds) ownerIntakeIds.add(owner.id);
+    else sourceOwnerIntakeIdsBySourceId.set(owner.affiliateSourceId, new Set([owner.id]));
+  }
+  if (anchoredCandidates.some((source) => {
+    const provenance = provenanceBySourceId.get(source.id);
+    const ownerIntakeIds = sourceOwnerIntakeIdsBySourceId.get(source.id);
+    return provenance?.intakeIds.some((id) => id !== intake.id) === true
+      || provenance?.sourceKeys.some((key) => key !== intake.sourceKey) === true
+      || Boolean(ownerIntakeIds && (ownerIntakeIds.size > 1 || !ownerIntakeIds.has(intake.id)));
+  })) {
+    reasons.push('SOURCE_IDENTITY_CONFLICT');
+  }
+  const candidates = Array.from(new Map(
+    [...selectedCandidates, ...competingCandidates].map((source) => [source.id, source]),
+  ).values()).sort(compareId);
   if (candidates.length > 1) reasons.push('AMBIGUOUS_SOURCE_IDENTITY');
   if (job.sourceId && candidates.length === 1 && candidates[0]!.id !== job.sourceId) {
     reasons.push('MAPPING_JOB_SOURCE_CONFLICT');
@@ -1881,12 +1961,21 @@ const evaluateJob = async (
     || sourceId === intake.affiliateSourceId
     || sourceId === knownMapping?.sourceId
   ));
+  const selection = evidenceSelectionFor(input, job);
+  const selectedPrimaryPageUrl = selection
+    ? snapshot.pages.find((candidate) => (
+      candidate.id === selection.pageId
+      && candidate.intakeId === intake.id
+      && upper(candidate.status) === 'ACTIVE'
+    ))?.canonicalUrl ?? null
+    : null;
   const sourceResolution = sourceCandidatesFor(
     snapshot,
     job,
     intake,
     jobRequestedSourceIds,
     knownMapping?.sourceId ?? null,
+    selectedPrimaryPageUrl,
   );
   reasons.push(...sourceResolution.reasons);
   const source = sourceResolution.candidates.length === 1 ? sourceResolution.candidates[0]! : null;
@@ -1939,7 +2028,9 @@ const evaluateJob = async (
   reasons.push(...pair.reasons);
   const run = pair.run;
   const page = pair.page;
-  if (!source && page && upper(page.role) !== 'LISTING') reasons.push('SOURCE_CREATION_PAGE_NOT_LISTING');
+  if (!source && page && !SOURCE_CREATION_PRIMARY_PAGE_ROLES[upper(page.role)]) {
+    reasons.push(SOURCE_CREATION_PAGE_ROLE_HOLD);
+  }
   let evidence: ExistingDataRepairArtifact[] = [];
   let manifest: AffiliateAgentEvidenceManifest | null = null;
   if (run && page) {
@@ -3215,7 +3306,10 @@ const artifactBinding = async (
     .filter((page): page is PageRow => Boolean(page))
     .filter((page) => canonical(page.canonicalUrl) === canonical(source.listUrl));
   const sourceCreated = recordValue(recordValue(admissionAudit).selectedWrite).sourceAction === 'CREATE_SOURCE';
-  if (primaryPages.length !== 1 || sourceCreated && upper(primaryPages[0]!.role) !== 'LISTING') {
+  if (
+    primaryPages.length !== 1
+    || sourceCreated && !SOURCE_CREATION_PRIMARY_PAGE_ROLES[upper(primaryPages[0]!.role)]
+  ) {
     bindingError('The repair claim evidence is missing the exact source page.');
   }
   if (

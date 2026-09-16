@@ -38,6 +38,14 @@ const articleMapping: AffiliateScrapeMapping = {
   },
 };
 
+const canonicalArticleMapping: AffiliateScrapeMapping = {
+  ...articleMapping,
+  fields: {
+    ...articleMapping.fields,
+    officialActionUrl: { selector: ':scope', mode: 'literal', value: articleUrl },
+  },
+};
+
 const candidateFor = (
   title: string,
   officialActionUrl: string,
@@ -95,6 +103,127 @@ describe('analyzeAffiliateEntityActionQuality', () => {
       expect.objectContaining({ code: 'ACTION_PURPOSE_UNSUPPORTED', candidateIndex: 0 }),
     ]));
   });
+  it('rejects a primary editorial CLUB even when its action is the canonical self URL', () => {
+    const url = 'https://news.example/editorial/club-teams';
+    const page = pageFor(url, `
+      <html><head>
+        <meta property="og:type" content="article">
+        <link rel="canonical" href="${url}">
+        <script type="application/ld+json">
+          {"@type":"Article","url":"${url}","headline":"Club teams expand"}
+        </script>
+      </head><body><main>
+        <article class="article club-card">
+          <h1 class="title">Club teams expand</h1>
+          <p>The latest club-team news and analysis.</p>
+          <a class="action" href="${url}">Read the editorial</a>
+        </article>
+      </main></body></html>
+    `);
+    const report = analyzeAffiliateEntityActionQuality({
+      page,
+      mapping: clubMappingFor(url),
+      candidates: [candidateFor('Club teams expand', url, url)],
+    });
+
+    expect(report).toMatchObject({ schemaVersion: 1, isValid: false, sourceDocumentKind: 'ARTICLE' });
+    expect(report.issues).toContainEqual(expect.objectContaining({
+      code: 'DOCUMENT_ENTITY_MISMATCH',
+      candidateIndex: 0,
+    }));
+  });
+
+  it('rejects article self-links with OG-only metadata despite publisher organization evidence', () => {
+    const page = {
+      ...articlePage,
+      body: articlePage.body.replace(
+        /<script type="application\/ld\+json">[\s\S]*?<\/script>/,
+        `<script type="application/ld+json">{"@type":"Organization","url":"${articleUrl}","name":"College Football Publisher"}</script>`,
+      ),
+    };
+    const candidates = extractAffiliateCandidatesFromPage(page, canonicalArticleMapping);
+    const report = analyzeAffiliateEntityActionQuality({ page, mapping: canonicalArticleMapping, candidates });
+    expect(report).toMatchObject({ isValid: false, sourceDocumentKind: 'ARTICLE' });
+    expect(report.issues).toContainEqual(expect.objectContaining({ code: 'DOCUMENT_ENTITY_MISMATCH' }));
+  });
+
+  it('rejects self-links in wrapped posts with headline-bound Article metadata', () => {
+    const page = {
+      ...articlePage,
+      body: articlePage.body
+        .replace('<meta property="og:type" content="article">', '')
+        .replace(/,"url":"[^"]+"/, '')
+        .replace('<article class="article post">', '<div class="layout"><article class="post">')
+        .replace('</main>', '</div></main>'),
+    };
+    const mapping = { ...canonicalArticleMapping, itemSelector: 'article.post' };
+    const candidates = extractAffiliateCandidatesFromPage(page, mapping);
+    const report = analyzeAffiliateEntityActionQuality({ page, mapping, candidates });
+    expect(report).toMatchObject({ isValid: false, sourceDocumentKind: 'ARTICLE' });
+    expect(report.issues).toContainEqual(expect.objectContaining({ code: 'DOCUMENT_ENTITY_MISMATCH' }));
+  });
+
+  it('does not treat action words in an Article self-link as a club action', () => {
+    const url = 'https://news.example/registration-opens-for-river-club';
+    const page = pageFor(url, `
+      <head><meta property="og:type" content="article"></head>
+      <main class="club-card"><h1 class="title">Registration opens for River Club</h1>
+        <p>The latest club registration news.</p><a class="action" href="${url}">Register</a>
+      </main>
+    `);
+    const mapping = clubMappingFor(url);
+    const candidates = extractAffiliateCandidatesFromPage(page, mapping);
+    expect(analyzeAffiliateEntityActionQuality({ page, mapping, candidates }).issues)
+      .toContainEqual(expect.objectContaining({ code: 'DOCUMENT_ENTITY_MISMATCH', candidateIndex: 0 }));
+  });
+
+  it('requires club action evidence for an Article identified only by @id', () => {
+    const url = 'https://news.example/club-expansion';
+    const page = pageFor(url, `
+      <head><script type="application/ld+json">{"@type":"Article","@id":"${url}#article"}</script></head>
+      <main class="club-card"><h1 class="title">Club expansion</h1>
+        <p>Several schools announced new teams.</p><a class="action" href="${url}">Read story</a>
+      </main>
+    `);
+    const mapping = clubMappingFor(url);
+    const candidates = extractAffiliateCandidatesFromPage(page, mapping);
+    const report = analyzeAffiliateEntityActionQuality({ page, mapping, candidates });
+    expect(report).toMatchObject({ isValid: false, sourceDocumentKind: 'ARTICLE' });
+    expect(report.issues).toContainEqual(expect.objectContaining({ code: 'DOCUMENT_ENTITY_MISMATCH' }));
+  });
+
+  it('does not override an unrelated Article @id with a matching headline', () => {
+    const url = 'https://river-club.example/';
+    const page = pageFor(url, `
+      <head><meta property="og:type" content="website">
+        <script type="application/ld+json">{"@type":"Article","@id":"${url}news/river-club","headline":"River Club"}</script>
+      </head><main class="club-card"><h1 class="title">River Club</h1>
+        <p>We offer indoor volleyball programs.</p><a class="action" href="${url}">Club home</a>
+      </main>
+    `);
+    const mapping = clubMappingFor(url);
+    const candidates = extractAffiliateCandidatesFromPage(page, mapping);
+    expect(analyzeAffiliateEntityActionQuality({ page, mapping, candidates })).toMatchObject({
+      isValid: true, sourceDocumentKind: 'OTHER', issues: [],
+    });
+  });
+
+  it('accepts canonical club information backed by an Organization @id', () => {
+    const url = 'https://river-club.example/';
+    const page = pageFor(url, `
+      <head><meta property="og:type" content="article">
+        <script type="application/ld+json">{"@type":"SportsOrganization","@id":"${url}#organization","name":"River Club"}</script>
+      </head><main class="club-card"><h1 class="title">River Club</h1>
+        <p>We offer indoor volleyball programs.</p><a class="action" href="${url}">Club home</a>
+      </main>
+    `);
+    const mapping = clubMappingFor(url);
+    const candidates = extractAffiliateCandidatesFromPage(page, mapping);
+    expect(analyzeAffiliateEntityActionQuality({ page, mapping, candidates })).toMatchObject({
+      isValid: true, sourceDocumentKind: 'ARTICLE', issues: [],
+    });
+  });
+
 
   it('does not reject a club homepage because an unrelated news widget is present', () => {
     const url = 'https://river-club.example/';
@@ -117,6 +246,230 @@ describe('analyzeAffiliateEntityActionQuality', () => {
     expect(report.sourceDocumentKind).toBe('OTHER');
     expect(report).toMatchObject({ schemaVersion: 1, isValid: true, issues: [] });
   });
+
+  it('treats generic article SEO metadata as informational on a club page', () => {
+    const url = 'https://river-club.example/';
+    const page = pageFor(url, `
+      <html><head>
+        <meta property="og:type" content="article">
+        <script type="application/ld+json">{"@type":"WebPage","url":"${url}","name":"River Club"}</script>
+      </head><body><main class="club-card">
+        <h1 class="title">River Club</h1><p>Our club offers indoor volleyball programs.</p>
+        <a class="action" href="/register">Register for River Club</a>
+      </main></body></html>
+    `);
+    const mapping = clubMappingFor(url);
+    const candidates = extractAffiliateCandidatesFromPage(page, mapping);
+    expect(analyzeAffiliateEntityActionQuality({ page, mapping, candidates })).toMatchObject({
+      isValid: true, sourceDocumentKind: 'ARTICLE', issues: [],
+    });
+  });
+
+  it('accepts a CMS club article with an evidenced registration action', () => {
+    const url = 'https://river-club.example/';
+    const page = pageFor(url, `
+      <head>
+        <meta property="og:type" content="article">
+        <script type="application/ld+json">{"@type":"Article","url":"${url}","headline":"River Club"}</script>
+      </head><body><main><article class="article club-card">
+        <h1 class="title">River Club</h1>
+        <p>Our club offers indoor volleyball programs.</p>
+        <a class="action" href="/register">Register for River Club</a>
+      </article></main></body>
+    `);
+    const mapping = clubMappingFor(url);
+    const candidates = extractAffiliateCandidatesFromPage(page, mapping);
+    expect(analyzeAffiliateEntityActionQuality({ page, mapping, candidates })).toMatchObject({
+      isValid: true, sourceDocumentKind: 'ARTICLE', issues: [],
+    });
+  });
+  it('accepts North Carolina Tigers club evidence with generic article metadata', () => {
+    const url = 'https://aussierulesusa.com/clubs/north-carolina-tigers-144/';
+    const actionUrl = 'https://www.playhq.com/afl/org/north-carolina-tigers/2a4e8e1f/register';
+    const page = pageFor(url, `
+      <html><head>
+        <meta property="og:type" content="article">
+        <meta property="og:url" content="${url}">
+        <link rel="canonical" href="${url}">
+        <script type="application/ld+json">
+          {"@context":"https://schema.org","@graph":[
+            {"@type":"WebPage","@id":"${url}","url":"${url}","name":"North Carolina Tigers - USAFL"},
+            {"@type":"SportsOrganization","url":"${url}","name":"North Carolina Tigers"}
+          ]}
+        </script>
+      </head><body><main>
+        <div class="club-card">
+          <h1 class="title">North Carolina Tigers</h1>
+          <p>The North Carolina Tigers Australian Rules Football Club is based in Raleigh, North Carolina.
+            The club conducts regular training sessions and participates in all USAFL events.</p>
+          <a class="action" href="${actionUrl}">register</a>
+          <a class="profile" href="${url}">Club profile</a>
+        </div>
+      </main></body></html>
+    `);
+    const mapping = clubMappingFor(url, '.action', 'CLUB');
+    const report = analyzeAffiliateEntityActionQuality({
+      page,
+      mapping,
+      candidates: [candidateFor('North Carolina Tigers', actionUrl, url)],
+    });
+
+    expect(report).toMatchObject({
+      schemaVersion: 1, isValid: true, sourceDocumentKind: 'ARTICLE', issues: [],
+    });
+    expect(analyzeAffiliateEntityActionQuality({
+      page,
+      mapping: clubMappingFor(url, '.profile'),
+      candidates: [candidateFor('North Carolina Tigers', url, url)],
+    })).toMatchObject({ isValid: true, issues: [] });
+  });
+
+  it.each([
+    [
+      'Pier 25',
+      'https://www.manhattanyouth.org/sports/volleyball',
+      'Beach Volleyball at Pier 25',
+      'https://playtomic.io/pier-25-volleyball-manhattan-youth-rec/d6531ecc-55f1-44ca-b374-0443b9ed1cc2?q=BEACH_VOLLEY~2023-03-23~~',
+      'Reserve Now',
+      'Beach volleyball at Pier 25 courts are available to rent for $100 per hour.',
+    ],
+    [
+      'Commonpoint',
+      'https://www.commonpoint.org/turf-field-in-queens-new-york',
+      'Turf and Court Rentals',
+      'https://www.catchcorner.com/organization-page/embedded/rental/commonpoint-queens---alley-pond/Soccer',
+      'Book Turf Online',
+      'Our climate-controlled turf field supports soccer, flag football, lacrosse, and baseball rentals.',
+    ],
+  ])('accepts the %s dedicated rental page despite Article metadata', (
+    _name,
+    pageUrl,
+    title,
+    actionUrl,
+    actionLabel,
+    description,
+  ) => {
+    const page = pageFor(pageUrl, `
+      <html><head>
+        <meta property="og:type" content="article">
+        <link rel="canonical" href="${pageUrl}">
+      </head><body><main>
+        <div class="club-card">
+          <h1 class="title">${title}</h1>
+          <p>${description}</p>
+          <a class="action" href="${actionUrl}">${actionLabel}</a>
+        </div>
+      </main></body></html>
+    `);
+    const mapping = clubMappingFor(pageUrl, '.action', 'RENTAL');
+    const report = analyzeAffiliateEntityActionQuality({
+      page,
+      mapping,
+      candidates: [candidateFor(title, actionUrl, pageUrl, 'RENTAL')],
+    });
+
+    expect(report).toMatchObject({
+      schemaVersion: 1, isValid: true, sourceDocumentKind: 'ARTICLE', issues: [],
+    });
+  });
+
+
+  it('does not classify event content as navigation from page template classes', () => {
+    const url = 'https://river-club.example/events';
+    const page = pageFor(url, `
+      <body class="top-navigation-position-above-banner disable-navigation-border">
+        <nav><a href="/about">About</a></nav>
+        <main><article class="club-card">
+          <h1 class="title">Doubles Tournament</h1>
+          <a class="action" href="/payments/doubles">REGISTER HERE</a>
+        </article></main>
+      </body>
+    `);
+    const mapping = clubMappingFor(url, '.action', 'EVENT');
+    const candidates = extractAffiliateCandidatesFromPage(page, mapping);
+    expect(analyzeAffiliateEntityActionQuality({ page, mapping, candidates })).toMatchObject({
+      isValid: true, issues: [],
+    });
+  });
+  it.each([
+    'class="primary-navigation"',
+    'id="site-navigation"',
+    'class="mobile-navigation-menu"',
+  ])('rejects a candidate action inside %s', (attributes) => {
+    const url = 'https://river-club.example/';
+    const page = pageFor(url, `
+      <main><div class="club-card">
+        <h1 class="title">River Club</h1>
+        <div ${attributes}><a class="action" href="/register">Register</a></div>
+      </div></main>
+    `);
+    const mapping = clubMappingFor(url);
+    const candidates = extractAffiliateCandidatesFromPage(page, mapping);
+    expect(analyzeAffiliateEntityActionQuality({ page, mapping, candidates }).issues)
+      .toContainEqual(expect.objectContaining({ code: 'ACTION_NAVIGATION', candidateIndex: 0 }));
+  });
+
+  it('rejects an action inside an exact class-token navigation wrapper', () => {
+    const url = 'https://river-club.example/';
+    const page = pageFor(url, `
+      <main><div class="club-card">
+        <h2 class="title">River Club</h2>
+        <div class="main-navigation"><a class="action" href="/register">Register</a></div>
+      </div></main>
+    `);
+    const report = analyzeAffiliateEntityActionQuality({
+      page,
+      mapping: clubMappingFor(url),
+      candidates: [candidateFor('River Club', `${url}register`, url)],
+    });
+
+    expect(report.isValid).toBe(false);
+    expect(report.issues).toContainEqual(expect.objectContaining({
+      code: 'ACTION_NAVIGATION',
+      candidateIndex: 0,
+    }));
+  });
+  it('rejects an action inside an ARIA navigation wrapper', () => {
+    const url = 'https://river-club.example/';
+    const page = pageFor(url, `
+      <main><div class="club-card">
+        <h2 class="title">River Club</h2>
+        <div role="navigation"><a class="action" href="/register">Register</a></div>
+      </div></main>
+    `);
+    const report = analyzeAffiliateEntityActionQuality({
+      page,
+      mapping: clubMappingFor(url),
+      candidates: [candidateFor('River Club', `${url}register`, url)],
+    });
+
+    expect(report.isValid).toBe(false);
+    expect(report.issues).toContainEqual(expect.objectContaining({
+      code: 'ACTION_NAVIGATION',
+      candidateIndex: 0,
+    }));
+  });
+
+
+  it('ignores navigation substrings on ordinary content wrappers', () => {
+    const url = 'https://river-club.example/';
+    const page = pageFor(url, `
+      <html class="site-navigation-layout"><body id="navigation-template">
+        <main><div class="club-card content-navigation-layout" id="content-navigation-settings">
+          <h2 class="title">River Club</h2>
+          <a class="action" href="/register">Register</a>
+        </div></main>
+      </body></html>
+    `);
+    const report = analyzeAffiliateEntityActionQuality({
+      page,
+      mapping: clubMappingFor(url),
+      candidates: [candidateFor('River Club', `${url}register`, url)],
+    });
+
+    expect(report).toMatchObject({ schemaVersion: 1, isValid: true, issues: [] });
+  });
+
 
   it('accepts a plain club homepage with a scoped registration action and no SEO metadata', () => {
     const url = 'https://river-club.example/';

@@ -810,13 +810,13 @@ describe("affiliate Agent Gateway contracts", () => {
       ),
     ).toEqual([false, false, false, false, false]);
   });
-  it("rejects legacy version-1 role and prompt contracts after the OMP cutover", () => {
+  it("rejects superseded version-11 role and prompt contracts after the guard cutover", () => {
     const roleContract = AFFILIATE_AGENT_ROLE_CONTRACTS.COVERAGE_PLANNER;
     const { hash: _roleHash, ...rolePreimage } = roleContract;
     const legacyRolePreimage = {
       ...rolePreimage,
-      version: 1,
-      promptTemplateVersion: 1,
+      version: 11,
+      promptTemplateVersion: 11,
     };
     expect(
       affiliateAgentRoleContractSchema.safeParse({
@@ -829,7 +829,7 @@ describe("affiliate Agent Gateway contracts", () => {
     const { hash: _promptHash, ...promptPreimage } = promptTemplate;
     const legacyPromptPreimage = {
       ...promptPreimage,
-      version: 1,
+      version: 11,
     };
     expect(
       affiliateAgentPromptTemplateSchema.safeParse({

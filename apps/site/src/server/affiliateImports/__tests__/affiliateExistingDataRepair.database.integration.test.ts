@@ -196,6 +196,256 @@ const exerciseExistingRepair = async () => {
     const privateSource = await seed('private');
     const publicSource = await seed('working', true);
     const gapSource = await seed('gap', true);
+    const linkedLocation = await seed('linked-location', true);
+    const otherLocation = await seed('other-location', true);
+    const sharedWebsite = `https://${prefix}.test/`;
+    await prisma.affiliateSourceIntakes.update({
+      where: { id: linkedLocation.intakeId }, data: { baseUrl: sharedWebsite },
+    });
+    await prisma.affiliateScrapeSources.updateMany({
+      where: { id: { in: [linkedLocation.sourceId!, otherLocation.sourceId!] } },
+      data: { baseUrl: sharedWebsite },
+    });
+    const linkedLocationPreview = await previewAffiliateExistingDataRepairAdmission({
+      prisma, bundle, artifactStore, operatorId: 'identity-smoke', reason: 'Preserve the explicit location identity.',
+      jobIds: [linkedLocation.jobId],
+      evidenceSelections: [{ jobId: linkedLocation.jobId, runId: linkedLocation.runId, pageId: linkedLocation.pageId }],
+    });
+    assert.equal(linkedLocationPreview.rows[0]?.eligible, true, JSON.stringify(linkedLocationPreview.rows));
+    assert.equal(linkedLocationPreview.rows[0]?.sourceId, linkedLocation.sourceId);
+    const homepage = await seed('homepage-primary');
+    await prisma.affiliateSourceIntakePages.update({
+      where: { id: homepage.pageId }, data: { role: 'HOME' },
+    });
+    const homepagePreview = await previewAffiliateExistingDataRepairAdmission({
+      prisma, bundle, artifactStore, operatorId: 'identity-smoke', reason: 'Review the explicitly selected official homepage.',
+      jobIds: [homepage.jobId],
+      evidenceSelections: [{ jobId: homepage.jobId, runId: homepage.runId, pageId: homepage.pageId }],
+    });
+    assert.equal(homepagePreview.rows[0]?.eligible, true, JSON.stringify(homepagePreview.rows));
+    const homepageInput = {
+      prisma, bundle, artifactStore, operatorId: 'identity-smoke', reason: 'Review the explicitly selected official homepage.',
+      jobIds: [homepage.jobId],
+      evidenceSelections: [{ jobId: homepage.jobId, runId: homepage.runId, pageId: homepage.pageId }],
+    };
+    const homepageApplied = await applyAffiliateExistingDataRepairAdmission({
+      ...homepageInput, expectedReportHash: homepagePreview.reportHash,
+    });
+    assert.equal(homepageApplied.writeCount, 1, JSON.stringify(homepageApplied));
+    assert.ok(homepageApplied.appliedJobs[0]?.sourceId, JSON.stringify(homepageApplied));
+    const exactSelected = await seed('exact-selected');
+    const exactBroad = await seed('exact-broad', true);
+    const sharedExactWebsite = `https://${prefix}.test/`;
+    const exactSelectedUrl = `https://${prefix}.test/exact-selected`;
+    await prisma.affiliateSourceIntakes.updateMany({
+      where: { id: { in: [exactSelected.intakeId, exactBroad.intakeId] } },
+      data: { baseUrl: sharedExactWebsite },
+    });
+    await prisma.affiliateScrapeSources.update({
+      where: { id: exactBroad.sourceId! },
+      data: { baseUrl: sharedExactWebsite },
+    });
+    const exactIdentity = normalizeAffiliateSupplyIdentity({ requestedUrl: exactSelectedUrl });
+    const exactRoot = await prisma.affiliateSupplySources.create({
+      data: {
+        id: `${prefix}-exact-selected-root`, intakeId: exactSelected.intakeId, rolloutCohort,
+        canonicalUrl: exactIdentity.canonicalUrl, identityKey: exactIdentity.identityKey,
+        origin: exactIdentity.origin, pathKey: exactIdentity.pathKey, targetKind: 'CLUB',
+      },
+    });
+    const exactSource = await prisma.affiliateScrapeSources.create({
+      data: {
+        id: `${prefix}-exact-selected-source`, sourceKey: `${prefix}-exact-selected-existing`,
+        name: 'Exact unlinked source', listUrl: exactSelectedUrl, baseUrl: sharedExactWebsite,
+        targetKind: 'CLUB', supplySourceId: exactRoot.id, autoScrapeEnabled: false,
+      },
+    });
+    await prisma.affiliateSupplySources.update({
+      where: { id: exactRoot.id }, data: { liveSourceId: exactSource.id },
+    });
+    const exactSelectedInput = {
+      prisma, bundle, artifactStore, operatorId: 'identity-smoke', reason: 'Resolve the exact selected listing.',
+      jobIds: [exactSelected.jobId],
+      evidenceSelections: [{ jobId: exactSelected.jobId, runId: exactSelected.runId, pageId: exactSelected.pageId }],
+    };
+    const exactSelectedPreview = await previewAffiliateExistingDataRepairAdmission(exactSelectedInput);
+    assert.equal(exactSelectedPreview.rows[0]?.eligible, true, JSON.stringify(exactSelectedPreview.rows));
+    assert.equal(exactSelectedPreview.rows[0]?.sourceId, exactSource.id, JSON.stringify(exactSelectedPreview.rows));
+    const exactSelectedApplied = await applyAffiliateExistingDataRepairAdmission({
+      ...exactSelectedInput, expectedReportHash: exactSelectedPreview.reportHash,
+    });
+    assert.equal(exactSelectedApplied.writeCount, 1, JSON.stringify(exactSelectedApplied));
+    assert.equal(exactSelectedApplied.appliedJobs[0]?.sourceId, exactSource.id);
+    const noPath = await seed('no-path');
+    await prisma.affiliateSourceIntakes.update({
+      where: { id: noPath.intakeId }, data: { baseUrl: sharedExactWebsite },
+    });
+    const noPathPreview = await previewAffiliateExistingDataRepairAdmission({
+      prisma, bundle, artifactStore, operatorId: 'identity-smoke', reason: 'Do not reuse a broad website source.',
+      jobIds: [noPath.jobId],
+      evidenceSelections: [{ jobId: noPath.jobId, runId: noPath.runId, pageId: noPath.pageId }],
+    });
+    assert.equal(noPathPreview.rows[0]?.eligible, true, JSON.stringify(noPathPreview.rows));
+    assert.equal(noPathPreview.rows[0]?.sourceId, null, JSON.stringify(noPathPreview.rows));
+    assert.equal(noPathPreview.rows[0]?.reasonCodes.includes('SOURCE_IDENTITY_CONFLICT'), false, JSON.stringify(noPathPreview.rows));
+    const duplicateExact = await seed('duplicate-exact');
+    await prisma.affiliateSourceIntakes.update({
+      where: { id: duplicateExact.intakeId }, data: { baseUrl: sharedExactWebsite },
+    });
+    await prisma.affiliateSourceIntakePages.update({
+      where: { id: duplicateExact.pageId },
+      data: { url: exactSelectedUrl, canonicalUrl: exactSelectedUrl, urlKey: `${prefix}-duplicate-exact-url` },
+    });
+    await prisma.affiliateSourceIntakeArtifacts.updateMany({
+      where: { intakeId: duplicateExact.intakeId, pageId: duplicateExact.pageId },
+      data: { sourceUrl: exactSelectedUrl, finalUrl: exactSelectedUrl },
+    });
+    await prisma.affiliateScrapeSources.create({
+      data: {
+        id: `${prefix}-duplicate-exact-source`, sourceKey: `${prefix}-duplicate-exact-source`,
+        name: 'Duplicate exact source', listUrl: exactSelectedUrl, baseUrl: sharedExactWebsite,
+        targetKind: 'CLUB', autoScrapeEnabled: false,
+      },
+    });
+    const duplicateExactPreview = await previewAffiliateExistingDataRepairAdmission({
+      prisma, bundle, artifactStore, operatorId: 'identity-smoke', reason: 'Hold duplicate exact listing ownership.',
+      jobIds: [duplicateExact.jobId],
+      evidenceSelections: [{ jobId: duplicateExact.jobId, runId: duplicateExact.runId, pageId: duplicateExact.pageId }],
+    });
+    assert.equal(duplicateExactPreview.rows[0]?.eligible, false, JSON.stringify(duplicateExactPreview.rows));
+    assert.ok(duplicateExactPreview.rows[0]?.reasonCodes.includes('AMBIGUOUS_SOURCE_IDENTITY'), JSON.stringify(duplicateExactPreview.rows));
+    assert.ok(duplicateExactPreview.rows[0]?.reasonCodes.includes('SOURCE_IDENTITY_CONFLICT'), JSON.stringify(duplicateExactPreview.rows));
+    const explicitConflict = await seed('explicit-conflict', true);
+    const conflictingSource = await prisma.affiliateScrapeSources.create({
+      data: {
+        id: `${prefix}-explicit-conflict-other-source`, sourceKey: `${prefix}-explicit-conflict-other`,
+        name: 'Conflicting explicit source', listUrl: `https://${prefix}.test/explicit-conflict-other`,
+        baseUrl: sharedExactWebsite, targetKind: 'CLUB', autoScrapeEnabled: false,
+      },
+    });
+    await prisma.affiliateSourceMappingJobs.update({
+      where: { id: explicitConflict.jobId }, data: { sourceId: conflictingSource.id },
+    });
+    const explicitConflictPreview = await previewAffiliateExistingDataRepairAdmission({
+      prisma, bundle, artifactStore, operatorId: 'identity-smoke', reason: 'Hold conflicting explicit source ownership.',
+      jobIds: [explicitConflict.jobId],
+      evidenceSelections: [{ jobId: explicitConflict.jobId, runId: explicitConflict.runId, pageId: explicitConflict.pageId }],
+    });
+    assert.equal(explicitConflictPreview.rows[0]?.eligible, false, JSON.stringify(explicitConflictPreview.rows));
+    assert.ok(explicitConflictPreview.rows[0]?.reasonCodes.includes('SOURCE_IDENTITY_CONFLICT'), JSON.stringify(explicitConflictPreview.rows));
+    await prisma.affiliateSourceMappingJobs.update({
+      where: { id: explicitConflict.jobId }, data: { sourceId: explicitConflict.sourceId },
+    });
+    const sourceKeyConflict = await seed('source-key-conflict');
+    const sourceKeyConflictUrl = `https://${prefix}.test/source-key-conflict`;
+    await prisma.affiliateSourceIntakes.update({
+      where: { id: sourceKeyConflict.intakeId }, data: { baseUrl: sharedExactWebsite },
+    });
+    await prisma.affiliateScrapeSources.create({
+      data: {
+        id: `${prefix}-source-key-conflict-broad-source`, sourceKey: `${prefix}-source-key-conflict`,
+        name: 'Source-key provenance source', listUrl: `https://source-key-provenance.example/${prefix}`,
+        baseUrl: 'https://source-key-provenance.example/', targetKind: 'CLUB', autoScrapeEnabled: false,
+      },
+    });
+    await prisma.affiliateScrapeSources.create({
+      data: {
+        id: `${prefix}-source-key-conflict-exact-source`, sourceKey: `${prefix}-source-key-conflict-exact`,
+        name: 'Source-key exact competitor', listUrl: sourceKeyConflictUrl,
+        baseUrl: sharedExactWebsite, targetKind: 'CLUB', autoScrapeEnabled: false,
+      },
+    });
+    const sourceKeyConflictPreview = await previewAffiliateExistingDataRepairAdmission({
+      prisma, bundle, artifactStore, operatorId: 'identity-smoke', reason: 'Hold source-key and exact URL disagreement.',
+      jobIds: [sourceKeyConflict.jobId],
+      evidenceSelections: [{ jobId: sourceKeyConflict.jobId, runId: sourceKeyConflict.runId, pageId: sourceKeyConflict.pageId }],
+    });
+    assert.equal(sourceKeyConflictPreview.rows[0]?.eligible, false, JSON.stringify(sourceKeyConflictPreview.rows));
+    assert.ok(sourceKeyConflictPreview.rows[0]?.reasonCodes.includes('SOURCE_IDENTITY_CONFLICT'), JSON.stringify(sourceKeyConflictPreview.rows));
+    await prisma.affiliateScrapeSources.delete({
+      where: { id: `${prefix}-source-key-conflict-broad-source` },
+    });
+    await prisma.affiliateScrapeSources.create({
+      data: {
+        id: `${prefix}-recorded-provenance-source`, sourceKey: `${prefix}-recorded-provenance-source`,
+        name: 'Recorded intake provenance source', listUrl: `https://recorded-provenance.example/${prefix}`,
+        baseUrl: 'https://recorded-provenance.example/', targetKind: 'CLUB', autoScrapeEnabled: false,
+        metadata: { existingDataRepairAdmission: { intakeId: sourceKeyConflict.intakeId } },
+      },
+    });
+    const recordedProvenancePreview = await previewAffiliateExistingDataRepairAdmission({
+      prisma, bundle, artifactStore, operatorId: 'identity-smoke', reason: 'Hold recorded intake provenance disagreement.',
+      jobIds: [sourceKeyConflict.jobId],
+      evidenceSelections: [{ jobId: sourceKeyConflict.jobId, runId: sourceKeyConflict.runId, pageId: sourceKeyConflict.pageId }],
+    });
+    assert.equal(recordedProvenancePreview.rows[0]?.eligible, false, JSON.stringify(recordedProvenancePreview.rows));
+    assert.ok(recordedProvenancePreview.rows[0]?.reasonCodes.includes('SOURCE_IDENTITY_CONFLICT'), JSON.stringify(recordedProvenancePreview.rows));
+    const ownershipInput = {
+      prisma, bundle, artifactStore, operatorId: 'identity-smoke', reason: 'Preserve existing intake ownership.',
+      jobIds: [sourceKeyConflict.jobId],
+      evidenceSelections: [{ jobId: sourceKeyConflict.jobId, runId: sourceKeyConflict.runId, pageId: sourceKeyConflict.pageId }],
+    };
+    await prisma.affiliateScrapeSources.update({
+      where: { id: `${prefix}-recorded-provenance-source` },
+      data: { metadata: { intakeSourceKey: `${prefix}-source-key-conflict` } },
+    });
+    const legacyKeyOwnershipPreview = await previewAffiliateExistingDataRepairAdmission(ownershipInput);
+    await prisma.affiliateScrapeSources.update({
+      where: { id: `${prefix}-recorded-provenance-source` }, data: { metadata: {} },
+    });
+    const reverseOwnedSourceId = `${prefix}-source-key-conflict-exact-source`;
+    await prisma.affiliateSourceIntakes.update({
+      where: { id: noPath.intakeId }, data: { affiliateSourceId: reverseOwnedSourceId },
+    });
+    const reverseOwnershipPreview = await previewAffiliateExistingDataRepairAdmission(ownershipInput);
+    assert.deepEqual(
+      [legacyKeyOwnershipPreview, reverseOwnershipPreview].map((preview) => ({
+        eligible: preview.rows[0]?.eligible,
+        ownershipConflict: preview.rows[0]?.reasonCodes.includes('SOURCE_IDENTITY_CONFLICT'),
+      })),
+      [
+        { eligible: false, ownershipConflict: true },
+        { eligible: false, ownershipConflict: true },
+      ],
+      'Legacy intake-source-key and reverse-linked intake owners must block exact-source selection.',
+    );
+    const reverseOwnershipApply = await applyAffiliateExistingDataRepairAdmission({
+      ...ownershipInput, expectedReportHash: reverseOwnershipPreview.reportHash,
+    });
+    assert.equal(reverseOwnershipApply.writeCount, 0, JSON.stringify(reverseOwnershipApply));
+    const unchangedOwners = await prisma.affiliateSourceIntakes.findMany({
+      where: { id: { in: [sourceKeyConflict.intakeId, noPath.intakeId] } },
+      select: { id: true, affiliateSourceId: true },
+    });
+    assert.equal(unchangedOwners.find((intake) => intake.id === sourceKeyConflict.intakeId)?.affiliateSourceId, null);
+    assert.equal(unchangedOwners.find((intake) => intake.id === noPath.intakeId)?.affiliateSourceId, reverseOwnedSourceId);
+    const roleBoundary = privateSource;
+    for (const role of ['HOME', 'LISTING', 'DETAIL', 'REGISTRATION', 'RENTAL'] as const) {
+      await prisma.affiliateSourceIntakePages.update({ where: { id: roleBoundary.pageId }, data: { role } });
+      const rolePreview = await previewAffiliateExistingDataRepairAdmission({
+        prisma, bundle, artifactStore, operatorId: 'identity-smoke', reason: `Allow explicitly selected ${role} evidence.`,
+        jobIds: [roleBoundary.jobId],
+        evidenceSelections: [{ jobId: roleBoundary.jobId, runId: roleBoundary.runId, pageId: roleBoundary.pageId }],
+      });
+      assert.equal(rolePreview.rows[0]?.eligible, true, JSON.stringify(rolePreview.rows));
+      assert.equal(rolePreview.rows[0]?.sourceId, null, JSON.stringify(rolePreview.rows));
+    }
+    for (const role of ['DIRECTORY', 'POLICY', 'LOGO', 'ABOUT', 'UNKNOWN'] as const) {
+      await prisma.affiliateSourceIntakePages.update({ where: { id: roleBoundary.pageId }, data: { role } });
+      const rolePreview = await previewAffiliateExistingDataRepairAdmission({
+        prisma, bundle, artifactStore, operatorId: 'identity-smoke', reason: `Hold unsupported primary ${role} evidence.`,
+        jobIds: [roleBoundary.jobId],
+        evidenceSelections: [{ jobId: roleBoundary.jobId, runId: roleBoundary.runId, pageId: roleBoundary.pageId }],
+      });
+      assert.equal(rolePreview.rows[0]?.eligible, false, JSON.stringify(rolePreview.rows));
+      assert.ok(
+        rolePreview.rows[0]?.reasonCodes.includes('SOURCE_CREATION_PAGE_ROLE_UNSUPPORTED'),
+        JSON.stringify(rolePreview.rows),
+      );
+    }
+    await prisma.affiliateSourceIntakePages.update({
+      where: { id: roleBoundary.pageId }, data: { role: 'LISTING' },
+    });
     const workingIdentity = normalizeAffiliateSupplyIdentity({ requestedUrl: `https://${prefix}.test/working` });
     const existingWorkingRoot = await prisma.affiliateSupplySources.create({ data: {
       id: `${prefix}-existing-working-root`, intakeId: publicSource.intakeId, liveSourceId: publicSource.sourceId,
@@ -895,6 +1145,48 @@ const exerciseExistingRepair = async () => {
       }
       return response;
     };
+    const homepageGatewayJob = homepageApplied.appliedJobs[0];
+    if (!homepageGatewayJob) throw new Error('The homepage admission did not create a gateway job.');
+    const homepageProducer = await claim(homepageGatewayJob.jobId, 'MAPPING_PRODUCER', 'homepage-primary-producer');
+    if (homepageProducer.envelope.subject.type !== 'MAPPING_PRODUCER') {
+      throw new Error('The explicitly selected homepage is not claimable.');
+    }
+    const homepageRepair = homepageProducer.envelope.subject.repairContext;
+    if (!homepageRepair || homepageRepair.kind !== 'EXISTING_DATA_REPAIR') {
+      throw new Error('The homepage producer lost its repair context.');
+    }
+    const homepageHtml = homepageProducer.envelope.evidenceManifest.entries.find((entry) => entry.kind === 'PAGE_HTML');
+    assert.ok(homepageHtml);
+    const homepagePage = await prisma.affiliateSourceIntakePages.findUniqueOrThrow({ where: { id: homepage.pageId } });
+    const homepageGap = await gateway.perform({
+      kind: 'SUBMIT_RESULT',
+      idempotencyKey: `${prefix}-homepage-primary-gap`,
+      authorization: authorizationFor(homepageProducer),
+      result: {
+        ...affiliateAgentTerminalIdentityFor(homepageProducer.envelope),
+        disposition: 'CONTRACT_GAP',
+        reasonCodes: ['CONTRACT_REQUIREMENT_MISSING'],
+        evidenceRefs: [homepageHtml.evidenceRef],
+        summary: 'The explicitly selected homepage needs additional first-party location evidence.',
+        payload: {
+          contractArea: 'MAPPING_EVIDENCE',
+          requestedChange: 'Provide the missing first-party location evidence.',
+          sportEvidence: {
+            evidenceRunId: homepageRepair.evidenceRunId,
+            sportsCatalogSha256: homepageRepair.sportsCatalog.sha256,
+            sportDeterminations: [{
+              sourceLabels: ['indoor volleyball'], status: 'RESOLVED', resolutionBasis: 'SOURCE_EVIDENCE',
+              canonicalSportNames: ['Indoor Volleyball'], rationale: 'The homepage explicitly describes indoor volleyball on hardwood courts.',
+              evidence: [{
+                artifactId: homepageHtml.artifactId, artifactSha256: homepageHtml.sha256, artifactKind: 'PAGE_HTML',
+                pageUrl: homepagePage.canonicalUrl, excerpt: 'We offer indoor volleyball on our hardwood courts.',
+              }],
+            }],
+          },
+        },
+      },
+    });
+    assert.equal(homepageGap.kind, 'TERMINAL_ACCEPTED', JSON.stringify(homepageGap));
     for (const job of jobs) {
       const fixture = repairFixtures.find((item) => item.jobId === job.subjectId);
       assert.ok(fixture);

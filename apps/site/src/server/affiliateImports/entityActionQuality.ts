@@ -74,12 +74,7 @@ const RELATED_SCOPE_SELECTOR = [
   '[aria-label*="recommended"]',
   '[aria-label*="Recommended"]',
 ].join(',');
-const NAVIGATION_SCOPE_SELECTOR = [
-  'nav',
-  '[role="navigation"]',
-  '[class*="navigation"]',
-  '[id*="navigation"]',
-].join(',');
+const NAVIGATION_CONTAINER_TOKEN_PATTERN = /^(?:(?:main|primary|secondary|site|global|header|footer|mobile|desktop)-)?navigation(?:-menu)?$/i;
 const ACTION_PATH_PATTERN = /(?:^|[/.#_?&=-])(?:register|registration|membership|member|join|sign[-_ ]?up|try[-_ ]?out|book|booking|reserve|reservation|enroll|enrollment|apply|application)(?:$|[/.#_?&=-])/i;
 const EDITORIAL_ACTION_PATH_PATTERN = /(?:^|\/)(?:news|article|articles|story|stories|blog|blogs|press|post|posts)(?:\/|$)/i;
 const OFFICIAL_INFORMATION_PATH_PATTERN = /(?:^|\/)(?:about(?:-us)?|contact(?:-us)?|program(?:s)?|team(?:s)?|roster|facilit(?:y|ies)|location(?:s)?|schedule|information|info|home)(?:\/|$)/i;
@@ -87,6 +82,7 @@ const OFFICIAL_INFORMATION_LABEL_PATTERN = /\b(?:official(?:\s+(?:site|website|p
 const MEMBERSHIP_ACTION_PATTERN = /\b(?:member(?:ship)?|enroll(?:ment)?|apply|application)\b/i;
 const ARTICLE_TYPE_PATTERN = /^(?:article|newsarticle|blogposting)$/i;
 const OTHER_DOCUMENT_TYPE_PATTERN = /^(?:website|webpage|profilepage|collectionpage|itemlist|searchresults?page)$/i;
+const ORGANIZATION_TYPE_PATTERN = /^(?:organization|sportsorganization|sportsteam)$/i;
 
 const normalizeWhitespace = (value: string): string => value.replace(/\s+/g, ' ').trim();
 
@@ -254,25 +250,6 @@ const jsonLdUrlValues = (record: JsonRecord): string[] => {
   return values;
 };
 
-const primaryArticleElement = (document: Document): Element | null => {
-  const candidates = Array.from(document.querySelectorAll(
-    'main > article, [role="main"] > article, body > article',
-  ));
-  return candidates.find((element) => {
-    const classTokens = (element.getAttribute('class') ?? '').split(/\s+/).filter(Boolean);
-    const classText = normalizedLower(classTokens.join(' '));
-    const isExplicitArticle = classTokens.some((token) => token.toLowerCase() === 'article');
-    if (!isExplicitArticle && classTokens.some((token) => /^(?:post|news|story|card|widget|feed)(?:-|$)/i.test(token))) {
-      return false;
-    }
-    return !/(?:post-card|related|recommended|widget|news-card|story-card)/i.test(classText);
-  }) ?? null;
-};
-
-const primaryHeadingText = (document: Document, article: Element | null): string => {
-  const heading = article?.querySelector('h1, h2') ?? document.querySelector('main h1, [role="main"] h1, h1');
-  return normalizedLower(heading?.textContent ?? '');
-};
 
 const hasPrimaryArticleJsonLd = (
   records: JsonRecord[],
@@ -280,18 +257,17 @@ const hasPrimaryArticleJsonLd = (
   baseUrl: string,
   document: Document,
 ): boolean => {
-  const articleElement = primaryArticleElement(document);
-  const heading = primaryHeadingText(document, articleElement);
+  const heading = normalizedLower(document.querySelector('main h1, [role="main"] h1, h1')?.textContent ?? '');
   return records.some((record) => {
     if (!jsonLdTypes(record).some((type) => ARTICLE_TYPE_PATTERN.test(type))) return false;
-    const identityMatches = jsonLdUrlValues(record).some((value) => {
+    const urls = jsonLdUrlValues(record);
+    if (urls.length === 0) {
+      return Boolean(heading && normalizedLower(stringValue(record.headline) ?? '') === heading);
+    }
+    return urls.some((value) => {
       const normalized = canonicalDocumentIdentityUrl(value, baseUrl);
       return Boolean(normalized && pageIdentityUrls.has(normalized));
     });
-    if (identityMatches) return true;
-    if (!articleElement) return false;
-    const headline = normalizedLower(stringValue(record.headline) ?? stringValue(record.name) ?? '');
-    return Boolean(headline && heading && (headline === heading || headline.includes(heading) || heading.includes(headline)));
   });
 };
 
@@ -299,9 +275,11 @@ const documentKindFor = (
   document: Document,
   page: ScrapedPage,
   mapping: AffiliateScrapeMapping,
+  includeOrganizationIdentity: boolean,
 ): {
   kind: AffiliateEntityActionSourceDocumentKind;
   contradictory: boolean;
+  primaryOrganizationNames: ReadonlySet<string> | null;
 } => {
   const baseUrl = page.finalUrl || page.url;
   const canonical = Array.from(document.querySelectorAll('link[rel]'))
@@ -321,10 +299,44 @@ const documentKindFor = (
     && jsonRecords.some((record) => jsonLdTypes(record).some((type) => OTHER_DOCUMENT_TYPE_PATTERN.test(type)));
   const article = explicitOgArticle || jsonArticle;
   const other = explicitOgOther || jsonOther;
+  let primaryOrganizationNames: Set<string> | null = null;
+  if (article && includeOrganizationIdentity) {
+    for (const record of jsonRecords) {
+      const name = stringValue(record.name);
+      if (!name || !jsonLdTypes(record).some((type) => ORGANIZATION_TYPE_PATTERN.test(type))) continue;
+      if (jsonLdUrlValues(record).some((value) => {
+        const url = canonicalDocumentIdentityUrl(value, baseUrl);
+        return Boolean(url && pageIdentityUrls.has(url));
+      })) {
+        (primaryOrganizationNames ??= new Set()).add(normalizedLower(name));
+      }
+    }
+  }
   return {
     kind: article ? 'ARTICLE' : other ? 'OTHER' : 'UNKNOWN',
-    contradictory: article && other,
+    contradictory: explicitOgArticle && explicitOgOther,
+    primaryOrganizationNames,
   };
+};
+
+const isNavigationContainer = (element: Element): boolean => {
+  const tagName = element.tagName.toLowerCase();
+  if (tagName === 'nav') return true;
+  if (normalizedLower(element.getAttribute('role') ?? '') === 'navigation') return true;
+  if (tagName === 'html' || tagName === 'body' || tagName === 'main') return false;
+  for (const token of element.classList) {
+    if (NAVIGATION_CONTAINER_TOKEN_PATTERN.test(token)) return true;
+  }
+  return NAVIGATION_CONTAINER_TOKEN_PATTERN.test(element.getAttribute('id') ?? '');
+};
+
+const isWithinNavigation = (element: Element | null): boolean => {
+  let current = element;
+  while (current) {
+    if (isNavigationContainer(current)) return true;
+    current = current.parentElement;
+  }
+  return false;
 };
 
 const isWithinSelector = (element: Element | null, selector: string): boolean => (
@@ -721,11 +733,14 @@ const canonicalActionPurpose = (
   label: string,
   hasOwnOfficialContext: boolean,
   isInPageNavigation: boolean,
+  allowCanonicalSelf: boolean,
 ): boolean => {
   if (isInPageNavigation) return false;
   if (EDITORIAL_ACTION_PATH_PATTERN.test(actionUrl.pathname)) return false;
   const comparableIdentity = canonicalDocumentIdentityUrl(actionUrl.toString(), baseUrl);
-  if (!actionUrl.hash && comparableIdentity && canonicalUrls.has(comparableIdentity)) return true;
+  if (!actionUrl.hash && comparableIdentity && canonicalUrls.has(comparableIdentity)) {
+    return allowCanonicalSelf || hasOwnOfficialContext;
+  }
   let baseOrigin: string;
   try {
     baseOrigin = new URL(baseUrl).origin.toLowerCase();
@@ -842,7 +857,8 @@ export const analyzeAffiliateEntityActionQuality = (input: {
   const baseUrl = input.page.finalUrl || input.page.url;
   const dom = createAffiliateMappingDom(input.page.body, baseUrl);
   const document = dom.window.document;
-  const documentKind = documentKindFor(document, input.page, input.mapping);
+  const hasClubCandidate = input.candidates.some((candidate) => candidate.listingKind === 'CLUB');
+  const documentKind = documentKindFor(document, input.page, input.mapping, hasClubCandidate);
   const itemElements = selectAffiliateMappingItems(document, input.mapping);
   const itemIndexes = new Map<Element, number>();
   itemElements.forEach((item, itemIndex) => itemIndexes.set(item, itemIndex));
@@ -914,25 +930,6 @@ export const analyzeAffiliateEntityActionQuality = (input: {
   }
   if (input.candidates.length === 0) {
     addIssue(issues, 'NO_CANDIDATES', null, 'Entity/action quality cannot pass without an extracted candidate.');
-  }
-  const hasClubCandidate = input.mapping.kind === 'CLUB'
-    || input.candidates.some((candidate) => candidate.listingKind === 'CLUB');
-  if (documentKind.kind === 'ARTICLE' && hasClubCandidate) {
-    if (input.candidates.length === 0) {
-      addIssue(
-        issues,
-        'DOCUMENT_ENTITY_MISMATCH',
-        null,
-        'An explicitly identified article/news document cannot be accepted as a CLUB source.',
-      );
-    } else {
-      input.candidates.forEach((_candidate, candidateIndex) => addIssue(
-        issues,
-        'DOCUMENT_ENTITY_MISMATCH',
-        candidateIndex,
-        'An explicitly identified article/news document cannot be accepted as a CLUB candidate.',
-      ));
-    }
   }
 
   input.candidates.forEach((candidate, candidateIndex) => {
@@ -1007,7 +1004,7 @@ export const analyzeAffiliateEntityActionQuality = (input: {
     const actionUrl = new URL(evidenceUrl);
     const ownerIndex = nearestSelectedItemIndexFor(actionElement, itemIndexes);
     const ownerItem = ownerIndex >= 0 ? itemElements[ownerIndex] ?? null : item;
-    if (isWithinSelector(actionElement ?? evidence.element, NAVIGATION_SCOPE_SELECTOR)) {
+    if (isWithinNavigation(actionElement ?? evidence.element)) {
       addIssue(
         issues,
         'ACTION_NAVIGATION',
@@ -1046,6 +1043,9 @@ export const analyzeAffiliateEntityActionQuality = (input: {
         'The selected action URL points at another candidate source rather than this candidate.',
       );
     }
+    const articleClub = documentKind.kind === 'ARTICLE' && candidate.listingKind === 'CLUB';
+    const allowCanonicalSelf = !articleClub
+      || Boolean(documentKind.primaryOrganizationNames?.has(normalizedLower(candidate.title)));
     const directPurpose = canonicalActionPurpose(
       actionUrl,
       baseUrl,
@@ -1053,6 +1053,7 @@ export const analyzeAffiliateEntityActionQuality = (input: {
       label,
       false,
       navigation,
+      allowCanonicalSelf,
     );
     let supportedPurpose = directPurpose;
     if (
@@ -1080,9 +1081,18 @@ export const analyzeAffiliateEntityActionQuality = (input: {
         label,
         context.hasOwnOfficialContext,
         navigation,
+        allowCanonicalSelf,
       );
     }
     if (!supportedPurpose) {
+      if (articleClub) {
+        addIssue(
+          issues,
+          'DOCUMENT_ENTITY_MISMATCH',
+          candidateIndex,
+          'Article context alone does not establish a CLUB action. Select an entity-scoped action or named organization evidence.',
+        );
+      }
       addIssue(
         issues,
         'ACTION_PURPOSE_UNSUPPORTED',
