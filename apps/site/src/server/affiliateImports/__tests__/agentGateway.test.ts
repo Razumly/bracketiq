@@ -5,6 +5,11 @@ import { AffiliateAgentHttpGateway } from "../../../../scripts/run-affiliate-age
 
 import type { PrismaClient } from "@/generated/prisma/client";
 import { buildAffiliateSportsCatalogSnapshot } from "../affiliateSportsCatalog";
+import {
+  gatewayCommandRejectionDiagnosticFor,
+  parseAffiliateAgentCommandRejectionDiagnostic,
+  serializeAffiliateAgentCommandRejectionDiagnostic,
+} from "../affiliateAgentCommandDiagnostics";
 
 import {
   AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX,
@@ -5407,6 +5412,65 @@ describe("Prisma affiliate Agent Gateway", () => {
       startedAt: new Date("2026-08-20T18:00:00.000Z"),
       completedAt: new Date("2026-08-20T18:00:07.000Z"),
     });
+    if (!validationReceipt) throw new Error("Expected a validation receipt.");
+    const validationBaseline = { ...validationReceipt };
+    const commitRejections: Array<{
+      reasonCode: string;
+      receiptPatch?: Record<string, unknown>;
+      receiptId?: string;
+      packageHash?: string;
+    }> = [
+      { reasonCode: "PACKAGE_COMMIT_RECEIPT_NOT_FOUND", receiptId: "not-for-logs-missing-receipt" },
+      { reasonCode: "PACKAGE_COMMIT_RECEIPT_CLAIM_MISMATCH", receiptPatch: { claimId: "not-for-logs-foreign-claim" } },
+      { reasonCode: "PACKAGE_COMMIT_RECEIPT_JOB_MISMATCH", receiptPatch: { jobId: "not-for-logs-foreign-job" } },
+      { reasonCode: "PACKAGE_COMMIT_RECEIPT_GENERATION_MISMATCH", receiptPatch: { claimGeneration: grant.envelope.claimGeneration + 1 } },
+      { reasonCode: "PACKAGE_COMMIT_RECEIPT_OPERATION_MISMATCH", receiptPatch: { operationKind: "HEARTBEAT" } },
+      { reasonCode: "PACKAGE_COMMIT_RECEIPT_NOT_SUCCEEDED", receiptPatch: { status: "FAILED" } },
+      { reasonCode: "PACKAGE_COMMIT_RECEIPT_COMMAND_MISMATCH", receiptPatch: { commandName: "CAPTURE_CLAIM_URL" } },
+      {
+        reasonCode: "PACKAGE_COMMIT_OUTPUT_INVALID",
+        receiptPatch: { responseJson: { safeOutput: { isValid: false, validatedPackageHash: packageHash } } },
+      },
+      { reasonCode: "PACKAGE_COMMIT_HASH_MISMATCH", packageHash: "f".repeat(64) },
+    ];
+    const recordedReasons: string[] = [];
+    for (const [index, rejection] of commitRejections.entries()) {
+      const storedReceipt = harness.state.receipts.find((receipt) => receipt.id === validation.receiptId);
+      if (!storedReceipt) throw new Error("Validation receipt was lost.");
+      Object.assign(storedReceipt, validationBaseline, rejection.receiptPatch);
+      const command = {
+        type: "COMMIT_DECLARATIVE_PACKAGE" as const,
+        data: {
+          validationReceiptId: rejection.receiptId ?? validation.receiptId,
+          validatedPackageHash: rejection.packageHash ?? packageHash,
+        },
+      };
+      const error = await harness.gateway.perform({
+        kind: "EXECUTE_COMMAND",
+        idempotencyKey: `rejected-commit-${index}`,
+        authorization,
+        command,
+      }).catch((failure: unknown) => failure);
+      expect(error).toMatchObject({ code: "COMMAND_NOT_PERMITTED", isRetryable: false });
+      if (!(error instanceof Error) || !("code" in error) || !("safeMessage" in error)) {
+        throw new Error("Expected a structured commit rejection.");
+      }
+      const diagnostic = gatewayCommandRejectionDiagnosticFor({
+        command, errorCode: error.code, safeMessage: error.safeMessage, isRetryable: false,
+      });
+      if (!diagnostic) throw new Error("Commit rejection lost its diagnostic.");
+      const serialized = serializeAffiliateAgentCommandRejectionDiagnostic(diagnostic);
+      expect(serialized).not.toContain("not-for-logs");
+      expect(serialized).not.toContain(packageHash);
+      expect(parseAffiliateAgentCommandRejectionDiagnostic(JSON.parse(serialized))).toEqual(diagnostic);
+      recordedReasons.push(diagnostic.reasonCode);
+    }
+    Object.assign(
+      harness.state.receipts.find((receipt) => receipt.id === validation.receiptId)!,
+      validationBaseline,
+    );
+    expect(recordedReasons).toEqual(commitRejections.map((rejection) => rejection.reasonCode));
+    expect(harness.state.receipts.filter((receipt) => receipt.commandName === "COMMIT_DECLARATIVE_PACKAGE")).toHaveLength(0);
     const commitOperation = {
       kind: "EXECUTE_COMMAND" as const,
       idempotencyKey: "mapping-commit-1",

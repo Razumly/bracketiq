@@ -4252,3 +4252,43 @@ or larger retry batch was authorized or performed.
 
 Change note: Record the measured version-13 deployment, five staged approvals,
 the unchanged failed attempt, and the decision to retain the bounded scope.
+
+## Authorized commit diagnostics and one Fort Greene retry
+
+
+The user requested more precise commit rejection logging and one new attempt.
+Use workstream `workstream/affiliate-commit-diagnostics` from checkpoint
+`dcc6a0858a584f7b3e4cf6b7772542db8b0e47e5`.
+
+Keep the existing bounded redacted command-rejection channel. Give each
+commit-validation guard a finite reason code: missing receipt, wrong claim,
+wrong job, wrong claim generation, wrong operation, non-success status, wrong
+command, invalid validation output, or package-hash mismatch. Keep the
+COMMAND_NOT_PERMITTED error class, rejection order, and acceptance predicates.
+Log no raw commands, IDs supplied by the model, hashes, tokens, source content,
+or error prose. The existing per-record, count, and total-byte limits remain.
+
+The Gateway regression exercises all nine actual rejection branches, passes
+their diagnostics through serialization/parsing, and verifies that no commit
+receipt is written before the unchanged successful commit/replay path.
+It failed before the change because every branch emitted
+PACKAGE_MANIFEST_MISMATCH. The first corrected gate passed three suites and
+166 tests, source TypeScript, and targeted ESLint.
+
+This is a diagnostic-only image update. Supply, role, prompt, Gateway command,
+and deployment authority contracts do not change. Keep the existing deployment
+contract version 13 and its exact hash, and role/prompt version 12. Deploy
+matching source-revision images to the same seven runtimes with a new private
+preflight. This avoids rebinding or rewriting the queued Fort Greene repair
+authority merely to add logging. Preserve all credentials and adjacent state.
+
+The user-authorized retry is only Gateway job
+`17660388-1c26-4c49-b251-faf4f22750d6`, mapping job
+`6ba98571-5f89-4541-be5e-c7e6560cf078`. Preserve failed generation 1 and claim
+`agw-claim-015de215-3713-42ed-97fb-a99cda8e4c14`. Permit one new producer claim
+generation through the existing scheduled-retry and exact-lease boundary.
+Do not reset counters, fabricate a result, reuse a failed token, or replay the
+five approved sources. Follow any new committed package through independent
+review. Stop on another process failure or unresolved effect. Activation,
+publication, recurring imports, and the separate Pickleball recovery stay
+outside scope.

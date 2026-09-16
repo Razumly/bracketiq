@@ -93,6 +93,15 @@ export const AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_REASON_CODES = [
   "PACKAGE_SOURCE_MISMATCH",
   "SOURCE_KIND_MISMATCH",
   "PACKAGE_MANIFEST_MISMATCH",
+  "PACKAGE_COMMIT_RECEIPT_NOT_FOUND",
+  "PACKAGE_COMMIT_RECEIPT_CLAIM_MISMATCH",
+  "PACKAGE_COMMIT_RECEIPT_JOB_MISMATCH",
+  "PACKAGE_COMMIT_RECEIPT_GENERATION_MISMATCH",
+  "PACKAGE_COMMIT_RECEIPT_OPERATION_MISMATCH",
+  "PACKAGE_COMMIT_RECEIPT_NOT_SUCCEEDED",
+  "PACKAGE_COMMIT_RECEIPT_COMMAND_MISMATCH",
+  "PACKAGE_COMMIT_OUTPUT_INVALID",
+  "PACKAGE_COMMIT_HASH_MISMATCH",
   "PACKAGE_EVIDENCE_OUTSIDE_CLAIM",
   "PAGE_HTML_REQUIRED",
   "PACKAGE_SELECTOR_INVALID",
@@ -360,8 +369,24 @@ const gatewayReasonCodeFor = (
       return "SOURCE_KIND_MISMATCH";
     case "The package validation manifest does not match the claim.":
       return "PACKAGE_MANIFEST_MISMATCH";
-    case "The package commit does not match a successful validation receipt.":
-      return "PACKAGE_MANIFEST_MISMATCH";
+    case "The package commit validation receipt was not found.":
+      return "PACKAGE_COMMIT_RECEIPT_NOT_FOUND";
+    case "The package commit validation receipt belongs to a different claim.":
+      return "PACKAGE_COMMIT_RECEIPT_CLAIM_MISMATCH";
+    case "The package commit validation receipt belongs to a different job.":
+      return "PACKAGE_COMMIT_RECEIPT_JOB_MISMATCH";
+    case "The package commit validation receipt belongs to a different claim generation.":
+      return "PACKAGE_COMMIT_RECEIPT_GENERATION_MISMATCH";
+    case "The package commit validation receipt is not a command receipt.":
+      return "PACKAGE_COMMIT_RECEIPT_OPERATION_MISMATCH";
+    case "The package commit validation receipt has not succeeded.":
+      return "PACKAGE_COMMIT_RECEIPT_NOT_SUCCEEDED";
+    case "The package commit validation receipt is not for package validation.":
+      return "PACKAGE_COMMIT_RECEIPT_COMMAND_MISMATCH";
+    case "The package commit validation receipt has invalid validation output.":
+      return "PACKAGE_COMMIT_OUTPUT_INVALID";
+    case "The package commit hash does not match the validated package hash.":
+      return "PACKAGE_COMMIT_HASH_MISMATCH";
     case "The package references evidence outside the claim manifest.":
       return "PACKAGE_EVIDENCE_OUTSIDE_CLAIM";
     case "Declarative CSS extraction requires PAGE_HTML listing evidence.":

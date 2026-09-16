@@ -6955,15 +6955,28 @@ function assertValidationReceiptOwnership(
   validationReceipt: AffiliateAgentGatewayOperationReceipts | null,
   authorized: AuthorizedClaim,
 ): asserts validationReceipt is AffiliateAgentGatewayOperationReceipts {
-  if (
-    !validationReceipt ||
-    validationReceipt.claimId !== authorized.claim.id ||
-    validationReceipt.jobId !== authorized.job.id ||
-    validationReceipt.claimGeneration !== authorized.claim.claimGeneration
-  ) {
+  if (!validationReceipt) {
     throw gatewayError(
       "COMMAND_NOT_PERMITTED",
-      "The package commit does not match a successful validation receipt.",
+      "The package commit validation receipt was not found.",
+    );
+  }
+  if (validationReceipt.claimId !== authorized.claim.id) {
+    throw gatewayError(
+      "COMMAND_NOT_PERMITTED",
+      "The package commit validation receipt belongs to a different claim.",
+    );
+  }
+  if (validationReceipt.jobId !== authorized.job.id) {
+    throw gatewayError(
+      "COMMAND_NOT_PERMITTED",
+      "The package commit validation receipt belongs to a different job.",
+    );
+  }
+  if (validationReceipt.claimGeneration !== authorized.claim.claimGeneration) {
+    throw gatewayError(
+      "COMMAND_NOT_PERMITTED",
+      "The package commit validation receipt belongs to a different claim generation.",
     );
   }
 }
@@ -6983,27 +6996,31 @@ const assertSuccessfulValidationReceipt = (
   if (validationReceipt.operationKind !== "EXECUTE_COMMAND") {
     throw gatewayError(
       "COMMAND_NOT_PERMITTED",
-      "The package commit does not match a successful validation receipt.",
+      "The package commit validation receipt is not a command receipt.",
     );
   }
-  if (
-    validationReceipt.status !== "SUCCEEDED" ||
-    validationReceipt.commandName !== "VALIDATE_DECLARATIVE_PACKAGE"
-  ) {
+  if (validationReceipt.status !== "SUCCEEDED") {
     throw gatewayError(
       "COMMAND_NOT_PERMITTED",
-      "The package commit does not match a successful validation receipt.",
+      "The package commit validation receipt has not succeeded.",
     );
   }
-  if (
-    !validationOutput.success ||
-    validationOutput.data.isValid !== true ||
-    validationOutput.data.validatedPackageHash !==
-      command.data.validatedPackageHash
-  ) {
+  if (validationReceipt.commandName !== "VALIDATE_DECLARATIVE_PACKAGE") {
     throw gatewayError(
       "COMMAND_NOT_PERMITTED",
-      "The package commit does not match a successful validation receipt.",
+      "The package commit validation receipt is not for package validation.",
+    );
+  }
+  if (!validationOutput.success) {
+    throw gatewayError(
+      "COMMAND_NOT_PERMITTED",
+      "The package commit validation receipt has invalid validation output.",
+    );
+  }
+  if (validationOutput.data.validatedPackageHash !== command.data.validatedPackageHash) {
+    throw gatewayError(
+      "COMMAND_NOT_PERMITTED",
+      "The package commit hash does not match the validated package hash.",
     );
   }
 };
