@@ -1,9 +1,8 @@
 import type {
-  OfficialSchedulingMode,
   StaffingPriority,
 } from "@/server/officials/config";
 
-export type { OfficialSchedulingMode, StaffingPriority };
+export type { StaffingPriority };
 
 import { formatDisplayDate, formatDisplayTime, parseLocalDateTime } from '@/lib/dateUtils';
 import { normalizeEnumValue } from '@/lib/enumUtils';
@@ -358,6 +357,8 @@ export interface MatchOfficialCheckInOperation {
 }
 
 export interface TeamPlayerRegistration {
+  invitationId?: string | null;
+  invitationLabel?: string | null;
   id: string;
   teamId?: string | null;
   userId: string;
@@ -503,6 +504,15 @@ export interface Sport {
   $updatedAt: string;
 }
 
+export interface SportCategory {
+  $id: string;
+  name: string;
+  sportIds: string[];
+  displayOrder: number;
+  $createdAt: string;
+  $updatedAt: string;
+}
+
 export interface LeagueScoringConfig {
   $id?: string;
   pointsForWin: number;
@@ -528,6 +538,7 @@ export interface Match {
   phaseDivisionId?: string | null;
   fieldId?: string | null;
   locked?: boolean;
+  placementState?: string | null;
   status?: MatchLifecycleStatus | string | null;
   resultStatus?: MatchResultStatus | string | null;
   resultType?: MatchResultType | string | null;
@@ -626,6 +637,7 @@ export type TimeSlotPayload = Omit<TimeSlot, 'event' | 'field' | '$id'> & {
 };
 
 export interface UserData {
+  hasActiveAccount?: boolean;
   $id: string;
   firstName: string;
   lastName: string;
@@ -652,6 +664,8 @@ export interface UserData {
   chatTermsVersion?: string | null;
   onboardingIntent?: OnboardingIntent | null;
   accountVisibility?: AccountVisibility | null;
+  isManagedPlayer?: boolean;
+  mergedIntoProfileId?: string | null;
   notificationSettings?: NotificationSettings | null;
   stripeAccountId?: string | null;
   $createdAt?: string;
@@ -664,7 +678,7 @@ export interface UserData {
 
 export type StaffMemberType = 'HOST' | 'OFFICIAL' | 'STAFF';
 export type InviteType = 'STAFF' | 'TEAM' | 'EVENT';
-export type InviteStatus = 'PENDING' | 'DECLINED' | 'FAILED';
+export type InviteStatus = 'PENDING' | 'DECLINED' | 'FAILED' | 'ACCEPTED' | 'CANCELLED' | 'EXPIRED';
 export type TeamInviteRole = 'player' | 'team_manager' | 'team_head_coach' | 'team_assistant_coach';
 export type OrganizationRoleKind = 'OWNER' | 'STAFF' | 'HOST' | 'OFFICIAL';
 
@@ -694,12 +708,31 @@ export interface StaffMember {
   $updatedAt?: string;
 }
 export interface Invite {
+  finalizedAt?: string | null;
+  actedBy?: string | null;
+  actingGuardianId?: string | null;
+  senderName?: string | null;
+  actingGuardianName?: string | null;
+  declineBlockScope?: 'sender' | 'team' | null;
+  linkExpiresAt?: string | null;
+  sentAt?: string | null;
+  canBlockSender?: boolean;
+  isCurrentAttempt?: boolean;
+  invitationLabel?: string;
+  deliveries?: Array<{ id: string; kind: string; status: string; createdAt: string; completedAt?: string | null; sentAt?: string | null }>;
+  delivery?: { failed: boolean; status: string; error?: string };
   $id: string;
   type: InviteType;
   role?: TeamInviteRole | null;
   email?: string;
+  playerEmail?: string | null;
   phone?: string;
+  isAssigned?: boolean;
   shareUrl?: string;
+  claimUrl?: string | null;
+  isMinor?: boolean;
+  dateOfBirth?: string | null;
+  guardianEmail?: string | null;
   status?: InviteStatus;
   staffTypes?: StaffMemberType[];
   userId?: string | null;
@@ -793,7 +826,7 @@ export interface Field {
   rentalSlots?: TimeSlot[];
 }
 
-export type EventType = 'EVENT' | 'TOURNAMENT' | 'LEAGUE' | 'WEEKLY_EVENT' | 'TRYOUT' | 'AFFILIATE';
+export type EventType = 'EVENT' | 'TOURNAMENT' | 'LEAGUE' | 'WEEKLY_EVENT' | 'TRYOUT';
 export type RegistrationPaymentMode = 'ONLINE' | 'MANUAL';
 export type ManualPaymentProvider = 'CASH_APP' | 'VENMO' | 'PAYPAL' | 'STRIPE' | 'ZELLE' | 'OTHER';
 
@@ -885,20 +918,30 @@ export interface OrganizationTag {
   isSystem?: boolean;
 }
 
+export interface EventOccurrencePreview {
+  slotId: string;
+  occurrenceDate: string;
+  start: string;
+  end: string;
+  timeZone?: string;
+}
+
 // Core Event interface with relationships
 export interface Event {
+  sourceTemplateId?: string | null;
   $id: string;
   name: string;
   description: string;
   affiliateUrl?: string | null;
   affiliateActionUrl?: string | null;
   sourceUrl?: string | null;
-  organizerName?: string | null;
-  scheduleText?: string | null;
+  nextOccurrence?: EventOccurrencePreview | null;
   dateDisplayMode?: 'SCHEDULED' | 'DATE_ONLY' | 'NO_FIXED_DATE' | 'ONGOING' | string | null;
   dateDisplayText?: string | null;
   priceText?: string | null;
   statusText?: string | null;
+  organizerName?: string | null;
+  scheduleText?: string | null;
   tags?: EventTag[];
   start: string;
   end: string | null;
@@ -920,6 +963,7 @@ export interface Event {
   imageId: string | null;
   hostId: string | null;
   noFixedEndDateTime?: boolean;
+  isAutomatedScheduling?: boolean;
   state: EventState;
   maxParticipants: number;
   teamSizeLimit: number;
@@ -933,7 +977,6 @@ export interface Event {
   fieldIds?: string[];
   timeSlotIds?: string[];
   officialIds?: string[];
-  officialSchedulingMode?: OfficialSchedulingMode;
   staffingPriority?: StaffingPriority;
   officialPositions?: EventOfficialPosition[];
   eventOfficials?: EventOfficial[];

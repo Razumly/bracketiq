@@ -76,7 +76,7 @@ class EventDetailJoinActionPresentationTest {
         )
 
         assertEquals(2_500, presentation.priceCents)
-        assertEquals(listOf("Join as Free Agent", "Complete payment"), presentation.options.map { it.label })
+        assertEquals(listOf("Continue as a free agent", "Complete payment"), presentation.options.map { it.label })
         presentation.options.first().onClick()
         assertTrue(joined)
         presentation.options.last().onClick()
@@ -98,6 +98,31 @@ class EventDetailJoinActionPresentationTest {
             isWeeklyParentEvent = true,
             hasSelectedWeeklyOccurrence = false,
             isAffiliateEvent = false,
+            isRegistrationPaymentFailed = false,
+            onJoinEvent = {},
+            onSelectTeam = {},
+        )
+
+        assertTrue(presentation.options.isEmpty())
+    }
+    @Test
+    fun joinPresentation_archivedWeeklyEventHasNoRegistrationOptions() {
+        val presentation = buildEventDetailJoinPresentation(
+            event = Event(
+                eventType = com.razumly.mvp.core.data.dataTypes.enums.EventType.WEEKLY_EVENT,
+                state = "ARCHIVED",
+            ),
+            selectedDivision = null,
+            selectedJoinOptionDivisionId = null,
+            hasAnyPaidDivision = false,
+            tournamentPoolPlayEnabled = false,
+            isUserInEvent = false,
+            selectedWeeklyOccurrenceJoined = false,
+            isEventFull = false,
+            joinBlockedByStart = false,
+            isWeeklyParentEvent = false,
+            hasSelectedWeeklyOccurrence = false,
+            isAffiliateEvent = true,
             isRegistrationPaymentFailed = false,
             onJoinEvent = {},
             onSelectTeam = {},

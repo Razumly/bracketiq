@@ -19,8 +19,7 @@ import {
   Stack,
   Text,
   TextInput,
-  ThemeIcon,
-} from '@mantine/core';
+} from '@/components/organization/organization-operation-ui';
 import {
   Check as IconCheck,
   ChevronLeft as IconChevronLeft,
@@ -44,6 +43,8 @@ import {
   getUserFullName,
   getUserHandle,
 } from '@/types';
+
+import type { EventTeamCreationContext } from '@/lib/contracts/eventRegistrationDraft';
 
 type BuilderStepKey = 'team' | 'freeAgents' | 'staff' | 'invite' | 'review';
 type StaffInviteRole = 'team_manager' | 'team_head_coach' | 'team_assistant_coach';
@@ -103,13 +104,15 @@ type CreatedInviteLink = {
   role: string;
   shareUrl: string;
   emailSent: boolean;
+  deliveryFailed: boolean;
 };
 
 type TeamBuilderModalProps = {
   isOpen: boolean;
   onClose: () => void;
   currentUser: UserData | null;
-  onTeamCreated?: (team: Team) => void;
+  onTeamCreated?: (team: Team) => void | Promise<void>;
+  registrationDraft?: EventTeamCreationContext & { teamId: string };
   organizationId?: string;
   eventId?: string | null;
   initialFreeAgentId?: string | null;
@@ -163,6 +166,7 @@ export default function TeamBuilderModal({
   organizationId,
   eventId,
   initialFreeAgentId,
+  registrationDraft,
 }: TeamBuilderModalProps) {
   const [step, setStep] = useState(0);
   const [teamName, setTeamName] = useState('');
@@ -196,17 +200,19 @@ export default function TeamBuilderModal({
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
+  const [eventReload, setEventReload] = useState(0);
   const currentUserId = normalizedUserId(currentUser);
+  const isEventRegistration = Boolean(registrationDraft);
   const hasFreeAgentStep = eventContextResolved
     && Boolean(event?.start && new Date(event.start).getTime() > Date.now())
     && freeAgents.length > 0;
-  const steps = useMemo<Array<{ key: BuilderStepKey; label: string }>>(() => [
+  const steps = useMemo<Array<{ key: BuilderStepKey; label: string }>>(() => registrationDraft ? [{ key: 'team', label: 'Team details' }] : [
     { key: 'team', label: 'Team' },
     ...(hasFreeAgentStep ? [{ key: 'freeAgents' as const, label: 'Free agents' }] : []),
     { key: 'staff', label: 'Staff' },
     { key: 'invite', label: 'Invite players' },
     { key: 'review', label: 'Review' },
-  ], [hasFreeAgentStep]);
+  ], [hasFreeAgentStep, registrationDraft]);
   const activeStep = steps[step]?.key ?? 'team';
   const resolvedTeamSize = typeof teamSize === 'number' ? Math.trunc(teamSize) : Number(teamSize);
   const selectedFreeAgents = useMemo(() => {
@@ -275,11 +281,15 @@ export default function TeamBuilderModal({
       setLoadingEvent(true);
       setEventContextResolved(false);
       try {
-        const snapshot = await eventService.getEventParticipants(eventId);
+        const snapshot = isEventRegistration ? null : await eventService.getEventParticipants(eventId);
         if (cancelled) return;
-        const nextEvent = snapshot.event ?? await eventService.getEventById(eventId) ?? null;
-        const freeAgentIdSet = new Set(snapshot.participants.freeAgentIds ?? []);
-        const nextFreeAgents = (snapshot.users ?? []).filter((user) => freeAgentIdSet.has(user.$id));
+        const nextEvent = snapshot?.event ?? await eventService.getEventById(eventId) ?? null;
+        if (cancelled) return;
+        if (isEventRegistration && !eventSportName(nextEvent)) {
+          throw new Error('Event sport could not be loaded.');
+        }
+        const freeAgentIdSet = new Set(snapshot?.participants.freeAgentIds ?? []);
+        const nextFreeAgents = (snapshot?.users ?? []).filter((user) => freeAgentIdSet.has(user.$id));
         setEvent(nextEvent);
         setFreeAgents(nextFreeAgents);
         const eventTeamSize = Number(nextEvent?.teamSizeLimit);
@@ -292,7 +302,9 @@ export default function TeamBuilderModal({
         }
       } catch (loadError) {
         console.error('Failed to load team-builder event context:', loadError);
-        if (!cancelled) setError('Event details could not be loaded. You can still create a team.');
+        if (!cancelled) setError(isEventRegistration
+          ? 'Event details could not be loaded. Reload them before saving your team.'
+          : 'Event details could not be loaded. You can still create a team.');
       } finally {
         if (!cancelled) {
           setLoadingEvent(false);
@@ -302,7 +314,7 @@ export default function TeamBuilderModal({
     };
     void loadEventContext();
     return () => { cancelled = true; };
-  }, [eventId, initialFreeAgentId, isOpen]);
+  }, [eventId, initialFreeAgentId, isOpen, isEventRegistration, eventReload]);
 
   useEffect(() => {
     if (!isOpen || activeStep !== 'invite' || searchQuery.trim().length < 2) {
@@ -355,6 +367,10 @@ export default function TeamBuilderModal({
   };
 
   const validateBasics = (): boolean => {
+    if (isEventRegistration && (loadingEvent || !eventSportName(event))) {
+      setError('Load the event sport before saving your team.');
+      return false;
+    }
     if (!teamName.trim()) {
       setError('Enter a team name.');
       return false;
@@ -490,6 +506,7 @@ export default function TeamBuilderModal({
         resolvedTeamSize,
         undefined,
         {
+          ...(registrationDraft ? { teamId: registrationDraft.teamId, registrationDraft: { eventId: registrationDraft.eventId, slotId: registrationDraft.slotId, occurrenceDate: registrationDraft.occurrenceDate, baseRevision: registrationDraft.baseRevision } } : {}),
           addSelfAsPlayer,
           creatorIsCaptain,
           creatorCoachRole,
@@ -498,6 +515,13 @@ export default function TeamBuilderModal({
           openRegistration: false,
         },
       );
+
+      if (registrationDraft) {
+        await onTeamCreated?.(team);
+        reset();
+        onClose();
+        return;
+      }
 
       const accountUsers = [
         ...selectedFreeAgents,
@@ -508,20 +532,20 @@ export default function TeamBuilderModal({
         name: string;
         role: string;
         emailSent: boolean;
-        run: () => Promise<boolean | { shareUrl?: string | null; invite?: { $id?: string; id?: string } }>;
+        run: () => Promise<boolean | { shareUrl?: string | null; invite?: { $id?: string; id?: string }; delivery?: { failed?: boolean; status?: string } }>;
       }> = [
         ...accountUsers.map((user) => ({
           name: getUserFullName(user),
           role: 'Player',
           emailSent: false,
-          run: () => teamService.inviteUserToTeamRole(team, user, 'player'),
+          run: () => teamService.createTeamMemberInvite(team.$id, { userId: user.$id, role: 'player' }),
         })),
         ...staffInvites.map((invite) => ({
           name: invite.kind === 'account' ? getUserFullName(invite.user) : `${invite.firstName} ${invite.lastName}`.trim(),
           role: STAFF_ROLE_OPTIONS.find((option) => option.value === invite.role)?.label ?? 'Staff',
           emailSent: invite.kind === 'person' && EMAIL_REGEX.test(invite.email.trim()),
           run: () => invite.kind === 'account'
-            ? teamService.inviteUserToTeamRole(team, invite.user, invite.role)
+            ? teamService.createTeamMemberInvite(team.$id, { userId: invite.user.$id, role: invite.role })
             : teamService.createTeamMemberInvite(team.$id, {
               role: invite.role,
               firstName: invite.firstName,
@@ -545,7 +569,7 @@ export default function TeamBuilderModal({
           }),
         })),
       ];
-      const results: PromiseSettledResult<boolean | { shareUrl?: string | null; invite?: { $id?: string; id?: string } }>[] = [];
+      const results: PromiseSettledResult<boolean | { shareUrl?: string | null; invite?: { $id?: string; id?: string }; delivery?: { failed?: boolean; status?: string } }>[] = [];
       for (const job of inviteJobs) {
         try {
           results.push({ status: 'fulfilled', value: await job.run() });
@@ -554,23 +578,26 @@ export default function TeamBuilderModal({
         }
       }
       const failedCount = results.filter((result) => result.status === 'rejected' || result.value === false).length;
+      const deliveryFailureCount = results.filter((result) => result.status === 'fulfilled'
+        && typeof result.value === 'object' && result.value.delivery?.failed).length;
       const links = results.flatMap((result, index): CreatedInviteLink[] => {
         if (result.status !== 'fulfilled' || typeof result.value !== 'object' || !result.value?.shareUrl) return [];
         return [{
-          id: result.value.invite?.$id ?? result.value.invite?.id ?? `${team.$id}-${index}`,
+          id: `${result.value.invite?.$id ?? result.value.invite?.id ?? team.$id}-${index}`,
           name: inviteJobs[index].name,
           role: inviteJobs[index].role,
           shareUrl: result.value.shareUrl,
-          emailSent: inviteJobs[index].emailSent,
+          emailSent: inviteJobs[index].emailSent && result.value.delivery?.status === 'SENT',
+          deliveryFailed: result.value.delivery?.failed === true,
         }];
       });
       onTeamCreated?.(team);
-      if (links.length > 0 || failedCount > 0) {
+      if (links.length > 0 || failedCount > 0 || deliveryFailureCount > 0) {
         setCreatedTeamName(team.name);
         setCreatedInviteLinks(links);
         setCreationWarning(failedCount > 0
           ? `${failedCount} invite${failedCount === 1 ? '' : 's'} could not be saved. Open the team to retry.`
-          : null);
+          : deliveryFailureCount > 0 ? `${deliveryFailureCount} invitation message${deliveryFailureCount === 1 ? '' : 's'} could not be delivered. The invitations are saved. Open the Team and use Remind.` : null);
         setCreating(false);
         return;
       }
@@ -600,22 +627,21 @@ export default function TeamBuilderModal({
         title="Team created"
         size="lg"
         centered
-        scrollAreaComponent={ScrollArea.Autosize}
       >
         <Stack gap="md">
           <Alert color="green" variant="light" icon={<IconCheck size={18} />}>
             {createdTeamName} is ready. Share each registration link below with the intended person.
           </Alert>
           {creationWarning ? <Alert color="yellow" variant="light">{creationWarning}</Alert> : null}
-          <ScrollArea.Autosize mah={320} type="auto" offsetScrollbars scrollbarSize={8}>
-            <Stack gap="xs" pr="xs">
+          <ScrollArea.Autosize mah={320} type="auto" offsetScrollbars>
+            <Stack gap="xs">
               {createdInviteLinks.map((invite) => (
                 <Paper key={invite.id} withBorder radius="md" p="md">
                   <Group justify="space-between" wrap="nowrap" align="center">
                     <div style={{ minWidth: 0 }}>
                       <Text fw={700} truncate>{invite.name}</Text>
                       <Text size="sm" c="dimmed">
-                        {invite.role}{invite.emailSent ? ' · Email invite sent' : ' · Link ready to share'}
+                        {invite.role}{invite.deliveryFailed ? ' · Invitation saved; delivery failed' : invite.emailSent ? ' · Email invite sent' : ' · Link ready to share'}
                       </Text>
                     </div>
                     <Button
@@ -642,8 +668,8 @@ export default function TeamBuilderModal({
   }
 
   const rosterRows = (editable: boolean) => (
-    <ScrollArea h={300} type="auto" offsetScrollbars scrollbarSize={8}>
-      <Stack gap="xs" pr="xs">
+    <ScrollArea style={{ height: 300 }} type="auto" offsetScrollbars>
+      <Stack gap="xs">
         {addSelfAsPlayer && currentUser ? (
           <RosterRow
             avatar={getUserAvatarUrl(currentUser, 40)}
@@ -689,7 +715,7 @@ export default function TeamBuilderModal({
         {Array.from({ length: openSlots }).map((_, index) => (
           <Paper key={`open-${index}`} withBorder radius="md" p="sm" bg="gray.0">
             <Group gap="sm">
-              <ThemeIcon variant="light" color="gray" radius="xl" size={40}><IconUserPlus size={18} /></ThemeIcon>
+              <span className="flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground"><IconUserPlus aria-hidden="true" size={18} /></span>
               <Text size="sm" c="dimmed">Open roster spot</Text>
             </Group>
           </Paper>
@@ -699,8 +725,8 @@ export default function TeamBuilderModal({
   );
 
   const staffRows = (editable: boolean) => (
-    <ScrollArea.Autosize mah={240} type="auto" offsetScrollbars scrollbarSize={8}>
-      <Stack gap="xs" pr="xs">
+    <ScrollArea.Autosize mah={240} type="auto" offsetScrollbars>
+      <Stack gap="xs">
         {creatorIsManager && currentUser ? (
           <RosterRow
             avatar={getUserAvatarUrl(currentUser, 40)}
@@ -765,28 +791,30 @@ export default function TeamBuilderModal({
       size="lg"
       centered
       closeOnClickOutside={!creating}
-      scrollAreaComponent={ScrollArea.Autosize}
+      styles={{ content: { zIndex: 1900 } }}
     >
       <Stack gap="md">
         <div>
           <Group justify="space-between" align="end" mb={6}>
             <div>
-              <Text size="xs" fw={700} tt="uppercase" c="blue">Step {step + 1} of {steps.length}</Text>
               <Text fw={700} size="lg">{steps[step]?.label}</Text>
+              {!isEventRegistration ? <Text size="sm" c="dimmed">Step {step + 1} of {steps.length}</Text> : null}
             </div>
             <Text size="sm" c="dimmed">{rosterCount} / {Number.isFinite(resolvedTeamSize) ? resolvedTeamSize : 0} spots</Text>
           </Group>
-          <Progress value={((step + 1) / steps.length) * 100} size="sm" radius="xl" />
+          {!isEventRegistration ? <Progress value={((step + 1) / steps.length) * 100} size="sm" /> : null}
         </div>
 
-        {error ? <Alert color="red" variant="light">{error}</Alert> : null}
+        {error ? <Alert color="red" variant="light">{error}
+          {isEventRegistration && !eventSportName(event) ? <Button variant="subtle" loading={loadingEvent} onClick={() => setEventReload((current) => current + 1)}>Reload event details</Button> : null}
+        </Alert> : null}
 
         {activeStep === 'team' ? (
           <Stack gap="sm">
             {event ? (
               <Paper withBorder radius="md" p="sm" bg="blue.0">
-                <Text size="xs" fw={700} c="blue">Building for event</Text>
                 <Text fw={600}>{event.name}</Text>
+                <Text size="sm" c="dimmed">Create a team for this event. You can add players after saving.</Text>
               </Paper>
             ) : null}
             <TextInput
@@ -798,7 +826,7 @@ export default function TeamBuilderModal({
               maxLength={50}
               size="md"
             />
-            <Group grow align="start">
+            <Group grow align="flex-start">
               <NumberInput
                 label="Team size"
                 value={teamSize}
@@ -813,7 +841,8 @@ export default function TeamBuilderModal({
                 value={sport || null}
                 onChange={(value) => setSport(value ?? '')}
                 searchable
-                disabled={Boolean(eventSportName(event))}
+                disabled={isEventRegistration || Boolean(eventSportName(event))}
+                description={isEventRegistration && sport ? `This event uses ${sport}.` : undefined}
                 size="md"
               />
             </Group>
@@ -828,8 +857,8 @@ export default function TeamBuilderModal({
               <Text size="sm" c="dimmed">Choose interested players now. You can remove a selection before continuing.</Text>
             </div>
             {freeAgents.length > 0 ? (
-              <ScrollArea h={300} type="auto" offsetScrollbars scrollbarSize={8}>
-                <Stack gap="xs" pr="xs">
+              <ScrollArea style={{ height: 300 }} type="auto" offsetScrollbars>
+                <Stack gap="xs">
                   {freeAgents.map((user) => {
                     const selected = selectedFreeAgentIds.includes(user.$id);
                     return (
@@ -942,8 +971,8 @@ export default function TeamBuilderModal({
             </Button>
             {staffSearching ? <Text size="sm" c="dimmed">Searching…</Text> : null}
             {!staffSearching && staffSearchQuery.trim().length >= 2 && staffSearchResults.length > 0 ? (
-              <ScrollArea h={180} type="auto" offsetScrollbars scrollbarSize={8}>
-                <Stack gap="xs" pr="xs">
+              <ScrollArea style={{ height: 180 }} type="auto" offsetScrollbars>
+                <Stack gap="xs">
                   {staffSearchResults.map((user) => (
                     <Paper key={user.$id} withBorder radius="md" p="sm">
                       <Group justify="space-between" wrap="nowrap">
@@ -992,7 +1021,8 @@ export default function TeamBuilderModal({
                 </Stack>
               </Paper>
             ) : null}
-            <Divider label="Team staff" labelPosition="left" />
+            <Divider />
+            <Text fw={700}>Team staff</Text>
             {staffRows(true)}
           </Stack>
         ) : null}
@@ -1026,8 +1056,8 @@ export default function TeamBuilderModal({
 
             {searching ? <Text size="sm" c="dimmed">Searching…</Text> : null}
             {!searching && searchQuery.trim().length >= 2 && searchResults.length > 0 ? (
-              <ScrollArea h={190} type="auto" offsetScrollbars scrollbarSize={8}>
-                <Stack gap="xs" pr="xs">
+              <ScrollArea style={{ height: 190 }} type="auto" offsetScrollbars>
+                <Stack gap="xs">
                   {searchResults.map((user) => (
                     <Paper key={user.$id} withBorder radius="md" p="sm">
                       <Group justify="space-between" wrap="nowrap">
@@ -1071,7 +1101,8 @@ export default function TeamBuilderModal({
               </Paper>
             ) : null}
 
-            <Divider label="Roster" labelPosition="left" />
+            <Divider />
+            <Text fw={700}>Roster</Text>
             {rosterRows(true)}
           </Stack>
         ) : null}
@@ -1079,9 +1110,8 @@ export default function TeamBuilderModal({
         {activeStep === 'review' ? (
           <Stack gap="sm">
             <Paper withBorder radius="md" p="md">
-              <Group justify="space-between" align="start">
+              <Group justify="space-between" align="flex-start">
                 <div>
-                  <Text size="xs" c="dimmed" tt="uppercase" fw={700}>Team</Text>
                   <Text size="lg" fw={700}>{teamName.trim()}</Text>
                   <Text size="sm" c="dimmed">{sport} · {resolvedTeamSize} players</Text>
                 </div>
@@ -1117,8 +1147,9 @@ export default function TeamBuilderModal({
               {activeStep === 'invite' ? 'Review team' : 'Continue'}
             </Button>
           ) : (
-            <Button leftSection={<IconCheck size={16} />} onClick={() => { void createTeam(); }} loading={creating} size="md">
-              Create team
+            <Button leftSection={<IconCheck size={16} />} onClick={() => { void createTeam(); }} loading={creating} size="md"
+              disabled={isEventRegistration && (loadingEvent || !eventSportName(event))}>
+              {registrationDraft ? 'Save team and continue' : 'Create team'}
             </Button>
           )}
         </Group>

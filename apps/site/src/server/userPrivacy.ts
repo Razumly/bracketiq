@@ -1,6 +1,7 @@
 import type { Prisma } from '@/generated/prisma/client';
 import { isPrivateToOrganizationsVisibility, normalizeAccountVisibility } from '@/lib/accountVisibility';
 import { formatNameParts, normalizeOptionalName } from '@/lib/nameCase';
+import { hasGuardianAge } from '@/server/guardianAuthority';
 
 export const publicUserSelect = {
   id: true,
@@ -22,6 +23,8 @@ export const publicUserSelect = {
   profileImageId: true,
   homePageOrganizationId: true,
   accountVisibility: true,
+  isManagedPlayer: true,
+  mergedIntoProfileId: true,
 } as const;
 
 export type SelectedPublicUser = Prisma.UserDataGetPayload<{ select: typeof publicUserSelect }>;
@@ -67,9 +70,12 @@ export type VisibilityContext = {
   contextTeamAllowsParent: boolean;
   contextEventAllowsParent: boolean;
   contextEventAllowsHost: boolean;
+  contextEventAllowsOfficial: boolean;
   contextOrganizationAllowsStaff: boolean;
   contextTeamVisibleUserIds: Set<string>;
+  contextTeamPendingUserIds: Set<string>;
   contextEventVisibleUserIds: Set<string>;
+  contextEventPendingUserIds: Set<string>;
   contextEventViewerTeamVisibleUserIds: Set<string>;
   contextEventParentVisibleUserIds: Set<string>;
   contextOrganizationVisibleUserIds: Set<string>;
@@ -131,6 +137,7 @@ const resolveDisplayName = (user: Pick<PublicUser, 'firstName' | 'lastName' | 'u
 
 export const createVisibilityContext = async (
   client: {
+    userData?: { findMany: (args: any) => Promise<Array<{ id: string; dateOfBirth?: Date | null }>> };
     parentChildLinks: { findMany: (args: any) => Promise<Array<{ childId: string }>> };
     staffMembers: { findMany: (args: any) => Promise<Array<{ organizationId?: string; userId?: string | null }>> };
     teams: {
@@ -156,6 +163,7 @@ export const createVisibilityContext = async (
     events: {
       findUnique: (args: any) => Promise<{
         hostId: string | null;
+        assistantHostIds?: string[];
         organizationId: string | null;
       } | null>;
     };
@@ -166,19 +174,32 @@ export const createVisibilityContext = async (
         rosterRole: string | null;
       }>>;
     };
+    eventOfficials?: {
+      findFirst: (args: any) => Promise<unknown>;
+    };
     organizations: {
       findMany: (args: any) => Promise<Array<{ id?: string; ownerId?: string | null }>>;
       findUnique: (args: any) => Promise<{ id?: string } | null>;
     };
     canonicalTeams?: {
-      findUnique: (args: any) => Promise<{ organizationId?: string | null } | null>;
+      findUnique: (args: any) => Promise<{ id?: string; organizationId?: string | null } | null>;
       findMany: (args: any) => Promise<Array<{ id: string }>>;
     };
     teamRegistrations?: {
-      findMany: (args: any) => Promise<Array<{ teamId: string; userId: string; status?: string | null }>>;
+      findMany: (args: any) => Promise<Array<{
+        teamId: string;
+        userId: string;
+        status?: string | null;
+        isCaptain?: boolean | null;
+      }>>;
     };
     teamStaffAssignments?: {
-      findMany: (args: any) => Promise<Array<{ teamId: string; userId: string; status?: string | null }>>;
+      findMany: (args: any) => Promise<Array<{
+        teamId: string;
+        userId: string;
+        role?: string | null;
+        status?: string | null;
+      }>>;
     };
   },
   options: VisibilityContextOptions,
@@ -191,6 +212,54 @@ export const createVisibilityContext = async (
   const contextEventId = normalizeId(options.eventId ?? null);
 
   if (!viewerId || isAdmin) {
+    let contextTeamPendingUserIds = new Set<string>();
+    let contextEventPendingUserIds = new Set<string>();
+    if (!isAdmin && contextTeamId) {
+      const contextTeam = await client.teams.findUnique({
+        where: { id: contextTeamId },
+        select: { pending: true },
+      });
+      if (contextTeam) {
+        contextTeamPendingUserIds = new Set(normalizeIdList(contextTeam.pending));
+      } else if (client.canonicalTeams?.findUnique && client.teamRegistrations?.findMany) {
+        const canonicalTeam = await client.canonicalTeams.findUnique({
+          where: { id: contextTeamId },
+          select: { id: true },
+        });
+        if (canonicalTeam) {
+          const invitedRegistrations = await client.teamRegistrations.findMany({
+            where: { teamId: contextTeamId, status: 'INVITED' },
+            select: { userId: true },
+          });
+          contextTeamPendingUserIds = new Set(normalizeIdList(
+            invitedRegistrations.map((registration) => registration.userId),
+          ));
+        }
+      }
+    }
+    if (!isAdmin && contextEventId) {
+      const contextRegistrations = await client.eventRegistrations.findMany({
+        where: {
+          eventId: contextEventId,
+          status: { in: ['STARTED', 'PENDING', 'ACTIVE', 'BLOCKED'] },
+          slotId: null,
+          occurrenceDate: null,
+        },
+        select: { registrantId: true, registrantType: true, rosterRole: true },
+      });
+      const eventTeamIds = normalizeIdList(contextRegistrations
+        .filter((row) => row.registrantType === 'TEAM' && (row.rosterRole ?? 'PARTICIPANT') === 'PARTICIPANT')
+        .map((row) => row.registrantId));
+      if (eventTeamIds.length) {
+        const eventTeams = await client.teams.findMany({
+          where: { id: { in: eventTeamIds } },
+          select: { pending: true },
+        });
+        contextEventPendingUserIds = new Set(normalizeIdList(
+          eventTeams.flatMap((team) => team.pending ?? []),
+        ));
+      }
+    }
     return {
       viewerId,
       isAdmin,
@@ -201,9 +270,12 @@ export const createVisibilityContext = async (
       contextTeamAllowsParent: false,
       contextEventAllowsParent: false,
       contextEventAllowsHost: false,
+      contextEventAllowsOfficial: false,
       contextOrganizationAllowsStaff: false,
       contextTeamVisibleUserIds: new Set(),
+      contextTeamPendingUserIds,
       contextEventVisibleUserIds: new Set(),
+      contextEventPendingUserIds,
       contextEventViewerTeamVisibleUserIds: new Set(),
       contextEventParentVisibleUserIds: new Set(),
       contextOrganizationVisibleUserIds: new Set(),
@@ -221,7 +293,10 @@ export const createVisibilityContext = async (
     },
     select: { childId: true },
   });
-  const activeChildIds = new Set(normalizeIdList(childLinks.map((row) => row.childId)));
+  const childProfiles = childLinks.length && client.userData
+    ? await client.userData.findMany({ where: { id: { in: childLinks.map((row) => row.childId) } }, select: { id: true, dateOfBirth: true } })
+    : [];
+  const activeChildIds = new Set(childProfiles.filter((child) => hasGuardianAge(child.dateOfBirth, now)).map((child) => child.id));
 
   const [ownedOrganizations, staffMemberships] = await Promise.all([
     client.organizations.findMany({
@@ -271,6 +346,7 @@ export const createVisibilityContext = async (
   let viewerManagesContextTeam = false;
   let viewerBelongsToContextTeam = false;
   let contextTeamVisibleUserIds = new Set<string>();
+  let contextTeamPendingUserIds = new Set<string>();
   let contextOrganizationId: string | null = null;
   if (contextTeamId) {
     const contextTeam = await client.teams.findUnique({
@@ -300,18 +376,72 @@ export const createVisibilityContext = async (
         ...contextTeam.playerIds,
         ...contextTeam.pending,
       ]));
+      contextTeamPendingUserIds = new Set(normalizeIdList(contextTeam.pending));
       viewerBelongsToContextTeam = contextTeamVisibleUserIds.has(viewerId);
       const contextTeamOrganization = await client.canonicalTeams?.findUnique?.({
         where: { id: contextTeam.id },
         select: { organizationId: true },
       });
       contextOrganizationId = normalizeId(contextTeamOrganization?.organizationId ?? null);
+    } else if (client.canonicalTeams?.findUnique) {
+      const canonicalTeam = await client.canonicalTeams.findUnique({
+        where: { id: contextTeamId },
+        select: { id: true, organizationId: true },
+      });
+      if (canonicalTeam) {
+        const [playerRegistrations, staffAssignments] = await Promise.all([
+          client.teamRegistrations?.findMany?.({
+            where: {
+              teamId: contextTeamId,
+              status: { in: ['ACTIVE', 'INVITED'] },
+            },
+            select: { teamId: true, userId: true, status: true, isCaptain: true },
+          }) ?? Promise.resolve([]),
+          client.teamStaffAssignments?.findMany?.({
+            where: { teamId: contextTeamId, status: 'ACTIVE' },
+            select: { teamId: true, userId: true, role: true, status: true },
+          }) ?? Promise.resolve([]),
+        ]);
+        const activePlayerIds = playerRegistrations
+          .filter((registration) => String(registration.status ?? '').toUpperCase() === 'ACTIVE')
+          .map((registration) => registration.userId);
+        const pendingPlayerIds = playerRegistrations
+          .filter((registration) => String(registration.status ?? '').toUpperCase() === 'INVITED')
+          .map((registration) => registration.userId);
+        const activeStaffAssignments = staffAssignments.filter(
+          (assignment) => String(assignment.status ?? '').toUpperCase() === 'ACTIVE',
+        );
+        const isCanonicalManager = activeStaffAssignments.some((assignment) => (
+          assignment.userId === viewerId
+          && String(assignment.role ?? '').toUpperCase() === 'MANAGER'
+        ));
+        const isCanonicalCoach = activeStaffAssignments.some((assignment) => (
+          assignment.userId === viewerId
+          && ['HEAD_COACH', 'ASSISTANT_COACH'].includes(String(assignment.role ?? '').toUpperCase())
+        ));
+        const isCanonicalCaptain = playerRegistrations.some((registration) => (
+          registration.userId === viewerId
+          && String(registration.status ?? '').toUpperCase() === 'ACTIVE'
+          && Boolean(registration.isCaptain)
+        ));
+        viewerManagesContextTeam = isCanonicalManager || isCanonicalCoach || isCanonicalCaptain;
+        contextTeamVisibleUserIds = new Set(normalizeIdList([
+          ...activePlayerIds,
+          ...pendingPlayerIds,
+          ...activeStaffAssignments.map((assignment) => assignment.userId),
+        ]));
+        contextTeamPendingUserIds = new Set(normalizeIdList(pendingPlayerIds));
+        viewerBelongsToContextTeam = contextTeamVisibleUserIds.has(viewerId);
+        contextOrganizationId = normalizeId(canonicalTeam.organizationId ?? null);
+      }
     }
   }
 
   let contextEventAllowsParent = false;
   let contextEventAllowsHost = false;
+  let contextEventAllowsOfficial = false;
   let contextEventVisibleUserIds = new Set<string>();
+  let contextEventPendingUserIds = new Set<string>();
   let contextEventViewerTeamVisibleUserIds = new Set<string>();
   let contextEventParentVisibleUserIds = new Set<string>();
   let contextEventFreeAgentIds = new Set<string>(normalizeIdList(options.freeAgentUserIds));
@@ -320,9 +450,22 @@ export const createVisibilityContext = async (
       where: { id: contextEventId },
       select: {
         hostId: true,
+        assistantHostIds: true,
         organizationId: true,
       },
     });
+
+    if (viewerId && client.eventOfficials?.findFirst) {
+      const eventOfficial = await client.eventOfficials.findFirst({
+        where: {
+          eventId: contextEventId,
+          userId: viewerId,
+          isActive: { not: false },
+        },
+        select: { id: true },
+      });
+      contextEventAllowsOfficial = Boolean(eventOfficial);
+    }
 
     const contextRegistrations = contextEvent
       ? await client.eventRegistrations.findMany({
@@ -346,7 +489,10 @@ export const createVisibilityContext = async (
     );
     const contextEventTeamIdValues = Array.from(contextEventTeamIds);
     contextEventAllowsParent = contextEventTeamIdValues.some((teamId) => parentTeamIds.has(teamId));
-    contextEventAllowsHost = normalizeId(contextEvent?.hostId ?? null) === viewerId;
+    contextEventAllowsHost = Boolean(
+      normalizeId(contextEvent?.hostId ?? null) === viewerId
+      || normalizeIdList(contextEvent?.assistantHostIds).includes(viewerId),
+    );
     contextOrganizationId = normalizeId(contextEvent?.organizationId ?? null) ?? contextOrganizationId;
 
     contextEventFreeAgentIds = new Set([
@@ -380,10 +526,13 @@ export const createVisibilityContext = async (
           ...(team.playerIds ?? []),
           ...(team.pending ?? []),
         ]);
-        return { teamId, visibleUserIds };
+        return { teamId, visibleUserIds, pendingUserIds: normalizeIdList(team.pending) };
       });
 
       eventTeamVisibleUserIds = eventTeamVisibilityRows.flatMap((row) => row.visibleUserIds);
+      contextEventPendingUserIds = new Set(normalizeIdList(
+        eventTeamVisibilityRows.flatMap((row) => row.pendingUserIds),
+      ));
 
       const viewerScopedRows = eventTeamVisibilityRows.filter((row) => row.visibleUserIds.includes(viewerId));
       contextEventViewerTeamVisibleUserIds = new Set(
@@ -456,9 +605,12 @@ export const createVisibilityContext = async (
     contextTeamAllowsParent: contextTeamId ? parentTeamIds.has(contextTeamId) : false,
     contextEventAllowsParent,
     contextEventAllowsHost,
+    contextEventAllowsOfficial,
     contextOrganizationAllowsStaff,
     contextTeamVisibleUserIds,
+    contextTeamPendingUserIds,
     contextEventVisibleUserIds,
+    contextEventPendingUserIds,
     contextEventViewerTeamVisibleUserIds,
     contextEventParentVisibleUserIds,
     contextOrganizationVisibleUserIds,
@@ -467,6 +619,34 @@ export const createVisibilityContext = async (
     viewerManagesContextTeam,
     allowManagerFreeAgentUnmask: Boolean(options.allowManagerFreeAgentUnmask),
   };
+};
+
+export const canViewPendingRosterIdentity = (
+  context: VisibilityContext,
+  userId: string,
+): boolean => {
+  const normalizedUserId = normalizeId(userId);
+  if (!normalizedUserId) {
+    return false;
+  }
+  if (context.isAdmin || context.viewerId === normalizedUserId) {
+    return true;
+  }
+  const canViewScopedPending = Boolean(
+    context.viewerManagesContextTeam
+    || context.contextEventAllowsHost
+    || context.contextEventAllowsOfficial
+    || context.contextOrganizationAllowsStaff
+  );
+  if (context.contextTeamPendingUserIds?.has(normalizedUserId)) {
+    return canViewScopedPending;
+  }
+  if (context.contextEventPendingUserIds?.has(normalizedUserId)) {
+    // Event-scoped pending identities are only exposed to a team manager
+    // when that team is the active visibility context.
+    return canViewScopedPending;
+  }
+  return true;
 };
 
 export const applyUserPrivacy = (user: PublicUser, context: VisibilityContext): VisibilityUser => {
@@ -498,6 +678,11 @@ export const applyUserPrivacy = (user: PublicUser, context: VisibilityContext): 
     )
   );
   const isIdentityHidden = isMinor && !canViewScopedMinorIdentity;
+  const canViewManagedProfileState = Boolean(
+    context.isAdmin
+    || context.viewerId === user.id
+    || context.viewerManagesContextTeam,
+  );
 
   const normalizedUser: PublicUser = {
     ...user,
@@ -508,6 +693,10 @@ export const applyUserPrivacy = (user: PublicUser, context: VisibilityContext): 
 
   const privacyMinimizedUser = {
     ...normalizedUser,
+    // Managed-profile state is a roster-management signal. Do not expose it
+    // to generic public profile viewers.
+    isManagedPlayer: canViewManagedProfileState ? normalizedUser.isManagedPlayer : false,
+    mergedIntoProfileId: canViewManagedProfileState ? normalizedUser.mergedIntoProfileId : null,
     dateOfBirth: canViewPrivateProfile ? normalizedUser.dateOfBirth : null,
     dobVerified: canViewPrivateProfile ? normalizedUser.dobVerified : false,
     dobVerifiedAt: canViewPrivateProfile ? normalizedUser.dobVerifiedAt : null,

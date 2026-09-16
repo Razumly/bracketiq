@@ -1,8 +1,9 @@
 "use client";
 
-import { NumberInput, Stack, Text, Title } from "@mantine/core";
+import { NumberInput, Stack, Text, Title } from '@/components/organization/organization-operation-ui';
 
 import { resolveEventResourceLabels } from "@/lib/sportResourceLabels";
+import { isUnscheduledCompetition } from "../eventRules";
 import { deriveScheduleParticipantCount } from "../divisionForm";
 import { coordinatesAreSet } from "../locationHelpers";
 import { EventDetailsLocationControls } from "../sections/EventDetailsLocationControls";
@@ -10,7 +11,6 @@ import { EventDetailsResourceControls } from "../sections/EventDetailsResourceCo
 import type { EventFormSectionsProps } from "../sections/EventFormSections";
 import { EventDetailsTimingControls } from "../sections/EventDetailsTimingControls";
 import { ScheduleConfigBody } from "../sections/ScheduleConfigBody";
-import type { EventSetupScheduleStyle } from "./types";
 
 const SHEET_POPOVER_Z_INDEX = 1800;
 const sharedPopoverProps = {
@@ -34,12 +34,10 @@ const MAX_MEDIUM_TEXT_LENGTH = 160;
 
 type SimpleSetupScheduleLocationPageProps = {
   model: EventFormSectionsProps;
-  scheduleStyle: EventSetupScheduleStyle;
 };
 
 export const SimpleSetupScheduleLocationPage = ({
   model,
-  scheduleStyle,
 }: SimpleSetupScheduleLocationPageProps) => {
   const {
     configurationActions,
@@ -83,15 +81,22 @@ export const SimpleSetupScheduleLocationPage = ({
     setFieldNamesCollapsed,
     showScheduleConfig,
   } = sectionsController;
-  const { handleEndChange, handleSelectedAddressChange, handleStartChange } =
-    configurationActions;
+  const {
+    handleNoFixedEndDateTimeChange,
+    handleSelectedAddressChange,
+  } = configurationActions;
   const {
     handleAddSlot,
+    handleAssignCalendarResource,
     handleAutoResolveSlotConflict,
+    handleCreateCalendarSelection,
+    handleMoveCalendarSlot,
     handleRemoveSlot,
+    handleResizeCalendarSlot,
     handleUpdateSlot,
   } = slotController;
   const { setLeagueData } = fieldWriters;
+  const { timingController } = model;
   const resourceLabels = resolveEventResourceLabels({
     sportIds: eventData.sportIds,
     sportsById: catalog.sportsById,
@@ -119,9 +124,30 @@ export const SimpleSetupScheduleLocationPage = ({
       error={errors.fieldCount?.message as string | undefined}
     />
   ) : null;
+  const localResourceControls = showLocalFieldCreationControls ? (
+    <EventDetailsResourceControls
+      control={control}
+      showOrganizationFields={showOrganizationFieldsInEventDetails}
+      organizationResourcePool={organizationResourcePool}
+      resourceSelectorLoading={resourceSelectorLoading}
+      organizationHostedEventId={organizationHostedEventId}
+      isImmutableField={isImmutableField}
+      rentalResourcesError={rentalResourcesError}
+      showLocalFieldCreationControls={showLocalFieldCreationControls}
+      eventLocalFields={eventLocalFields}
+      fieldNamesCollapsed={fieldNamesCollapsed}
+      setFieldNamesCollapsed={setFieldNamesCollapsed}
+      maxResourceNameLength={MAX_MEDIUM_TEXT_LENGTH}
+      embedded
+      resourceLabels={resourceLabels}
+      showOrganizationResourceControls={false}
+      localFieldCreationControl={localFieldCreationControl}
+      onLocalFieldNameChange={handleLocalFieldNameChange}
+    />
+  ) : null;
 
   return (
-    <Stack gap="xl">
+    <Stack gap="lg">
       <div>
         <Title order={4}>Timing and location</Title>
         <Text size="sm" c="dimmed">
@@ -131,113 +157,110 @@ export const SimpleSetupScheduleLocationPage = ({
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-12 md:items-start">
-        <EventDetailsTimingControls
-          control={control}
-          eventType={eventData.eventType}
-          startValue={eventData.start}
-          noFixedEndDateTime={Boolean(eventData.noFixedEndDateTime)}
-          supportsNoFixedEndDateTime={
-            model.presentation.supportsNoFixedEndDateTime
-          }
-          automaticRefundsAvailable={
-            model.paymentController.automaticRefundsAvailable
-          }
-          manualPaymentsEnabled={model.paymentController.manualPaymentsEnabled}
-          todaysDate={new Date(new Date().setHours(0, 0, 0, 0))}
-          maxStandardNumber={MAX_STANDARD_NUMBER}
-          dateTimePickerStyles={alignedDetailsFieldStyles}
-          numberInputStyles={alignedDetailsFieldStyles}
-          popoverProps={sharedPopoverProps}
-          isImmutableField={isImmutableField}
-          onStartChange={handleStartChange}
-          onEndChange={handleEndChange}
-          onNoFixedEndDateTimeChange={() => undefined}
-          showScheduleControls
-          showRegistrationControls={false}
-          showGeneratedEndDateControl={false}
-        />
-      </div>
-
-      <EventDetailsLocationControls
-        control={control}
-        eventType={eventData.eventType}
-        coordinates={eventData.coordinates}
-        defaultCoordinates={defaultCoordinates}
-        coordinatesSelected={coordinatesAreSet(eventData.coordinates)}
-        onSelectedAddressChange={handleSelectedAddressChange}
-        isLocationImmutable={
-          isImmutableField("location") ||
-          isImmutableField("coordinates") ||
-          hasExternalRentalField
-        }
-        isImmutableField={isImmutableField}
-        templatesLoading={false}
-        templateOptions={[]}
-        comboboxProps={sharedComboboxProps}
-        maxStandardNumber={MAX_STANDARD_NUMBER}
-        normalizeNumberValue={() => undefined}
-        showRequiredDocumentControls={false}
-        showAffiliateListingControls={false}
-        showAgeControls={false}
-        showRegistrationQuestions={false}
-        showCapacityWarning={false}
-        resourceControls={
-          showOrganizationFieldsInEventDetails ? (
-            <EventDetailsResourceControls
-              control={control}
-              showOrganizationFields={showOrganizationFieldsInEventDetails}
-              organizationResourcePool={organizationResourcePool}
-              resourceSelectorLoading={resourceSelectorLoading}
-              organizationHostedEventId={organizationHostedEventId}
+        <div
+          className={`min-w-0 ${
+            localResourceControls
+              ? "md:col-span-6"
+              : "md:col-span-12"
+          }`}
+          data-testid="simple-setup-timing-location-column"
+        >
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:items-start">
+            <EventDetailsTimingControls
               isImmutableField={isImmutableField}
-              rentalResourcesError={rentalResourcesError}
-              showLocalFieldCreationControls={showLocalFieldCreationControls}
-              eventLocalFields={eventLocalFields}
-              fieldNamesCollapsed={fieldNamesCollapsed}
-              setFieldNamesCollapsed={setFieldNamesCollapsed}
-              maxResourceNameLength={MAX_MEDIUM_TEXT_LENGTH}
-              resourceLabels={resourceLabels}
-              embedded
-              showLocalFieldNameControls={false}
-              onLocalFieldNameChange={handleLocalFieldNameChange}
-            />
-          ) : null
-        }
-        localFieldNameControls={
-          showLocalFieldCreationControls ? (
-            <EventDetailsResourceControls
               control={control}
-              showOrganizationFields={showOrganizationFieldsInEventDetails}
-              organizationResourcePool={organizationResourcePool}
-              resourceSelectorLoading={resourceSelectorLoading}
-              organizationHostedEventId={organizationHostedEventId}
-              isImmutableField={isImmutableField}
-              rentalResourcesError={rentalResourcesError}
-              showLocalFieldCreationControls={showLocalFieldCreationControls}
-              eventLocalFields={eventLocalFields}
-              fieldNamesCollapsed={fieldNamesCollapsed}
-              setFieldNamesCollapsed={setFieldNamesCollapsed}
-              maxResourceNameLength={MAX_MEDIUM_TEXT_LENGTH}
-              embedded
-              resourceLabels={resourceLabels}
-              showOrganizationResourceControls={false}
-              localFieldCreationControl={localFieldCreationControl}
-              onLocalFieldNameChange={handleLocalFieldNameChange}
+              eventType={eventData.eventType}
+              startValue={eventData.start}
+              eventTimeZone={eventData.timeZone}
+              noFixedEndDateTime={Boolean(eventData.noFixedEndDateTime)}
+              supportsNoFixedEndDateTime={
+                model.presentation.supportsNoFixedEndDateTime
+              }
+              automaticRefundsAvailable={
+                model.paymentController.automaticRefundsAvailable
+              }
+              manualPaymentsEnabled={model.paymentController.manualPaymentsEnabled}
+              todaysDate={new Date(new Date().setHours(0, 0, 0, 0))}
+              maxStandardNumber={MAX_STANDARD_NUMBER}
+              dateTimePickerStyles={alignedDetailsFieldStyles}
+              numberInputStyles={alignedDetailsFieldStyles}
+              fieldColumnClassName="md:col-span-1"
+              onStartChange={timingController?.handleStartChange ?? configurationActions.handleStartChange}
+              onEndChange={timingController?.handleEndChange ?? configurationActions.handleEndChange}
+              startTimingSource={isSchedulableEventType ? timingController?.startSource : undefined}
+              endTimingSource={isSchedulableEventType ? timingController?.endSource : undefined}
+              onResetStartToCalendar={isSchedulableEventType ? timingController?.resetStartToCalendar : undefined}
+              onResetEndToCalendar={isSchedulableEventType ? timingController?.resetEndToCalendar : undefined}
+              scheduleBoundaryError={isSchedulableEventType ? timingController?.scheduleBoundaryError : undefined}
+              scheduleBoundaryWarning={isSchedulableEventType ? timingController?.scheduleBoundaryWarning : undefined}
+              onNoFixedEndDateTimeChange={timingController?.handleNoFixedEndDateTimeChange ?? handleNoFixedEndDateTimeChange}
+              showAutomatedSchedulingControl={false}
+              showScheduleControls
+              showRegistrationControls={false}
+              showGeneratedEndDateControl={isSchedulableEventType}
             />
-          ) : null
-        }
-        registrationQuestionsEditor={null}
-        hasUnsetTeamCapacityLimits={false}
-        teamSignup={Boolean(eventData.teamSignup)}
-      />
-
-      {showScheduleConfig ? (
-        <div>
+          </div>
+          <div className="mt-6">
+            <EventDetailsLocationControls
+              control={control}
+              eventType={eventData.eventType}
+              coordinates={eventData.coordinates}
+              defaultCoordinates={defaultCoordinates}
+              coordinatesSelected={coordinatesAreSet(eventData.coordinates)}
+              onSelectedAddressChange={handleSelectedAddressChange}
+              isLocationImmutable={
+                isImmutableField("location") ||
+                isImmutableField("coordinates") ||
+                hasExternalRentalField
+              }
+              isImmutableField={isImmutableField}
+              templatesLoading={false}
+              templateOptions={[]}
+              comboboxProps={sharedComboboxProps}
+              maxStandardNumber={MAX_STANDARD_NUMBER}
+              normalizeNumberValue={() => undefined}
+              showRequiredDocumentControls={false}
+              showAffiliateListingControls={false}
+              showAgeControls={false}
+              showRegistrationQuestions={false}
+              showCapacityWarning={false}
+              locationMapColumnClassName={localResourceControls ? "md:col-span-12" : undefined}
+              resourceControls={
+                showOrganizationFieldsInEventDetails ? (
+                  <EventDetailsResourceControls
+                    control={control}
+                    showOrganizationFields={showOrganizationFieldsInEventDetails}
+                    organizationResourcePool={organizationResourcePool}
+                    resourceSelectorLoading={resourceSelectorLoading}
+                    organizationHostedEventId={organizationHostedEventId}
+                    isImmutableField={isImmutableField}
+                    rentalResourcesError={rentalResourcesError}
+                    showLocalFieldCreationControls={showLocalFieldCreationControls}
+                    eventLocalFields={eventLocalFields}
+                    fieldNamesCollapsed={fieldNamesCollapsed}
+                    setFieldNamesCollapsed={setFieldNamesCollapsed}
+                    maxResourceNameLength={MAX_MEDIUM_TEXT_LENGTH}
+                    resourceLabels={resourceLabels}
+                    embedded
+                    showLocalFieldNameControls={false}
+                    onLocalFieldNameChange={handleLocalFieldNameChange}
+                  />
+                ) : null
+              }
+              registrationQuestionsEditor={null}
+              hasUnsetTeamCapacityLimits={false}
+              teamSignup={Boolean(eventData.teamSignup)}
+            />
+          </div>
+        </div>
+        {localResourceControls ? (
+          <div className="min-w-0 md:col-span-6">{localResourceControls}</div>
+        ) : null}
+        {showScheduleConfig ? (
+          <div className="min-w-0 md:col-span-12">
           <Title order={4}>Schedule</Title>
           <Text size="sm" c="dimmed" mb="md">
-            {scheduleStyle === "FIXED_WINDOW"
-              ? `Assign ${resourceLabels.plural.toLocaleLowerCase()} and divisions. The timeslot follows the event start and end automatically.`
-              : "Configure the timeslots the match generator can use."}
+            Configure availability from the Resource calendar and the Time Slot editor.
           </Text>
           <ScheduleConfigBody
             control={control}
@@ -248,6 +271,7 @@ export const SimpleSetupScheduleLocationPage = ({
               eventData.eventType === "WEEKLY_EVENT" && !eventData.parentEvent
             }
             isSchedulableEventType={isSchedulableEventType}
+            eventType={eventData.eventType}
             isOrganizationManagedEvent={isOrganizationManagedEvent}
             organizationHostedEventId={organizationHostedEventId}
             selectedFields={selectedFields}
@@ -266,15 +290,14 @@ export const SimpleSetupScheduleLocationPage = ({
             leagueFieldOptions={leagueFieldOptions}
             divisionOptions={divisionOptions}
             eventStartDate={eventData.start}
-            timeslotMode={
-              scheduleStyle === "FIXED_WINDOW"
-                ? "FIXED_WINDOW"
-                : scheduleStyle === "WEEKLY_SLOTS"
-                  ? "WEEKLY"
-                  : scheduleStyle === "FIXED_SLOTS"
-                    ? "FIXED"
-                    : "MIXED"
-            }
+            eventEndDate={eventData.end}
+            showBoundaryOnlyRange={isUnscheduledCompetition(
+              eventData.eventType,
+              eventData.isAutomatedScheduling,
+            )}
+            eventTimeZone={eventData.timeZone}
+            timeslotMode="MIXED"
+            showTimeslotHeading={false}
             lockSlotDivisions={Boolean(eventData.singleDivision)}
             lockedDivisionKeys={slotDivisionKeys}
             readOnly={hasImmutableTimeSlots}
@@ -292,9 +315,36 @@ export const SimpleSetupScheduleLocationPage = ({
             onUpdateSlot={handleUpdateSlot}
             onRemoveSlot={handleRemoveSlot}
             onAutoResolveSlotConflict={handleAutoResolveSlotConflict}
+            onCreateCalendarSelection={(selection) => {
+              if (timingController && isUnscheduledCompetition(
+                eventData.eventType,
+                eventData.isAutomatedScheduling,
+              )) {
+                timingController.handleStartChange(selection.start);
+                timingController.handleEndChange(selection.end);
+              }
+              handleCreateCalendarSelection(selection);
+            }}
+            onMoveCalendarSlot={slotController.handleMoveCalendarSlot}
+            onResizeCalendarSlot={slotController.handleResizeCalendarSlot}
+            onSelectCalendarSlot={(slotIndex) => {
+              const slot = eventData.leagueSlots[slotIndex];
+              if (!slot || typeof document === "undefined") {
+                return;
+              }
+              const escapedKey =
+                typeof CSS !== "undefined" && typeof CSS.escape === "function"
+                  ? CSS.escape(slot.key)
+                  : slot.key.replace(/"/g, '\\"');
+              document
+                .querySelector(`[data-event-slot-key="${escapedKey}"]`)
+                ?.scrollIntoView({ behavior: "smooth", block: "center" });
+            }}
+            onAssignCalendarResource={handleAssignCalendarResource}
           />
         </div>
       ) : null}
+      </div>
     </Stack>
   );
 };

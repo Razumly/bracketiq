@@ -22,6 +22,7 @@ import {
   editDocumentTemplateVersion,
   lockDocumentTemplateVersionForUpdate,
 } from '@/server/documents/documentTemplateVersions';
+import { acquireEventLock, acquireEventTemplateLocks, acquireTimeSlotLocks } from '@/server/repositories/locks';
 
 export const dynamic = 'force-dynamic';
 const templateEditSchema = z.object({
@@ -220,6 +221,14 @@ export async function DELETE(
         select: { id: true, requiredTemplateIds: true, hostRequiredTemplateIds: true },
       }),
     ]);
+    for (const event of eventsToUpdate.sort((left, right) => left.id.localeCompare(right.id))) {
+      await acquireEventLock(tx, event.id);
+    }
+    await acquireEventTemplateLocks(tx, [templateDocumentId]);
+    await acquireTimeSlotLocks(
+      tx,
+      timeSlotsToUpdate.map((timeSlot) => timeSlot.id),
+    );
 
     const now = new Date();
     await Promise.all([

@@ -1,4 +1,4 @@
-import { Alert, Text } from "@mantine/core";
+import { Alert, Text } from "@/components/organization/organization-operation-ui";
 
 import type { Event } from "@/types";
 
@@ -38,6 +38,11 @@ type PublicEventProgramDetailsProps = {
   supportsScheduleDetails: boolean;
   scheduleDateChips: ScheduleDateChip[];
   schedulePreviewItems: SchedulePreviewItem[];
+  isScheduleIncomplete?: boolean;
+  unscheduledMatchCount?: number;
+  unscheduledMatchIds?: string[];
+  affectedCompetitionPhaseLabels?: string[];
+  affectedCompetitionPhaseIds?: string[];
   eventType: Event["eventType"];
   canViewStaffSection: boolean;
   sportLabel: string;
@@ -60,6 +65,11 @@ export function PublicEventProgramDetails({
   scheduleDateChips,
   schedulePreviewItems,
   eventType,
+  isScheduleIncomplete = false,
+  unscheduledMatchCount = 0,
+  unscheduledMatchIds = [],
+  affectedCompetitionPhaseLabels = [],
+  affectedCompetitionPhaseIds = [],
   canViewStaffSection,
   sportLabel,
   hostedByLabel,
@@ -112,7 +122,7 @@ export function PublicEventProgramDetails({
                         <summary className="cursor-pointer py-2 text-base font-bold text-slate-950 marker:text-slate-400">
                           <span className="ml-1 inline-flex w-[calc(100%-1rem)] items-center justify-between gap-3 align-middle">
                             <span>{genderGroup.label}</span>
-                            <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">
+                            <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">
                               {genderDivisionCount}
                             </span>
                           </span>
@@ -207,7 +217,7 @@ export function PublicEventProgramDetails({
                                                       </Text>
                                                     </div>
                                                     {selected ? (
-                                                      <span className="rounded-full bg-emerald-600 px-2 py-1 text-xs font-bold text-white">
+                                                      <span className="rounded-md bg-emerald-600 px-2 py-1 text-xs font-bold text-white">
                                                         Current
                                                       </span>
                                                     ) : null}
@@ -245,6 +255,27 @@ export function PublicEventProgramDetails({
           {supportsScheduleDetails ? (
             <PublicEventSection title="Timeline" className="xl:h-full">
               <div className="space-y-5">
+                {isScheduleIncomplete ? (
+                  <Alert color="yellow" variant="light" title="Schedule incomplete">
+                    <div>
+                      {unscheduledMatchCount} unscheduled{" "}
+                      {unscheduledMatchCount === 1 ? "match" : "matches"}:{" "}
+                      {unscheduledMatchIds.join(", ")}
+                    </div>
+                    {affectedCompetitionPhaseLabels.length > 0 ? (
+                      <div>
+                        Affected Competition Phases:{" "}
+                        {affectedCompetitionPhaseLabels.join(", ")}
+                      </div>
+                    ) : null}
+                    {affectedCompetitionPhaseIds.length > 0 ? (
+                      <div>
+                        Competition Phase IDs:{" "}
+                        {affectedCompetitionPhaseIds.join(", ")}
+                      </div>
+                    ) : null}
+                  </Alert>
+                ) : null}
                 {scheduleDateChips.length > 0 ? (
                   <div className="flex gap-2 overflow-x-auto pb-1">
                     {scheduleDateChips.map((chip) => (

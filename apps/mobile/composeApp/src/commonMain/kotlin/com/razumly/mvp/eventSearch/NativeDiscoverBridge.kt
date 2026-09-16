@@ -38,7 +38,7 @@ data class NativeDiscoverFilterSnapshot(
  * projection keeps the matching rules identical for the native SwiftUI and Compose presentations.
  */
 data class NativeDiscoverSearchSnapshot(
-    val events: List<Event>,
+    val events: List<DiscoverEventSearchResult>,
     val organizations: List<Organization>,
     val teams: List<Team>,
     val rentals: List<Organization>,
@@ -76,15 +76,16 @@ internal fun normalizedDiscoverFilterValues(values: List<String>): Set<String> =
 
 internal fun buildNativeDiscoverSearchSnapshot(
     query: String,
-    events: List<Event>,
+    eventCards: List<DiscoverEventSearchResult>,
     organizations: List<Organization>,
     teams: List<Team>,
     rentals: List<Organization>,
 ): NativeDiscoverSearchSnapshot = NativeDiscoverSearchSnapshot(
-    events = events.filter { event ->
+    events = eventCards.filter { result ->
         discoverSearchMatches(
             query = query,
             values = buildList {
+                val event = result.event
                 add(event.name)
                 add(event.description)
                 add(event.location)

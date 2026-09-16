@@ -164,6 +164,7 @@ describe('GET /api/profile/documents', () => {
         scopeId: 'event_1',
         status: 'SATISFIED',
         isComplete: true,
+        sourceEvidenceId: 'signed_1',
       },
     ]);
     prismaMock.signedDocuments.findMany.mockResolvedValue([
@@ -243,7 +244,7 @@ describe('GET /api/profile/documents', () => {
       },
     ]);
     prismaMock.userData.findMany.mockResolvedValue([
-      { id: 'child_1', firstName: 'Child', lastName: 'One' },
+      { id: 'child_1', firstName: 'Child', lastName: 'One', dateOfBirth: new Date('2015-01-01') },
     ]);
     prismaMock.documentSubjects.findMany.mockResolvedValue([
       { id: 'document-subject:org_1:child_1', userId: 'child_1', organizationId: 'org_1' },
@@ -412,7 +413,7 @@ describe('GET /api/profile/documents', () => {
       .mockResolvedValueOnce([{ childId: 'child_1' }])
       .mockResolvedValueOnce([]);
     prismaMock.userData.findMany.mockResolvedValue([
-      { id: 'child_1', firstName: 'Child', lastName: 'One' },
+      { id: 'child_1', firstName: 'Child', lastName: 'One', dateOfBirth: new Date('2015-01-01') },
     ]);
     prismaMock.documentSubjects.findMany.mockResolvedValue([
       { id: 'document-subject:org_1:child_1', userId: 'child_1', organizationId: 'org_1' },

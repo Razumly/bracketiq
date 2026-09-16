@@ -5,6 +5,7 @@ import { normalizeOptionalName } from '@/lib/nameCase';
 import { requireSession } from '@/lib/permissions';
 import { calculateAgeOnDate } from '@/lib/age';
 import { isFutureDateOfBirth, parseDateOfBirth } from '@/lib/dateOfBirth';
+import { hasGuardianAge } from '@/server/guardianAuthority';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,7 +21,7 @@ export async function GET(req: NextRequest) {
   try {
     const session = await requireSession(req);
     const links = await prisma.parentChildLinks.findMany({
-      where: { parentId: session.userId },
+      where: { parentId: session.userId, status: 'ACTIVE' },
       orderBy: { createdAt: 'desc' },
     });
 
@@ -29,16 +30,17 @@ export async function GET(req: NextRequest) {
       ? await prisma.userData.findMany({ where: { id: { in: childIds } } })
       : [];
 
-    const childMap = new Map(children.map((child) => [child.id, child]));
-    const sensitiveRows = childIds.length
+    const childMap = new Map(children.filter((child) => hasGuardianAge(child.dateOfBirth)).map((child) => [child.id, child]));
+    const authorizedIds = links.filter((link) => link.status === 'ACTIVE' && childMap.has(link.childId)).map((link) => link.childId);
+    const sensitiveRows = authorizedIds.length
       ? await prisma.sensitiveUserData.findMany({
-        where: { userId: { in: childIds } },
+        where: { userId: { in: authorizedIds } },
         select: { userId: true, email: true },
       })
       : [];
     const emailByUserId = new Map(sensitiveRows.map((row) => [row.userId, row.email]));
 
-    const payload = links.map((link) => {
+    const payload = links.filter((link) => authorizedIds.includes(link.childId)).map((link) => {
       const child = childMap.get(link.childId);
       const email = emailByUserId.get(link.childId) ?? null;
       const now = new Date();
@@ -83,40 +85,46 @@ export async function POST(req: NextRequest) {
     if (isFutureDateOfBirth(dob)) {
       return NextResponse.json({ error: 'dateOfBirth cannot be in the future' }, { status: 400 });
     }
+    if (!hasGuardianAge(dob)) {
+      return NextResponse.json({ error: 'A child must be under 18 with a known dateOfBirth' }, { status: 400 });
+    }
     const firstName = normalizeOptionalName(parsed.data.firstName);
     const lastName = normalizeOptionalName(parsed.data.lastName);
     if (!firstName || !lastName) {
       return NextResponse.json({ error: 'First name and last name are required' }, { status: 400 });
     }
 
-    await prisma.userData.create({
-      data: {
-        id: childId,
-        firstName,
-        lastName,
-        userName: `${firstName}.${lastName}.${childId.slice(0, 6)}`.toLowerCase(),
-        dateOfBirth: dob,
-        friendIds: [],
-        friendRequestIds: [],
-        friendRequestSentIds: [],
-        followingIds: [],
-        uploadedImages: [],
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      },
-    });
+    const link = await prisma.$transaction(async (tx) => {
+      await tx.userData.create({
+        data: {
+          id: childId,
+          firstName,
+          lastName,
+          userName: `${firstName}.${lastName}.${childId.slice(0, 6)}`.toLowerCase(),
+          dateOfBirth: dob,
+          isManagedPlayer: true,
+          friendIds: [],
+          friendRequestIds: [],
+          friendRequestSentIds: [],
+          followingIds: [],
+          uploadedImages: [],
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      });
 
-    const link = await prisma.parentChildLinks.create({
-      data: {
-        id: crypto.randomUUID(),
-        parentId: session.userId,
-        childId,
-        status: 'ACTIVE',
-        relationship: parsed.data.relationship ?? null,
-        createdBy: session.userId,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      },
+      return tx.parentChildLinks.create({
+        data: {
+          id: crypto.randomUUID(),
+          parentId: session.userId,
+          childId,
+          status: 'ACTIVE',
+          relationship: parsed.data.relationship ?? null,
+          createdBy: session.userId,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      });
     });
 
     return NextResponse.json({ childUserId: childId, linkId: link.id, status: 'active' }, { status: 201 });

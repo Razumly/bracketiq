@@ -1,0 +1,273 @@
+{
+  "basics": {
+    "name": "Canonical League",
+    "description": "A complete League parity fixture.",
+    "eventType": "LEAGUE",
+    "sportIds": [
+      "sport_pickleball"
+    ],
+    "start": "2026-09-01T10:00:00Z",
+    "timeZone": "UTC",
+    "location": "Building A",
+    "address": "1 Main Street",
+    "coordinates": [
+      40.0,
+      -73.0
+    ],
+    "affiliateUrl": "https://example.test/event",
+    "parentEvent": "parent-event-1",
+    "organizationId": "organization-1",
+    "hostId": "host-1",
+    "state": "UNPUBLISHED",
+    "imageId": "image-1",
+    "tags": [
+      {
+        "id": "tag-1",
+        "slug": "summer",
+        "name": "Summer"
+      }
+    ]
+  },
+  "participation": {
+    "teamSignup": true,
+    "singleDivision": false,
+    "registrationByDivisionType": true,
+    "teamSizeLimit": 2,
+    "maxParticipants": 4,
+    "minAge": 18,
+    "maxAge": 99,
+    "cancellationRefundHours": 24,
+    "registrationCutoffHours": 12,
+    "allowTeamSplitDefault": true,
+    "waitListIds": [
+      "wait-1"
+    ],
+    "freeAgentIds": [
+      "free-agent-1"
+    ]
+  },
+  "registration": {
+    "payment": {
+      "mode": "FREE",
+      "priceCents": 0,
+      "taxHandling": "INCLUSIVE",
+      "organizerManualTaxRateBps": 0,
+      "manualPaymentInstructions": null,
+      "manualPaymentLinks": [],
+      "allowPaymentPlans": false,
+      "installmentCount": null,
+      "installmentDueDates": [],
+      "installmentDueRelativeDays": [],
+      "installmentAmounts": []
+    },
+    "questions": [
+      {
+        "clientId": "question-client-1",
+        "prompt": "Preferred side?",
+        "answerType": "TEXT",
+        "required": true,
+        "sortOrder": 0
+      }
+    ],
+    "requiredDocumentIds": [
+      "document-1"
+    ]
+  },
+  "competition": {
+    "divisionIds": [
+      "division-1"
+    ],
+    "divisionDetails": [
+      {
+        "id": "division-1",
+        "sourceDivisionId": "source-division-1",
+        "key": "division-key",
+        "name": "Open",
+        "kind": "LEAGUE",
+        "isSystemGenerated": false,
+        "poolPlay": false,
+        "divisionTypeId": "division-type-1",
+        "skillDivisionTypeId": "skill-1",
+        "ageDivisionTypeId": "age-1",
+        "divisionTypeName": "Open",
+        "ratingType": "NONE",
+        "fieldIds": [
+          "field-1"
+        ],
+        "teamIds": [],
+        "maxParticipants": 4,
+        "playoffTeamCount": 4,
+        "phaseSettings": {
+          "gamesPerOpponent": 2
+        }
+      }
+    ],
+    "playoffDivisionDetails": [
+      {
+        "id": "playoff-division-1",
+        "sourceDivisionId": null,
+        "key": "playoff-key",
+        "name": "Playoff",
+        "kind": "PLAYOFF",
+        "isSystemGenerated": false,
+        "poolPlay": false,
+        "divisionTypeId": "division-type-1",
+        "skillDivisionTypeId": "skill-1",
+        "ageDivisionTypeId": "age-1",
+        "divisionTypeName": "Open",
+        "ratingType": "NONE",
+        "fieldIds": [
+          "field-1"
+        ],
+        "teamIds": [],
+        "maxParticipants": 4,
+        "playoffTeamCount": 4,
+        "phaseSettings": {
+          "gamesPerOpponent": 1
+        }
+      }
+    ],
+    "divisionFieldIds": {
+      "division-1": [
+        "field-1"
+      ]
+    },
+    "winnerSetCount": 2,
+    "loserSetCount": 1,
+    "doubleElimination": true,
+    "includePlayoffs": true,
+    "splitLeaguePlayoffDivisions": false,
+    "playoffTeamCount": 4,
+    "pointsToVictory": [
+      21,
+      15
+    ],
+    "winnerBracketPointsToVictory": [
+      21
+    ],
+    "loserBracketPointsToVictory": [
+      15
+    ],
+    "usesSets": true,
+    "setsPerMatch": 3,
+    "setDurationMinutes": 20,
+    "restTimeMinutes": 10,
+    "matchDurationMinutes": 60,
+    "gamesPerOpponent": 2,
+    "matchRulesOverride": {
+      "serveOrder": "alternating"
+    },
+    "leagueScoringConfig": {
+      "win": 3,
+      "loss": 0
+    }
+  },
+  "schedule": {
+    "mode": "FIXED_END",
+    "endConstraint": "2026-09-01T14:00:00Z",
+    "isAutomatedScheduling": true
+  },
+  "resources": {
+    "fieldIds": [
+      "field-1"
+    ],
+    "fields": [
+      {
+        "id": "field-1",
+        "name": "Court 1",
+        "location": "Building A",
+        "address": "1 Main Street",
+        "lat": 40.0,
+        "long": -73.0,
+        "inUse": true,
+        "sportIds": [
+          "sport_pickleball"
+        ],
+        "organizationId": "organization-1",
+        "facilityId": "facility-1"
+      }
+    ],
+    "timeSlotIds": [
+      "slot-1"
+    ],
+    "timeSlots": [
+      {
+        "id": "slot-1",
+        "eventId": "event-1",
+        "daysOfWeek": [
+          2,
+          4
+        ],
+        "startTimeMinutes": 600,
+        "endTimeMinutes": 660,
+        "startDate": "2026-09-01T10:00:00Z",
+        "endDate": "2026-09-01T14:00:00Z",
+        "timeZone": "UTC",
+        "scheduledFieldIds": [
+          "field-1"
+        ],
+        "divisions": [
+          "division-1"
+        ],
+        "requiredTemplateIds": [
+          "template-1"
+        ],
+        "hostRequiredTemplateIds": [
+          "host-template-1"
+        ],
+        "repeating": false,
+        "sourceType": "EVENT"
+      }
+    ],
+    "requiredTemplateIds": [
+      "template-1"
+    ],
+    "immutableFieldIds": [
+      "field-immutable-1"
+    ],
+    "rentalBookingId": "rental-1",
+    "rentalBookingItemId": "rental-item-1"
+  },
+  "staff": {
+    "staffingPriority": "BEST_AVAILABLE_COVERAGE",
+    "doTeamsOfficiate": false,
+    "teamOfficialsMaySwap": false,
+    "teamCheckInMode": "MATCH",
+    "teamCheckInOpenMinutesBefore": 30,
+    "allowMatchRosterEdits": true,
+    "allowTemporaryMatchPlayers": true,
+    "autoCreatePointMatchIncidents": true,
+    "officialIds": [
+      "official-1"
+    ],
+    "officialPositions": [
+      {
+        "id": "r1",
+        "name": "Referee",
+        "count": 1,
+        "order": 0
+      },
+      {
+        "id": "r2",
+        "name": "Line Judge",
+        "count": 1,
+        "order": 1
+      }
+    ],
+    "eventOfficials": [
+      {
+        "id": "event-official-1",
+        "userId": "official-1",
+        "positionIds": [
+          "r1"
+        ],
+        "fieldIds": [],
+        "isActive": true
+      }
+    ],
+    "assistantHostIds": [
+      "assistant-1"
+    ],
+    "pendingInvites": []
+  }
+}

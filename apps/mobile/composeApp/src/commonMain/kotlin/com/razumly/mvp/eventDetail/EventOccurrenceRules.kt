@@ -39,6 +39,7 @@ internal fun isJoinBlockedByStart(
     selectedWeeklyOccurrenceStarted: Boolean,
     now: Instant = Clock.System.now(),
 ): Boolean {
+    if (event.isArchived()) return true
     if (isWeeklyParentEvent(event)) {
         return hasSelectedWeeklyOccurrenceStarted(
             isWeeklyParent = true,
@@ -49,15 +50,25 @@ internal fun isJoinBlockedByStart(
     return event.eventType != EventType.WEEKLY_EVENT
 }
 
-internal fun isWeeklyParentEvent(event: Event): Boolean =
+internal fun isWeeklyEventShape(event: Event): Boolean =
     event.eventType == EventType.WEEKLY_EVENT &&
         event.timeSlotIds.any { slotId -> slotId.isNotBlank() }
 
+internal fun isWeeklyParentEvent(event: Event): Boolean =
+    !event.isArchived() && isWeeklyEventShape(event)
+
+internal const val ARCHIVED_EVENT_ACTION_ERROR =
+    "Archived events no longer accept participant changes."
+
+internal fun Event.isArchived(): Boolean =
+    !archivedAt.isNullOrBlank() ||
+        state.trim().uppercase() in setOf("ARCHIVED", "CANCELLED", "CANCELED", "DELETED")
 internal fun participantManagementRoomTarget(
     event: Event,
     occurrence: EventOccurrenceSelection?,
 ): ParticipantManagementRoomTarget? {
     val eventId = event.id.trim().takeIf(String::isNotBlank) ?: return null
+    if (event.isArchived()) return null
     if (isWeeklyParentEvent(event) && occurrence == null) {
         return null
     }

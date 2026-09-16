@@ -7,6 +7,7 @@ import {
     isBracketTeamCountEnabled,
     normalizeBracketTeamCount,
 } from '@/lib/divisionTypes';
+import { normalizeAutomatedSchedulingForEventType } from '@/lib/automatedScheduling';
 import { getSystemTimeZone, normalizeTimeZone } from '@/lib/dateUtils';
 import { normalizePriceCents } from '@/lib/priceUtils';
 import {
@@ -21,8 +22,6 @@ import {
 } from '@/lib/manualRegistrationPayments';
 import type { Event, EventState, Division as CoreDivision, LeagueScoringConfig, Sport } from '@/types';
 import {
-    isStaffingPriority,
-    normalizeOfficialSchedulingMode,
     normalizeStaffingPriority,
 } from '@/server/officials/config';
 
@@ -117,7 +116,7 @@ export const mapEventToFormState = (event: Event): EventFormState => {
     const defaultEventPrice = defaultEventAllowPaymentPlans && defaultEventInstallmentAmounts.length
         ? sumInstallmentAmounts(defaultEventInstallmentAmounts)
         : normalizePriceCents(event.price);
-    const normalizedEventType = event.eventType === 'AFFILIATE' ? 'EVENT' : event.eventType;
+    const normalizedEventType = event.eventType;
 
     const normalizedDivisionIds = Array.isArray(event.divisions)
         ? Array.from(
@@ -398,11 +397,8 @@ export const mapEventToFormState = (event: Event): EventFormState => {
     const explicitStaffingPriority = typeof event.staffingPriority === 'string'
         ? event.staffingPriority.trim().toUpperCase()
         : null;
-    const hasExplicitStaffingPriority = isStaffingPriority(explicitStaffingPriority);
-    const legacyOfficialSchedulingMode = normalizeOfficialSchedulingMode(event.officialSchedulingMode);
-    const staffingPriority = normalizeStaffingPriority(explicitStaffingPriority, legacyOfficialSchedulingMode);
-    const doTeamsOfficiate = Boolean(event.doTeamsOfficiate)
-        || (!hasExplicitStaffingPriority && legacyOfficialSchedulingMode === 'TEAM_STAFFING');
+    const staffingPriority = normalizeStaffingPriority(explicitStaffingPriority);
+    const doTeamsOfficiate = Boolean(event.doTeamsOfficiate);
 
     const existingAffiliateUrl = event.affiliateUrl ?? '';
 
@@ -410,7 +406,7 @@ export const mapEventToFormState = (event: Event): EventFormState => {
     $id: event.$id,
     name: event.name,
     description: event.description ?? '',
-    isAffiliateEvent: existingAffiliateUrl.trim().length > 0 || event.eventType === 'AFFILIATE',
+    isAffiliateEvent: existingAffiliateUrl.trim().length > 0,
     affiliateUrl: existingAffiliateUrl,
     registrationPaymentMode: normalizeRegistrationPaymentMode(event.registrationPaymentMode),
     manualPaymentLinks: normalizeManualPaymentLinks(event.manualPaymentLinks).map((link) => ({
@@ -480,11 +476,15 @@ export const mapEventToFormState = (event: Event): EventFormState => {
         : null,
     registrationCutoffHours: event.registrationCutoffHours != null && Number.isFinite(Number(event.registrationCutoffHours))
         ? Number(event.registrationCutoffHours)
-        : 2,
+        : 0,
     hostId: event.hostId || undefined,
-    noFixedEndDateTime: isSchedulableType && event.eventType !== 'WEEKLY_EVENT'
+    noFixedEndDateTime: isSchedulableType && event.eventType !== 'TRYOUT'
         ? derivedNoFixedEndDateTime
         : false,
+    isAutomatedScheduling: normalizeAutomatedSchedulingForEventType(
+        normalizedEventType,
+        event.isAutomatedScheduling,
+    ),
     requiredTemplateIds: Array.isArray(event.requiredTemplateIds)
         ? event.requiredTemplateIds
         : [],

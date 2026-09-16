@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { EditorImmutableFieldError } from "./eventEditorAuthority";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
 import type { Event } from "@/types";
@@ -8,6 +9,7 @@ import {
   parseEventEditorSnapshot,
   type EventEditorBootstrapQuery,
   type EventEditorDraft,
+  type EventEditorMaintenanceOperation,
   type EventEditorSnapshot,
 } from "@/contracts/eventEditor";
 import { legacyEventToEditorDraft } from "@/app/events/[id]/schedule/components/eventForm/editorContractAdapters";
@@ -15,6 +17,7 @@ import { loadEventStaffSnapshot } from "./eventStaffReconciliation";
 import { listRegistrationQuestions } from "@/server/registrationQuestions";
 import { buildSeedEventFromTemplate } from "@/server/eventTemplates";
 import { hasJoinedEventParticipant } from "./eventRegistrations";
+import { loadEventProtectedHistory } from "./eventProtectedHistory";
 import { projectEventAuthorityCapabilities } from "@/server/accessControl";
 import {
   matchDemandFromPersistedGraph,
@@ -130,53 +133,10 @@ export const loadEventScheduleState = async (
   revision: string;
   hasProtectedHistory: boolean;
 }> => {
-  const [matches, divisionRows] = await Promise.all([
-    callFindMany(client, "matches", {
-      where: { eventId },
-      select: {
-        id: true,
-        matchId: true,
-        start: true,
-        end: true,
-        locked: true,
-        placementState: true,
-        division: true,
-        fieldId: true,
-        team1Id: true,
-        team2Id: true,
-        team1Seed: true,
-        team2Seed: true,
-        status: true,
-        resultStatus: true,
-        resultType: true,
-        actualStart: true,
-        actualEnd: true,
-        statusReason: true,
-        winnerEventTeamId: true,
-        winnerNextMatchId: true,
-        loserNextMatchId: true,
-        previousLeftId: true,
-        previousRightId: true,
-        side: true,
-        team1Points: true,
-        team2Points: true,
-        updatedAt: true,
-      },
-    }),
-    callFindMany(client, "divisions", {
-      where: { eventId, scope: "EVENT", status: "ACTIVE" },
-      select: { id: true, phase: true },
-    }),
-  ]);
-  const matchIds = matches
-    .filter(
-      (row): row is Record<string, unknown> =>
-        Boolean(row) && typeof row === "object",
-    )
-    .map((row) => row.id)
-    .filter((id): id is string => typeof id === "string" && id.length > 0);
-  const matchWhere = { matchId: { in: matchIds } };
-  const [
+  const protectedHistory = await loadEventProtectedHistory(eventId, client);
+  const {
+    matches,
+    divisionRows,
     segments,
     incidents,
     receipts,
@@ -184,186 +144,25 @@ export const loadEventScheduleState = async (
     rosters,
     broadcastActions,
     broadcastStates,
-  ] = await Promise.all([
-    callFindMany(client, "matchSegments", {
-      where: matchWhere,
-      select: {
-        id: true,
-        matchId: true,
-        sequence: true,
-        status: true,
-        scores: true,
-        winnerEventTeamId: true,
-        startedAt: true,
-        endedAt: true,
-        resultType: true,
-        statusReason: true,
-        updatedAt: true,
-      },
-    }),
-    callFindMany(client, "matchIncidents", {
-      where: matchWhere,
-      select: {
-        id: true,
-        matchId: true,
-        incidentType: true,
-        sequence: true,
-        updatedAt: true,
-      },
-    }),
-    callFindMany(client, "matchOperationReceipts", {
-      where: matchWhere,
-      select: {
-        clientOperationId: true,
-        matchId: true,
-        operationKind: true,
-        requestHash: true,
-        createdAt: true,
-      },
-    }),
-    callFindMany(client, "teamCheckIns", {
-      where: matchWhere,
-      select: {
-        id: true,
-        matchId: true,
-        eventTeamId: true,
-        scope: true,
-        status: true,
-        checkedInAt: true,
-        updatedAt: true,
-      },
-    }),
-    callFindMany(client, "matchRosterEntries", {
-      where: matchWhere,
-      select: {
-        id: true,
-        matchId: true,
-        eventTeamId: true,
-        userId: true,
-        source: true,
-        status: true,
-        removedAt: true,
-        updatedAt: true,
-      },
-    }),
-    callFindMany(client, "broadcastOverlayActions", {
-      where: { eventId, matchId: { not: null } },
-      select: {
-        id: true,
-        matchId: true,
-        actionType: true,
-        requestId: true,
-        presentationRevision: true,
-        createdAt: true,
-      },
-    }),
-    callFindMany(client, "broadcastOverlayStates", {
-      where: { eventId },
-      select: {
-        id: true,
-        activeMatchId: true,
-        revision: true,
-        updatedAt: true,
-      },
-    }),
-  ]);
+    protectedMatchIds,
+  } = protectedHistory;
 
-  const matchRows = matches.filter(
-    (row): row is Record<string, unknown> =>
-      Boolean(row) && typeof row === "object",
-  );
-  const segmentRows = segments.filter(
-    (row): row is Record<string, unknown> =>
-      Boolean(row) && typeof row === "object",
-  );
+  const matchRows = matches;
+  const segmentRows = segments;
   const demandDivisions = divisionRows
-    .filter(
-      (row): row is Record<string, unknown> =>
-        Boolean(row) && typeof row === "object",
-    )
     .map((row) => ({
-      id: typeof row.id === "string" ? row.id : "",
+      id: row.id,
       phase: typeof row.phase === "string" ? row.phase : null,
     }))
     .filter((division) => division.id.length > 0);
   const matchDemand = matchDemandFromPersistedGraph(
     matchRows.map((row) => ({
-      divisionId:
-        typeof row.division === "string"
-          ? row.division
-          : typeof row.divisionId === "string"
-            ? row.divisionId
-            : null,
-      placementState:
-        typeof row.placementState === "string" ? row.placementState : null,
-      fieldId: typeof row.fieldId === "string" ? row.fieldId : null,
+      divisionId: row.division,
+      placementState: row.placementState,
+      fieldId: row.fieldId,
     })),
     demandDivisions,
   );
-  const matchIdSet = new Set(matchIds);
-  const hasNonZeroScores = (value: unknown): boolean =>
-    Array.isArray(value) &&
-    value.some(
-      (score) =>
-        typeof score === "number" && Number.isFinite(score) && score !== 0,
-    );
-  const protectedMatchIds = new Set<string>();
-  for (const row of matchRows) {
-    const status =
-      typeof row.status === "string" ? row.status.trim().toUpperCase() : null;
-    if (
-      row.locked === true ||
-      (status !== null && status !== "" && status !== "NOT_STARTED") ||
-      row.actualStart != null ||
-      row.actualEnd != null ||
-      row.resultStatus != null ||
-      row.resultType != null ||
-      row.statusReason != null ||
-      row.winnerEventTeamId != null ||
-      hasNonZeroScores(row.team1Points) ||
-      hasNonZeroScores(row.team2Points)
-    ) {
-      if (typeof row.id === "string") protectedMatchIds.add(row.id);
-    }
-  }
-  for (const row of segmentRows) {
-    const status =
-      typeof row.status === "string" ? row.status.trim().toUpperCase() : null;
-    if (
-      (status !== null && status !== "" && status !== "NOT_STARTED") ||
-      row.startedAt != null ||
-      row.endedAt != null ||
-      row.resultType != null ||
-      row.winnerEventTeamId != null ||
-      hasNonZeroScores(row.scores)
-    ) {
-      if (typeof row.matchId === "string") protectedMatchIds.add(row.matchId);
-    }
-  }
-  const dependentRows = [
-    incidents,
-    receipts,
-    checkIns,
-    rosters,
-    broadcastActions,
-  ]
-    .flat()
-    .filter(
-      (row): row is Record<string, unknown> =>
-        Boolean(row) && typeof row === "object",
-    );
-  for (const row of dependentRows) {
-    if (typeof row.matchId === "string" && matchIdSet.has(row.matchId)) {
-      protectedMatchIds.add(row.matchId);
-    }
-  }
-  for (const row of broadcastStates) {
-    if (!row || typeof row !== "object") continue;
-    const activeMatchId = (row as Record<string, unknown>).activeMatchId;
-    if (typeof activeMatchId === "string" && matchIdSet.has(activeMatchId)) {
-      protectedMatchIds.add(activeMatchId);
-    }
-  }
   const normalizedSourceType =
     typeof event.sourceType === "string" && event.sourceType.trim()
       ? event.sourceType.trim()
@@ -377,54 +176,36 @@ export const loadEventScheduleState = async (
       "end",
       "scheduleEndConstraint",
       "generatedScheduleEnd",
-      "noFixedEndDateTime",
-      "fieldIds",
+      "automatedScheduling",
       "timeSlotIds",
       "updatedAt",
     ]),
-    matches: matchRows.sort((left, right) =>
-      String(left.id ?? "").localeCompare(String(right.id ?? "")),
+    matches: [...matchRows].sort((left, right) =>
+      left.id.localeCompare(right.id),
     ),
-    segments: segmentRows.sort((left, right) =>
-      `${String(left.matchId ?? "")}:${String(left.sequence ?? "")}`.localeCompare(
-        `${String(right.matchId ?? "")}:${String(right.sequence ?? "")}`,
+    segments: [...segmentRows].sort((left, right) =>
+      `${left.matchId}:${left.sequence}`.localeCompare(
+        `${right.matchId}:${right.sequence}`,
       ),
     ),
-    incidents: dependentRows
-      .filter((row) => incidents.includes(row))
-      .sort((left, right) =>
-        String(left.id ?? "").localeCompare(String(right.id ?? "")),
-      ),
-    receipts: dependentRows
-      .filter((row) => receipts.includes(row))
-      .sort((left, right) =>
-        String(left.clientOperationId ?? "").localeCompare(
-          String(right.clientOperationId ?? ""),
-        ),
-      ),
-    checkIns: dependentRows
-      .filter((row) => checkIns.includes(row))
-      .sort((left, right) =>
-        String(left.id ?? "").localeCompare(String(right.id ?? "")),
-      ),
-    rosters: dependentRows
-      .filter((row) => rosters.includes(row))
-      .sort((left, right) =>
-        String(left.id ?? "").localeCompare(String(right.id ?? "")),
-      ),
-    broadcastActions: dependentRows
-      .filter((row) => broadcastActions.includes(row))
-      .sort((left, right) =>
-        String(left.id ?? "").localeCompare(String(right.id ?? "")),
-      ),
-    broadcastStates: broadcastStates
-      .filter(
-        (row): row is Record<string, unknown> =>
-          Boolean(row) && typeof row === "object",
-      )
-      .sort((left, right) =>
-        String(left.id ?? "").localeCompare(String(right.id ?? "")),
-      ),
+    incidents: [...incidents].sort((left, right) =>
+      left.id.localeCompare(right.id),
+    ),
+    receipts: [...receipts].sort((left, right) =>
+      left.clientOperationId.localeCompare(right.clientOperationId),
+    ),
+    checkIns: [...checkIns].sort((left, right) =>
+      left.id.localeCompare(right.id),
+    ),
+    rosters: [...rosters].sort((left, right) =>
+      left.id.localeCompare(right.id),
+    ),
+    broadcastActions: [...broadcastActions].sort((left, right) =>
+      left.id.localeCompare(right.id),
+    ),
+    broadcastStates: [...broadcastStates].sort((left, right) =>
+      left.id.localeCompare(right.id),
+    ),
   });
   return {
     sourceType: normalizedSourceType,
@@ -1072,6 +853,52 @@ const loadCapability = async (
   };
 };
 
+const maintenanceOperationsFor = ({
+  event,
+  eventId,
+  mode,
+  scheduleState,
+  capabilities,
+  immutable,
+}: {
+  event: Record<string, unknown>;
+  eventId: string | null;
+  mode: "CREATE" | "EDIT";
+  scheduleState: {
+    matchCount: number;
+    matchDemand?: MatchDemand;
+  };
+  capabilities: {
+    canEdit: boolean;
+    readOnly: boolean;
+  };
+  immutable: {
+    template: boolean;
+  };
+}): EventEditorMaintenanceOperation[] => {
+  if (
+    mode !== "EDIT"
+    || !eventId
+    || event.automatedScheduling !== true
+    || !["LEAGUE", "TOURNAMENT"].includes(
+      String(event.eventType ?? "").trim().toUpperCase(),
+    )
+    || capabilities.canEdit !== true
+    || capabilities.readOnly !== false
+    || immutable.template
+  ) {
+    return [];
+  }
+
+  if (scheduleState.matchCount === 0) {
+    return ["BUILD"];
+  }
+  if ((scheduleState.matchDemand?.unplaced ?? 0) > 0) {
+    return ["COMPLETE", "REBUILD"];
+  }
+  return ["REBUILD"];
+};
+
 const asDate = (value: unknown): Date | null => {
   const date =
     value instanceof Date ? new Date(value) : new Date(String(value ?? ""));
@@ -1094,10 +921,10 @@ const normalizedCreateRevisionQuery = (
     eventType: eventType.toUpperCase(),
     sportId: stringValue(query.sportId) ?? firstString(event.sportIds),
     parentEventId: stringValue(query.parentEventId) ?? stringValue(event.parentEvent),
-    templateId: stringValue(query.templateId) ?? firstString(event.requiredTemplateIds),
+    templateId: stringValue(query.templateId) ?? stringValue(event.sourceTemplateId),
     rentalBookingId:
       stringValue(query.rentalBookingId) ?? stringValue(event.rentalBookingId),
-    start: effectiveStart?.toISOString() ?? null,
+    start: query.templateId ? null : effectiveStart?.toISOString() ?? null,
   };
 };
 
@@ -1169,8 +996,10 @@ const loadCreateSourceEvent = async (
       event = {
         ...(seeded as unknown as Record<string, unknown>),
         id: "",
-        organizationId: seeded.organizationId ?? query.organizationId ?? null,
-        requiredTemplateIds: [query.templateId],
+        organizationId: query.organizationId ?? seeded.organizationId ?? null,
+        eventType: query.eventType ?? seeded.eventType,
+        sportIds: query.sportId ? [query.sportId] : seeded.sportIds,
+        sourceTemplateId: query.templateId,
       };
     }
   }
@@ -1192,18 +1021,13 @@ const loadCreateSourceEvent = async (
     (item): item is Record<string, unknown> =>
       Boolean(item) && typeof item === "object",
   );
-  if (!rentalItems.length) {
-    return setNormalizedCreateRevisionSource(
-      { ...event, rentalBookingId: query.rentalBookingId },
-      {
-        ...revisionSource,
-        rental: {
-          booking,
-          items: canonicalizeSourceCollection(rentalItems),
-        },
-      },
-      query,
-    );
+  if (!booking || !rentalItems.length) {
+    throw new EditorImmutableFieldError("rentalBookingId", "The Rental Booking or its booked resources are missing. Select an available booking.");
+  }
+  const destinationOrganizationId = typeof booking.renterOrganizationId === "string"
+    ? booking.renterOrganizationId : null;
+  if (query.organizationId && query.organizationId !== destinationOrganizationId) {
+    throw new EditorImmutableFieldError("organizationId", "The selected Organization conflicts with the Rental Booking owner. Use the booking's destination Organization.");
   }
 
   const fieldIds = Array.from(
@@ -1216,17 +1040,16 @@ const loadCreateSourceEvent = async (
   const storedFields = await callFindMany(client, "fields", {
     where: { id: { in: fieldIds } },
   });
-  const fields = (
-    storedFields.length
-      ? storedFields
-      : fieldIds.map((id) => ({ id, $id: id, name: "" }))
-  ).filter(
+  const fields = storedFields.filter(
     (field): field is Record<string, unknown> =>
       Boolean(field) && typeof field === "object",
   );
   const fieldById = new Map(
     fields.map((field) => [String(field.id ?? field.$id), field]),
   );
+  if (fieldIds.some((id) => !fieldById.has(id))) {
+    throw new EditorImmutableFieldError("fields", "A booked Resource is missing. Restore the Resource through the rental workflow.");
+  }
   const timeSlots = rentalItems.map((item, index) => {
     const itemId = String(item.id ?? `rental-item-${index + 1}`);
     const fieldId = String(item.fieldId ?? "");
@@ -1274,11 +1097,7 @@ const loadCreateSourceEvent = async (
   };
   return setNormalizedCreateRevisionSource({
     ...event,
-    organizationId:
-      booking?.organizationId ??
-      event.organizationId ??
-      query.organizationId ??
-      null,
+    organizationId: destinationOrganizationId,
     rentalBookingId: query.rentalBookingId,
     rentalBookingItemId: String(rentalItems[0].id ?? ""),
     start: (
@@ -1303,7 +1122,7 @@ const emptyEvent = (
 ): Record<string, unknown> => {
   const eventType = String(query.eventType ?? "EVENT").trim().toUpperCase();
   const start = (asDate(query.start) ?? new Date()).toISOString();
-  const isOneTimeEvent = eventType === "EVENT";
+  const isOneTimeEvent = eventType === "EVENT" || eventType === "TRYOUT";
   const end = isOneTimeEvent
     ? new Date(new Date(start).getTime() + 60 * 60 * 1000).toISOString()
     : null;
@@ -1318,6 +1137,7 @@ const emptyEvent = (
     scheduleEndConstraint: null,
     generatedScheduleEnd: null,
     noFixedEndDateTime: !isOneTimeEvent,
+    isAutomatedScheduling: eventType === "LEAGUE" || eventType === "TOURNAMENT" || eventType === "WEEKLY_EVENT",
     location: "",
     address: "",
     coordinates: [0, 0],
@@ -1338,9 +1158,9 @@ const emptyEvent = (
     installmentDueRelativeDays: [],
     installmentAmounts: [],
     teamSignup: false,
-    singleDivision: true,
+    singleDivision: eventType === "TRYOUT" ? false : true,
     registrationByDivisionType: false,
-    teamSizeLimit: 2,
+    teamSizeLimit: eventType === "TRYOUT" ? 0 : 2,
     minAge: null,
     maxAge: null,
     cancellationRefundHours: null,
@@ -1359,8 +1179,6 @@ const emptyEvent = (
     splitLeaguePlayoffDivisions: false,
     playoffTeamCount: null,
     pointsToVictory: [],
-    winnerBracketPointsToVictory: [],
-    loserBracketPointsToVictory: [],
     usesSets: false,
     setsPerMatch: null,
     setDurationMinutes: null,
@@ -1412,6 +1230,7 @@ export const buildEventEditorSnapshot = async (
       placed: 0,
       unplaced: 0,
     },
+    availableMaintenanceOperations: [] as EventEditorMaintenanceOperation[],
     revision: "new",
     hasProtectedHistory: false,
   } as const;
@@ -1481,7 +1300,13 @@ export const buildEventEditorSnapshot = async (
       : {};
   const eventWithResources = {
     ...event,
+    isAutomatedScheduling: event.automatedScheduling,
     ...resources,
+    immutableFieldIds: Array.from(new Set([
+      ...(Array.isArray(event.immutableFieldIds) ? event.immutableFieldIds : []),
+      ...rentalSlots.flatMap((slot) => Array.isArray(slot.scheduledFieldIds)
+        ? slot.scheduledFieldIds : typeof slot.scheduledFieldId === "string" ? [slot.scheduledFieldId] : []),
+    ])),
     divisions: divisionDetails.length
       ? divisionDetails
           .filter((division) => division.kind === "LEAGUE")
@@ -1528,14 +1353,18 @@ export const buildEventEditorSnapshot = async (
     questions,
   );
   if (staff) {
-    draft.staff = {
-      ...draft.staff,
-      assistantHostIds: staff.assistantHostIds,
-      officialPositions: staff.officialPositions,
-      eventOfficials: staff.eventOfficials,
-      officialIds: staff.officialIds,
-      pendingInvites: staff.staffInvites,
-    };
+    const staffDraft = legacyEventToEditorDraft(
+      {
+        ...eventWithResources,
+        assistantHostIds: staff.assistantHostIds,
+        officialPositions: staff.officialPositions,
+        eventOfficials: staff.eventOfficials,
+        officialIds: staff.officialIds,
+        pendingStaffInvites: staff.staffInvites,
+      } as unknown as Event,
+      questions,
+    );
+    draft.staff = staffDraft.staff;
   }
   const immutableFieldNames = new Set(
     Array.isArray(event.immutableFieldNames)
@@ -1561,6 +1390,15 @@ export const buildEventEditorSnapshot = async (
       String(event.state ?? "").toUpperCase() === "TEMPLATE" ||
       Boolean(context.query?.templateId),
   };
+  const availableMaintenanceOperations =
+    maintenanceOperationsFor({
+      event,
+      eventId,
+      mode,
+      scheduleState,
+      capabilities,
+      immutable,
+    });
   const createSource =
     mode === "CREATE"
       ? {
@@ -1580,12 +1418,16 @@ export const buildEventEditorSnapshot = async (
     mode === "CREATE"
       ? {
           ...scheduleState,
+          availableMaintenanceOperations: [] as EventEditorMaintenanceOperation[],
           revision: editorRevisionFor({
             source: "CREATE_SCHEDULE",
             ...createSource,
           }),
         }
-      : scheduleState;
+      : {
+          ...scheduleState,
+          availableMaintenanceOperations,
+        };
   const snapshot = {
     contractVersion: EVENT_EDITOR_CONTRACT_VERSION,
     mode,
@@ -1597,6 +1439,11 @@ export const buildEventEditorSnapshot = async (
     catalogs,
     immutable,
     scheduleState: resolvedScheduleState,
+    provenance: {
+      sourceType: typeof event.sourceType === "string" ? event.sourceType : null,
+      sourceId: typeof event.sourceId === "string" ? event.sourceId : null,
+      sourceUrl: typeof event.sourceUrl === "string" ? event.sourceUrl : null,
+    },
   };
   return parseEventEditorSnapshot(snapshot);
 };

@@ -1,4 +1,4 @@
-import { MantineProvider } from "@mantine/core";
+import { MantineProvider } from '@mantine/core';
 import {
   act,
   fireEvent,

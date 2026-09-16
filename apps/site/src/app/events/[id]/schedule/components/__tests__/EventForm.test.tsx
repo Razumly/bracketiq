@@ -50,25 +50,6 @@ describe('buildDefaultSetupChoices', () => {
     expect(choices.useCustomOfficialPositions).toBe(true);
   });
 
-  it('normalizes a fixed-only saved Weekly Event schedule to mixed setup', () => {
-    const choices = buildDefaultSetupChoices({
-      eventType: 'WEEKLY_EVENT',
-      start: '2026-03-12T10:00:00',
-      end: '2026-03-12T12:00:00',
-      leagueSlots: [{
-        key: 'fixed-slot',
-        repeating: false,
-        startDate: '2026-03-12T10:00:00',
-        endDate: '2026-03-12T12:00:00',
-        startTimeMinutes: 600,
-        endTimeMinutes: 720,
-        conflicts: [],
-        checking: false,
-      }],
-    } as any);
-
-    expect(choices.scheduleStyle).toBe('MIXED_SLOTS');
-  });
 });
 
 let mockDateTimePickerValuesByLabel: Record<string, string> = {};
@@ -83,6 +64,32 @@ const createDeferred = <T,>() => {
   });
   return { promise, resolve, reject };
 };
+const buildServerFieldConflict = (slotKey = 'slot_1') => ({
+  slotKey,
+  fieldId: 'field_1',
+  kind: 'ONE_TIME_EVENT',
+  start: '2026-04-20T09:00:00.000Z',
+  end: '2026-04-20T17:00:00.000Z',
+  source: {
+    id: 'event_blocking_1',
+    eventId: 'event_blocking_1',
+    parentId: 'event_blocking_1',
+    kind: 'ONE_TIME_EVENT',
+    eventType: 'EVENT',
+    eventStart: '2026-04-20T09:00:00.000Z',
+    eventEnd: '2026-04-20T17:00:00.000Z',
+    eventTimeZone: 'UTC',
+    noFixedEndDateTime: false,
+    repeating: false,
+    startDate: '2026-04-20T09:00:00.000Z',
+    endDate: '2026-04-20T17:00:00.000Z',
+    timeZone: 'UTC',
+    startTimeMinutes: 540,
+    endTimeMinutes: 1020,
+    daysOfWeek: [],
+    scheduledFieldIds: ['field_1'],
+  },
+});
 
 jest.mock('@mantine/core', () => {
   const actual = jest.requireActual('@mantine/core');
@@ -150,30 +157,34 @@ jest.mock('@mantine/core', () => {
   };
 });
 
-jest.mock('@mantine/dates', () => ({
-  DateTimePicker: ({ label, onChange, value, disabled }: {
-    label?: React.ReactNode;
-    onChange?: (value: Date) => void;
-    value?: Date | null;
-    disabled?: boolean;
-  }) => {
-    const labelText = typeof label === 'string' ? label : 'Date Time Picker';
-    const valueText = value instanceof Date && !Number.isNaN(value.getTime())
-      ? `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}T${String(value.getHours()).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')}`
-      : '';
-    return (
-      <button
-        type="button"
-        aria-label={labelText}
-        data-value={valueText}
-        disabled={disabled}
-        onClick={() => onChange?.(new Date(mockDateTimePickerValuesByLabel[labelText] ?? '2026-03-12T15:30:00'))}
-      >
-        {labelText}
-      </button>
-    );
-  },
-}));
+jest.mock('@/components/organization/organization-operation-ui', () => {
+  const actual = jest.requireActual('@/components/organization/organization-operation-ui');
+  return {
+    ...actual,
+    DateTimePicker: ({ label, onChange, value, disabled }: {
+      label?: React.ReactNode;
+      onChange?: (value: Date) => void;
+      value?: Date | null;
+      disabled?: boolean;
+    }) => {
+      const labelText = typeof label === 'string' ? label : 'Date Time Picker';
+      const valueText = value instanceof Date && !Number.isNaN(value.getTime())
+        ? `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}T${String(value.getHours()).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')}`
+        : '';
+      return (
+        <button
+          type="button"
+          aria-label={labelText}
+          data-value={valueText}
+          disabled={disabled}
+          onClick={() => onChange?.(new Date(mockDateTimePickerValuesByLabel[labelText] ?? '2026-03-12T15:30:00'))}
+        >
+          {labelText}
+        </button>
+      );
+    },
+  };
+});
 
 jest.mock('motion/react', () => {
   const React = require('react');
@@ -337,7 +348,7 @@ jest.mock('@/lib/eventService', () => ({
   eventService: {
     getEventWithRelations: jest.fn().mockResolvedValue(null),
     getEventsForFieldInRange: jest.fn().mockResolvedValue([]),
-    getBlockingForFieldInRange: jest.fn().mockResolvedValue([]),
+    getFieldSchedulingConflicts: jest.fn().mockResolvedValue({ conflicts: [] }),
   },
 }));
 
@@ -390,7 +401,7 @@ describe('EventForm dirty state', () => {
     mockUseSportsState = buildMockUseSportsState();
     (eventService.getEventWithRelations as jest.Mock).mockResolvedValue(null);
     (eventService.getEventsForFieldInRange as jest.Mock).mockResolvedValue([]);
-    (eventService.getBlockingForFieldInRange as jest.Mock).mockResolvedValue([]);
+    (eventService.getFieldSchedulingConflicts as jest.Mock).mockResolvedValue({ conflicts: [] });
     (userService.getUsersByIds as jest.Mock).mockResolvedValue([]);
     (userService.searchUsers as jest.Mock).mockResolvedValue([]);
     (userService.lookupEmailMembership as jest.Mock).mockResolvedValue([]);
@@ -527,7 +538,7 @@ describe('EventForm dirty state', () => {
       snapshot.catalogs.organizations = [organization];
     }
     snapshot.catalogs.fields = Array.isArray(event.fields) ? event.fields : [];
-    return renderFormContent(
+    const rendered = renderFormContent(
       <EventForm
         ref={ref}
         isOpen
@@ -547,6 +558,10 @@ describe('EventForm dirty state', () => {
         {...extraProps}
       />,
     );
+    if ((extraProps.initialSetupMode ?? 'ADVANCED') === 'ADVANCED') {
+      rendered.queryAllByRole('button', { name: 'Expand' }).forEach((button) => fireEvent.click(button));
+    }
+    return rendered;
   };
 
   const buildOrganization = () => ({
@@ -631,7 +646,7 @@ describe('EventForm dirty state', () => {
 
     expect(await screen.findByRole('heading', { name: 'Options' })).toBeInTheDocument();
     const formatPageFrame = screen.getByRole('region', { name: 'Options' });
-    expect(formatPageFrame.parentElement).toHaveClass('overflow-hidden');
+    expect(formatPageFrame.parentElement).not.toHaveClass('overflow-hidden');
     expect(formatPageFrame).not.toHaveClass('rounded-lg', 'border', 'shadow-sm');
     expect(screen.getByTestId('simple-setup-format-layout')).toHaveClass('flex', 'flex-wrap');
     expect(screen.getByRole('button', { name: 'Basics: Locked' })).toBeInTheDocument();
@@ -670,22 +685,6 @@ describe('EventForm dirty state', () => {
 
     fireEvent.click(reviewPage);
 
-    expect(await screen.findByRole('heading', { name: 'Review & Publish' })).toBeInTheDocument();
-  });
-
-  it('keeps invalid used pages directly selectable while editing', async () => {
-    renderForm(jest.fn(), undefined, { imageId: '' }, null, {
-      initialSetupMode: 'SIMPLE',
-    });
-
-    expect(await screen.findByRole('heading', { name: 'Options' })).toBeInTheDocument();
-    const progress = screen.getByRole('navigation', { name: 'Event setup progress' });
-
-    fireEvent.click(within(progress).getByRole('button', { name: 'Basics: Available' }));
-    expect(await screen.findByRole('heading', { name: 'Basics' })).toBeInTheDocument();
-    expect(within(progress).getByRole('button', { name: 'Options: Available' })).toBeEnabled();
-
-    fireEvent.click(within(progress).getByRole('button', { name: 'Review & Publish: Available' }));
     expect(await screen.findByRole('heading', { name: 'Review & Publish' })).toBeInTheDocument();
   });
   it('recalculates optional pages in edit mode without restoring prerequisite locks', async () => {
@@ -885,6 +884,49 @@ describe('EventForm dirty state', () => {
     expect(screen.getByRole('heading', { name: 'Divisions' })).toBeInTheDocument();
   });
 
+  it('clears division validation after adding a division', async () => {
+    renderForm(jest.fn(), undefined, {
+      divisions: [],
+      divisionDetails: [],
+      singleDivision: false,
+    }, null, {
+      initialSetupMode: 'SIMPLE',
+    });
+
+    expect(await screen.findByRole('heading', { name: 'Options' })).toBeInTheDocument();
+    const progress = screen.getByRole('navigation', { name: 'Event setup progress' });
+    fireEvent.click(within(progress).getByRole('button', { name: 'Divisions: Available' }));
+    expect(await screen.findByRole('heading', { name: 'Divisions' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    expect(await screen.findByText('Select at least one division')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Divisions' })).toBeInTheDocument();
+
+    const selectFirstAvailableOption = (label: string) => {
+      const select = screen.getByLabelText(label);
+      fireEvent.click(select);
+      const option = within(screen.getByRole('listbox'))
+        .getAllByRole('option')
+        .find((candidate) => !candidate.hasAttribute('disabled'));
+      expect(option).toBeDefined();
+      fireEvent.click(option!);
+    };
+    selectFirstAvailableOption('Gender');
+    selectFirstAvailableOption('Skill Division');
+    selectFirstAvailableOption('Age Division');
+    fireEvent.change(screen.getByLabelText('Division Name'), {
+      target: { value: 'River City Open' },
+    });
+    fireEvent.change(screen.getByLabelText('Division Max Participants'), {
+      target: { value: '8' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add Division' }));
+
+    await waitFor(() => {
+      expect(screen.queryByText('Select at least one division')).not.toBeInTheDocument();
+    });
+  });
+
   it('blocks Schedule and Location when a Weekly Event has no repeating timeslot', async () => {
     renderForm(jest.fn(), undefined, {
       eventType: 'WEEKLY_EVENT',
@@ -1009,6 +1051,25 @@ describe('EventForm dirty state', () => {
       fireEvent.click(within(progress).getByRole('button', { name: 'Staff & Operations: Available' }));
       expect(await screen.findByLabelText('Staffing Priority')).toHaveValue('OFFICIAL_COVERAGE_REQUIRED');
       expect(screen.queryByRole('heading', { name: 'Official Positions' })).not.toBeInTheDocument();
+      const teamDuties = screen.getByRole('switch', { name: /Teams provide officials/i });
+      expect(teamDuties).toBeChecked();
+      fireEvent.click(teamDuties);
+      await waitFor(() => {
+        expect(getEditorDraft(formRef).staff.doTeamsOfficiate).toBe(false);
+      });
+      fireEvent.change(screen.getByLabelText('Staffing Priority'), {
+        target: { value: 'BEST_AVAILABLE_COVERAGE' },
+      });
+      await waitFor(() => {
+        expect(getEditorDraft(formRef).staff).toEqual(expect.objectContaining({
+          staffingPriority: 'BEST_AVAILABLE_COVERAGE',
+          doTeamsOfficiate: false,
+          teamOfficialsMaySwap: false,
+          officialIds: [],
+          eventOfficials: [],
+          officialPositions: [{ id: 'position_r1', name: 'R1', count: 2, order: 0 }],
+        }));
+      });
     } finally {
       confirmSpy.mockRestore();
     }
@@ -1127,7 +1188,7 @@ describe('EventForm dirty state', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
     expect(await screen.findByRole('heading', { name: 'Divisions' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Division configuration' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Division configuration' })).not.toBeInTheDocument();
     expect(screen.queryByTestId('division-mode-switches')).not.toBeInTheDocument();
     expect(screen.getByTestId('division-field-row')).toHaveClass('flex', 'flex-wrap');
     expect(screen.queryByTestId('cents-input')).not.toBeInTheDocument();
@@ -1138,26 +1199,9 @@ describe('EventForm dirty state', () => {
     expect(screen.queryByRole('heading', { name: 'Schedule' })).not.toBeInTheDocument();
   });
 
-  it('uses descriptive schedule choices without duplicate resource planning inputs', async () => {
-    renderForm(jest.fn(), undefined, {}, null, {
-      isCreateMode: true,
-      initialSetupMode: 'SIMPLE',
-    });
 
-    expect(screen.getByRole('radiogroup', { name: 'Schedule style' })).toBeInTheDocument();
-    expect(screen.getByText('Use one non-repeating timeslot that always matches the event start and end.')).toBeInTheDocument();
-    expect(screen.getByText('Use the same selected weekdays and times each week during the event.')).toBeInTheDocument();
-    expect(screen.getByText('Add individual dates and times that do not repeat.')).toBeInTheDocument();
-    expect(screen.getByText('Combine weekly availability with one-time dates or exceptions.')).toBeInTheDocument();
-    expect(screen.queryByLabelText('Court source')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Custom court count')).not.toBeInTheDocument();
-    expect(screen.queryByText('Division assignment')).not.toBeInTheDocument();
-  });
-
-  it('applies the fixed event window choice to Schedule and Location', async () => {
-    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
-    const formRef = React.createRef<EventFormHandle>();
-    renderForm(jest.fn(), formRef, {
+  it('keeps calendar slot data when the setup reaches Schedule and Location', async () => {
+    renderForm(jest.fn(), undefined, {
       eventType: 'LEAGUE',
       start: '2026-03-12T10:00:00',
       end: '2026-03-12T12:00:00',
@@ -1179,25 +1223,65 @@ describe('EventForm dirty state', () => {
       initialSetupMode: 'SIMPLE',
     });
 
-    fireEvent.click(screen.getByText('Fixed event window'));
+    for (const pageName of ['Basics', 'Divisions', 'Schedule & Location']) {
+      fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+      expect(await screen.findByRole('heading', { name: pageName })).toBeInTheDocument();
+    }
+    expect(screen.queryByRole('radiogroup', { name: 'Schedule style' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start Date & Time' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'End Date & Time' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Set the end date during match generation')).toBeInTheDocument();
+    await waitFor(() => {
+      const latestScheduleProps = mockLeagueFieldsProps.at(-1);
+      expect(latestScheduleProps?.timeslotMode).toBe('MIXED');
+      expect(latestScheduleProps?.slots).toEqual([
+        expect.objectContaining({
+          repeating: true,
+          startTimeMinutes: 600,
+          endTimeMinutes: 720,
+        }),
+      ]);
+    });
+  });
+
+  it('keeps event dates and shows a boundary-only calendar when automated scheduling is disabled', async () => {
+    renderForm(jest.fn(), undefined, {
+      eventType: 'LEAGUE',
+      isAutomatedScheduling: true,
+      noFixedEndDateTime: false,
+      start: '2026-03-12T10:00:00',
+      end: '2026-03-12T12:00:00',
+    }, null, {
+      isCreateMode: true,
+      initialSetupMode: 'SIMPLE',
+    });
+
+    fireEvent.click(screen.getByLabelText('Automated Scheduling'));
+    await waitFor(() => {
+      expect(screen.getByLabelText('Automated Scheduling')).not.toBeChecked();
+    });
 
     for (const pageName of ['Basics', 'Divisions', 'Schedule & Location']) {
       fireEvent.click(screen.getByRole('button', { name: 'Next' }));
       expect(await screen.findByRole('heading', { name: pageName })).toBeInTheDocument();
     }
+
+    expect(screen.queryByLabelText('Automated Scheduling')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start Date & Time' })).toHaveAttribute(
+      'data-value',
+      '2026-03-12T10:00',
+    );
+    expect(screen.getByRole('button', { name: 'End Date & Time' })).toHaveAttribute(
+      'data-value',
+      '2026-03-12T12:00',
+    );
+    expect(screen.getByRole('heading', { name: 'Schedule' })).toBeInTheDocument();
+    expect(screen.getByTestId('league-fields')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: /calendar/i })).toBeInTheDocument();
     await waitFor(() => {
-      const latestScheduleProps = mockLeagueFieldsProps.at(-1);
-      expect(latestScheduleProps?.timeslotMode).toBe('FIXED_WINDOW');
-      expect(latestScheduleProps?.unstyled).toBe(true);
-      expect(latestScheduleProps?.slots).toEqual([
-        expect.objectContaining({
-          repeating: false,
-          startDate: '2026-03-12T10:00:00',
-          endDate: '2026-03-12T12:00:00',
-        }),
-      ]);
+      expect(mockLeagueFieldsProps.at(-1)?.slots).toEqual([]);
     });
-    confirmSpy.mockRestore();
+    expect(screen.getByLabelText('Location')).toBeInTheDocument();
   });
 
   it('defaults bracket teams to three and rejects smaller counts', async () => {
@@ -1262,6 +1346,35 @@ describe('EventForm dirty state', () => {
     expect(screen.queryByRole('heading', { name: 'Event Details' })).not.toBeInTheDocument();
   });
 
+  it.each(['SIMPLE', 'ADVANCED'] as const)('preserves operations when External Registration changes in %s Setup', async (initialSetupMode) => {
+    const formRef = React.createRef<EventFormHandle>();
+    renderForm(jest.fn(), formRef, {
+      eventType: 'LEAGUE',
+      teamSignup: true,
+      doTeamsOfficiate: true,
+      teamOfficialsMaySwap: true,
+      staffingPriority: 'TEAM_COVERAGE_REQUIRED',
+      matchRulesOverride: { scoringModel: 'POINTS_ONLY' },
+    }, null, { isCreateMode: true, initialSetupMode });
+
+    fireEvent.click(screen.getByLabelText('External registration'));
+    if (initialSetupMode === 'SIMPLE') {
+      fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    }
+    fireEvent.change(await screen.findByPlaceholderText('https://example.com/event'), {
+      target: { value: 'https://partner.example/register' },
+    });
+    const draft = formRef.current!.captureCurrentEventConfiguration().draft;
+    expect(draft.basics).toMatchObject({ eventType: 'LEAGUE', affiliateUrl: 'https://partner.example/register' });
+    expect(draft.participation.teamSignup).toBe(true);
+    expect(draft.staff).toMatchObject({
+      doTeamsOfficiate: true,
+      teamOfficialsMaySwap: true,
+      staffingPriority: 'TEAM_COVERAGE_REQUIRED',
+    });
+    expect(draft.competition.matchRulesOverride).toEqual({ scoringModel: 'POINTS_ONLY' });
+  });
+
   it('preserves the event draft when switching from Simple to Advanced Setup', async () => {
     renderForm(jest.fn(), undefined, {}, null, {
       isCreateMode: true,
@@ -1316,7 +1429,7 @@ describe('EventForm dirty state', () => {
 
     expect(isValid).toBe(false);
     await waitFor(() => {
-      expect(screen.getAllByLabelText('Basic Information: 1 error')).toHaveLength(3);
+      expect(screen.getAllByLabelText('Basic Information: 1 error')).toHaveLength(1);
       expect(screen.getByPlaceholderText('Enter event name')).toHaveFocus();
     });
 
@@ -1331,7 +1444,7 @@ describe('EventForm dirty state', () => {
     expect(isValid).toBe(false);
     await waitFor(() => {
       expect(screen.getAllByText('Enter a valid Cash App username or HTTPS link.').length).toBeGreaterThan(0);
-      expect(screen.getAllByLabelText('Manual Payments: 1 error')).toHaveLength(3);
+      expect(screen.getAllByLabelText('Manual Payments: 1 error')).toHaveLength(1);
       expect(screen.getByLabelText('Cash App username')).toHaveFocus();
     });
     scrollToSpy.mockRestore();
@@ -1366,13 +1479,14 @@ describe('EventForm dirty state', () => {
 
     fireEvent.click(screen.getByLabelText('Advanced Setup'));
     const cashAppInput = await screen.findByLabelText('Cash App username');
+    await waitFor(() => expect(cashAppInput).toHaveValue('$camka14'));
     fireEvent.change(cashAppInput, { target: { value: '' } });
     await waitFor(() => expect(screen.getByLabelText('Cash App username')).toHaveValue(''));
     fireEvent.change(screen.getByLabelText('Cash App username'), { target: { value: '$' } });
     await waitFor(() => expect(screen.getByLabelText('Cash App username')).toHaveValue('$'));
     fireEvent.click(screen.getByLabelText('Simple Setup'));
     expect(screen.queryByRole('button', { name: 'Review event' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Create Event' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Publish Event' })).toBeDisabled();
   });
 
   it('renders the current draft in the full review and edits the owning page', async () => {
@@ -1456,7 +1570,14 @@ describe('EventForm dirty state', () => {
 
     await waitFor(() => {
       expect(getLegacyDraft(formRef).divisionDetails?.[0]?.price).toBe(3500);
+      expect(getEditorDraft(formRef).staff).toEqual(expect.objectContaining({
+        doTeamsOfficiate: false,
+        staffingPriority: 'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED',
+      }));
     });
+    expect(screen.queryByRole('switch', { name: /Teams provide officials/i })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Staffing Priority')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Official Positions' })).not.toBeInTheDocument();
   });
 
   it('allows event payment plan totals to drive price instead of matching the existing price', async () => {
@@ -1655,7 +1776,7 @@ describe('EventForm dirty state', () => {
 
     await waitForStableDirtyState(onDirtyStateChange, false);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Start Date & Time' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start Date & Time' }));
 
     await waitForStableDirtyState(onDirtyStateChange, true);
   });
@@ -1686,7 +1807,7 @@ describe('EventForm dirty state', () => {
     expect(screen.queryByLabelText('Official scheduling mode')).not.toBeInTheDocument();
   });
 
-  it('preserves team policy and named positions when priority changes hide and restore them', async () => {
+  it('preserves team policy and named positions while priority changes', async () => {
     const onDirtyStateChange = jest.fn();
     const formRef = React.createRef<EventFormHandle>();
     renderForm(onDirtyStateChange, formRef, {
@@ -1706,7 +1827,7 @@ describe('EventForm dirty state', () => {
     });
 
     await waitForStableDirtyState(onDirtyStateChange, true);
-    expect(screen.queryByRole('heading', { name: 'Official Positions' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Official Positions' })).toBeInTheDocument();
     expect(screen.getByRole('switch', { name: /Teams provide officials/i })).toBeChecked();
     expect(getLegacyDraft(formRef)).toEqual(expect.objectContaining({
       staffingPriority: 'TEAM_COVERAGE_REQUIRED',
@@ -2146,8 +2267,7 @@ describe('EventForm dirty state', () => {
 
   it('does not mark edit mode dirty when timeslot conflict checks update slot metadata', async () => {
     const onDirtyStateChange = jest.fn();
-    (eventService.getBlockingForFieldInRange as jest.Mock).mockResolvedValue([]);
-
+    (eventService.getFieldSchedulingConflicts as jest.Mock).mockResolvedValue({ conflicts: [] });
     renderForm(onDirtyStateChange, undefined, {
       state: 'UNPUBLISHED',
       eventType: 'LEAGUE',
@@ -2174,7 +2294,7 @@ describe('EventForm dirty state', () => {
     });
 
     await waitFor(() => {
-      expect(eventService.getBlockingForFieldInRange).toHaveBeenCalled();
+      expect(eventService.getFieldSchedulingConflicts).toHaveBeenCalled();
     });
 
     await waitForStableDirtyState(onDirtyStateChange, false);
@@ -2214,18 +2334,11 @@ describe('EventForm dirty state', () => {
     const onDirtyStateChange = jest.fn();
     const formRef = React.createRef<EventFormHandle>();
     mockDateTimePickerValuesByLabel['Start Date & Time'] = '2026-05-04T09:00:00';
-    (eventService.getBlockingForFieldInRange as jest.Mock).mockResolvedValue({
-      events: [
-        {
-          $id: 'event_blocking_1',
-          name: 'TEST DOC',
-          eventType: 'EVENT',
-          start: '2026-04-20T09:00:00',
-          end: '2026-04-20T17:00:00',
-        },
-      ],
-      rentalSlots: [],
-    });
+    (eventService.getFieldSchedulingConflicts as jest.Mock).mockImplementation((payload: any) => (
+      String(payload?.eventStart ?? '').startsWith('2026-04-20')
+        ? Promise.resolve({ conflicts: [buildServerFieldConflict()] })
+        : Promise.resolve({ conflicts: [] })
+    ));
 
     renderForm(onDirtyStateChange, formRef, {
       state: 'UNPUBLISHED',
@@ -2270,11 +2383,11 @@ describe('EventForm dirty state', () => {
   });
 
   it('ignores a late slot-conflict response after the event schedule changes', async () => {
-    const firstRequest = createDeferred<{ events: any[]; rentalSlots: any[] }>();
-    const secondRequest = createDeferred<{ events: any[]; rentalSlots: any[] }>();
+    const firstRequest = createDeferred<{ conflicts: any[] }>();
+    const secondRequest = createDeferred<{ conflicts: any[] }>();
     let requestCount = 0;
     mockDateTimePickerValuesByLabel['Start Date & Time'] = '2026-05-04T09:00:00';
-    (eventService.getBlockingForFieldInRange as jest.Mock).mockImplementation(() => {
+    (eventService.getFieldSchedulingConflicts as jest.Mock).mockImplementation(() => {
       requestCount += 1;
       return requestCount === 1 ? firstRequest.promise : secondRequest.promise;
     });
@@ -2305,17 +2418,17 @@ describe('EventForm dirty state', () => {
     });
 
     await waitFor(() => {
-      expect(eventService.getBlockingForFieldInRange).toHaveBeenCalledTimes(1);
+      expect(eventService.getFieldSchedulingConflicts).toHaveBeenCalledTimes(1);
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Start Date & Time' }));
 
     await waitFor(() => {
-      expect(eventService.getBlockingForFieldInRange).toHaveBeenCalledTimes(2);
+      expect(eventService.getFieldSchedulingConflicts).toHaveBeenCalledTimes(2);
     });
 
     await act(async () => {
-      secondRequest.resolve({ events: [], rentalSlots: [] });
+      secondRequest.resolve({ conflicts: [] });
       await secondRequest.promise;
     });
     await waitFor(() => {
@@ -2323,16 +2436,7 @@ describe('EventForm dirty state', () => {
     });
 
     await act(async () => {
-      firstRequest.resolve({
-        events: [{
-          $id: 'stale_blocking_event',
-          name: 'Stale blocking event',
-          eventType: 'EVENT',
-          start: '2026-04-20T09:00:00',
-          end: '2026-04-20T17:00:00',
-        }],
-        rentalSlots: [],
-      });
+      firstRequest.resolve({ conflicts: [buildServerFieldConflict()] });
       await firstRequest.promise;
     });
 
@@ -2342,31 +2446,8 @@ describe('EventForm dirty state', () => {
   it('keeps external timeslot field conflicts as warnings during validation', async () => {
     const onDirtyStateChange = jest.fn();
     const formRef = React.createRef<EventFormHandle>();
-    (eventService.getBlockingForFieldInRange as jest.Mock).mockResolvedValue({
-      events: [
-        {
-          $id: 'event_blocking_1',
-          name: 'Conflicting League',
-          eventType: 'LEAGUE',
-          start: '2026-04-20T09:00:00',
-          end: '2026-06-01T17:00:00',
-          timeSlots: [
-            {
-              $id: 'blocking_slot_1',
-              scheduledFieldId: 'field_1',
-              scheduledFieldIds: ['field_1'],
-              dayOfWeek: 0,
-              daysOfWeek: [0],
-              startTimeMinutes: 9 * 60,
-              endTimeMinutes: 21 * 60,
-              repeating: true,
-              startDate: '2026-04-20T09:00:00',
-              endDate: '2026-06-01T17:00:00',
-            },
-          ],
-        },
-      ],
-      rentalSlots: [],
+    (eventService.getFieldSchedulingConflicts as jest.Mock).mockResolvedValue({
+      conflicts: [buildServerFieldConflict()],
     });
 
     renderForm(onDirtyStateChange, formRef, {
@@ -2410,25 +2491,21 @@ describe('EventForm dirty state', () => {
     expect(screen.getByText(/Timeslot court conflicts are warnings/i)).toBeInTheDocument();
   });
 
-  it('does not treat rental slots as external timeslot field conflicts', async () => {
+  it('reports rental booking conflicts as external timeslot warnings', async () => {
     const onDirtyStateChange = jest.fn();
     const formRef = React.createRef<EventFormHandle>();
-    (eventService.getBlockingForFieldInRange as jest.Mock).mockResolvedValue({
-      events: [],
-      rentalSlots: [
-        {
-          $id: 'rental_slot_1',
-          scheduledFieldId: 'field_1',
-          scheduledFieldIds: ['field_1'],
-          dayOfWeek: 0,
-          daysOfWeek: [0],
-          startTimeMinutes: 9 * 60,
-          endTimeMinutes: 21 * 60,
-          repeating: true,
-          startDate: '2026-04-20T09:00:00',
-          endDate: '2026-06-01T17:00:00',
+    const baseConflict = buildServerFieldConflict();
+    (eventService.getFieldSchedulingConflicts as jest.Mock).mockResolvedValue({
+      conflicts: [{
+        ...baseConflict,
+        kind: 'RENTAL_BOOKING',
+        source: {
+          ...baseConflict.source,
+          kind: 'RENTAL_BOOKING',
+          eventId: null,
+          parentId: 'booking_1',
         },
-      ],
+      }],
     });
 
     renderForm(onDirtyStateChange, formRef, {
@@ -2459,9 +2536,9 @@ describe('EventForm dirty state', () => {
     });
 
     await waitFor(() => {
-      expect(eventService.getBlockingForFieldInRange).toHaveBeenCalled();
+      expect(eventService.getFieldSchedulingConflicts).toHaveBeenCalled();
     });
-    expect(screen.getByTestId('league-conflict-count')).toHaveTextContent('0');
+    expect(screen.getByTestId('league-conflict-count')).toHaveTextContent('1');
 
     let isValid: boolean | undefined;
     await act(async () => {
@@ -2470,7 +2547,7 @@ describe('EventForm dirty state', () => {
 
     expect(isValid).toBe(true);
     expect(formRef.current?.getValidationErrors()).toEqual([]);
-    expect(screen.queryByText(/Timeslot court conflicts are warnings/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/Timeslot court conflicts are warnings/i)).toBeInTheDocument();
   });
 
   it('does not display a fixed end input in generated-end mode', async () => {
@@ -2515,7 +2592,7 @@ describe('EventForm dirty state', () => {
     });
   });
 
-  it('disables generated-end-date mode and clears stale values for Weekly Events', async () => {
+  it('preserves and edits No Planned End for Weekly Events', async () => {
     const formRef = React.createRef<EventFormHandle>();
 
     renderForm(jest.fn(), formRef, {
@@ -2543,12 +2620,14 @@ describe('EventForm dirty state', () => {
       }],
     });
 
-    const generatedEndCheckbox = screen.getByRole('checkbox', {
-      name: 'Set the end date during match generation',
+    const noPlannedEndCheckbox = screen.getByRole('checkbox', {
+      name: 'No Planned End',
     });
-    expect(generatedEndCheckbox).toBeDisabled();
-    expect(generatedEndCheckbox).not.toBeChecked();
+    expect(noPlannedEndCheckbox).toBeEnabled();
+    expect(noPlannedEndCheckbox).toBeChecked();
 
+    fireEvent.click(noPlannedEndCheckbox);
+    expect(noPlannedEndCheckbox).not.toBeChecked();
     await waitFor(() => expect(getLegacyDraft(formRef)?.noFixedEndDateTime).toBe(false));
   });
 
@@ -3000,8 +3079,8 @@ describe('EventForm dirty state', () => {
     });
 
     const eventDetailsGrid = document.getElementById('section-event-details-content');
-    const startControl = screen.getByRole('button', { name: 'Start Date & Time' }).closest('.md\\:col-span-2');
-    const endControl = screen.getByRole('button', { name: 'End Date & Time' }).closest('.md\\:col-span-2');
+    const startControl = (await screen.findByRole('button', { name: 'Start Date & Time' })).closest('.md\\:col-span-2');
+    const endControl = (await screen.findByRole('button', { name: 'End Date & Time' })).closest('.md\\:col-span-2');
     const registrationCutoffControl = screen.getByLabelText('Registration Cutoff (Hours)').closest('.md\\:col-span-2');
     const refundCutoffControl = screen.getByLabelText('Refund Cutoff (Hours)').closest('.md\\:col-span-2');
 
@@ -3087,7 +3166,7 @@ describe('EventForm dirty state', () => {
     expect(within(locationMapColumn).queryByRole('button', { name: /show map|hide map/i })).not.toBeInTheDocument();
   });
 
-  it('keeps affiliate capacity in Event Details while pricing affiliate divisions in the division editor', async () => {
+  it('keeps external event operations available with shared capacity and per-division listing prices', async () => {
     const onDirtyStateChange = jest.fn();
     const baseDivision = buildEvent().divisionDetails[0];
 
@@ -3132,18 +3211,18 @@ describe('EventForm dirty state', () => {
     expect(mapSideControls).toContainElement(maxParticipantsInput);
     expect(within(mapSideControls).queryByTestId('cents-input')).not.toBeInTheDocument();
     expect(divisionModeSwitches).toContainElement(screen.getByText('Single Division (all skill levels play together)'));
-    expect(divisionModeSwitches).not.toContainElement(screen.queryByText('Register by Division Type'));
+    expect(divisionModeSwitches).toContainElement(screen.getByText('Register by Division Type'));
     expect(divisionSettingsSection).toContainElement(divisionPriceInput);
     expect(screen.getByText('New Division')).toBeInTheDocument();
     expect(screen.getByLabelText('Gender')).toBeInTheDocument();
     expect(screen.getByLabelText('Skill Division')).toBeInTheDocument();
     expect(screen.getByLabelText('Age Division')).toBeInTheDocument();
-    expect(screen.getByLabelText('Division Max Participants')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Division Max Participants')).not.toBeInTheDocument();
     expect(screen.getByText('Open Division')).toBeInTheDocument();
     expect(screen.queryByText('Capacity & Price')).not.toBeInTheDocument();
     expect(screen.queryByText('Listing Capacity')).not.toBeInTheDocument();
     expect(screen.queryByText('Payment Plans')).not.toBeInTheDocument();
-    expect(screen.getByText('Price: $99.00 • Max participants: 99')).toBeInTheDocument();
+    expect(screen.getByText('Price: $99.00 • Max teams: 40')).toBeInTheDocument();
     expect(screen.queryByText(/Payment plan:/)).not.toBeInTheDocument();
   });
 
@@ -4410,8 +4489,8 @@ describe('EventForm dirty state', () => {
 
     expect(screen.getByText('Rented')).toBeInTheDocument();
     expect(screen.getByLabelText('Rental Court')).toBeChecked();
-    expect(screen.getByRole('button', { name: 'Start Date & Time' })).not.toBeDisabled();
-    expect(screen.getByRole('button', { name: 'End Date & Time' })).not.toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'Start Date & Time' })).not.toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'End Date & Time' })).not.toBeDisabled();
 
     await userEvent.click(screen.getByRole('button', { name: /Home Facility/i }));
     await userEvent.click(screen.getByLabelText('Main Court'));
@@ -4622,8 +4701,8 @@ describe('EventForm dirty state', () => {
 
     const selectedRentalResource = await screen.findByLabelText(/Rental Court - Mar 12, 2026/i);
     expect(selectedRentalResource).toBeChecked();
-    expect(screen.getByRole('button', { name: 'Start Date & Time' })).not.toBeDisabled();
-    expect(screen.getByRole('button', { name: 'End Date & Time' })).not.toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'Start Date & Time' })).not.toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'End Date & Time' })).not.toBeDisabled();
   });
 
   it('allows selected rental resources to use no fixed end datetime scheduling for leagues', async () => {

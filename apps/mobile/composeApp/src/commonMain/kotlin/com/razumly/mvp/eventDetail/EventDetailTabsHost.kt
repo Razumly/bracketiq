@@ -137,6 +137,7 @@ internal fun EventDetailTabsHost(
     state: EventDetailTabsHostState,
     actions: EventDetailTabsHostActions,
     modifier: Modifier = Modifier,
+    scheduleActions: @Composable () -> Unit = {},
 ) {
     EventDetailTabStrip(
         availableTabs = state.availableTabs,
@@ -147,6 +148,7 @@ internal fun EventDetailTabsHost(
             .guideTarget(EventGuideTargets.DetailTabs)
             .padding(start = 12.dp, end = 12.dp, bottom = 8.dp),
     )
+    if (state.selectedTab == DetailTab.SCHEDULE) scheduleActions()
     Box(modifier.fillMaxSize()) {
         when (state.selectedTab) {
             DetailTab.BRACKET -> EventDetailBracketTab(
@@ -387,6 +389,7 @@ private fun MatchSchedule(
     val scheduledMatches = scheduleMatches.filter { match -> match.match.start != null }
     ScheduleView(
         items = scheduledMatches.map { match -> ScheduleItem.MatchEntry(match) },
+        unscheduledMatches = scheduleMatches.filter { it.match.start == null },
         fields = state.eventFields,
         resourceLabels = state.resourceLabels,
         resourceLabelsByFieldId = state.resourceLabelsByFieldId,

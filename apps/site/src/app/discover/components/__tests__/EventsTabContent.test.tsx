@@ -1,163 +1,405 @@
-import { createRef } from 'react';
-import { screen } from '@testing-library/react';
+import { createRef, useState, type ComponentProps } from 'react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import type { Event } from '@/types';
+import { createSport } from '@/types/defaults';
+import { trackEventClicked } from '@/lib/analytics/eventAnalytics';
+import { buildEvent } from '../../../../../test/factories';
+import EventsTabContent, { type EventSortValue } from '../EventsTabContent';
+import type { DivisionDiscoveryFilterValue } from '../DivisionDiscoveryFilters';
+import { calculateVisibleFilterCount } from '../DiscoverFilterBar';
 
-import EventsTabContent from '../EventsTabContent';
-import { renderWithMantine } from '../../../../../test/utils/renderWithMantine';
-
-jest.mock('@/components/location/LocationSearch', () => ({
+jest.mock('@/components/location/LocationSearch', () => ({ __esModule: true, default: () => null }));
+jest.mock('@/lib/analytics/eventAnalytics', () => ({ trackEventClicked: jest.fn() }));
+jest.mock('@/components/organization/OrganizationEventCard', () => ({
   __esModule: true,
-  default: () => <div data-testid="location-search" />,
+  default: ({ event, onClick }: { event: Event; onClick: () => void }) => (
+    <button data-testid="event-card" onClick={onClick}>{event.name}</button>
+  ),
 }));
 
-jest.mock('@/components/ui/EventCard', () => ({
-  __esModule: true,
-  default: () => <div data-testid="event-card" />,
-}));
+type Props = ComponentProps<typeof EventsTabContent>;
+const basketball = createSport({ $id: 'basketball', name: 'Basketball' });
+const volleyball = createSport({ $id: 'volleyball', name: 'Volleyball' });
+const events = [
+  buildEvent({ $id: 'late', name: 'Basketball late', eventType: 'EVENT', sport: basketball, start: '2099-09-12T18:00:00Z', price: 2000 }),
+  buildEvent({ $id: 'early', name: 'Volleyball early', eventType: 'EVENT', sport: volleyball, start: '2099-09-10T18:00:00Z', price: 1000 }),
+  buildEvent({ $id: 'middle', name: 'Basketball middle', eventType: 'EVENT', sport: basketball, start: '2099-09-11T18:00:00Z', price: 1500 }),
+];
 
-jest.mock('@/components/ui/ResponsiveCardGrid', () => ({
-  __esModule: true,
-  default: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}));
+function Harness({
+  initialDivisionFilters,
+  initialSelectedSports = [],
+  ...overrides
+}: Partial<Props> & { initialDivisionFilters?: DivisionDiscoveryFilterValue; initialSelectedSports?: string[] }) {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedSports, setSelectedSports] = useState(initialSelectedSports);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [selectedStartDate, setSelectedStartDate] = useState<Date | null>(null);
+  const [selectedEndDate, setSelectedEndDate] = useState<Date | null>(null);
+  const [selectedEventTypes, setSelectedEventTypes] = useState(['EVENT']);
+  const [maxDistance, setMaxDistance] = useState<number | null>(null);
+  const [divisionFilters, setDivisionFilters] = useState<DivisionDiscoveryFilterValue>(
+    () => initialDivisionFilters ?? {
+      genders: [],
+      skillDivisionTypeIds: [],
+      ageDivisionTypeIds: [],
+      priceMinDollars: null,
+      priceMaxDollars: null,
+    },
+  );
+  return (
+    <EventsTabContent
+      location={null} searchTerm={searchTerm} setSearchTerm={setSearchTerm}
+      selectedEventTypes={selectedEventTypes} setSelectedEventTypes={setSelectedEventTypes} eventTypeOptions={['EVENT']}
+      selectedSports={selectedSports} setSelectedSports={setSelectedSports}
+      selectedTags={selectedTags} setSelectedTags={setSelectedTags}
+      maxDistance={maxDistance} setMaxDistance={setMaxDistance}
+      selectedStartDate={selectedStartDate} setSelectedStartDate={setSelectedStartDate}
+      selectedEndDate={selectedEndDate} setSelectedEndDate={setSelectedEndDate}
+      divisionFilters={divisionFilters} setDivisionFilters={setDivisionFilters}
+      sports={['Basketball', 'Volleyball']} sportsLoading={false} sportsError={null}
+      defaultMaxDistance={50} kmBetween={() => 0} events={events} totalEvents={37}
+      isLoadingInitial={false} isLoadingMore={false} hasMoreEvents={false}
+      sentinelRef={createRef<HTMLDivElement>()} eventsError={null}
+      onRetry={jest.fn()}
+      onEventClick={jest.fn()} onCreateEvent={jest.fn()} {...overrides}
+    />
+  );
+}
 
-jest.mock('@/components/ui/Loading', () => ({
-  __esModule: true,
-  default: ({ text }: { text?: string }) => <div>{text ?? 'Loading...'}</div>,
-}));
+function cardNames() {
+  return screen.queryAllByTestId('event-card').map((card) => card.textContent);
+}
 
-describe('EventsTabContent', () => {
-  const originalFetch = globalThis.fetch;
-
-  beforeEach(() => {
-    globalThis.fetch = jest.fn(
-      () => new Promise<Response>(() => undefined),
-    ) as typeof fetch;
+it('sorts Weekly cards by the next occurrence instead of the season start', () => {
+  const weekly = buildEvent({
+    $id: 'weekly-season', name: 'Weekly season', eventType: 'WEEKLY_EVENT',
+    start: '2099-06-01T18:00:00Z',
+    nextOccurrence: { slotId: 'weekly-slot', occurrenceDate: '2099-09-16', start: '2099-09-16T18:00:00Z', end: '2099-09-16T20:00:00Z' },
   });
+  const earlier = buildEvent({ $id: 'earlier', name: 'Earlier event', eventType: 'EVENT', start: '2099-09-10T18:00:00Z' });
+  render(<Harness events={[weekly, earlier]} selectedEventTypes={['EVENT', 'WEEKLY_EVENT']} defaultSort="soonest" />);
+  expect(cardNames()).toEqual(['Earlier event', 'Weekly season']);
+});
 
-  afterAll(() => {
-    if (originalFetch) {
-      globalThis.fetch = originalFetch;
-    } else {
-      delete (globalThis as { fetch?: typeof fetch }).fetch;
+it('opens More filters as a dropdown with remaining filter controls', async () => {
+  const user = userEvent.setup();
+  render(<Harness selectedSports={['Basketball']} />);
+
+  await user.click(screen.getByRole('button', { name: 'More filters (1)' }));
+
+  const filterDialog = screen.getByRole('dialog', { name: 'More filters (1)' });
+  expect(within(filterDialog).getByRole('button', { name: /Event tags/ })).toBeInTheDocument();
+  await user.click(within(filterDialog).getByRole('button', { name: /Event tags/ }));
+  expect(screen.getByRole('dialog', { name: 'Event tags filter' })).toBeInTheDocument();
+  expect(screen.queryByRole('dialog', { name: 'Filter Events' })).not.toBeInTheDocument();
+});
+
+it('opens More sports as a dropdown with remaining sports', async () => {
+  const user = userEvent.setup();
+  render(<Harness sports={['Basketball', 'Volleyball', 'Rugby', 'Tennis']} />);
+
+  await user.click(screen.getByRole('button', { name: 'More sports' }));
+
+  const sportsDialog = screen.getByRole('dialog', { name: 'More sports' });
+  expect(within(sportsDialog).getByRole('button', { name: 'Rugby', exact: true })).toBeInTheDocument();
+  expect(within(sportsDialog).getByRole('button', { name: 'Tennis', exact: true })).toBeInTheDocument();
+});
+it('searches the complete sport collection from More sports', async () => {
+  const user = userEvent.setup();
+  render(<Harness sports={['Basketball', 'Volleyball', 'Rugby', 'Tennis']} />);
+
+  await user.click(screen.getByRole('button', { name: 'More sports', exact: true }));
+  const searchInput = screen.getByRole('textbox', { name: 'Search sports', exact: true });
+  await user.type(searchInput, 'Tennis');
+
+  expect(screen.getByRole('button', { name: 'Tennis', exact: true })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Rugby', exact: true })).not.toBeInTheDocument();
+});
+
+
+it('keeps the Price maximum input focused while editing from More filters', async () => {
+  const clientWidthDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+  const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, value: 100 });
+  HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
+    if (this.matches('[data-overflow-item]') || this.matches('[data-overflow-more]')) {
+      return { width: 80 } as DOMRect;
     }
+    return originalGetBoundingClientRect.call(this);
+  };
+  try {
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(screen.getByRole('button', { name: 'More filters', exact: true }));
+    const moreDialog = screen.getByRole('dialog', { name: 'More filters' });
+    await user.click(within(moreDialog).getByRole('button', { name: 'Price', exact: true }));
+    const priceDialog = screen.getByRole('dialog', { name: 'Price filter' });
+    const maximumInput = within(priceDialog).getByRole('textbox', { name: 'Maximum', exact: true });
+
+    await user.type(maximumInput, '25');
+
+    expect(maximumInput).toHaveValue('25');
+    expect(maximumInput).toHaveFocus();
+  } finally {
+    if (clientWidthDescriptor) {
+      Object.defineProperty(HTMLElement.prototype, 'clientWidth', clientWidthDescriptor);
+    } else {
+      delete (HTMLElement.prototype as Partial<HTMLElement>).clientWidth;
+    }
+    HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+  }
+});
+
+it('shows the skill trigger only for one sport when the toolbar has room', async () => {
+  const user = userEvent.setup();
+  globalThis.fetch = jest.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      sportSkills: [
+        {
+          sportId: 'volleyball',
+          sportName: 'Volleyball',
+          skills: [{ id: 'open', name: 'Open' }],
+        },
+      ],
+    }),
   });
+  const clientWidthDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, value: 2000 });
+  try {
+    render(<Harness />);
+    ['Price', /^Distance/, 'Event type', 'Event tags', 'Gender', 'Age group'].forEach((name) => {
+      expect(screen.getByRole('button', { name, exact: typeof name === 'string' })).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('button', { name: 'More filters' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'More sports' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Skill level(?:$|:)/ })).not.toBeInTheDocument();
 
-  it('disables organization event creation and shows the field warning', () => {
-    renderWithMantine(
-      <EventsTabContent
-        location={null}
-        searchTerm=""
-        setSearchTerm={jest.fn()}
-        selectedEventTypes={['EVENT', 'TOURNAMENT']}
-        setSelectedEventTypes={jest.fn()}
-        eventTypeOptions={['EVENT', 'TOURNAMENT'] as const}
-        selectedSports={[]}
-        setSelectedSports={jest.fn()}
-        maxDistance={null}
-        setMaxDistance={jest.fn()}
-        selectedStartDate={null}
-        setSelectedStartDate={jest.fn()}
-        selectedEndDate={null}
-        setSelectedEndDate={jest.fn()}
-        sports={[]}
-        sportsLoading={false}
-        sportsError={null}
-        defaultMaxDistance={50}
-        kmBetween={jest.fn(() => 0)}
-        events={[]}
-        totalEvents={null}
-        isLoadingInitial={false}
-        isLoadingMore={false}
-        hasMoreEvents={false}
-        sentinelRef={createRef<HTMLDivElement>()}
-        eventsError={null}
-        onEventClick={jest.fn()}
-        onCreateEvent={jest.fn()}
-        showCreateEventButton
-        createEventDisabled
-        createEventHelperText="Create a field for this organization before creating an event."
-      />,
-    );
+    await user.click(screen.getByRole('button', { name: 'Volleyball', exact: true }));
+    await user.click(screen.getByRole('button', { name: 'Skill level', exact: true }));
+    await user.click(await screen.findByRole('button', { name: 'Open', exact: true }));
+    expect(screen.getByRole('button', { name: 'Open', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await user.keyboard('{Escape}');
 
-    expect(screen.getByRole('button', { name: 'Create event' })).toBeDisabled();
-    expect(
-      screen.getByText('Create a field for this organization before creating an event.'),
-    ).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Basketball', exact: true }));
+    expect(screen.queryByRole('button', { name: /^Skill level(?:$|:)/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Gender', exact: true })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Age group', exact: true })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Price', exact: true })).toBeInTheDocument();
+  } finally {
+    if (clientWidthDescriptor) {
+      Object.defineProperty(HTMLElement.prototype, 'clientWidth', clientWidthDescriptor);
+    } else {
+      delete (HTMLElement.prototype as Partial<HTMLElement>).clientWidth;
+    }
+  }
+});
+it('keeps the event type all option mapped to every event type', async () => {
+  const clientWidthDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, value: 2000 });
+  try {
+    const user = userEvent.setup();
+    render(<Harness eventTypeOptions={['EVENT', 'TOURNAMENT']} />);
+
+    await user.click(screen.getByRole('button', { name: /^Event type/ }));
+    const eventTypeDialog = screen.getByRole('dialog', { name: 'Event type filter' });
+    const allOption = within(eventTypeDialog).getByRole('button', { name: /All event types/ });
+    expect(allOption).not.toHaveAttribute('aria-pressed', 'true');
+    await user.click(within(eventTypeDialog).getByRole('button', { name: 'Event', exact: true }));
+    await user.click(within(eventTypeDialog).getByRole('button', { name: 'Tournament', exact: true }));
+    expect(screen.getByRole('button', { name: 'Event type: Tournament', exact: true })).toBeInTheDocument();
+
+    await user.click(within(eventTypeDialog).getByRole('button', { name: /All event types/ }));
+    expect(screen.getByRole('button', { name: 'Event type', exact: true })).toBeInTheDocument();
+    expect(within(eventTypeDialog).getByRole('button', { name: /All event types/ })).toHaveAttribute('aria-pressed', 'true');
+  } finally {
+    if (clientWidthDescriptor) {
+      Object.defineProperty(HTMLElement.prototype, 'clientWidth', clientWidthDescriptor);
+    } else {
+      delete (HTMLElement.prototype as Partial<HTMLElement>).clientWidth;
+    }
+  }
+});
+it('keeps dates in the shared search group instead of the event filter row', () => {
+  render(<Harness />);
+  expect(screen.queryByRole('button', { name: 'Dates', exact: true })).not.toBeInTheDocument();
+});
+it('reserves the More control gap when fitting the first filter', () => {
+  expect(calculateVisibleFilterCount([100, 100], 150, 8, 50, 0)).toBe(0);
+});
+
+
+it.each(['Basketball', 'All sports'])('clears skills when a single sport becomes ineligible through %s', async (sportButton) => {
+  globalThis.fetch = jest.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      genders: [],
+      ages: [],
+      sportSkills: [
+        {
+          sportId: 'basketball',
+          sportName: 'Basketball',
+          skills: [{ id: 'basketball-beginner', name: 'Beginner' }],
+        },
+        {
+          sportId: 'volleyball',
+          sportName: 'Volleyball',
+          skills: [{ id: 'volleyball-beginner', name: 'Beginner' }],
+        },
+      ],
+    }),
   });
+  const user = userEvent.setup();
+  render(<Harness initialSelectedSports={['Volleyball']} initialDivisionFilters={{
+    genders: [],
+    skillDivisionTypeIds: ['volleyball-beginner'],
+    ageDivisionTypeIds: [],
+    priceMinDollars: null,
+    priceMaxDollars: null,
+  }} />);
 
-  it('shows the server event total as available when distance filtering is inactive', () => {
-    renderWithMantine(
-      <EventsTabContent
-        location={null}
-        searchTerm=""
-        setSearchTerm={jest.fn()}
-        selectedEventTypes={['EVENT', 'TOURNAMENT']}
-        setSelectedEventTypes={jest.fn()}
-        eventTypeOptions={['EVENT', 'TOURNAMENT'] as const}
-        selectedSports={[]}
-        setSelectedSports={jest.fn()}
-        maxDistance={null}
-        setMaxDistance={jest.fn()}
-        selectedStartDate={null}
-        setSelectedStartDate={jest.fn()}
-        selectedEndDate={null}
-        setSelectedEndDate={jest.fn()}
-        sports={[]}
-        sportsLoading={false}
-        sportsError={null}
-        defaultMaxDistance={50}
-        kmBetween={jest.fn(() => 0)}
-        events={[]}
-        totalEvents={37}
-        isLoadingInitial={false}
-        isLoadingMore={false}
-        hasMoreEvents={false}
-        sentinelRef={createRef<HTMLDivElement>()}
-        eventsError={null}
-        onEventClick={jest.fn()}
-        onCreateEvent={jest.fn()}
-      />,
-    );
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Division filters', exact: true })).toBeInTheDocument());
+  await user.click(screen.getByRole('button', { name: sportButton, exact: true }));
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Division filters', exact: true })).not.toBeInTheDocument());
+});
 
-    expect(screen.getByText('37 events available.')).toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: 'Sort events' })).toHaveValue('Recommended');
+const originalFetch = globalThis.fetch;
+beforeEach(() => {
+  jest.resetAllMocks();
+  globalThis.fetch = jest.fn().mockResolvedValue({
+    ok: true, json: async () => ({ genders: [], ages: [], sportSkills: [] }),
   });
+});
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+  jest.useRealTimers();
+  jest.restoreAllMocks();
+});
 
-  it('shows the server event total as near you when distance filtering is active', () => {
-    renderWithMantine(
-      <EventsTabContent
-        location={{ lat: 45.5152, lng: -122.6784 }}
-        searchTerm=""
-        setSearchTerm={jest.fn()}
-        selectedEventTypes={['EVENT', 'TOURNAMENT']}
-        setSelectedEventTypes={jest.fn()}
-        eventTypeOptions={['EVENT', 'TOURNAMENT'] as const}
-        selectedSports={[]}
-        setSelectedSports={jest.fn()}
-        maxDistance={50}
-        setMaxDistance={jest.fn()}
-        selectedStartDate={null}
-        setSelectedStartDate={jest.fn()}
-        selectedEndDate={null}
-        setSelectedEndDate={jest.fn()}
-        sports={[]}
-        sportsLoading={false}
-        sportsError={null}
-        defaultMaxDistance={50}
-        kmBetween={jest.fn(() => 0)}
-        events={[]}
-        totalEvents={12}
-        isLoadingInitial={false}
-        isLoadingMore={false}
-        hasMoreEvents={false}
-        sentinelRef={createRef<HTMLDivElement>()}
-        eventsError={null}
-        onEventClick={jest.fn()}
-        onCreateEvent={jest.fn()}
-        defaultSort="nearest"
-      />,
-    );
+it('blocks event creation until the caller enables it', async () => {
+  const user = userEvent.setup();
+  const onCreateEvent = jest.fn();
+  const view = render(<Harness createEventDisabled onCreateEvent={onCreateEvent}
+    createEventHelperText="Create a field for this organization before creating an event." />);
+  await user.click(screen.getByRole('button', { name: 'Create event' }));
+  expect(onCreateEvent).not.toHaveBeenCalled();
+  expect(screen.getByText('Create a field for this organization before creating an event.')).toBeInTheDocument();
+  view.rerender(<Harness createEventDisabled={false} onCreateEvent={onCreateEvent} />);
+  await user.click(screen.getByRole('button', { name: 'Create event' }));
+  expect(onCreateEvent).toHaveBeenCalledTimes(1);
+});
 
-    expect(screen.getByText('12 events near you.')).toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: 'Sort events' })).toHaveValue('Nearest');
-  });
+it('filters the complete cache locally, updates counts, removes chips, and opens the selected event', async () => {
+  jest.useFakeTimers();
+  const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+  const onFilterChange = jest.fn();
+  const onEventClick = jest.fn();
+  render(<Harness onFilterChange={onFilterChange} onEventClick={onEventClick} />);
+  expect(screen.getByText('37 events in this map area.')).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Basketball', exact: true }));
+  expect(cardNames()).toEqual(['Basketball late', 'Basketball middle']);
+  expect(screen.getByText('2 events in this map area.').parentElement).toContainElement(
+    screen.getByLabelText('Active event filters'),
+  );
+  await user.type(screen.getByRole('textbox', { name: 'Search events', exact: true }), 'middle');
+  expect(cardNames()).toEqual(['Basketball middle']);
+  await act(async () => { jest.advanceTimersByTime(500); });
+  expect(onFilterChange).not.toHaveBeenCalled();
+  await user.click(screen.getByRole('button', { name: 'Basketball middle' }));
+  expect(onEventClick).toHaveBeenCalledWith(events[2]);
+  expect(trackEventClicked).toHaveBeenCalledWith(events[2], 'discover_events');
+  await user.click(screen.getByRole('button', { name: 'Search: middle' }));
+  expect(cardNames()).toHaveLength(2);
+});
+
+it.each(['Soonest', 'Price (Low to High)'])('sorts cached cards by %s without fetching', async (label) => {
+  const user = userEvent.setup();
+  const onFilterChange = jest.fn();
+  render(<Harness onFilterChange={onFilterChange} />);
+  expect(screen.getByRole('combobox', { name: 'Sort events' })).toHaveAttribute('readonly');
+  await user.click(screen.getByRole('combobox', { name: 'Sort events' }));
+  await user.click(screen.getByRole('option', { name: label }));
+  expect(cardNames()).toEqual(['Volleyball early', 'Basketball middle', 'Basketball late']);
+  expect(onFilterChange).not.toHaveBeenCalled();
+});
+it('keeps the server total for a matching scoped cache', () => {
+  render(<Harness initialSelectedSports={['Basketball']} hasScopedEventCache />);
+
+  expect(cardNames()).toEqual(['Basketball late', 'Basketball middle']);
+  expect(screen.getByText('37 events in this map area.')).toBeInTheDocument();
+});
+
+
+it('delegates a controlled sort and waits for the caller value', async () => {
+  const user = userEvent.setup();
+  const onEventSortChange = jest.fn<void, [EventSortValue]>();
+  const view = render(<Harness eventSort="recommended" onEventSortChange={onEventSortChange} />);
+  await user.click(screen.getByRole('combobox', { name: 'Sort events' }));
+  await user.click(screen.getByRole('option', { name: 'Soonest' }));
+  expect(onEventSortChange).toHaveBeenCalledWith('soonest');
+  expect(cardNames()[0]).toBe('Basketball late');
+  view.rerender(<Harness eventSort="soonest" onEventSortChange={onEventSortChange} />);
+  expect(cardNames()[0]).toBe('Volleyball early');
+});
+
+it('offers retry after a request failure instead of reporting empty or exhausted results', async () => {
+  const user = userEvent.setup();
+  const onRetry = jest.fn();
+  const view = render(
+    <Harness events={[]} totalEvents={0} eventsError="Events are unavailable" onRetry={onRetry} />,
+  );
+  expect(screen.getByRole('alert')).toHaveTextContent('Events are unavailable');
+  expect(screen.queryByText('No events match your filters')).not.toBeInTheDocument();
+  expect(screen.queryByText('0 events in this map area.')).not.toBeInTheDocument();
+  expect(screen.queryByText("You've reached the end of the results.")).not.toBeInTheDocument();
+
+  await user.click(screen.getByRole('button', { name: 'Retry events' }));
+  expect(onRetry).toHaveBeenCalledTimes(1);
+
+  view.rerender(<Harness events={[]} totalEvents={0} onRetry={onRetry} />);
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(screen.getByText('No events match your filters')).toBeInTheDocument();
+});
+
+it('keeps filters and cached results while a partial-cache refresh fails', async () => {
+  jest.useFakeTimers();
+  let reject!: (error: Error) => void;
+  const onFilterChange = jest.fn(() => new Promise<void>((_resolve, fail) => { reject = fail; }));
+  const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+  render(<Harness hasMoreEvents onFilterChange={onFilterChange} />);
+  const input = screen.getByRole('textbox', { name: 'Search events', exact: true });
+  await user.type(input, 'Basketball');
+  await act(async () => { jest.advanceTimersByTime(250); });
+  expect(onFilterChange).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText('Updating events…')).not.toBeInTheDocument();
+  expect(screen.getByRole('textbox', { name: 'Search events', exact: true })).toBe(input);
+  expect(input).toHaveFocus();
+  expect(cardNames()).toEqual(['Basketball late', 'Basketball middle']);
+  await act(async () => { reject(new Error('Events are unavailable')); });
+  expect(screen.getByRole('alert')).toHaveTextContent('Events are unavailable');
+  expect(input).toHaveValue('Basketball');
+  expect(cardNames()).toHaveLength(2);
+  expect(screen.queryByText('Updating events…')).not.toBeInTheDocument();
+  onFilterChange.mockImplementationOnce(async () => {});
+  await user.click(screen.getByRole('button', { name: 'Retry events' }));
+  await act(async () => { await Promise.resolve(); });
+  expect(onFilterChange).toHaveBeenCalledTimes(2);
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(input).toHaveValue('Basketball');
+  expect(cardNames()).toEqual(['Basketball late', 'Basketball middle']);
+});
+
+it('retains filters during initial loading and applies them when events arrive', async () => {
+  const user = userEvent.setup();
+  const view = render(<Harness isLoadingInitial events={[]} />);
+  const input = screen.getByRole('textbox', { name: 'Search events', exact: true });
+  await user.type(input, 'middle');
+  expect(cardNames()).toHaveLength(0);
+  view.rerender(<Harness isLoadingInitial={false} />);
+  await waitFor(() => expect(cardNames()).toEqual(['Basketball middle']));
+  expect(screen.getByRole('textbox', { name: 'Search events', exact: true })).toBe(input);
+  fireEvent.click(screen.getByRole('button', { name: 'Clear all' }));
+  expect(cardNames()).toHaveLength(3);
 });

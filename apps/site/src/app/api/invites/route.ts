@@ -1,3 +1,5 @@
+import { replayInvitationRequest, recordInvitationRequest, InvitationRequestError } from '@/server/teams/teamInvitationRequests';
+import { withTeamInvitationViews } from '@/server/teams/teamInvitationViews';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
@@ -13,9 +15,12 @@ import {
   normalizeStaffMemberTypes,
 } from '@/lib/staff';
 import { sendInviteEmails } from '@/server/inviteEmails';
+import { expireTeamInvitations, isInvitationExpired, resolvePendingTeamInvitation } from '@/server/teams/teamInvitationState';
+import { routineInvitationWhere } from '@/server/invitationRetention';
+import { assertTeamInvitationAllowed, TeamInvitationRestrictionError } from '@/server/teams/teamInvitationRestrictions';
 import { ensureAuthUserAndUserDataByEmail } from '@/server/inviteUsers';
 import { getRequestOrigin } from '@/lib/requestOrigin';
-import { buildTeamInviteShareUrl } from '@/server/teamInviteLinks';
+import { buildManagedPlayerClaimUrl, buildTeamInviteShareUrl, TEAM_INVITE_LINK_TTL_MS } from '@/server/teamInviteLinks';
 import {
   canManageEvent,
   canManageOrganization,
@@ -34,6 +39,7 @@ import {
 import {
   acquireOrganizationStaffAssignmentLock,
   acquireOrganizationStaffMemberLock,
+  acquireTeamRosterLock,
 } from '@/server/repositories/locks';
 import {
   loadCanonicalTeamById,
@@ -48,6 +54,8 @@ import {
   rollbackTeamInviteEventSyncs,
 } from '@/server/teams/teamInviteEventSync';
 import { acquireEventLock } from '@/server/repositories/locks';
+import { createManagedPlayerProfile, UNKNOWN_MANAGED_PLAYER_DATE_OF_BIRTH } from '@/server/managedPlayers';
+import { isMinorAtUtcDate } from '@/server/userPrivacy';
 import {
   InvalidInviteCursorError,
   listInviteRecordsPage,
@@ -57,9 +65,18 @@ import {
 
 export const dynamic = 'force-dynamic';
 
+type InviteDeliveryRecord = {
+  type?: string | null;
+  delivery?: { failed: boolean; status: string };
+  id: string;
+  status?: string | null;
+  sentAt?: Date | string | null;
+};
+
 const inviteSchema = z.object({
   type: z.string(),
   email: z.string().optional(),
+  phone: z.string().optional(),
   role: z.string().optional(),
   status: z.string().optional(),
   staffTypes: z.array(z.string()).optional(),
@@ -73,6 +90,12 @@ const inviteSchema = z.object({
   firstName: z.string().optional(),
   lastName: z.string().optional(),
   replaceStaffTypes: z.boolean().optional(),
+  shareOnly: z.boolean().optional(),
+  isMinor: z.boolean().optional(),
+  dateOfBirth: z.string().optional(),
+  guardianEmail: z.string().optional(),
+  existingInviteId: z.string().optional(),
+  idempotencyKey: z.string().trim().min(1).max(200).optional(),
 }).passthrough();
 
 const createSchema = z.object({
@@ -236,6 +259,36 @@ const formatFullName = (firstName?: string | null, lastName?: string | null): st
   `${normalizeOptionalName(firstName) ?? ''} ${normalizeOptionalName(lastName) ?? ''}`.trim()
 );
 
+const PLAYER_CAPACITY_STATUSES = new Set(['ACTIVE', 'INVITED', 'STARTED', 'PENDING']);
+
+const getTeamPlayerCapacityUserIds = (team: Record<string, any>): Set<string> => {
+  const ids = new Set<string>();
+  const registrations = Array.isArray(team.playerRegistrations) ? team.playerRegistrations : [];
+  registrations.forEach((registration: any) => {
+    const userId = normalizeId(registration?.userId);
+    const status = String(registration?.status ?? '').trim().toUpperCase();
+    if (userId && PLAYER_CAPACITY_STATUSES.has(status)) {
+      ids.add(userId);
+    }
+  });
+  // Legacy team rows can omit registrations or contain only active rows.
+  // Always include both serialized lists so pending assignments count too.
+  normalizeIdList(team.playerIds).forEach((userId) => ids.add(userId));
+  normalizeIdList(team.pending).forEach((userId) => ids.add(userId));
+  return ids;
+};
+
+const assertTeamPlayerCapacity = (team: Record<string, any>, userId: string | null) => {
+  const teamSize = Number.isFinite(Number(team.teamSize)) ? Math.max(0, Math.trunc(Number(team.teamSize))) : 0;
+  if (teamSize <= 0 || !userId) {
+    return;
+  }
+  const occupied = getTeamPlayerCapacityUserIds(team);
+  if (!occupied.has(userId) && occupied.size >= teamSize) {
+    throw new InviteRouteError(409, 'Team is full. Player invite was not sent.');
+  }
+};
+
 const canManageTeamInvites = async (
   teamId: string,
   session: { userId: string; isAdmin: boolean },
@@ -283,6 +336,44 @@ const resolveInviteUser = async (client: any, invite: z.infer<typeof inviteSchem
   let userId = inviteUserId;
   let shouldSendEmail = false;
   let skipped = false;
+  const inviteType = normalizeInviteType(invite.type);
+  const teamRole = getTeamInviteRole(invite.role, invite.type) ?? 'player';
+  const isManagedPlayerInvite = inviteType === 'TEAM'
+    && teamRole === 'player'
+    && !inviteUserId
+    && Boolean(
+      (typeof invite.phone === 'string' && invite.phone.trim())
+      || invite.shareOnly
+      || invite.isMinor
+      || (typeof invite.dateOfBirth === 'string' && invite.dateOfBirth.trim())
+      || (typeof invite.guardianEmail === 'string' && invite.guardianEmail.trim())
+      || (typeof invite.existingInviteId === 'string' && invite.existingInviteId.trim()),
+    );
+
+  if (isManagedPlayerInvite) {
+    const firstName = normalizeOptionalName(invite.firstName);
+    const lastName = normalizeOptionalName(invite.lastName);
+    if (!firstName || !lastName) throw new Error('First name and last name are required');
+    const playerEmail = email || null;
+    const guardianEmail = typeof invite.guardianEmail === 'string' ? invite.guardianEmail.trim().toLowerCase() : '';
+    const parsedDateOfBirth = invite.dateOfBirth ? new Date(`${invite.dateOfBirth.trim().split('T')[0]}T00:00:00.000Z`) : null;
+    const inferredMinor = Boolean(parsedDateOfBirth && !Number.isNaN(parsedDateOfBirth.getTime()) && isMinorAtUtcDate(parsedDateOfBirth, now));
+    const isMinor = invite.isMinor === true || inferredMinor;
+    if (isMinor && (!invite.dateOfBirth?.trim() || !emailSchema.safeParse(guardianEmail).success)) {
+      throw new Error('Minor players require a date of birth and guardian email');
+    }
+    if (email && !emailSchema.safeParse(email).success) throw new Error('Invalid email');
+    if (!email && !invite.phone?.trim() && !invite.shareOnly) throw new Error('Add an email, phone, or choose a share-only invite');
+    return {
+      userId: null,
+      email: isMinor ? guardianEmail : (email || null),
+      playerEmail,
+      shouldSendEmail: Boolean(isMinor ? guardianEmail : email),
+      skipped: false,
+      isManagedPlayerInvite: true,
+      managedPlayerInput: { firstName, lastName, dateOfBirth: invite.dateOfBirth ?? null, isMinor, guardianEmail: guardianEmail || null },
+    };
+  }
 
   if (userId) {
     const authUser = await client.authUser.findUnique({
@@ -311,10 +402,10 @@ const resolveInviteUser = async (client: any, invite: z.infer<typeof inviteSchem
       // Some profile-only users (for example dependent child profiles) may not have
       // a linked auth account or sensitive email yet. Skip invite creation silently.
       skipped = true;
-      return { userId, email: '', shouldSendEmail: false, skipped };
+    return { userId, email: '', playerEmail: null, shouldSendEmail: false, skipped, isManagedPlayerInvite: false };
     }
     shouldSendEmail = isInvitePlaceholderAuthUser(authUser);
-    return { userId, email, shouldSendEmail, skipped };
+    return { userId, email, playerEmail: email, shouldSendEmail, skipped, isManagedPlayerInvite: false };
   }
 
   if (!emailSchema.safeParse(email).success) {
@@ -327,7 +418,7 @@ const resolveInviteUser = async (client: any, invite: z.infer<typeof inviteSchem
   });
   userId = ensured.userId;
   shouldSendEmail = !ensured.authUserExisted;
-  return { userId, email, shouldSendEmail, skipped };
+  return { userId, email, playerEmail: email, shouldSendEmail, skipped, isManagedPlayerInvite: false };
 };
 
 export async function GET(req: NextRequest) {
@@ -378,7 +469,6 @@ export async function GET(req: NextRequest) {
           {
             type: 'TEAM',
             userId: { in: childInviteIdsForViewer },
-            status: 'PENDING',
           },
         ];
       }
@@ -388,15 +478,20 @@ export async function GET(req: NextRequest) {
   }
   if (type) where.type = type;
   if (teamId) where.teamId = teamId;
+  await expireTeamInvitations(prisma, where);
   const requestedStatus = status ?? 'PENDING';
   const statusWhere = history
-    ? { status: { in: ['DECLINED', 'REJECTED', 'FAILED'] } }
+    ? { status: { in: ['DECLINED', 'REJECTED', 'ACCEPTED', 'CANCELLED', 'EXPIRED'] } }
     : requestedStatus === 'PENDING'
-      ? { OR: [{ status: null }, { status: { in: ['PENDING', 'SENT'] } }] }
+      ? { OR: [{ status: null }, { status: { in: ['PENDING', 'SENT', 'FAILED'] } }] }
       : requestedStatus === 'DECLINED'
         ? { status: { in: ['DECLINED', 'REJECTED'] } }
         : { status: requestedStatus };
-  const listingWhere = { AND: [where, statusWhere] };
+  const listingWhere = { AND: [where, statusWhere, routineInvitationWhere(), {
+    // The next expiry batch must not expose expired attempts as pending.
+    NOT: { type: 'TEAM', linkExpiresAt: { lte: new Date() },
+      OR: [{ status: null }, { status: { in: ['PENDING', 'SENT', 'FAILED'] } }] },
+  }] };
 
   let page: { invites: Array<Record<string, any>>; nextCursor: string | null };
   try {
@@ -407,7 +502,7 @@ export async function GET(req: NextRequest) {
     }
     throw error;
   }
-  const invites = page.invites;
+  const invites = await withTeamInvitationViews(prisma, page.invites as Array<Record<string, any> & { id: string }>);
 
   const childProfiles = childInviteIdsForViewer.length
     ? await prisma.userData.findMany({
@@ -416,6 +511,21 @@ export async function GET(req: NextRequest) {
     })
     : [];
   const childById = new Map(childProfiles.map((child) => [child.id, child]));
+  const managedPlayerIds = canListTeamInvites
+    ? invites
+      .filter((invite) => String(invite.type ?? '').toUpperCase() === 'TEAM'
+        && String(invite.role ?? '').toLowerCase() === 'player'
+        && invite.isAssigned === true
+        && Boolean(invite.userId))
+      .map((invite) => invite.userId as string)
+    : [];
+  const managedProfiles = managedPlayerIds.length
+    ? await prisma.userData.findMany({
+      where: { id: { in: Array.from(new Set(managedPlayerIds)) }, isManagedPlayer: true, mergedIntoProfileId: null },
+      select: { id: true },
+    })
+    : [];
+  const managedProfileIds = new Set(managedProfiles.map((profile) => profile.id));
 
   if (!cursor) {
     try {
@@ -443,6 +553,7 @@ export async function GET(req: NextRequest) {
         : new Date(String(invite.linkExpiresAt ?? '')).getTime();
       const canShareTeamLink = canListTeamInvites
         && String(invite.type ?? '').toUpperCase() === 'TEAM'
+        && invite.status === 'PENDING'
         && Number.isFinite(linkExpiresAt)
         && linkExpiresAt > Date.now();
       const { shareUrl: _existingShareUrl, ...inviteWithoutShareUrl } = invite;
@@ -451,6 +562,15 @@ export async function GET(req: NextRequest) {
         ...(canShareTeamLink
           ? {
             shareUrl: buildTeamInviteShareUrl({
+              id: String(invite.id),
+              linkVersion: invite.linkVersion,
+              linkExpiresAt: invite.linkExpiresAt,
+            }, getRequestOrigin(req)),
+          }
+          : {}),
+        ...(canShareTeamLink && invite.userId && managedProfileIds.has(invite.userId)
+          ? {
+            claimUrl: buildManagedPlayerClaimUrl({
               id: String(invite.id),
               linkVersion: invite.linkVersion,
               linkExpiresAt: invite.linkExpiresAt,
@@ -525,6 +645,15 @@ export async function POST(req: NextRequest) {
     return eventId ? [eventId] : [];
   }))).sort();
 
+  const teamRosterLockIds = Array.from(new Set<string>(invitesInput.flatMap((inviteInput): string[] => {
+    const parsedInvite = inviteSchema.safeParse(inviteInput);
+    if (!parsedInvite.success || normalizeInviteType(parsedInvite.data.type) !== 'TEAM') {
+      return [];
+    }
+    const teamId = normalizeId(parsedInvite.data.teamId);
+    return teamId ? [teamId] : [];
+  }))).sort();
+
   const now = new Date();
   try {
     const { created, toEmail } = await prisma.$transaction(async (tx) => {
@@ -533,6 +662,12 @@ export async function POST(req: NextRequest) {
       }
       for (const eventId of eventStaffLockIds) {
         await acquireEventLock(tx, eventId);
+      }
+      for (const teamId of teamRosterLockIds) {
+        if (typeof tx?.$executeRaw === 'function') {
+          await acquireTeamRosterLock(tx, teamId);
+        }
+        await expireTeamInvitations(tx, { teamId }, now);
       }
 
       const createdRecords: any[] = [];
@@ -553,13 +688,30 @@ export async function POST(req: NextRequest) {
           throw new InviteRouteError(400, 'Invalid invite type');
         }
 
-        const normalizedStatus = normalizeInviteStatus(invite.status) ?? 'PENDING';
+        const requestedStatus = normalizeInviteStatus(invite.status);
+        if (requestedStatus && requestedStatus !== 'PENDING') {
+          throw new InviteRouteError(400, 'New invites must start with PENDING status');
+        }
+        const normalizedStatus = 'PENDING';
         const eventId = typeof invite.eventId === 'string' && invite.eventId.trim() ? invite.eventId.trim() : null;
         const organizationId = typeof invite.organizationId === 'string' && invite.organizationId.trim()
           ? invite.organizationId.trim()
           : null;
         const teamId = typeof invite.teamId === 'string' && invite.teamId.trim() ? invite.teamId.trim() : null;
 
+        const requestScope = { teamId: teamId ?? '', senderId: session.userId, requestKey: invite.idempotencyKey, payload: invite };
+        if (inviteType === 'TEAM' && teamId && invite.idempotencyKey) {
+          if (!(await canManageTeamInvites(teamId, session, tx))) throw new InviteRouteError(403, 'Forbidden');
+          const replay = await replayInvitationRequest(tx, requestScope);
+          if (replay) { createdRecords.push(replay); continue; }
+        }
+
+        if (inviteType === 'TEAM' && invite.existingInviteId) {
+          const requested = await tx.invites.findUnique({ where: { id: invite.existingInviteId } });
+          if (!requested || requested.teamId !== teamId || requested.type !== 'TEAM' || isInvitationExpired(requested, now) || !['PENDING', 'SENT', 'FAILED'].includes(requested.status ?? 'PENDING')) {
+            throw new InviteRouteError(409, 'The requested invitation is no longer pending.');
+          }
+        }
         const resolvedUser = await resolveInviteUser(tx, invite, now);
         if (resolvedUser.skipped) {
           if (inviteType !== 'STAFF') {
@@ -567,9 +719,54 @@ export async function POST(req: NextRequest) {
           }
           continue;
         }
-        const inviteUserId = resolvedUser.userId;
+        let inviteUserId = resolvedUser.userId;
+        const managedPlayerInput = resolvedUser.managedPlayerInput;
+
+        if (inviteType === 'TEAM' && resolvedUser.isManagedPlayerInvite) {
+          if (!managedPlayerInput) throw new InviteRouteError(400, 'Managed Player details are required');
+          const contactMatches = [
+            ...(invite.existingInviteId ? [{ id: invite.existingInviteId }] : []),
+            ...(!managedPlayerInput.isMinor && resolvedUser.email ? [{ email: resolvedUser.email }] : []),
+            ...(!managedPlayerInput.isMinor && resolvedUser.playerEmail ? [{ playerEmail: resolvedUser.playerEmail }] : []),
+            ...(!managedPlayerInput.isMinor && invite.phone ? [{ phone: invite.phone.trim() }] : []),
+          ];
+          const priorInvite = teamId && contactMatches.length > 0
+            ? await tx.invites.findFirst({
+              where: {
+                type: 'TEAM',
+                teamId,
+                role: 'player',
+                OR: contactMatches,
+                status: { in: ['PENDING', 'SENT', 'FAILED'] },
+              },
+              select: { userId: true },
+            })
+            : null;
+          const priorProfile = priorInvite?.userId && tx.userData?.findUnique
+            ? await tx.userData.findUnique({ where: { id: priorInvite.userId }, select: { id: true, isManagedPlayer: true } })
+            : null;
+          if (priorProfile?.isManagedPlayer) {
+            inviteUserId = priorProfile.id;
+          } else {
+            const managed = await createManagedPlayerProfile(tx, {
+              firstName: managedPlayerInput.firstName,
+              lastName: managedPlayerInput.lastName,
+              dateOfBirth: managedPlayerInput.dateOfBirth,
+              isMinor: managedPlayerInput.isMinor,
+              guardianEmail: managedPlayerInput.guardianEmail,
+            }, now);
+            inviteUserId = managed.id;
+          }
+        }
+        if (inviteType === 'STAFF' && !inviteUserId) {
+          throw new InviteRouteError(400, 'Staff invites require a userId or email');
+        }
 
         if (inviteType === 'STAFF') {
+          const staffUserId = inviteUserId;
+          if (!staffUserId) {
+            throw new InviteRouteError(400, 'Staff invites require a userId or email');
+          }
           const organization = organizationId
             ? await tx.organizations.findUnique({
               where: { id: organizationId },
@@ -592,7 +789,7 @@ export async function POST(req: NextRequest) {
             if (!(await hasOrgPermission(session, organization, ORG_PERMISSIONS.STAFF_MANAGE, tx))) {
               throw new InviteRouteError(403, 'Forbidden');
             }
-            if (organization.ownerId && inviteUserId === organization.ownerId) {
+            if (organization.ownerId && staffUserId === organization.ownerId) {
               throw new InviteRouteError(409, 'Organization owner already has staff access');
             }
             if (
@@ -649,12 +846,12 @@ export async function POST(req: NextRequest) {
           const replaceStaffTypes = invite.replaceStaffTypes === true;
 
           if (organizationId) {
-            await acquireOrganizationStaffMemberLock(tx, organizationId, inviteUserId);
+            await acquireOrganizationStaffMemberLock(tx, organizationId, staffUserId);
             const existingStaffMember = await tx.staffMembers.findUnique({
               where: {
                 organizationId_userId: {
                   organizationId,
-                  userId: inviteUserId,
+                  userId: staffUserId,
                 },
               },
               select: { roleId: true, types: true },
@@ -664,7 +861,7 @@ export async function POST(req: NextRequest) {
                 where: {
                   organizationId_userId: {
                     organizationId,
-                    userId: inviteUserId,
+                    userId: staffUserId,
                   },
                 },
                 data: { updatedAt: now },
@@ -710,13 +907,13 @@ export async function POST(req: NextRequest) {
               where: {
                 organizationId_userId: {
                   organizationId,
-                  userId: inviteUserId,
+                  userId: staffUserId,
                 },
               },
               create: {
                 id: crypto.randomUUID(),
                 organizationId,
-                userId: inviteUserId,
+                userId: staffUserId,
                 types: staffTypes,
                 roleId: defaultRoleId,
                 createdAt: now,
@@ -737,7 +934,7 @@ export async function POST(req: NextRequest) {
               type: 'STAFF',
               organizationId,
               eventId,
-              userId: inviteUserId,
+              userId: staffUserId,
             },
           });
           const wasCreated = !existingInvite;
@@ -763,7 +960,7 @@ export async function POST(req: NextRequest) {
                 staffTypes,
                 eventId,
                 organizationId,
-                userId: inviteUserId,
+                userId: staffUserId,
                 createdBy: invite.createdBy ?? session.userId,
                 firstName: normalizedFirstName ?? null,
                 lastName: normalizedLastName ?? null,
@@ -792,26 +989,58 @@ export async function POST(req: NextRequest) {
           if (!(await canManageTeamInvites(teamId, session, tx))) {
             throw new InviteRouteError(403, 'Forbidden');
           }
+          const teamInviteUserId = inviteUserId;
+          if (!teamInviteUserId) {
+            throw new InviteRouteError(400, 'Team invites require a userId or email');
+          }
 
 
-          const existingInvite = await tx.invites.findFirst({
+          let existingInvite = await tx.invites.findFirst({
             where: {
               type: 'TEAM',
               teamId,
-              userId: inviteUserId,
+              userId: teamInviteUserId,
+              OR: [
+                { status: null },
+                { status: { in: ['PENDING', 'SENT', 'FAILED'] } },
+              ],
             },
           });
+          if (resolvedUser.isManagedPlayerInvite && !existingInvite) {
+            existingInvite = await tx.invites.findFirst({
+              where: {
+                type: 'TEAM',
+                teamId,
+                userId: null,
+                role: 'player',
+                OR: [
+                  ...(invite.existingInviteId ? [{ id: invite.existingInviteId }] : []),
+                  ...(resolvedUser.email ? [{ email: resolvedUser.email }] : []),
+                  ...(resolvedUser.playerEmail ? [{ playerEmail: resolvedUser.playerEmail }] : []),
+                ],
+                status: { in: ['PENDING', 'SENT', 'FAILED'] },
+              },
+            });
+          }
+          existingInvite = await resolvePendingTeamInvitation(tx, existingInvite, now);
           const teamRole = getTeamInviteRole(invite.role, invite.type)
             ?? getTeamInviteRole(existingInvite?.role, existingInvite?.type)
             ?? 'player';
+          await assertTeamInvitationAllowed(tx, {
+            teamId, playerIds: [teamInviteUserId], senderId: session.userId,
+            guardianEmail: managedPlayerInput?.guardianEmail,
+          }, now);
           const previousRole = getTeamInviteRole(existingInvite?.role, existingInvite?.type);
-          if (teamRole === 'player' && inviteUserId && normalizeIdList(team.playerIds).includes(inviteUserId)) {
+          if (teamRole === 'player' && normalizeIdList(team.playerIds).includes(teamInviteUserId)) {
             throw new InviteRouteError(409, 'User is already on this team');
+          }
+          if (teamRole === 'player') {
+            assertTeamPlayerCapacity(team as Record<string, any>, teamInviteUserId);
           }
           await reconcileTeamInviteRoleTransition(
             tx,
             teamId,
-            inviteUserId,
+            teamInviteUserId,
 
             previousRole,
             teamRole,
@@ -824,7 +1053,7 @@ export async function POST(req: NextRequest) {
               teamId,
               role: teamStaffType,
               replacementInviteId: existingInvite?.id ?? null,
-              replacementUserId: inviteUserId,
+              replacementUserId: teamInviteUserId,
               now,
             });
           }
@@ -835,10 +1064,19 @@ export async function POST(req: NextRequest) {
               where: { id: existingInvite.id },
               data: {
                 email: resolvedUser.email,
+                playerEmail: resolvedUser.playerEmail,
                 role: teamRole,
                 status: normalizedStatus,
+                userId: teamInviteUserId,
+                isAssigned: teamRole === 'player' && resolvedUser.isManagedPlayerInvite,
+                ...(resolvedUser.isManagedPlayerInvite ? {
+                  isMinor: managedPlayerInput?.isMinor === true,
+                  dateOfBirth: managedPlayerInput?.dateOfBirth
+                    ? new Date(`${managedPlayerInput.dateOfBirth.trim().split('T')[0]}T00:00:00.000Z`)
+                    : UNKNOWN_MANAGED_PLAYER_DATE_OF_BIRTH,
+                  guardianEmail: managedPlayerInput?.guardianEmail,
+                } : {}),
                 staffTypes: teamStaffType ? [teamStaffType] : normalizeIdList(existingInvite.staffTypes),
-                createdBy: invite.createdBy ?? session.userId,
                 firstName: normalizedFirstName ?? existingInvite.firstName,
                 lastName: normalizedLastName ?? existingInvite.lastName,
                 updatedAt: now,
@@ -849,12 +1087,22 @@ export async function POST(req: NextRequest) {
                 id: crypto.randomUUID(),
                 type: 'TEAM',
                 email: resolvedUser.email,
+                playerEmail: resolvedUser.playerEmail,
                 status: normalizedStatus,
                 role: teamRole,
                 staffTypes: teamStaffType ? [teamStaffType] : [],
                 teamId,
-                userId: inviteUserId,
-                createdBy: invite.createdBy ?? session.userId,
+                userId: teamInviteUserId,
+                isAssigned: teamRole === 'player' && resolvedUser.isManagedPlayerInvite,
+                isMinor: resolvedUser.isManagedPlayerInvite && managedPlayerInput?.isMinor === true,
+                dateOfBirth: resolvedUser.isManagedPlayerInvite && managedPlayerInput?.dateOfBirth
+                  ? new Date(`${managedPlayerInput.dateOfBirth.trim().split('T')[0]}T00:00:00.000Z`)
+                  : UNKNOWN_MANAGED_PLAYER_DATE_OF_BIRTH,
+                guardianEmail: resolvedUser.isManagedPlayerInvite ? managedPlayerInput?.guardianEmail ?? null : null,
+                createdBy: session.userId,
+                idempotencyKey: invite.idempotencyKey,
+                linkVersion: 1,
+                linkExpiresAt: new Date(now.getTime() + TEAM_INVITE_LINK_TTL_MS),
                 firstName: normalizedFirstName ?? null,
                 lastName: normalizedLastName ?? null,
                 createdAt: now,
@@ -862,12 +1110,14 @@ export async function POST(req: NextRequest) {
               },
             });
 
+          await recordInvitationRequest(tx, requestScope, record.id);
+
           if (teamRole === 'player') {
             await syncCanonicalTeamRoster({
               teamId,
               captainId: team.captainId,
               playerIds: normalizeIdList(team.playerIds),
-              pendingPlayerIds: unionStrings(normalizeIdList(team.pending), [inviteUserId]),
+              pendingPlayerIds: unionStrings(normalizeIdList(team.pending), [teamInviteUserId]),
               managerId: team.managerId,
               headCoachId: team.headCoachId,
               assistantCoachIds: normalizeIdList(team.coachIds),
@@ -880,7 +1130,7 @@ export async function POST(req: NextRequest) {
               tx,
               teamRole,
               teamId,
-              inviteUserId,
+              teamInviteUserId,
               session.userId,
               now,
             );
@@ -896,12 +1146,16 @@ export async function POST(req: NextRequest) {
         if (!eventId) {
           throw new InviteRouteError(400, 'Event invites require eventId');
         }
+        const eventInviteUserId = inviteUserId;
+        if (!eventInviteUserId) {
+          throw new InviteRouteError(400, 'Event invites require a userId or email');
+        }
 
         const existingInvite = await tx.invites.findFirst({
           where: {
             type: 'EVENT',
             eventId,
-            userId: inviteUserId,
+            userId: eventInviteUserId,
           },
         });
         const wasCreated = !existingInvite;
@@ -926,7 +1180,7 @@ export async function POST(req: NextRequest) {
               eventId,
               organizationId,
               teamId,
-              userId: inviteUserId,
+              userId: eventInviteUserId,
               createdBy: invite.createdBy ?? session.userId,
               firstName: normalizedFirstName ?? null,
               lastName: normalizedLastName ?? null,
@@ -944,17 +1198,37 @@ export async function POST(req: NextRequest) {
     });
 
     const baseUrl = getRequestOrigin(req);
-    const emailedInvites = await sendInviteEmails(toEmail, baseUrl);
+    let emailedInvites: InviteDeliveryRecord[] = [];
+    let inviteDeliveryFailed = false;
+    try {
+      emailedInvites = await sendInviteEmails(toEmail, baseUrl, { requestedBy: session.userId, requestedByIsAdmin: session.isAdmin });
+    } catch (error) {
+      // The database transaction already committed. Keep that result and
+      // report delivery failure so the client can retry delivery safely.
+      inviteDeliveryFailed = true;
+      console.warn('Invite save committed but delivery failed', error);
+    }
     const emailedById = new Map(emailedInvites.map((invite) => [invite.id, invite]));
     const mergedInvites = created.map((invite) => {
       const emailed = emailedById.get(invite.id);
       return emailed
-        ? { ...invite, status: emailed.status ?? invite.status, sentAt: emailed.sentAt ?? invite.sentAt }
+        ? { ...invite, status: emailed.status ?? invite.status, sentAt: emailed.sentAt ?? invite.sentAt, delivery: emailed.delivery }
         : invite;
     });
 
-    return NextResponse.json({ invites: mergedInvites.map((invite) => mapInviteRecord(invite)) }, { status: 201 });
+    return NextResponse.json({
+      invites: mergedInvites.map((invite) => mapInviteRecord(invite)),
+      delivery: {
+        attempted: toEmail.length > 0,
+        failed: inviteDeliveryFailed || emailedInvites.some(
+          (invite) => invite.delivery?.failed === true || (invite.type !== 'TEAM' && String(invite.status ?? '').toUpperCase() === 'FAILED'),
+        ),
+        inviteIds: toEmail.map((invite) => invite.id),
+      },
+    }, { status: 201 });
   } catch (error) {
+    if (error instanceof InvitationRequestError) return NextResponse.json({ error: error.message }, { status: error.status });
+    if (error instanceof TeamInvitationRestrictionError) return NextResponse.json({ error: error.message }, { status: error.status });
     if (error instanceof InviteRouteError) {
       const payload = error.details === undefined
         ? { error: error.message }
@@ -998,6 +1272,10 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ deleted: true }, { status: 200 });
   }
 
+  if (inviteCandidates.some((invite) => normalizeInviteType(invite.type) === 'TEAM')) {
+    return NextResponse.json({ error: 'Cancel or decline a Team invitation by its invitation ID.' }, { status: 409 });
+  }
+
   const now = new Date();
   await prisma.$transaction(async (tx) => {
     const eventStaffLockIds = Array.from(new Set(inviteCandidates.flatMap((invite) => (
@@ -1021,32 +1299,49 @@ export async function DELETE(req: NextRequest) {
     });
     const invites = lockedCandidates.filter((invite) => {
       const currentEventId = normalizeId(invite.eventId);
-      return normalizeInviteType(invite.type) !== 'STAFF'
+      return normalizeInviteType(invite.type) !== 'TEAM' && (normalizeInviteType(invite.type) !== 'STAFF'
         || !currentEventId
-        || lockedEventIds.has(currentEventId);
+        || lockedEventIds.has(currentEventId));
     });
 
-    for (const invite of invites) {
-      if (normalizeInviteType(invite.type) === 'TEAM' && invite.teamId && invite.userId) {
-        const teamsDelegate = getTeamsDelegate(tx);
-        const team = await teamsDelegate?.findUnique({ where: { id: invite.teamId } });
-        if (team && Array.isArray(team.pending) && team.pending.includes(invite.userId)) {
-          await teamsDelegate.update({
-            where: { id: invite.teamId },
-            data: {
-              pending: team.pending.filter((entry: string) => entry !== invite.userId),
-              updatedAt: now,
-            },
-          });
-        }
-        await rollbackTeamInviteEventSyncs(tx, invite, 'CANCELLED', now);
-        await removeCanonicalPendingInvitee(tx, invite, session.userId, now);
-      }
+    const profileIds = invites.map((invite) => invite.userId).filter((id): id is string => Boolean(id));
+    const managedProfiles = profileIds.length && tx.userData?.findMany
+      ? await tx.userData.findMany({
+        where: { id: { in: profileIds }, OR: [{ isManagedPlayer: true }, { mergedIntoProfileId: { not: null } }] },
+        select: { id: true },
+      })
+      : [];
+    const durableIds = new Set((managedProfiles ?? []).map((profile: { id: string }) => profile.id));
+    const claimedInviteIds = new Set(invites.filter((invite) => Boolean(invite.claimedBy)).map((invite) => invite.id));
+    if (tx.userProfileClaims?.findMany) {
+      const claims = await tx.userProfileClaims.findMany({
+        where: { inviteId: { in: invites.map((invite) => invite.id) }, status: 'COMPLETED' },
+        select: { inviteId: true },
+      });
+      claims.forEach((claim: { inviteId?: string | null }) => { if (claim.inviteId) claimedInviteIds.add(claim.inviteId); });
     }
-
-    await tx.invites.deleteMany({
-      where: { id: { in: invites.map((invite) => invite.id) } },
-    });
+    if (tx.userProfileMerges?.findMany) {
+      const merges = await tx.userProfileMerges.findMany({
+        where: { invitationIds: { hasSome: invites.map((invite) => invite.id) } },
+        select: { invitationIds: true },
+      });
+      merges.forEach((merge: { invitationIds?: string[] }) => (merge.invitationIds ?? []).forEach((inviteId) => claimedInviteIds.add(inviteId)));
+    }
+    const durableInviteIds = invites.filter((invite) => durableIds.has(invite.userId ?? '') || claimedInviteIds.has(invite.id)).map((invite) => invite.id);
+    const deletableInviteIds = invites
+      .filter((invite) => !durableIds.has(invite.userId ?? '') && !claimedInviteIds.has(invite.id))
+      .map((invite) => invite.id);
+    if (durableInviteIds.length) {
+      await tx.invites.updateMany({
+        where: { id: { in: durableInviteIds } },
+        data: { status: 'CANCELLED', finalizedAt: now, updatedAt: now },
+      });
+    }
+    if (deletableInviteIds.length) {
+      await tx.invites.deleteMany({
+        where: { id: { in: deletableInviteIds } },
+      });
+    }
   });
 
   return NextResponse.json({ deleted: true }, { status: 200 });

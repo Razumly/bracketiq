@@ -4,11 +4,13 @@ This document describes the requirements for an execution plan ("ExecPlan"), a d
 
 ## How to use ExecPlans and PLANS.md
 
-When authoring an executable specification (ExecPlan), follow PLANS.md _to the letter_. If it is not in your context, refresh your memory by reading the entire PLANS.md file. Be thorough in reading (and re-reading) source material to produce an accurate specification. When creating a spec, start from the skeleton and flesh it out as you do your research.
+When authoring an executable specification (ExecPlan), follow PLANS.md to the letter. Read this document once. Research only the sources needed for the stated acceptance criteria. Record the minimum source set and expansion triggers in `Context Boundary`.
 
 Store every new ExecPlan under `plans/` at the repository root. Use `plans/<feature>-execplan.md`. Do not place new plans inside `apps/site` or `apps/mobile`.
 
 When implementing an executable specification (ExecPlan), do not prompt the user for "next steps"; simply proceed to the next milestone. Keep all sections up to date, add or split entries in the list at every stopping point to affirmatively state the progress made and next steps. Resolve ambiguities autonomously, and commit frequently.
+
+When implementing an ExecPlan, start with its `Context Boundary`. Expand context only when a stated trigger fires.
 
 When discussing an executable specification (ExecPlan), record decisions in a log in the spec for posterity; it should be unambiguously clear why any change to the specification was made. ExecPlans are living documents, and it should always be possible to restart from _only_ the ExecPlan and no other work.
 
@@ -23,6 +25,7 @@ NON-NEGOTIABLE REQUIREMENTS:
 * Every ExecPlan must enable a complete novice to implement the feature end-to-end without prior knowledge of this repo.
 * Every ExecPlan must produce a demonstrably working behavior, not merely code changes to "meet a definition".
 * Every ExecPlan must define every term of art in plain language or do not use it.
+* Every ExecPlan must contain a `Context Boundary` section that lists the minimum sources and expansion triggers.
 
 Purpose and intent come first. Begin by explaining, in a few sentences, why the work matters from a user's perspective: what someone can do after this change that they could not do before, and how to see it working. Then guide the reader through the exact steps to achieve that outcome, including what to edit, what to run, and what they should observe.
 
@@ -117,6 +120,10 @@ Summarize outcomes, gaps, and lessons learned at major milestones or at completi
 ## Context and Orientation
  
 Describe the current state relevant to this task as if the reader knows nothing. Name the key files and modules by full path. Define any non-obvious term you will use. Do not refer to prior plans.
+
+## Context Boundary
+
+Name the minimum repository files and sections needed for this plan. State the condition that requires each optional source. Include parent issues, blocker issues, or historical plans only when the acceptance criteria depend on unresolved information. Summarize required facts instead of copying unrelated source material.
  
 ## Plan of Work
  

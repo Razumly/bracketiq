@@ -39,23 +39,18 @@ export const useEventFormSectionsController = ({
     sectionErrorCounts,
 }: UseEventFormSectionsControllerParams) => {
     const leagueData = eventData.leagueData;
-    const isSchedulableEventType = !isAffiliateEvent && supportsScheduleSlotsForEvent(
+    const isSchedulableEventType = supportsScheduleSlotsForEvent(
         eventData.eventType,
         eventData.parentEvent,
     );
     const isWeeklyChildEvent = eventData.eventType === 'WEEKLY_EVENT'
         && hasParentEventRef(eventData.parentEvent);
-    const supportsEditableTeamSignup = !isAffiliateEvent
-        && (eventData.eventType === 'EVENT' || eventData.eventType === 'WEEKLY_EVENT');
-    const showsFixedTeamEventToggle = !isAffiliateEvent
-        && (eventData.eventType === 'LEAGUE' || eventData.eventType === 'TOURNAMENT');
-    const showScheduleConfig = !isAffiliateEvent
-        && (isSchedulableEventType || usesRentalSlots || isWeeklyChildEvent);
-    const showMatchRulesSection = !isAffiliateEvent
-        && eventData.eventType !== 'EVENT'
-        && eventData.eventType !== 'WEEKLY_EVENT';
-    const showStaffSection = !isAffiliateEvent;
-    const showScoringConfigSection = !isAffiliateEvent && (
+    const supportsEditableTeamSignup = (eventData.eventType === 'EVENT' || eventData.eventType === 'WEEKLY_EVENT');
+    const showsFixedTeamEventToggle = (eventData.eventType === 'LEAGUE' || eventData.eventType === 'TOURNAMENT');
+    const showScheduleConfig = isSchedulableEventType || usesRentalSlots || isWeeklyChildEvent;
+    const showMatchRulesSection = (eventData.eventType === 'LEAGUE' || eventData.eventType === 'TOURNAMENT');
+    const showStaffSection = true;
+    const showScoringConfigSection = (
         eventData.eventType === 'LEAGUE'
         || isTournamentPoolPlayFormEnabled(eventData.eventType, leagueData.includePlayoffs)
     );

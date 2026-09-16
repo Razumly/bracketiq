@@ -11,7 +11,6 @@ import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
 import com.razumly.mvp.core.data.dataTypes.MatchSegmentMVP
 import com.razumly.mvp.core.data.dataTypes.ManualPaymentLink
 import com.razumly.mvp.core.data.dataTypes.NotificationSettings
-import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
 import com.razumly.mvp.core.data.dataTypes.TeamStaffAssignment
@@ -26,6 +25,12 @@ import kotlin.time.Instant
 
 @OptIn(ExperimentalTime::class)
 class Converters {
+    @TypeConverter
+    fun fromInviteDeliveries(value: List<com.razumly.mvp.core.data.dataTypes.InviteDelivery>): String = Json.encodeToString(value)
+
+    @TypeConverter
+    fun toInviteDeliveries(value: String): List<com.razumly.mvp.core.data.dataTypes.InviteDelivery> = Json.decodeFromString(value)
+
     // List<String> converter
     @TypeConverter
     fun fromStringList(value: List<String>): String {
@@ -94,15 +99,7 @@ class Converters {
     fun fromEventType(eventType: EventType): String = eventType.name
 
     @TypeConverter
-    fun toEventType(value: String): EventType = EventType.valueOf(value)
-
-    @TypeConverter
-    fun fromOfficialSchedulingMode(value: OfficialSchedulingMode): String = value.name
-
-    @TypeConverter
-    fun toOfficialSchedulingMode(value: String): OfficialSchedulingMode =
-        runCatching { OfficialSchedulingMode.valueOf(value.trim().uppercase()) }
-            .getOrDefault(OfficialSchedulingMode.SCHEDULE)
+    fun toEventType(value: String): EventType = EventType.valueOf(value.trim().uppercase())
 
     @TypeConverter
     fun fromEventOfficialPositions(value: List<EventOfficialPosition>): String =

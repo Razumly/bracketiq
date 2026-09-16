@@ -100,6 +100,11 @@ export type MatchOperationReceipts = Prisma.MatchOperationReceiptsModel
  */
 export type EventEditorCreateOperations = Prisma.EventEditorCreateOperationsModel
 /**
+ * Model EventEditorMaintenanceOperations
+ *
+ */
+export type EventEditorMaintenanceOperations = Prisma.EventEditorMaintenanceOperationsModel
+/**
  * Model Divisions
  *
  */
@@ -139,6 +144,46 @@ export type AuthMfaChallenges = Prisma.AuthMfaChallengesModel
  *
  */
 export type Invites = Prisma.InvitesModel
+/**
+ * Model InvitationEvidence
+ *
+ */
+export type InvitationEvidence = Prisma.InvitationEvidenceModel
+/**
+ * Model TeamBlocks
+ *
+ */
+export type TeamBlocks = Prisma.TeamBlocksModel
+/**
+ * Model InviteDeliveries
+ *
+ */
+export type InviteDeliveries = Prisma.InviteDeliveriesModel
+/**
+ * Model TeamCreationRequests
+ *
+ */
+export type TeamCreationRequests = Prisma.TeamCreationRequestsModel
+/**
+ * Model InvitationRequests
+ *
+ */
+export type InvitationRequests = Prisma.InvitationRequestsModel
+/**
+ * Model UserProfileClaims
+ *
+ */
+export type UserProfileClaims = Prisma.UserProfileClaimsModel
+/**
+ * Model UserProfileMerges
+ *
+ */
+export type UserProfileMerges = Prisma.UserProfileMergesModel
+/**
+ * Model UserProfileContactCorrections
+ *
+ */
+export type UserProfileContactCorrections = Prisma.UserProfileContactCorrectionsModel
 /**
  * Model TeamInviteEventSyncs
  *
@@ -645,6 +690,11 @@ export type EventTemplateLeagueScoringConfigs = Prisma.EventTemplateLeagueScorin
  */
 export type Sports = Prisma.SportsModel
 /**
+ * Model SportCategories
+ *
+ */
+export type SportCategories = Prisma.SportCategoriesModel
+/**
  * Model DocumentRequirements
  *
  */
@@ -699,6 +749,16 @@ export type BoldSignSyncOperations = Prisma.BoldSignSyncOperationsModel
  *
  */
 export type ParentChildLinks = Prisma.ParentChildLinksModel
+/**
+ * Model EventRegistrationDrafts
+ *
+ */
+export type EventRegistrationDrafts = Prisma.EventRegistrationDraftsModel
+/**
+ * Model EventRegistrationTeamPreferences
+ *
+ */
+export type EventRegistrationTeamPreferences = Prisma.EventRegistrationTeamPreferencesModel
 /**
  * Model EventRegistrations
  *

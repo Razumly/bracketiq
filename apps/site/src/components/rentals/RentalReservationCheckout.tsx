@@ -1,20 +1,31 @@
 "use client";
 
-import { useCallback, useMemo, useState, type ReactNode } from 'react';
-import { useRouter } from 'next/navigation';
-import { Alert, Button, Group, Modal, Stack, Text } from '@mantine/core';
-import { notifications } from '@mantine/notifications';
-import BillingAddressModal from '@/components/ui/BillingAddressModal';
-import PaymentModal from '@/components/ui/PaymentModal';
-import { apiRequest, isApiRequestError } from '@/lib/apiClient';
-import { paymentService } from '@/lib/paymentService';
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
+import { notifications } from "@/lib/organizationNotifications";
+import {
+  RentalOrderNotice,
+  RentalReservationChoice,
+  RentalSelectionSummary,
+} from "./RentalReservationDialogs";
+import BillingAddressModal from "@/components/ui/BillingAddressModal";
+import { Alert, Button } from "@/components/organization/organization-operation-ui";
+import PaymentModal from "@/components/ui/PaymentModal";
+import { apiRequest, isApiRequestError } from "@/lib/apiClient";
+import { paymentService } from "@/lib/paymentService";
 import {
   trackRentalCheckoutStarted,
   trackRentalClicked,
-} from '@/lib/analytics/eventAnalytics';
-import type { RentalSelectionCheckoutPayload } from '@/app/organizations/[id]/FieldsTabContent';
-import type { BillingAddress, Event, Organization, PaymentIntent, TimeSlot, UserData } from '@/types';
-import { formatPrice } from '@/types';
+} from "@/lib/analytics/eventAnalytics";
+import type { RentalSelectionCheckoutPayload } from "@/app/organizations/[id]/FieldsTabContent";
+import type {
+  BillingAddress,
+  Event,
+  Organization,
+  PaymentIntent,
+  TimeSlot,
+  UserData,
+} from "@/types";
 
 type RentalPaymentDraft = {
   event: Event;
@@ -39,6 +50,7 @@ type RentalOrderResult = {
 
 type CompletedRentalOrder = RentalOrderResult & {
   createEventUrl: string;
+  selection: RentalSelectionCheckoutPayload;
 };
 
 type RentalReservationCheckoutRenderProps = {
@@ -53,27 +65,29 @@ type RentalReservationCheckoutProps = {
 };
 
 const RENTAL_EVENT_QUERY_KEYS = [
-  'rentalStart',
-  'rentalEnd',
-  'rentalFieldId',
-  'rentalFieldName',
-  'rentalFacilityId',
-  'rentalFacilityName',
-  'rentalFacilityLocation',
-  'rentalFacilityAddress',
-  'rentalLocation',
-  'rentalLat',
-  'rentalLng',
-  'rentalPriceCents',
-  'rentalRequiredTemplateIds',
-  'rentalHostRequiredTemplateIds',
-  'rentalSelections',
-  'rentalBookingId',
-  'rentalBookingItems',
-  'rentalOrgId',
+  "rentalStart",
+  "rentalEnd",
+  "rentalFieldId",
+  "rentalFieldName",
+  "rentalFacilityId",
+  "rentalFacilityName",
+  "rentalFacilityLocation",
+  "rentalFacilityAddress",
+  "rentalLocation",
+  "rentalLat",
+  "rentalLng",
+  "rentalPriceCents",
+  "rentalRequiredTemplateIds",
+  "rentalHostRequiredTemplateIds",
+  "rentalSelections",
+  "rentalBookingId",
+  "rentalBookingItems",
+  "rentalOrgId",
 ];
 
-const rentalSelectionAnalyticsProperties = (payload: RentalSelectionCheckoutPayload) => ({
+const rentalSelectionAnalyticsProperties = (
+  payload: RentalSelectionCheckoutPayload,
+) => ({
   event_id: payload.eventId,
   field_id: payload.primaryFieldId,
   field_count: payload.fieldIds.length,
@@ -82,18 +96,29 @@ const rentalSelectionAnalyticsProperties = (payload: RentalSelectionCheckoutPayl
 });
 
 const stripRentalQueryParams = (manageEventUrl: string): string => {
-  const url = new URL(manageEventUrl, 'http://localhost');
+  const url = new URL(manageEventUrl, "http://localhost");
   RENTAL_EVENT_QUERY_KEYS.forEach((key) => url.searchParams.delete(key));
   return `${url.pathname}${url.search}`;
 };
 
-const getPaymentIntentId = (clientSecret: string | undefined): string | null => {
+const getPaymentIntentId = (
+  clientSecret: string | undefined,
+): string | null => {
   if (!clientSecret) {
     return null;
   }
-  const secretIndex = clientSecret.indexOf('_secret_');
+  const secretIndex = clientSecret.indexOf("_secret_");
   return secretIndex > 0 ? clientSecret.slice(0, secretIndex) : clientSecret;
 };
+
+const requiresBillingAddress = (error: unknown): boolean =>
+  isApiRequestError(error) &&
+  error.data !== null &&
+  typeof error.data === "object" &&
+  "billingAddressRequired" in error.data &&
+  Boolean(
+    (error.data as { billingAddressRequired?: boolean }).billingAddressRequired,
+  );
 
 const buildRentalPaymentDraft = (
   organization: Organization,
@@ -101,20 +126,21 @@ const buildRentalPaymentDraft = (
   userId: string,
 ): RentalPaymentDraft => {
   const timeSlotId = `${payload.eventId}-rental-payment`;
-  const fallbackCoordinates = payload.coordinates ?? organization.coordinates ?? [0, 0];
+  const fallbackCoordinates = payload.coordinates ??
+    organization.coordinates ?? [0, 0];
   const event = {
     $id: payload.eventId,
     name: organization.name,
     description: `Private rental order for ${organization.name}.`,
     start: payload.rentalStart,
     end: payload.rentalEnd,
-    location: payload.location || organization.location || 'Rental',
+    location: payload.location || organization.location || "Rental",
     address: payload.facilityAddress ?? organization.address,
     coordinates: fallbackCoordinates,
     price: 0,
-    imageId: '',
+    imageId: "",
     hostId: userId,
-    state: 'PRIVATE',
+    state: "PRIVATE",
     maxParticipants: 10,
     teamSizeLimit: 10,
     teamSignup: false,
@@ -130,7 +156,7 @@ const buildRentalPaymentDraft = (
     cancellationRefundHours: 24,
     registrationCutoffHours: 0,
     seedColor: 0,
-    eventType: 'EVENT',
+    eventType: "EVENT",
     organizationId: organization.$id,
     sportId: null,
     divisions: [],
@@ -162,73 +188,105 @@ export default function RentalReservationCheckout({
   children,
 }: RentalReservationCheckoutProps) {
   const router = useRouter();
-  const [pendingSelection, setPendingSelection] = useState<RentalSelectionCheckoutPayload | null>(null);
+  const [pendingSelection, setPendingSelection] =
+    useState<RentalSelectionCheckoutPayload | null>(null);
   const [choiceOpen, setChoiceOpen] = useState(false);
   const [startingCheckout, setStartingCheckout] = useState(false);
   const [showBillingAddressModal, setShowBillingAddressModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentData, setPaymentData] = useState<PaymentIntent | null>(null);
-  const [paymentDraft, setPaymentDraft] = useState<RentalPaymentDraft | null>(null);
-  const [orderCompleteMessage, setOrderCompleteMessage] = useState<string | null>(null);
-  const [completedRentalOrder, setCompletedRentalOrder] = useState<CompletedRentalOrder | null>(null);
+  const [paymentDraft, setPaymentDraft] = useState<RentalPaymentDraft | null>(
+    null,
+  );
+  const [orderCompleteMessage, setOrderCompleteMessage] = useState<
+    string | null
+  >(null);
+  const [completedRentalOrder, setCompletedRentalOrder] =
+    useState<CompletedRentalOrder | null>(null);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [paymentSubmitted, setPaymentSubmitted] = useState(false);
+  const checkoutInFlight = useRef(false);
+  const submittedPaymentIntentId = useRef<string | null>(null);
+  const completedBookingId = useRef<string | null>(null);
 
-  const normalizedRentalOrderSlug = typeof rentalOrderSlug === 'string' ? rentalOrderSlug.trim() : '';
-  const paymentEvent = useMemo(() => ({
-    name: `${organization.name} rental`,
-    location: pendingSelection?.location || pendingSelection?.facilityLocation || organization.location || '',
-    eventType: 'EVENT' as const,
-    price: pendingSelection?.totalRentalCents ?? 0,
-  }), [
-    organization.location,
-    organization.name,
-    pendingSelection?.facilityLocation,
-    pendingSelection?.location,
-    pendingSelection?.totalRentalCents,
-  ]);
+  const normalizedRentalOrderSlug =
+    typeof rentalOrderSlug === "string" ? rentalOrderSlug.trim() : "";
+  const paymentEvent = useMemo(
+    () => ({
+      name: `${organization.name} rental`,
+      location:
+        pendingSelection?.location ||
+        pendingSelection?.facilityLocation ||
+        organization.location ||
+        "",
+      eventType: "EVENT" as const,
+      price: pendingSelection?.totalRentalCents ?? 0,
+    }),
+    [
+      organization.location,
+      organization.name,
+      pendingSelection?.facilityLocation,
+      pendingSelection?.location,
+      pendingSelection?.totalRentalCents,
+    ],
+  );
 
-  const createRentalOrder = useCallback(async (
-    payload: RentalSelectionCheckoutPayload,
-    paymentIntentId: string | null,
-  ) => {
-    if (!normalizedRentalOrderSlug) {
-      throw new Error('This organization needs a public rental checkout before resources can be reserved.');
-    }
-    const result = await apiRequest<RentalOrderResult>(
-      `/api/public/organizations/${encodeURIComponent(normalizedRentalOrderSlug)}/rental-orders`,
-      {
-        method: 'POST',
-        body: {
-          eventId: payload.eventId,
-          selections: payload.rentalSelections,
-          paymentIntentId,
-          renterOrganizationId: payload.renterOrganizationId,
+  const createRentalOrder = useCallback(
+    async (
+      payload: RentalSelectionCheckoutPayload,
+      paymentIntentId: string | null,
+    ) => {
+      if (!normalizedRentalOrderSlug) {
+        throw new Error(
+          "This organization needs a public rental checkout before resources can be reserved.",
+        );
+      }
+      const result = await apiRequest<RentalOrderResult>(
+        `/api/public/organizations/${encodeURIComponent(normalizedRentalOrderSlug)}/rental-orders`,
+        {
+          method: "POST",
+          body: {
+            eventId: payload.eventId,
+            selections: payload.rentalSelections,
+            paymentIntentId,
+            renterOrganizationId: payload.renterOrganizationId,
+          },
+          timeoutMs: 30_000,
         },
-        timeoutMs: 30_000,
-      },
-    );
-    const createEventUrl = typeof result.createEventUrl === 'string' && result.createEventUrl.trim().length > 0
-      ? result.createEventUrl
-      : stripRentalQueryParams(payload.manageEventUrl);
-    const message = `Resources reserved for ${organization.name}.`;
-    setOrderCompleteMessage(message);
-    setCompletedRentalOrder({
-      ...result,
-      createEventUrl,
-    });
-    notifications.show({ color: 'green', message });
-    return { ...result, createEventUrl };
-  }, [normalizedRentalOrderSlug, organization.name]);
+      );
+      const createEventUrl =
+        typeof result.createEventUrl === "string" &&
+        result.createEventUrl.trim().length > 0
+          ? result.createEventUrl
+          : stripRentalQueryParams(payload.manageEventUrl);
+      const message = `Resources reserved for ${organization.name}.`;
+      setOrderCompleteMessage(message);
+      setCompletedRentalOrder({
+        ...result,
+        createEventUrl,
+        selection: payload,
+      });
+      completedBookingId.current = payload.eventId;
+      notifications.show({ color: "green", message });
+      return { ...result, createEventUrl };
+    },
+    [normalizedRentalOrderSlug, organization.name],
+  );
 
-  const completeRentalOrder = useCallback(async (
-    payload: RentalSelectionCheckoutPayload,
-    paymentIntentId: string | null,
-  ) => {
-    const result = await createRentalOrder(payload, paymentIntentId);
-    setChoiceOpen(false);
-    return result;
-  }, [createRentalOrder]);
+  const completeRentalOrder = useCallback(
+    async (
+      payload: RentalSelectionCheckoutPayload,
+      paymentIntentId: string | null,
+    ) => {
+      const result = await createRentalOrder(payload, paymentIntentId);
+      setChoiceOpen(false);
+      return result;
+    },
+    [createRentalOrder],
+  );
 
   const clearCheckoutState = useCallback(() => {
+    setCheckoutError(null);
     setChoiceOpen(false);
     setShowPaymentModal(false);
     setShowBillingAddressModal(false);
@@ -242,182 +300,237 @@ export default function RentalReservationCheckout({
       return;
     }
     try {
-      await paymentService.releaseRentalCheckoutLock(paymentDraft.event, paymentDraft.timeSlot);
+      await paymentService.releaseRentalCheckoutLock(
+        paymentDraft.event,
+        paymentDraft.timeSlot,
+      );
     } catch (error) {
-      console.warn('Failed to release rental checkout lock', error);
+      console.warn("Failed to release rental checkout lock", error);
     }
   }, [paymentDraft]);
 
-  const startRentalOnlyCheckout = useCallback(async (billingAddress?: BillingAddress) => {
-    if (!pendingSelection) {
+  const finishReservation = useCallback(async () => {
+    if (!pendingSelection || checkoutInFlight.current || completedBookingId.current === pendingSelection.eventId) {
       return;
     }
-    if (!currentUser) {
-      trackRentalCheckoutStarted(organization, 'public_rental_page', {
-        ...rentalSelectionAnalyticsProperties(pendingSelection),
-        auth_required: true,
-      });
-      notifications.show({ color: 'yellow', message: 'Sign in to order this rental.' });
-      router.push('/login');
-      return;
-    }
-
-    trackRentalCheckoutStarted(organization, 'public_rental_page', {
-      ...rentalSelectionAnalyticsProperties(pendingSelection),
-      auth_required: false,
-    });
-    const draft = buildRentalPaymentDraft(organization, pendingSelection, currentUser.$id);
-    setPaymentDraft(draft);
+    checkoutInFlight.current = true;
     setStartingCheckout(true);
+    setCheckoutError(null);
     try {
-      if (pendingSelection.totalRentalCents <= 0) {
-        await completeRentalOrder(pendingSelection, null);
-        clearCheckoutState();
-        return;
-      }
-
-      const intent = await paymentService.createPaymentIntent(
-        currentUser,
-        draft.event,
-        undefined,
-        draft.timeSlot,
-        { $id: organization.$id, name: organization.name },
-        undefined,
-        billingAddress,
-      );
-      setPaymentData(intent);
-      setShowBillingAddressModal(false);
-      setShowPaymentModal(true);
+      await completeRentalOrder(pendingSelection, submittedPaymentIntentId.current);
+      await releasePaymentDraftLock();
+      clearCheckoutState();
     } catch (error) {
-      if (
-        isApiRequestError(error)
-        && error.data
-        && typeof error.data === 'object'
-        && 'billingAddressRequired' in error.data
-        && Boolean((error.data as { billingAddressRequired?: boolean }).billingAddressRequired)
-      ) {
-        setShowBillingAddressModal(true);
-        return;
-      }
-      console.error('Failed to start rental checkout', error);
-      notifications.show({
-        color: 'red',
-        message: error instanceof Error ? error.message : 'Unable to start rental checkout.',
-      });
+      setCheckoutError(error instanceof Error ? error.message : "Unable to confirm your reservation.");
+      setChoiceOpen(true);
     } finally {
+      checkoutInFlight.current = false;
       setStartingCheckout(false);
     }
-  }, [clearCheckoutState, completeRentalOrder, currentUser, organization, pendingSelection, router]);
+  }, [clearCheckoutState, completeRentalOrder, pendingSelection, releasePaymentDraftLock]);
+
+  const startRentalOnlyCheckout = useCallback(
+    async (billingAddress?: BillingAddress) => {
+      if (!pendingSelection || checkoutInFlight.current) return;
+      if (paymentSubmitted) {
+        if (!submittedPaymentIntentId.current) {
+          setCheckoutError("Payment confirmation is missing. Contact the organization before paying again.");
+          return;
+        }
+        await finishReservation();
+        return;
+      }
+      if (!currentUser) {
+        trackRentalCheckoutStarted(organization, "public_rental_page", {
+          ...rentalSelectionAnalyticsProperties(pendingSelection),
+          auth_required: true,
+        });
+        router.push("/login");
+        return;
+      }
+
+      trackRentalCheckoutStarted(organization, "public_rental_page", {
+        ...rentalSelectionAnalyticsProperties(pendingSelection),
+        auth_required: false,
+      });
+      if (pendingSelection.totalRentalCents <= 0) {
+        await finishReservation();
+        return;
+      }
+
+      const draft = buildRentalPaymentDraft(organization, pendingSelection, currentUser.$id);
+      setPaymentDraft(draft);
+      checkoutInFlight.current = true;
+      setStartingCheckout(true);
+      setCheckoutError(null);
+      try {
+        const intent = await paymentService.createPaymentIntent(
+          currentUser,
+          draft.event,
+          undefined,
+          draft.timeSlot,
+          { $id: organization.$id, name: organization.name },
+          undefined,
+          billingAddress,
+        );
+        setPaymentData(intent);
+        setShowBillingAddressModal(false);
+        setShowPaymentModal(true);
+      } catch (error) {
+        if (requiresBillingAddress(error)) {
+          setShowBillingAddressModal(true);
+          return;
+        }
+        const message = error instanceof Error ? error.message : "Unable to start rental checkout.";
+        setCheckoutError(message);
+        if (billingAddress) throw error;
+      } finally {
+        checkoutInFlight.current = false;
+        setStartingCheckout(false);
+      }
+    },
+    [currentUser, finishReservation, organization, paymentSubmitted, pendingSelection, router],
+  );
 
   const handlePaymentSuccess = useCallback(async () => {
-    if (!pendingSelection || !paymentData) {
+    if (!pendingSelection || !paymentData) return;
+    const paymentIntentId = getPaymentIntentId(paymentData.paymentIntent);
+    setPaymentSubmitted(true);
+    setShowPaymentModal(false);
+    setChoiceOpen(true);
+    if (!paymentIntentId) {
+      setCheckoutError("Payment confirmation is missing. Keep this checkout open and contact the organization before paying again.");
       return;
     }
-    const paymentIntentId = getPaymentIntentId(paymentData.paymentIntent);
-    await completeRentalOrder(pendingSelection, paymentIntentId);
-    await releasePaymentDraftLock();
-    clearCheckoutState();
-  }, [clearCheckoutState, completeRentalOrder, paymentData, pendingSelection, releasePaymentDraftLock]);
+    submittedPaymentIntentId.current = paymentIntentId;
+    await finishReservation();
+  }, [finishReservation, paymentData, pendingSelection]);
+
+  const handlePaymentPending = useCallback(() => {
+    submittedPaymentIntentId.current = getPaymentIntentId(paymentData?.paymentIntent);
+    setPaymentSubmitted(true);
+    setShowPaymentModal(false);
+    setChoiceOpen(true);
+    setCheckoutError("Your payment is processing. Your reservation is not confirmed yet. Check confirmation again before submitting another payment.");
+  }, [paymentData]);
 
   const closePaymentModal = useCallback(async () => {
+    if (checkoutInFlight.current) return;
     setShowPaymentModal(false);
-    setPaymentData(null);
-    await releasePaymentDraftLock();
-    setPaymentDraft(null);
+    setChoiceOpen(true);
+    if (submittedPaymentIntentId.current) return;
+    checkoutInFlight.current = true;
+    setStartingCheckout(true);
+    try {
+      await releasePaymentDraftLock();
+      setPaymentData(null);
+      setPaymentDraft(null);
+    } finally {
+      checkoutInFlight.current = false;
+      setStartingCheckout(false);
+    }
   }, [releasePaymentDraftLock]);
 
-  const handleSelectionReady = useCallback((payload: RentalSelectionCheckoutPayload) => {
-    if (!normalizedRentalOrderSlug) {
-      notifications.show({
-        color: 'red',
-        message: 'This organization needs a public rental checkout before resources can be reserved.',
-      });
-      return;
+  const changeSelection = useCallback(async () => {
+    if (checkoutInFlight.current || submittedPaymentIntentId.current) return;
+    checkoutInFlight.current = true;
+    setStartingCheckout(true);
+    try {
+      await releasePaymentDraftLock();
+      setPaymentData(null);
+      setPaymentDraft(null);
+      setChoiceOpen(false);
+    } finally {
+      checkoutInFlight.current = false;
+      setStartingCheckout(false);
     }
-    setOrderCompleteMessage(null);
-    setCompletedRentalOrder(null);
-    trackRentalClicked(organization, 'public_rental_page', rentalSelectionAnalyticsProperties(payload));
-    setPendingSelection(payload);
-    setChoiceOpen(true);
-  }, [normalizedRentalOrderSlug]);
+  }, [releasePaymentDraftLock]);
+
+  const handleSelectionReady = useCallback(
+    (payload: RentalSelectionCheckoutPayload) => {
+      if (checkoutInFlight.current) return;
+      if (completedBookingId.current === payload.eventId && completedRentalOrder) {
+        setOrderCompleteMessage(`Resources reserved for ${organization.name}.`);
+        return;
+      }
+      if (paymentSubmitted && pendingSelection) {
+        setChoiceOpen(true);
+        return;
+      }
+      if (!normalizedRentalOrderSlug) {
+        notifications.show({
+          color: "red",
+          message:
+            "This organization needs a public rental checkout before resources can be reserved.",
+        });
+        return;
+      }
+      setOrderCompleteMessage(null);
+      setCompletedRentalOrder(null);
+      setCheckoutError(null);
+      submittedPaymentIntentId.current = null;
+      setPaymentSubmitted(false);
+      completedBookingId.current = null;
+      trackRentalClicked(
+        organization,
+        "public_rental_page",
+        rentalSelectionAnalyticsProperties(payload),
+      );
+      setPendingSelection(payload);
+      setChoiceOpen(true);
+    },
+    [completedRentalOrder, normalizedRentalOrderSlug, organization, paymentSubmitted, pendingSelection],
+  );
 
   return (
     <>
-      {orderCompleteMessage ? (
-        <Alert color="green" title="Resources reserved">
-          <Stack gap="sm">
-            <Text size="sm">{orderCompleteMessage}</Text>
-            {completedRentalOrder ? (
-              <Group gap="sm">
-                <Button size="sm" onClick={() => router.push(completedRentalOrder.createEventUrl)}>
-                  Create event now
-                </Button>
-                <Button size="sm" variant="default" onClick={() => setOrderCompleteMessage(null)}>
-                  Attach to event later
-                </Button>
-              </Group>
-            ) : null}
-          </Stack>
-        </Alert>
-      ) : null}
-
-      {children({ onRentalSelectionReady: handleSelectionReady })}
-
-      <Modal
-        opened={choiceOpen}
-        onClose={() => setChoiceOpen(false)}
-        title="Reserve resources"
-        centered
-        size="lg"
-      >
-        <Stack gap="md">
-          {pendingSelection ? (
-            <Stack gap={4}>
-              <Group justify="space-between">
-                <Text fw={600}>Rental total</Text>
-                <Text fw={700}>{formatPrice(pendingSelection.totalRentalCents)}</Text>
-              </Group>
-              {pendingSelection.facilityName ? (
-                <Text size="sm">
-                  <Text span fw={600}>Facility:</Text> {pendingSelection.facilityName}
-                </Text>
-              ) : null}
-              {pendingSelection.primaryFieldName ? (
-                <Text size="sm">
-                  <Text span fw={600}>Resource:</Text> {pendingSelection.primaryFieldName}
-                  {pendingSelection.fieldIds.length > 1 ? ` + ${pendingSelection.fieldIds.length - 1} more` : ''}
-                </Text>
-              ) : null}
-              {pendingSelection.location || pendingSelection.facilityLocation ? (
-                <Text size="sm" c="dimmed">
-                  {pendingSelection.location || pendingSelection.facilityLocation}
-                </Text>
-              ) : null}
-            </Stack>
-          ) : null}
-          <Text>
-            Continue to complete any required documents and payment. After checkout, these resources are reserved and can be attached to an event.
-          </Text>
-          <Group justify="flex-end">
-            <Button variant="default" onClick={() => setChoiceOpen(false)}>Cancel</Button>
-            <Button
-              loading={startingCheckout}
-              onClick={() => void startRentalOnlyCheckout()}
-            >
-              Continue to checkout
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
+      <RentalOrderNotice
+        message={orderCompleteMessage}
+        selection={completedRentalOrder?.selection ?? null}
+        canCreateEvent={Boolean(completedRentalOrder)}
+        onCreateEvent={() => {
+          if (completedRentalOrder)
+            router.push(completedRentalOrder.createEventUrl);
+        }}
+        onDismiss={() => setOrderCompleteMessage(null)}
+      />
+      <div hidden={paymentSubmitted && Boolean(pendingSelection)}>
+        {children({ onRentalSelectionReady: handleSelectionReady })}
+      </div>
+      {paymentSubmitted && pendingSelection && !choiceOpen && (
+        <RentalSelectionSummary selection={pendingSelection}>
+          <Alert color="yellow" title="Reservation confirmation is not complete">
+            Your payment was submitted. Resume confirmation for this reservation before starting another payment.
+          </Alert>
+          <Button fullWidth onClick={() => setChoiceOpen(true)}>Resume reservation confirmation</Button>
+        </RentalSelectionSummary>
+      )}
+      <RentalReservationChoice
+        opened={choiceOpen && !showBillingAddressModal && !showPaymentModal}
+        selection={pendingSelection}
+        startingCheckout={startingCheckout}
+        error={checkoutError}
+        paymentReceived={paymentSubmitted}
+        signedIn={Boolean(currentUser)}
+        onClose={() => {
+          if (checkoutInFlight.current) return;
+          if (paymentSubmitted) setChoiceOpen(false);
+          else void changeSelection();
+        }}
+        onContinue={() => void startRentalOnlyCheckout()}
+      />
 
       <BillingAddressModal
         opened={showBillingAddressModal}
-        onClose={() => setShowBillingAddressModal(false)}
+        onClose={() => {
+          if (!checkoutInFlight.current) setShowBillingAddressModal(false);
+        }}
         onSaved={async (billingAddress) => {
           await startRentalOnlyCheckout(billingAddress);
         }}
         title="Billing address required"
         description="Enter your billing address so tax can be calculated before checkout."
+        summary={pendingSelection && <RentalSelectionSummary selection={pendingSelection} />}
       />
 
       <PaymentModal
@@ -426,6 +539,8 @@ export default function RentalReservationCheckout({
         event={paymentEvent}
         paymentData={paymentData}
         onPaymentSuccess={handlePaymentSuccess}
+        onPaymentPending={handlePaymentPending}
+        summary={pendingSelection && <RentalSelectionSummary selection={pendingSelection} />}
       />
     </>
   );

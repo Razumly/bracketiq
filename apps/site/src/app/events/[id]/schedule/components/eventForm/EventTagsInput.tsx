@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
-import { Button, Group, Pill, PillsInput, Popover, ScrollArea, Text } from '@mantine/core';
+import { Button, Group, Pill, PillsInput, Popover, ScrollArea, Text } from '@/components/organization/organization-operation-ui';
 import type { EventTag } from '@/types';
 import { getEventTagIdentity, isEventTypeTag, slugifyEventTagName } from './eventTypeTags';
 

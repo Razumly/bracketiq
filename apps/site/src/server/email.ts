@@ -1,5 +1,6 @@
 import nodemailer, { Transporter } from 'nodemailer';
 import type SMTPTransport from 'nodemailer/lib/smtp-transport';
+import { isOutboundProvidersDisabled } from './outboundProviders';
 
 export interface EmailPayload {
   to: string;
@@ -43,6 +44,7 @@ const readEnv = (key: string): string | undefined => {
   return value ? value.trim() : undefined;
 };
 
+
 const parsePort = (value?: string, fallback = 587): number => {
   if (!value) return fallback;
   const parsed = Number.parseInt(value, 10);
@@ -74,6 +76,9 @@ const resolveFrom = (): { from: string | undefined; replyTo: string | undefined 
 };
 
 const resolveEmailConfig = (): EmailConfig | null => {
+  if (isOutboundProvidersDisabled()) {
+    return null;
+  }
   const { from, replyTo } = resolveFrom();
   const gmailOauthClientId = readEnv('GMAIL_OAUTH_CLIENT_ID');
   const gmailOauthClientSecret = readEnv('GMAIL_OAUTH_CLIENT_SECRET');

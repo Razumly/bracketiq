@@ -1,5 +1,5 @@
 import type { ComponentProps } from 'react';
-import { NumberInput, Text } from '@mantine/core';
+import { NumberInput, Text } from '@/components/organization/organization-operation-ui';
 import {
     Controller,
     type Control,

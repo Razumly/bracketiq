@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventSearchOccurrence
 import com.razumly.mvp.core.data.dataTypes.discoverPriceRangeLabel
 import com.razumly.mvp.core.data.dataTypes.evergreenDateDisplayLabel
 import com.razumly.mvp.core.data.dataTypes.isAffiliateEvent
@@ -61,6 +62,7 @@ import com.razumly.mvp.core.data.dataTypes.isDraftLikeState
 import com.razumly.mvp.core.data.dataTypes.isPrivateState
 import com.razumly.mvp.core.data.dataTypes.lifecycleStateLabel
 import com.razumly.mvp.core.presentation.util.dateFormat
+import com.razumly.mvp.core.presentation.util.timeFormat
 import com.razumly.mvp.core.presentation.util.eventTypeWithSportLabel
 import com.razumly.mvp.core.presentation.util.getImageUrl
 import com.razumly.mvp.core.presentation.util.getInitialsAvatarUrl
@@ -70,6 +72,7 @@ import dev.chrisbanes.haze.HazeInputScale
 import dev.chrisbanes.haze.HazeProgressive
 import dev.chrisbanes.haze.HazeStyle
 import dev.chrisbanes.haze.hazeEffect
+import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
 import kotlinx.datetime.toLocalDateTime
 import kotlin.time.ExperimentalTime
@@ -159,6 +162,28 @@ internal fun resolveEventCardImageSource(
     }
 }
 
+internal fun resolveEventCardDateLabel(
+    event: Event,
+    eventTimeZone: TimeZone,
+    nextOccurrence: EventSearchOccurrence? = event.nextOccurrence,
+): String {
+    val occurrence = nextOccurrence
+    if (occurrence != null) {
+        val localStart = occurrence.start.toLocalDateTime(eventTimeZone)
+        return "${localStart.date.format(dateFormat)} - ${localStart.time.format(timeFormat)}"
+    }
+    event.evergreenDateDisplayLabel()?.let { label -> return label }
+    val startDate = event.start.toLocalDateTime(eventTimeZone).date
+    val endDate = event.end.toLocalDateTime(eventTimeZone).date
+    val startStr = startDate.format(dateFormat)
+    return if (startDate != endDate && !event.noFixedEndDateTime) {
+        val endStr = endDate.format(dateFormat)
+        "$startStr - $endStr"
+    } else {
+        startStr
+    }
+}
+
 data class NativeEventCardData(
     val id: String,
     val imageUrl: String?,
@@ -188,7 +213,9 @@ fun EventCard(
     showPublishedLifecycleBadge: Boolean = false,
     onClick: (() -> Unit)? = null,
     onMapClick: (Offset) -> Unit,
-) {
+    nextOccurrence: EventSearchOccurrence? = event.nextOccurrence,
+)
+{
     val imageSource = remember(event.name, event.imageId, fallbackImageId, imageUrlOverride) {
         val resolvedSource = resolveEventCardImageSource(
             eventName = event.name,
@@ -203,27 +230,24 @@ fun EventCard(
     }
     val usesLogoFallback = imageSource.usesLogoFallback
     val imageModel = imageSource.imageUrl
-    val eventTimeZone = remember(event.timeZone) { event.resolvedTimeZone() }
-    val scheduledDateRangeText = remember(event.start, event.end, eventTimeZone) {
-        val startDate = event.start.toLocalDateTime(eventTimeZone).date
-        val endDate = event.end.toLocalDateTime(eventTimeZone).date
-
-        val startStr = startDate.format(dateFormat)
-
-        if (startDate != endDate) {
-            val endStr = endDate.format(dateFormat)
-            "$startStr - $endStr"
-        } else {
-            startStr
-        }
+    val eventTimeZone = remember(event.timeZone, nextOccurrence?.timeZone) {
+        val occurrenceTimeZone = nextOccurrence?.timeZone
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?.let { value -> runCatching { TimeZone.of(value) }.getOrNull() }
+        occurrenceTimeZone ?: event.resolvedTimeZone()
     }
-    val dateRangeText = remember(
+    val scheduledDateRangeText = remember(
+        event.start,
+        event.end,
+        event.noFixedEndDateTime,
         event.scheduleText,
         event.dateDisplayMode,
         event.dateDisplayText,
-        scheduledDateRangeText,
+        nextOccurrence,
+        eventTimeZone,
     ) {
-        event.evergreenDateDisplayLabel() ?: scheduledDateRangeText
+        resolveEventCardDateLabel(event, eventTimeZone, nextOccurrence)
     }
     val prizeText = remember(event.prize) {
         event.prize.trim().takeIf { it.isNotEmpty() }
@@ -268,7 +292,7 @@ fun EventCard(
         },
         divisionLabel = cardMetadata.divisionLabel,
         skillLevelLabel = cardMetadata.skillLevelLabel,
-        dateLabel = dateRangeText,
+        dateLabel = scheduledDateRangeText,
         priceLabel = event.discoverPriceRangeLabel(),
         prizeLabel = prizeText?.let { value -> "Prize: $value" },
         lifecycleLabel = lifecycleBadge?.label,

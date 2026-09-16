@@ -116,6 +116,7 @@ internal fun buildEventDetailJoinPresentation(
         else -> 0
     }
     val options = when {
+        event.isArchived() -> emptyList()
         isAffiliateEvent -> listOf(
             JoinOption(
                 label = "Register on website",
@@ -127,7 +128,6 @@ internal fun buildEventDetailJoinPresentation(
         joinBlockedByStart ||
             (isWeeklyParentEvent && (!hasSelectedWeeklyOccurrence || selectedWeeklyOccurrenceJoined)) ||
             (!isWeeklyParentEvent && isUserInEvent) -> emptyList()
-
         else -> buildList {
             if (isEventFull) {
                 if (event.teamSignup) {
@@ -154,7 +154,7 @@ internal fun buildEventDetailJoinPresentation(
             } else if (event.teamSignup) {
                 add(
                     JoinOption(
-                        label = "Join as Free Agent",
+                        label = "Continue as a free agent",
                         requiresPayment = false,
                         onClick = onJoinEvent,
                     ),
@@ -162,9 +162,9 @@ internal fun buildEventDetailJoinPresentation(
                 add(
                     JoinOption(
                         label = when {
-                            priceCents <= 0 -> "Join as Team"
+                            priceCents <= 0 -> "Register a team"
                             isRegistrationPaymentFailed -> "Complete payment"
-                            else -> "Purchase Ticket for Team"
+                            else -> "Register a team"
                         },
                         requiresPayment = priceCents > 0,
                         onClick = { onSelectTeam(selectedJoinOptionDivisionId) },
@@ -174,9 +174,9 @@ internal fun buildEventDetailJoinPresentation(
                 add(
                     JoinOption(
                         label = when {
-                            priceCents <= 0 -> "Join Event"
+                            priceCents <= 0 -> "Register"
                             isRegistrationPaymentFailed -> "Complete payment"
-                            else -> "Purchase Ticket"
+                            else -> "Register"
                         },
                         requiresPayment = priceCents > 0,
                         onClick = onJoinEvent,

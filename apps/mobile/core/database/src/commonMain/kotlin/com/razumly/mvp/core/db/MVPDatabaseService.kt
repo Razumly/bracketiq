@@ -8,6 +8,7 @@ import androidx.room.useWriterConnection
 
 import androidx.room.TypeConverters
 import com.razumly.mvp.core.data.DatabaseService
+import com.razumly.mvp.core.data.util.Converters
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.CatalogCacheViewerEntry
 import com.razumly.mvp.core.data.dataTypes.CatalogQueryCacheEntry
@@ -21,6 +22,7 @@ import com.razumly.mvp.core.data.dataTypes.DiscountTargetCacheEntry
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventParticipantManagementCacheEntry
 import com.razumly.mvp.core.data.dataTypes.EventRegistrationCacheEntry
+import com.razumly.mvp.core.data.dataTypes.EventTimeSlotCacheEntry
 import com.razumly.mvp.core.data.dataTypes.EventTeamComplianceCacheEntry
 import com.razumly.mvp.core.data.dataTypes.EventUserComplianceCacheEntry
 import com.razumly.mvp.core.data.dataTypes.Field
@@ -44,6 +46,7 @@ import com.razumly.mvp.core.data.dataTypes.daos.EventComplianceDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventParticipantManagementDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventRegistrationDao
+import com.razumly.mvp.core.data.dataTypes.daos.EventTimeSlotDao
 import com.razumly.mvp.core.data.dataTypes.daos.FieldDao
 import com.razumly.mvp.core.data.dataTypes.daos.InviteDao
 import com.razumly.mvp.core.data.dataTypes.daos.MatchDao
@@ -54,12 +57,13 @@ import com.razumly.mvp.core.data.dataTypes.daos.PendingRentalOrderDao
 import com.razumly.mvp.core.data.dataTypes.daos.RefundRequestDao
 import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
 import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
-import com.razumly.mvp.core.data.util.Converters
-
-const val MVP_DATABASE_VERSION = 100
+const val MVP_DATABASE_VERSION = 111
 
 @Database(
     entities = [
+        com.razumly.mvp.core.data.dataTypes.MatchRosterCacheEntry::class,
+        com.razumly.mvp.core.data.dataTypes.EventSignupCacheEntry::class,
+        com.razumly.mvp.core.data.dataTypes.FamilyCacheEntry::class,
         Event::class,
         EventRegistrationCacheEntry::class,
         EventParticipantManagementCacheEntry::class,
@@ -83,9 +87,12 @@ const val MVP_DATABASE_VERSION = 100
         DiscountCodeCacheEntry::class,
         DiscountTargetCacheEntry::class,
         Invite::class,
+        com.razumly.mvp.core.data.dataTypes.InvitationOperation::class,
+        com.razumly.mvp.core.data.dataTypes.TeamBlock::class,
         OrganizationCacheEntry::class,
         ProductCacheEntry::class,
         OrganizationReviewsCacheEntry::class,
+        EventTimeSlotCacheEntry::class,
         TimeSlotCacheEntry::class,
         CatalogCacheViewerEntry::class,
         CatalogQueryCacheEntry::class,
@@ -95,6 +102,11 @@ const val MVP_DATABASE_VERSION = 100
 @TypeConverters(Converters::class)
 @ConstructedBy(MVPDatabaseCtor::class)
 abstract class MVPDatabaseService : RoomDatabase(), DatabaseService {
+    abstract override val getMatchRosterDao: com.razumly.mvp.core.data.dataTypes.daos.MatchRosterDao
+    abstract override val getEventSignupDao: com.razumly.mvp.core.data.dataTypes.daos.EventSignupDao
+    override suspend fun clearMatchRosterCache() = getMatchRosterDao.clearAll()
+    override suspend fun clearEventSignupCache() = getEventSignupDao.clearAll()
+    abstract override val getFamilyCacheDao: com.razumly.mvp.core.data.dataTypes.daos.FamilyCacheDao
     override suspend fun <R> withTransaction(block: suspend () -> R): R =
         useWriterConnection { connection ->
             connection.immediateTransaction { block() }
@@ -107,6 +119,7 @@ abstract class MVPDatabaseService : RoomDatabase(), DatabaseService {
     abstract override val getFieldDao: FieldDao
     abstract override val getUserDataDao: UserDataDao
     abstract override val getEventDao: EventDao
+    abstract override val getEventTimeSlotDao: EventTimeSlotDao
     abstract override val getEventRegistrationDao: EventRegistrationDao
     abstract override val getEventParticipantManagementDao: EventParticipantManagementDao
     abstract override val getEventComplianceDao: EventComplianceDao

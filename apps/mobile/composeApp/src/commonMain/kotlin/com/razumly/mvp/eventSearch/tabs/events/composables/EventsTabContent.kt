@@ -2,15 +2,16 @@ package com.razumly.mvp.eventSearch.tabs.events.composables
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.layout.PaddingValues
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.eventSearch.DiscoverEventSearchResult
 import com.razumly.mvp.eventSearch.tabs.events.EventList
-
 @Composable
 fun EventsTabContent(
     events: List<Event>,
     organizationLogoIdsById: Map<String, String> = emptyMap(),
+    eventCards: List<DiscoverEventSearchResult>? = null,
     publishedBadgeEventIds: Set<String> = emptySet(),
     firstElementPadding: PaddingValues,
     lastElementPadding: PaddingValues,
@@ -28,6 +29,7 @@ fun EventsTabContent(
     EventList(
         events = events,
         organizationLogoIdsById = organizationLogoIdsById,
+        eventCards = eventCards,
         publishedBadgeEventIds = publishedBadgeEventIds,
         firstElementPadding = firstElementPadding,
         lastElementPadding = lastElementPadding,

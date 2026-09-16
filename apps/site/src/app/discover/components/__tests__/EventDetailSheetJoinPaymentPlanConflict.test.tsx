@@ -23,6 +23,21 @@ jest.mock('@/app/providers', () => ({
 
 jest.mock('@/lib/apiClient', () => ({
   apiRequest: jest.fn(),
+  isApiRequestError: () => false,
+}));
+
+jest.mock('@/lib/eventRegistrationDraftService', () => ({
+  eventRegistrationDraftService: {
+    get: jest.fn(async () => ({
+      version: 1, draft: null, eligibleTeams: [], selectedTeamId: null, selectionSource: null,
+      available: true, unavailableReason: null, invalidations: [],
+    })),
+    save: jest.fn(async () => ({
+      version: 1, draft: null, eligibleTeams: [], selectedTeamId: null, selectionSource: null,
+      available: true, unavailableReason: null, invalidations: [],
+    })),
+    clear: jest.fn(async () => undefined),
+  },
 }));
 
 jest.mock('@/lib/eventService', () => ({
@@ -225,6 +240,8 @@ describe('EventDetailSheet payment-plan join conflicts', () => {
     await act(async () => {
       await Promise.resolve();
     });
+    fireEvent.click(await screen.findByRole('button', { name: /^(Register|Continue registration)$/i }));
+    expect(registrationService.registerSelfForEvent).not.toHaveBeenCalled();
     fireEvent.click(await screen.findByRole('button', { name: /Join Event/i }));
 
     const questionsDialog = await screen.findByRole('dialog', { name: 'Registration questions' });
@@ -249,9 +266,8 @@ describe('EventDetailSheet payment-plan join conflicts', () => {
       expect(questionsDialogAfterSigning).not.toBeVisible();
     }
     expect(passwordDialog).not.toBeVisible();
-    const signingCloseButton = signingDialog.querySelector<HTMLButtonElement>('.mantine-Modal-close');
-    expect(signingCloseButton).not.toBeNull();
-    fireEvent.click(signingCloseButton!);
+    const signingCloseButton = within(signingDialog).getByRole('button', { name: 'Close' });
+    fireEvent.click(signingCloseButton);
 
     await waitFor(() => {
       expect(signingDialog).not.toBeVisible();
@@ -314,6 +330,8 @@ describe('EventDetailSheet payment-plan join conflicts', () => {
     await waitFor(() => {
       expect(teamService.getRegistrationQuestions).toHaveBeenCalledWith('EVENT', event.$id);
     });
+    fireEvent.click(await screen.findByRole('button', { name: /^(Register|Continue registration)$/i }));
+    expect(registrationService.registerSelfForEvent).not.toHaveBeenCalled();
     fireEvent.click(await screen.findByRole('button', { name: /Join Event/i }));
 
     const passwordDialog = await screen.findByRole('dialog', { name: 'Confirm your password' });
@@ -383,11 +401,13 @@ describe('EventDetailSheet payment-plan join conflicts', () => {
       <EventDetailSheet event={event} isOpen={true} onClose={jest.fn()} renderInline={true} />,
     );
 
+    fireEvent.click(await screen.findByRole('button', { name: /^(Register|Continue registration)$/i }));
     const joinButton = await screen.findByRole('button', { name: /Join Event/i });
     fireEvent.click(joinButton);
     expect(await screen.findByText(/Payment plan preview/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Continue with Payment Plan/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Confirm registration/i }));
 
     await waitFor(() => {
       expect(screen.getByText(/payment plan already exists/i)).toBeInTheDocument();
@@ -436,6 +456,8 @@ describe('EventDetailSheet payment-plan join conflicts', () => {
       <EventDetailSheet event={event} isOpen={true} onClose={jest.fn()} renderInline={true} />,
     );
 
+    fireEvent.click(await screen.findByRole('button', { name: /^(Register|Continue registration)$/i }));
+    expect(registrationService.registerSelfForEvent).not.toHaveBeenCalled();
     fireEvent.click(await screen.findByRole('button', { name: /Join Event/i }));
     expect(await screen.findByText(/Payment plan preview/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /^Cancel$/i }));
@@ -487,7 +509,10 @@ describe('EventDetailSheet payment-plan join conflicts', () => {
       <EventDetailSheet event={event} isOpen={true} onClose={jest.fn()} renderInline={true} />,
     );
 
+    fireEvent.click(await screen.findByRole('button', { name: /^(Register|Continue registration)$/i }));
+    expect(registrationService.registerSelfForEvent).not.toHaveBeenCalled();
     fireEvent.click(await screen.findByRole('button', { name: /Join Event/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Confirm registration/i }));
     fireEvent.click(await screen.findByRole('button', { name: /^Checkout$/i }));
 
     await waitFor(() => {

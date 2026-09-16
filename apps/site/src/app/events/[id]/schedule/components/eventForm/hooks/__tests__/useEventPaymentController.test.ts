@@ -1,5 +1,5 @@
 import { act, renderHook } from '@testing-library/react';
-import type { UseFormGetValues } from 'react-hook-form';
+import { useForm, type UseFormGetValues, type UseFormReturn } from 'react-hook-form';
 
 import { resolveClientPublicOrigin } from '@/lib/clientPublicOrigin';
 import { paymentService } from '@/lib/paymentService';
@@ -70,15 +70,20 @@ const renderController = ({
 } = {}) => {
     const setValue = jest.fn();
     const getValues = buildGetValues(eventData);
-    const hook = renderHook(() => useEventPaymentController({
-        currentUser: user,
-        eventData,
-        getValues,
-        isCreateMode,
-        resolvedOrganization: organization,
-        setValue,
-    }));
-    return { ...hook, getValues, setValue };
+    let form!: UseFormReturn<EventFormValues>;
+    const hook = renderHook(() => {
+        form = useForm<EventFormValues>({ defaultValues: eventData });
+        return useEventPaymentController({
+            control: form.control,
+            currentUser: user,
+            eventData,
+            getValues,
+            isCreateMode,
+            resolvedOrganization: organization,
+            setValue,
+        });
+    });
+    return { ...hook, form, getValues, setValue };
 };
 
 describe('useEventPaymentController', () => {
@@ -249,6 +254,27 @@ describe('useEventPaymentController', () => {
             1,
             { shouldDirty: true, shouldValidate: true },
         );
+    });
+
+    it('reflects live manual-payment destination changes from the form control', () => {
+        const eventData = buildEventData({
+            registrationPaymentMode: 'MANUAL',
+            manualPaymentLinks: [{
+                id: 'manual_link_1',
+                provider: 'VENMO',
+                label: 'Venmo',
+                url: 'https://venmo.com/u/example',
+            }],
+        });
+        const { result, form } = renderController({ eventData });
+
+        expect(result.current.manualPaymentLinks).toHaveLength(1);
+
+        act(() => {
+            form.setValue('manualPaymentLinks', []);
+        });
+
+        expect(result.current.manualPaymentLinks).toEqual([]);
     });
 
     it('owns manual-payment link edits and mode cleanup', () => {

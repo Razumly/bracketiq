@@ -121,6 +121,34 @@ const useConfigurationActionsHarness = (
 };
 
 describe('useEventFormConfigurationActions', () => {
+    it('requires a selected end when the organizer changes to Planned End', () => {
+        const { result } = renderHook(() => useConfigurationActionsHarness(
+            buildEventData({ noFixedEndDateTime: true, end: '2026-07-20T12:00' }), jest.fn(),
+        ));
+        act(() => result.current.actions.handleNoFixedEndDateTimeChange(false));
+        expect(result.current.eventData.noFixedEndDateTime).toBe(false);
+        expect(result.current.eventData.end).toBe('');
+    });
+    it('switches competition events to a fixed planned end without clearing it', async () => {
+        const { result } = renderHook(() => useConfigurationActionsHarness(
+            buildEventData({
+                eventType: 'LEAGUE',
+                isAutomatedScheduling: true,
+                noFixedEndDateTime: true,
+                end: '2026-07-20T12:00',
+            }),
+            jest.fn(),
+        ));
+
+        act(() => result.current.actions.handleAutomatedSchedulingChange(false));
+
+        await waitFor(() => {
+            expect(result.current.eventData.isAutomatedScheduling).toBe(false);
+            expect(result.current.eventData.noFixedEndDateTime).toBe(false);
+            expect(result.current.eventData.end).toBe('2026-07-20T12:00');
+        });
+    });
+
     it('applies league event-type invariants as one action', async () => {
         const clearLeagueSlotErrors = jest.fn();
         const { result } = renderHook(() => useConfigurationActionsHarness(
@@ -135,11 +163,50 @@ describe('useEventFormConfigurationActions', () => {
 
         await waitFor(() => {
             expect(result.current.eventData.eventType).toBe('LEAGUE');
+            expect(result.current.eventData.isAutomatedScheduling).toBe(true);
             expect(result.current.eventData.teamSignup).toBe(true);
             expect(result.current.eventData.singleDivision).toBe(true);
             expect(result.current.eventData.noFixedEndDateTime).toBe(true);
         });
         expect(clearLeagueSlotErrors).toHaveBeenCalledTimes(1);
+    });
+
+    it('gives tournaments a schedule window for the minimum bracket', async () => {
+        const { result } = renderHook(() => useConfigurationActionsHarness(
+            buildEventData({
+                start: '2026-07-20T09:00',
+                end: '2026-07-20T10:00',
+            }),
+            jest.fn(),
+        ));
+
+        act(() => result.current.actions.handleEventTypeChange(
+            'TOURNAMENT',
+            result.current.applyEventType,
+        ));
+
+        await waitFor(() => {
+            expect(result.current.eventData.end).toBe('2026-07-20T12:00:00');
+        });
+    });
+
+    it('gives leagues a schedule window for the default round robin', async () => {
+        const { result } = renderHook(() => useConfigurationActionsHarness(
+            buildEventData({
+                start: '2026-07-20T09:00',
+                end: '2026-07-20T10:00',
+            }),
+            jest.fn(),
+        ));
+
+        act(() => result.current.actions.handleEventTypeChange(
+            'LEAGUE',
+            result.current.applyEventType,
+        ));
+
+        await waitFor(() => {
+            expect(result.current.eventData.end).toBe('2026-07-20T15:00:00');
+        });
     });
 
     it('repairs the end time when a non-team event type requires a fixed end', async () => {
@@ -154,6 +221,42 @@ describe('useEventFormConfigurationActions', () => {
         ));
 
         await waitFor(() => {
+            expect(result.current.eventData.noFixedEndDateTime).toBe(false);
+            expect(result.current.eventData.end).toBe('2026-07-20T10:00:00');
+        });
+    });
+    it('preserves a valid short window for a one-off event', async () => {
+        const { result } = renderHook(() => useConfigurationActionsHarness(
+            buildEventData({
+                start: '2026-07-20T09:00',
+                end: '2026-07-20T09:30',
+            }),
+            jest.fn(),
+        ));
+
+        act(() => result.current.actions.handleEventTypeChange(
+            'EVENT',
+            result.current.applyEventType,
+        ));
+
+        await waitFor(() => {
+            expect(result.current.eventData.end).toBe('2026-07-20T09:30');
+        });
+    });
+
+    it('repairs a missing end time when Tryout requires a fixed end', async () => {
+        const { result } = renderHook(() => useConfigurationActionsHarness(
+            buildEventData({ end: '' }),
+            jest.fn(),
+        ));
+
+        act(() => result.current.actions.handleEventTypeChange(
+            'TRYOUT',
+            result.current.applyEventType,
+        ));
+
+        await waitFor(() => {
+            expect(result.current.eventData.eventType).toBe('TRYOUT');
             expect(result.current.eventData.noFixedEndDateTime).toBe(false);
             expect(result.current.eventData.end).toBe('2026-07-20T10:00:00');
         });
@@ -180,7 +283,7 @@ describe('useEventFormConfigurationActions', () => {
         });
     });
 
-    it('clears incompatible configuration when affiliate mode is enabled', async () => {
+    it('preserves operations when external registration is enabled', async () => {
         const { result } = renderHook(() => useConfigurationActionsHarness(buildEventData({
             teamSignup: true,
             registrationByDivisionType: true,
@@ -196,11 +299,11 @@ describe('useEventFormConfigurationActions', () => {
 
         await waitFor(() => {
             expect(result.current.eventData.isAffiliateEvent).toBe(true);
-            expect(result.current.eventData.teamSignup).toBe(false);
-            expect(result.current.eventData.registrationByDivisionType).toBe(false);
+            expect(result.current.eventData.teamSignup).toBe(true);
+            expect(result.current.eventData.registrationByDivisionType).toBe(true);
             expect(result.current.eventData.allowPaymentPlans).toBe(false);
-            expect(result.current.eventData.officialIds).toEqual([]);
-            expect(result.current.eventData.noFixedEndDateTime).toBe(false);
+            expect(result.current.eventData.officialIds).toEqual(['official_1']);
+            expect(result.current.eventData.noFixedEndDateTime).toBe(true);
         });
     });
 

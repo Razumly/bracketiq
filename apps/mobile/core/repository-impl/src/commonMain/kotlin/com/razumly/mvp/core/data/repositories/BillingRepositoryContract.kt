@@ -74,6 +74,15 @@ interface IBillingRepository : IMVPRepository {
         divisionId = divisionId,
         discountCode = discountCode,
     )
+    suspend fun createChildPurchaseIntent(
+        event: Event,
+        childUserId: String,
+        priceCents: Int,
+        occurrence: EventOccurrenceSelection?,
+        divisionId: String?,
+        answers: Map<String, String>,
+    ): Result<PurchaseIntent> = Result.failure(UnsupportedOperationException("Child checkout is not supported."))
+
     suspend fun createTeamRegistrationPurchaseIntent(
         team: Team,
         teamRegistration: TeamPlayerRegistration? = null,
@@ -173,7 +182,11 @@ interface IBillingRepository : IMVPRepository {
     }
     suspend fun createBill(request: CreateBillRequest): Result<Bill>
     suspend fun getBillPayments(billId: String): Result<List<BillPayment>>
-    suspend fun getEventTeamBillingSnapshot(eventId: String, teamId: String): Result<EventTeamBillingSnapshot>
+    suspend fun getEventTeamBillingSnapshot(
+        eventId: String,
+        teamId: String,
+        occurrence: EventOccurrenceSelection? = null,
+    ): Result<EventTeamBillingSnapshot>
     suspend fun createEventTeamBill(
         eventId: String,
         teamId: String,
@@ -189,6 +202,7 @@ interface IBillingRepository : IMVPRepository {
         teamId: String,
         billPaymentId: String,
         amountCents: Int,
+        occurrence: EventOccurrenceSelection? = null,
     ): Result<Unit>
     suspend fun createBillingIntent(billId: String, billPaymentId: String): Result<PurchaseIntent>
     suspend fun markBillingPaymentProcessing(

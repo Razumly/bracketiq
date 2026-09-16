@@ -1,7 +1,11 @@
 import {
   createEventEditorCommandSchema,
-  eventEditorCreateResultSchema,
+  eventEditorAcceptPartialProposalCommandSchema,
+  eventEditorAcceptPartialProposalResultSchema,
+  eventEditorAcceptProposalCommandSchema,
+  eventEditorAcceptProposalResultSchema,
   eventEditorCreateBootstrapSchema,
+  eventEditorCreateResultSchema,
   eventEditorDraftSchema,
   eventEditorSnapshotSchema,
   eventEditorErrorSchema,
@@ -121,8 +125,20 @@ const expectedCreateRevisions = {
 const newScheduleState = {
   sourceType: null,
   matchCount: 0,
+  availableMaintenanceOperations: [],
   revision: 'new',
   hasProtectedHistory: false,
+};
+const revisionBinding = {
+  editorRevision: 'binding-editor-revision',
+  staffRevision: 'binding-staff-revision',
+  scheduleRevision: 'binding-schedule-revision',
+  fieldRevisions: { field_1: 'field-revision' },
+  timeSlotRevisions: { slot_1: 'slot-revision' },
+  rentalBookingRevision: 'booking-revision',
+  rentalBookingRevisions: { booking_1: 'booking-revision' },
+  rentalBookingItemRevisions: { item_1: 'item-revision' },
+  availabilityRevision: 'availability-revision',
 };
 
 
@@ -137,6 +153,37 @@ describe('event editor contracts', () => {
     });
     expect(parsed.draft.registration.questions[0]).toEqual(expect.objectContaining({ clientId: 'question-client-1' }));
   });
+  it('requires the reviewed draft when accepting a schedule proposal', () => {
+    const parsed = eventEditorAcceptProposalCommandSchema.safeParse({
+      contractVersion: 3,
+      createOperationId: 'proposal-operation-1',
+      proposalRevision: 'proposal-revision-1',
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+  it('requires a fresh identity for explicit partial proposal acceptance', () => {
+    const full = eventEditorAcceptProposalCommandSchema.safeParse({
+      contractVersion: 3,
+      createOperationId: 'proposal-operation-1',
+      proposalRevision: 'proposal-revision-1',
+      acceptanceMode: 'PARTIAL',
+      acceptanceOperationId: 'acceptance-operation-1',
+      draft,
+    });
+    const partial = eventEditorAcceptPartialProposalCommandSchema.parse({
+      contractVersion: 3,
+      createOperationId: 'proposal-operation-1',
+      proposalRevision: 'proposal-revision-1',
+      acceptanceMode: 'PARTIAL',
+      acceptanceOperationId: 'acceptance-operation-1',
+      draft,
+    });
+
+    expect(full.success).toBe(false);
+    expect(partial.acceptanceOperationId).toBe('acceptance-operation-1');
+  });
+
   it('maps a version-3 legacy same-type BUILD_IF_MISSING Save to PRESERVE', () => {
     const parsed = parseSaveEventEditorCommand({
       contractVersion: 3,
@@ -192,29 +239,6 @@ describe('event editor contracts', () => {
     }
   });
 
-  it('accepts a legacy scheduling mode and maps it to canonical staffing fields', () => {
-    const legacyStaff = Object.fromEntries(
-      Object.entries(draft.staff).filter(
-        ([key]) => key !== 'staffingPriority' && key !== 'doTeamsOfficiate',
-      ),
-    );
-    const parsed = createEventEditorCommandSchema.parse({
-      contractVersion: 3,
-      createOperationId: 'create-operation-legacy-mode',
-      expectedRevisions: expectedCreateRevisions,
-      draft: {
-        ...draft,
-        staff: {
-          ...legacyStaff,
-          officialSchedulingMode: 'TEAM_STAFFING',
-        },
-      },
-      completion: createOnlyCompletion,
-    });
-    expect(parsed.draft.staff.staffingPriority).toBe('TEAM_COVERAGE_REQUIRED');
-    expect(parsed.draft.staff.doTeamsOfficiate).toBe(true);
-    expect('officialSchedulingMode' in parsed.draft.staff).toBe(false);
-  });
 
   it('requires the bootstrap operation identity and preserves the selected start', () => {
     const parsed = eventEditorCreateBootstrapSchema.parse({
@@ -234,10 +258,10 @@ describe('event editor contracts', () => {
           canDelegateHost: true,
           readOnly: false,
           readOnlyReason: null,
-          managementAuthority: null,
           eventHostId: 'host_1',
           viewerIsEventHost: true,
           supportsTeamStaffing: false,
+          managementAuthority: null,
         },
         catalogs: { sports: [], organizations: [], fields: [], templates: [] },
         immutable: { fieldNames: [], rental: false, template: false },
@@ -245,11 +269,44 @@ describe('event editor contracts', () => {
       },
     });
     expect(parsed.createOperationId).toBe('create-operation-1');
+    expect(parsed.snapshot.revisionBinding).toBeUndefined();
     expect(parsed.snapshot.draft.basics.start).toBe(draft.basics.start);
     expect(() => eventEditorCreateBootstrapSchema.parse({
       ...parsed,
       createOperationId: undefined,
     })).toThrow();
+  });
+  it('preserves a complete maintenance revision binding on an edit snapshot', () => {
+    const parsed = eventEditorSnapshotSchema.parse({
+      contractVersion: 3,
+      mode: 'EDIT',
+      eventId: 'event_1',
+      editorRevision: revisionBinding.editorRevision,
+      staffRevision: revisionBinding.staffRevision,
+      draft,
+      capabilities: {
+        canUseOnlinePayments: true,
+        canManageStaff: true,
+        canEdit: true,
+        canDelegateHost: true,
+        readOnly: false,
+        readOnlyReason: null,
+        managementAuthority: null,
+        eventHostId: 'host_1',
+        viewerIsEventHost: true,
+        supportsTeamStaffing: true,
+      },
+      catalogs: { sports: [], organizations: [], fields: [], templates: [] },
+      immutable: { fieldNames: [], rental: false, template: false },
+      scheduleState: {
+        ...newScheduleState,
+        matchCount: 1,
+        revision: revisionBinding.scheduleRevision,
+      },
+      revisionBinding,
+    });
+
+    expect(parsed.revisionBinding).toEqual(revisionBinding);
   });
 
   it('rejects hydrated or computed values at the command boundary', () => {
@@ -283,6 +340,7 @@ describe('event editor contracts', () => {
       immutable: {},
     })).toThrow();
   });
+
 
   it.each([
     ['FREE', 0],
@@ -327,6 +385,15 @@ describe('event editor contracts', () => {
     expect(roundTrip.mode).toBe(mode);
     expect(roundTrip.priceCents).toBe(priceCents);
   });
+  it('normalizes a non-positive stored team size for an individual event', () => {
+    const event = {
+      eventType: 'EVENT',
+      teamSignup: false,
+      teamSizeLimit: 0,
+    } as unknown as Event;
+
+    expect(legacyEventToEditorDraft(event).participation.teamSizeLimit).toBeNull();
+  });
 
   it('derives segmented match duration from editable timing rules', () => {
     const event = {
@@ -343,7 +410,7 @@ describe('event editor contracts', () => {
     } as unknown as Event;
     expect(legacyEventToEditorDraft(event).competition.matchDurationMinutes).toBe(35);
   });
-  it('returns the operation identity with actionable canonical revisions after create', () => {
+  it('validates full and partial acceptance result identities', () => {
     const parsed = eventEditorCreateResultSchema.parse({
       status: 'SAVED',
       createOperationId: 'create-operation-1',
@@ -391,6 +458,85 @@ describe('event editor contracts', () => {
       staffRevision: parsed.snapshot.staffRevision,
       scheduleRevision: parsed.snapshot.scheduleState.revision,
     }));
+    const fullAccepted = eventEditorAcceptProposalResultSchema.parse(parsed);
+    expect(fullAccepted).toEqual(parsed);
+    expect(fullAccepted).not.toHaveProperty('acceptanceOperationId');
+
+    const partialMatch = {
+      id: 'match-projection-1',
+      matchId: 1,
+      eventId: 'event-1',
+      start: null,
+      end: null,
+      locked: false,
+      placementState: 'UNPLACED' as const,
+      phase: 'LEAGUE',
+      sourceDivisionId: null,
+      phaseDivisionId: 'phase-division-1',
+      division: null,
+      fieldId: null,
+      team1Id: null,
+      team2Id: null,
+      team1Seed: null,
+      team2Seed: null,
+      status: null,
+      resultStatus: null,
+      resultType: null,
+      actualStart: null,
+      actualEnd: null,
+      statusReason: null,
+      winnerEventTeamId: null,
+      matchRulesSnapshot: null,
+      resolvedMatchRules: null,
+      segments: [],
+      incidents: [],
+      officialId: null,
+      officialIds: [],
+      teamOfficialId: null,
+      team1Points: [],
+      team2Points: [],
+      losersBracket: false,
+      winnerNextMatchId: null,
+      loserNextMatchId: null,
+      previousLeftId: null,
+      previousRightId: null,
+      side: null,
+      officialCheckedIn: false,
+    };
+    const partialAccepted =
+      eventEditorAcceptPartialProposalResultSchema.parse({
+        ...parsed,
+        acceptanceOperationId: 'acceptance-operation-1',
+        scheduleOutcome: {
+          status: 'PARTIAL',
+          isComplete: false,
+          matchCount: 1,
+          placedMatchCount: 0,
+          unplacedMatchCount: 1,
+          matches: [partialMatch],
+          unscheduledMatches: [{
+            id: partialMatch.id,
+            matchId: partialMatch.matchId,
+            phaseDivisionId: partialMatch.phaseDivisionId,
+            phase: partialMatch.phase,
+            sourceDivisionId: partialMatch.sourceDivisionId,
+          }],
+          affectedCompetitionPhases: [{
+            id: partialMatch.phaseDivisionId,
+            name: 'League',
+            phase: partialMatch.phase,
+            sourceDivisionId: partialMatch.sourceDivisionId,
+          }],
+          warnings: [],
+        },
+      });
+    expect(partialAccepted.acceptanceOperationId).toBe('acceptance-operation-1');
+
+    const { acceptanceOperationId: _acceptanceOperationId, ...withoutIdentity } =
+      partialAccepted;
+    expect(() =>
+      eventEditorAcceptPartialProposalResultSchema.parse(withoutIdentity),
+    ).toThrow();
   });
   it('accepts typed stale-revision and authority failures with canonical revisions', () => {
     const stale = eventEditorErrorSchema.parse({
@@ -420,6 +566,29 @@ describe('event editor contracts', () => {
     });
 
     expect(parsed.slotIds).toEqual(['slot_1', 'slot_2']);
+  });
+  it('accepts registration capacity and division diagnostics', () => {
+    const capacity = eventEditorErrorSchema.parse({
+      error: 'This event has reached its registration capacity of 8.',
+      code: 'EVENT_REGISTRATION_CAPACITY_EXCEEDED',
+      capacity: 8,
+      participantCount: 8,
+    });
+    const division = eventEditorErrorSchema.parse({
+      error: 'Select exactly one Entry Division for this participant.',
+      code: 'INVALID_EVENT_REGISTRATION_DIVISION',
+      divisionId: null,
+      matchCount: 0,
+    });
+
+    expect(capacity).toEqual(expect.objectContaining({
+      capacity: 8,
+      participantCount: 8,
+    }));
+    expect(division).toEqual(expect.objectContaining({
+      divisionId: null,
+      matchCount: 0,
+    }));
   });
   it('accepts a diagnostic save failure with a request reference', () => {
     const parsed = eventEditorErrorSchema.parse({

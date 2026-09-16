@@ -9,6 +9,7 @@ type EventRowForParticipants = {
   singleDivision?: boolean | null;
   maxParticipants?: number | null;
   sourceType?: string | null;
+  affiliateUrl?: string | null;
   statusText?: string | null;
   divisions?: unknown;
 };
@@ -26,8 +27,9 @@ export const withEventAttendeeCounts = async <T extends EventRowForParticipants>
       participantCount: 0,
       participantCapacity: null,
     };
-    const isAffiliateEvent = String(event.sourceType ?? '').toUpperCase() === 'AFFILIATE_IMPORT';
-    const sourceAvailability = isAffiliateEvent
+    const hasExternalSourceAvailability = Boolean(event.affiliateUrl?.trim())
+      && String(event.sourceType ?? '').toUpperCase() === 'AFFILIATE_IMPORT';
+    const sourceAvailability = hasExternalSourceAvailability
       ? inferAffiliateParticipantAvailability({
           maxParticipants: event.maxParticipants,
           spotsRemainingText: event.statusText,

@@ -1,11 +1,11 @@
 package com.razumly.mvp.eventSearch.tabs.events
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -41,6 +41,8 @@ import coil3.compose.LocalPlatformContext
 import coil3.request.ImageRequest
 import coil3.size.Scale
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventSearchOccurrence
+import com.razumly.mvp.eventSearch.DiscoverEventSearchResult
 import com.razumly.mvp.core.presentation.composables.EventCard
 import com.razumly.mvp.core.presentation.composables.EventCardPlaceholder
 import com.razumly.mvp.core.presentation.composables.resolveEventCardImageSource
@@ -78,12 +80,14 @@ private data class DiscoverEventListItem(
     val key: String,
     val event: Event,
     val sourceEvent: Event,
+    val nextOccurrence: EventSearchOccurrence?,
     val imageUrlOverride: String?,
 )
 
 @Composable
 fun EventList(
     events: List<Event>,
+    eventCards: List<DiscoverEventSearchResult>? = null,
     organizationLogoIdsById: Map<String, String> = emptyMap(),
     publishedBadgeEventIds: Set<String> = emptySet(),
     firstElementPadding: PaddingValues,
@@ -99,15 +103,19 @@ fun EventList(
     firstItemGuideTargetId: String? = null,
     onEventClick: (Event) -> Unit,
 ) {
+    val hasTrailingStatusItem = events.isNotEmpty() && showPagingStatus && (isLoadingMore || !hasMoreEvents)
     var lastLoadRequestKey by remember { mutableStateOf<String?>(null) }
     var suppressEventClicksAfterScroll by remember { mutableStateOf(false) }
-    val hasTrailingStatusItem = events.isNotEmpty() && showPagingStatus && (isLoadingMore || !hasMoreEvents)
-    val eventListItems = remember(events, hasMoreEvents, isLoadingMore) {
-        val realItems = events.map { event ->
+    val eventListItems = remember(events, eventCards, hasMoreEvents, isLoadingMore) {
+        val realItems = (eventCards ?: events.map { event ->
+            DiscoverEventSearchResult(event = event, nextOccurrence = event.nextOccurrence)
+        }).map { result ->
+            val event = result.event
             DiscoverEventListItem(
                 key = event.id,
                 event = event,
                 sourceEvent = event,
+                nextOccurrence = result.nextOccurrence,
                 imageUrlOverride = null,
             )
         }
@@ -135,6 +143,7 @@ fun EventList(
                             key = debugEvent.id,
                             event = debugEvent,
                             sourceEvent = sourceEvent,
+                            nextOccurrence = sourceEvent.nextOccurrence,
                             imageUrlOverride = DEBUG_DISCOVER_LIVE_IMAGE_URLS[
                                 placeholderIndex % DEBUG_DISCOVER_LIVE_IMAGE_URLS.size
                             ],
@@ -285,6 +294,7 @@ fun EventList(
                 ) {
                     EventCard(
                         event,
+                        nextOccurrence = item.nextOccurrence,
                         navPadding = PaddingValues(),
                         showLoadingPlaceholder = true,
                         fallbackImageId = event.organizationId

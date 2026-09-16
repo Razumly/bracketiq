@@ -8,7 +8,8 @@ import {
   assertOneTimeTimeSlotWithinEventBounds,
   resolveOneTimeTimeSlot,
 } from '@/lib/timeSlotAvailability';
-import { ScheduleError } from './scheduleErrors';
+import { enumerateRepeatingTimeSlotOccurrences } from '@/lib/repeatingTimeSlotAvailability';
+import { ScheduleError, type ScheduleFailureFactor } from './scheduleErrors';
 
 type ParticipantAvailability = 'AVAILABLE' | 'UNAVAILABLE' | 'TEAM_DUTY';
 
@@ -366,6 +367,7 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
         start: Date;
         end: Date;
       }) => boolean;
+      candidateFailureFactor?: ScheduleFailureFactor;
     },
   ): void {
     this.currentGroups = event.getGroups() as G[];
@@ -387,18 +389,19 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
     let earliestStart = this.getEarliestStartTime(event);
     earliestStart = this.nextValidStartTime(earliestStart, durationMs);
 
-    let sawNamedOfficialCapacityFailure = false;
+    let sawCandidateGuardFailure = false;
     let sawTeamDutyCapacityFailure = false;
+    const candidateFailureFactor = opts?.candidateFailureFactor ?? 'NAMED_OFFICIAL_POSITION';
+    const candidateFailureMessage = candidateFailureFactor === 'NAMED_OFFICIAL_POSITION'
+      ? `${NOT_ENOUGH_TIME_ALLOTTED_MESSAGE} No complete position-eligible assignment exists for the scheduled match.`
+      : `${NOT_ENOUGH_TIME_ALLOTTED_MESSAGE} No candidate satisfied the scheduling restrictions.`;
     while (true) {
       let adjustedStart: Date;
       try {
         adjustedStart = this.nextValidStartTime(earliestStart, durationMs);
       } catch (error) {
-        if (sawNamedOfficialCapacityFailure) {
-          throw new ScheduleError(
-            `${NOT_ENOUGH_TIME_ALLOTTED_MESSAGE} No complete position-eligible assignment is available for the scheduled match.`,
-            'NAMED_OFFICIAL_POSITION',
-          );
+        if (sawCandidateGuardFailure) {
+          throw new ScheduleError(candidateFailureMessage, candidateFailureFactor);
         }
         if (sawTeamDutyCapacityFailure) {
           throw new ScheduleError(
@@ -412,11 +415,8 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
         earliestStart = adjustedStart;
       }
       if (earliestStart.getTime() + durationMs > this.endTime.getTime()) {
-        if (sawNamedOfficialCapacityFailure) {
-          throw new ScheduleError(
-            `${NOT_ENOUGH_TIME_ALLOTTED_MESSAGE} No complete position-eligible assignment is available for the scheduled match.`,
-            'NAMED_OFFICIAL_POSITION',
-          );
+        if (sawCandidateGuardFailure) {
+          throw new ScheduleError(candidateFailureMessage, candidateFailureFactor);
         }
         if (sawTeamDutyCapacityFailure) {
           throw new ScheduleError(
@@ -456,7 +456,7 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
           ? this.findAvailableResource(earliestStart, durationMs, event, opts.canUseCandidate)
           : rawResource;
         if (rawResource && opts?.canUseCandidate && !resource) {
-          sawNamedOfficialCapacityFailure = true;
+          sawCandidateGuardFailure = true;
         }
         if (resource) {
           event.setResource(resource);
@@ -750,7 +750,6 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
   }
 
   private prepareTimeSlots(timeSlots: Iterable<any>): void {
-    const reference = this.startTime;
     const repeatingSlots: any[] = [];
 
     for (const slot of timeSlots) {
@@ -762,16 +761,15 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
       }
       repeatingSlots.push(slot);
     }
-
-    let weeks = 0;
-    while (reference.getTime() + weeks * 7 * 24 * 60 * MINUTE_MS <= this.endTime.getTime()) {
-      const weekReference = new Date(reference.getTime() + weeks * 7 * 24 * 60 * MINUTE_MS);
-      for (const slot of repeatingSlots) {
-        for (const [slotStart, slotEnd] of this.slotRanges(slot, weekReference)) {
-          this.addSlotWindow(slot, slotStart, slotEnd);
-        }
+    for (const slot of repeatingSlots) {
+      const occurrences = enumerateRepeatingTimeSlotOccurrences({
+        slot,
+        windowStart: this.startTime,
+        windowEnd: this.endTime,
+      });
+      for (const occurrence of occurrences) {
+        this.addSlotWindow(slot, occurrence.start, occurrence.end);
       }
-      weeks += 1;
     }
     for (const slots of this.resourceSlots.values()) {
       slots.sort((a, b) => a.start.getTime() - b.start.getTime());
@@ -825,99 +823,6 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
     }
   }
 
-  private slotRanges(slot: any, reference: Date): Array<[Date, Date]> {
-    const parseDate = (value: unknown): Date | null => {
-      if (value instanceof Date) {
-        return Number.isNaN(value.getTime()) ? null : value;
-      }
-      if (typeof value === 'string' || typeof value === 'number') {
-        const parsed = new Date(value);
-        return Number.isNaN(parsed.getTime()) ? null : parsed;
-      }
-      return null;
-    };
-
-    const timeZone = normalizeTimeZone(slot.timeZone, 'UTC');
-    const referenceParts = getDateTimePartsInTimeZone(reference, timeZone);
-    if (!referenceParts) {
-      return [];
-    }
-    const normalizedDays: number[] = Array.from(
-      new Set(
-        (Array.isArray(slot.daysOfWeek) && slot.daysOfWeek.length
-          ? slot.daysOfWeek
-          : slot.dayOfWeek !== undefined
-            ? [slot.dayOfWeek]
-            : slot.day_of_week !== undefined
-              ? [slot.day_of_week]
-              : [0]
-        )
-          .map((value: unknown) => Number(value))
-          .filter((value: number) => Number.isInteger(value) && value >= 0 && value <= 6),
-      ),
-    );
-    const startMinutes = slot.startTimeMinutes ?? slot.start_time_minutes ?? 0;
-    const endMinutes = slot.endTimeMinutes ?? slot.end_time_minutes ?? 0;
-    const recurringStartDate = parseDate(slot.startDate);
-    const recurringEndDate = parseDate(slot.endDate);
-    const calendarDay = (value: Date | null): number | null => {
-      if (!value) return null;
-      const parts = getDateTimePartsInTimeZone(value, timeZone);
-      return parts
-        ? Date.UTC(parts.year, parts.month - 1, parts.day)
-        : null;
-    };
-    const recurringStartDayMs = calendarDay(recurringStartDate);
-    const recurringEndDayMs = calendarDay(recurringEndDate);
-    const referenceNoon = new Date(
-      Date.UTC(
-        referenceParts.year,
-        referenceParts.month - 1,
-        referenceParts.day,
-        12,
-      ),
-    );
-    const referenceDay = (referenceNoon.getUTCDay() + 6) % 7;
-    const toWallClock = (slotNoon: Date, minutes: number): Date | null => {
-      const dayOffset = Math.floor(minutes / (24 * 60));
-      const minuteOfDay = ((minutes % (24 * 60)) + (24 * 60)) % (24 * 60);
-      const targetDay = new Date(
-        slotNoon.getTime() + dayOffset * 24 * 60 * MINUTE_MS,
-      );
-      const hours = Math.floor(minuteOfDay / 60);
-      const minute = minuteOfDay % 60;
-      return zonedTimeToUtcDate(
-        `${targetDay.getUTCFullYear()}-${pad2(targetDay.getUTCMonth() + 1)}-${pad2(targetDay.getUTCDate())}T${pad2(hours)}:${pad2(minute)}:00`,
-        timeZone,
-      );
-    };
-
-    const ranges: Array<[Date, Date]> = [];
-    for (const dayOfWeek of normalizedDays) {
-      const daysAhead = (dayOfWeek - referenceDay + 7) % 7;
-      const slotNoon = new Date(
-        referenceNoon.getTime() + daysAhead * 24 * 60 * MINUTE_MS,
-      );
-      const slotDayMs = Date.UTC(
-        slotNoon.getUTCFullYear(),
-        slotNoon.getUTCMonth(),
-        slotNoon.getUTCDate(),
-      );
-      if (recurringStartDayMs !== null && slotDayMs < recurringStartDayMs) {
-        continue;
-      }
-      if (recurringEndDayMs !== null && slotDayMs > recurringEndDayMs) {
-        continue;
-      }
-      const start = toWallClock(slotNoon, startMinutes);
-      const end = toWallClock(slotNoon, endMinutes);
-      if (!start || !end || end.getTime() <= start.getTime()) {
-        continue;
-      }
-      ranges.push([start, end]);
-    }
-    return ranges;
-  }
 
   private nextValidStartTime(candidate: Date, durationMs: number): Date {
     if (!this.hasSlots) return candidate;

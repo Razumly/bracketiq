@@ -63,6 +63,7 @@ fun Throwable.userMessage(defaultMessage: String = "Something went wrong."): Str
     generateSequence(this) { it.cause }
         .forEach { throwable ->
             if (throwable is ApiException) {
+                throwable.matchBoundaryError?.let { return it.error }
                 extractApiErrorMessage(throwable.responseBody)?.let { return it }
             }
             extractApiErrorMessage(throwable.message)?.let { return it }

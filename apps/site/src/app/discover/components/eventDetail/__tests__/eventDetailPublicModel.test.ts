@@ -207,4 +207,96 @@ describe('buildEventDetailPublicModel', () => {
         expect(model.scheduleDateChips).toHaveLength(1);
         expect(model.supportsScheduleDetails).toBe(true);
     });
+    it('labels persisted unplaced matches as an incomplete schedule with exact phase metadata', () => {
+        const event = buildEvent({
+            eventType: 'TOURNAMENT',
+            divisionDetails: [
+                { id: 'phase-final', name: 'Final', phase: 'FINAL' },
+            ],
+            matches: [
+                {
+                    $id: 'match-unplaced',
+                    placementState: 'UNPLACED',
+                    phaseDivisionId: 'phase-final',
+                    phase: 'FINAL',
+                    start: null,
+                    fieldId: null,
+                },
+                {
+                    $id: 'match-placed',
+                    placementState: 'PLACED',
+                    phaseDivisionId: 'phase-final',
+                    phase: 'FINAL',
+                    start: '2099-07-06T18:00:00.000Z',
+                    fieldId: 'court-one',
+                },
+            ] as never,
+        });
+
+        const model = buildModel({ event });
+
+        expect(model.isScheduleIncomplete).toBe(true);
+        expect(model.unscheduledMatchCount).toBe(1);
+        expect(model.unscheduledMatchIds).toEqual(['match-unplaced']);
+        expect(model.affectedCompetitionPhaseIds).toEqual(['phase-final']);
+        expect(model.affectedCompetitionPhaseLabels).toEqual(['Final']);
+    });
+    it('uses bounded competition phase metadata for normal pool labels', () => {
+        const event = buildEvent({
+            eventType: 'LEAGUE',
+            competitionPhaseDetails: [
+                {
+                    id: 'phase-pool',
+                    name: 'Pool Play',
+                    phase: 'POOL',
+                    sourceDivisionId: 'division-open',
+                },
+            ],
+            matches: [
+                {
+                    $id: 'match-pool',
+                    placementState: 'UNPLACED',
+                    phaseDivisionId: 'phase-pool',
+                    phase: 'POOL',
+                    start: null,
+                    fieldId: null,
+                },
+            ] as never,
+        } as never);
+
+        const model = buildModel({ event });
+
+        expect(model.unscheduledMatchIds).toEqual(['match-pool']);
+        expect(model.affectedCompetitionPhaseIds).toEqual(['phase-pool']);
+        expect(model.affectedCompetitionPhaseLabels).toEqual(['Pool Play']);
+    });
+    it('uses an unavailable label when a competition phase has no public name', () => {
+        const event = buildEvent({
+            competitionPhaseDetails: [
+                {
+                    id: 'phase-unknown',
+                    name: '',
+                    key: 'INTERNAL_PHASE_KEY',
+                    phase: 'FINAL',
+                },
+            ],
+            matches: [
+                {
+                    $id: 'match-unknown-phase',
+                    placementState: 'UNPLACED',
+                    phaseDivisionId: 'phase-unknown',
+                    phase: 'FINAL',
+                    start: null,
+                    fieldId: null,
+                },
+            ] as never,
+        } as never);
+
+        const model = buildModel({ event });
+
+        expect(model.affectedCompetitionPhaseIds).toEqual(['phase-unknown']);
+        expect(model.affectedCompetitionPhaseLabels).toEqual([
+            'Competition Phase details unavailable',
+        ]);
+    });
 });

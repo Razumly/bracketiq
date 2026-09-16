@@ -7,6 +7,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.usesManualRegistrationPayments
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
@@ -101,8 +102,18 @@ internal class EventRegistrationActionHandler(
             if (resumePendingSignatureFlowIfNeeded()) {
                 return@launch
             }
-            if (!selectedEvent().teamSignup) {
-                val children = loadJoinableChildren("Failed to load linked children before join flow.")
+            registrationFlowCoordinator.selectCheckoutRegistrant(currentUser().id)
+            if (!selectedEvent().teamSignup && !currentUser().isMinor) {
+                val linkedChildren = try {
+                    loadJoinableChildren("Failed to load linked children before join flow.")
+                } catch (failure: Exception) {
+                    if (failure is kotlinx.coroutines.CancellationException) throw failure
+                    setError("Could not load your children. Try opening registration again.")
+                    return@launch
+                }
+                val children = linkedChildren
+                    .filter { isChildEligibleForEvent(it, selectedEvent(), selectedDivision()) }
+                    .map { it.copy(ageAtEvent = childAgeAtEvent(it, selectedEvent())) }
                 if (children.isNotEmpty()) {
                     registrationFlowCoordinator.showJoinChoiceDialog(children)
                     return@launch
@@ -213,33 +224,14 @@ internal class EventRegistrationActionHandler(
             membershipCoordinator.setUsersTeam(team, currentUser().id)
             registrationFlowCoordinator.clearJoinDialogs()
 
-            if (!canManageSelectedEvent(selectedEvent(), currentUser())) {
-                buildPaymentPlanPreviewDialogState(
-                    event = selectedEvent(),
-                    ownerLabel = team.team.name.trim().ifBlank { "Your team" },
-                    forTeamJoin = true,
-                    preferredDivisionId = selectedDivision(),
-                    currentUserIsMinor = currentUser().isMinor,
-                    isEventFull = isEventFull(),
-                )?.let { preview ->
-                    showPaymentPlanPreviewDialog(preview) {
-                        scope.launch {
-                            runActionAfterRequiredSigning {
-                                executeJoinEventAsTeam(team)
-                            }
-                        }
-                    }
-                    return@launch
-                }
-            }
-
             runActionAfterRequiredSigning {
-                executeJoinEventAsTeam(team)
+                reviewCheckout(team = team) { executeJoinEventAsTeam(team) }
             }
         }
     }
 
     fun confirmJoinAsSelf() {
+        registrationFlowCoordinator.selectCheckoutRegistrant(currentUser().id)
         registrationFlowCoordinator.clearJoinDialogs()
         scope.launch {
             runSelfJoinFlow()
@@ -267,9 +259,18 @@ internal class EventRegistrationActionHandler(
             setError("Unable to find that child profile.")
             return
         }
+        if (currentUser().isMinor || !isChildEligibleForEvent(selectedChild, selectedEvent(), selectedDivision())) {
+            setError("This child is not eligible for the selected Event and division.")
+            return
+        }
 
+        registrationFlowCoordinator.selectCheckoutRegistrant(selectedChild.userId)
         registrationFlowCoordinator.clearJoinDialogs()
-        if (!ensureEventRegistrationQuestionsAnswered { selectChildForJoin(childUserId) }) {
+        if (!registrationFlowCoordinator.ensureQuestionsAnswered(
+                eventName = selectedEvent().name,
+                registrantName = selectedChild.fullName,
+                onReady = { selectChildForJoin(childUserId) },
+            )) {
             return
         }
         scope.launch {
@@ -277,7 +278,7 @@ internal class EventRegistrationActionHandler(
                 signerContext = SignerContext.PARENT_GUARDIAN,
                 child = selectedChild,
             ) {
-                executeChildRegistration(selectedChild)
+                reviewCheckout(ownerLabel = selectedChild.fullName, skipPaymentPlanPreview = true, isChild = true) { executeChildRegistration(selectedChild) }
             }
         }
     }
@@ -578,36 +579,73 @@ internal class EventRegistrationActionHandler(
         return true
     }
 
-    private suspend fun runSelfJoinFlow(skipPaymentPlanPreview: Boolean = false) {
+    private suspend fun runSelfJoinFlow() {
         if (!ensureRegistrationOpen()) return
         if (!ensureEventRegistrationQuestionsAnswered {
-                scope.launch { runSelfJoinFlow(skipPaymentPlanPreview = skipPaymentPlanPreview) }
+                scope.launch { runSelfJoinFlow() }
             }
         ) {
             return
-        }
-        if (!skipPaymentPlanPreview && !canManageSelectedEvent(selectedEvent(), currentUser())) {
-            buildPaymentPlanPreviewDialogState(
-                event = selectedEvent(),
-                ownerLabel = "You",
-                forTeamJoin = false,
-                preferredDivisionId = selectedDivision(),
-                currentUserIsMinor = currentUser().isMinor,
-                isEventFull = isEventFull(),
-            )?.let { preview ->
-                showPaymentPlanPreviewDialog(preview) {
-                    scope.launch {
-                        runSelfJoinFlow(skipPaymentPlanPreview = true)
-                    }
-                }
-                return
-            }
         }
         runActionAfterRequiredSigning(
             signerContext = SignerContext.PARTICIPANT,
             child = null,
         ) {
-            executeJoinEvent()
+            reviewCheckout { executeJoinEvent() }
+        }
+    }
+
+    private fun reviewCheckout(
+        team: TeamWithPlayers? = null,
+        ownerLabel: String = if (selectedEvent().teamSignup) "Free agent" else currentUser().displayName,
+        skipPaymentPlanPreview: Boolean = false,
+        isChild: Boolean = false,
+        onConfirm: suspend () -> Unit,
+    ) {
+        val event = selectedEvent()
+        if (!skipPaymentPlanPreview && !canManageSelectedEvent(event, currentUser())) {
+            buildPaymentPlanPreviewDialogState(event, team?.team?.name ?: ownerLabel, team != null,
+                selectedDivision(), currentUser().isMinor, isEventFull())?.let { preview ->
+                showPaymentPlanPreviewDialog(preview) {
+                    reviewCheckout(team, ownerLabel, skipPaymentPlanPreview = true, isChild = isChild, onConfirm = onConfirm)
+                }
+                return
+            }
+        }
+        val accountId = currentUser().id
+        val occurrence = currentWeeklyOccurrenceSelection()
+        val divisionId = selectedDivision()
+        val price = if ((team == null && event.teamSignup) || (!isChild && canManageSelectedEvent(event, currentUser()) && !currentUser().isMinor)) 0 else
+            resolveEffectivePaymentPlan(event, selectedDivision()).priceCents
+        val action = registrationFlowCoordinator.determineJoinExecutionAction(
+            paymentPlan = resolveEffectivePaymentPlan(event, divisionId),
+            currentUserIsMinor = currentUser().isMinor,
+            isEventFull = isEventFull(),
+            isTeamSignup = event.teamSignup,
+            forTeamJoin = team != null,
+            manualPayment = event.usesManualRegistrationPayments(),
+            currentUserCanManageEvent = !isChild && canManageSelectedEvent(event, currentUser()),
+        )
+        registrationFlowCoordinator.checkout.prepare(
+            EventCheckoutReviewState(
+                eventName = event.name,
+                ownerLabel = team?.team?.name ?: ownerLabel,
+                team = team,
+                priceCents = price,
+                answers = registrationFlowCoordinator.questions.value.map { question ->
+                    question.prompt to registrationFlowCoordinator.answers.value[question.id].orEmpty()
+                },
+                isWaitlist = isEventFull() && (team != null || !event.teamSignup),
+                action = checkoutReviewAction(action, isChild),
+                documents = registrationFlowCoordinator.checkoutDocuments,
+            ),
+        ) {
+            scope.launch {
+                if (selectedEvent().id != event.id || currentUser().id != accountId ||
+                    currentWeeklyOccurrenceSelection() != occurrence || selectedDivision() != divisionId) {
+                    setError("Registration changed. Open checkout and review it again.")
+                } else if (ensureRegistrationOpen()) onConfirm()
+            }
         }
     }
 
@@ -624,6 +662,10 @@ internal class EventRegistrationActionHandler(
     private suspend fun executeChildRegistration(child: JoinChildOption) {
         if (!ensureRegistrationOpen()) return
         val event = selectedEvent()
+        if (currentUser().isMinor || !isChildEligibleForEvent(child, event, selectedDivision())) {
+            setError("This child is not eligible for the selected Event and division.")
+            return
+        }
         val weeklyOccurrence = if (isWeeklyParentEvent(event)) {
             requireSelectedWeeklyOccurrence(
                 event,
@@ -632,13 +674,38 @@ internal class EventRegistrationActionHandler(
         } else {
             null
         }
+        val paymentPlan = resolveEffectivePaymentPlan(event, selectedDivision())
+        val childPrice = paymentPlan.priceCents
+        if (!isEventFull() && childPrice == null) {
+            setError("Set a price for this division before checkout.")
+            return
+        }
+        if (!isEventFull() && childPrice != null && childPrice > 0) {
+            if (event.usesManualRegistrationPayments() || paymentPlan.allowPaymentPlans) {
+                setError("Child checkout does not support manual payments or payment plans yet.")
+                return
+            }
+            if (!ensureBillingAddressOrPrompt { scope.launch { executeChildRegistration(child) } }) return
+            val operation = loadingHandler().newOperation()
+            operation.showLoading("Preparing child checkout...")
+            try {
+                billingRepository.createChildPurchaseIntent(event, child.userId, childPrice,
+                    weeklyOccurrence, selectedDivision(), registrationFlowCoordinator.answersForRequest())
+                    .onSuccess(::processPurchaseIntent)
+                    .onFailure { setError(it.userMessage("Could not prepare child checkout.")) }
+            } finally { operation.hideLoading() }
+            return
+        }
         val loadingOperation = loadingHandler().newOperation()
         joinExecutionCoordinator.executeChildRegistration(
             event = event,
             child = child,
             isEventFull = isEventFull(),
             weeklyOccurrence = weeklyOccurrence,
-            registerChildForEvent = eventRepository::registerChildForEvent,
+            registerChildForEvent = { eventId, childId, waitlist, occurrence ->
+                eventRepository.registerChildForEvent(eventId, childId, waitlist, occurrence,
+                    selectedDivision(), registrationFlowCoordinator.answersForRequest())
+            },
             refreshAfterParticipantMutation = refreshEventAfterParticipantMutation,
             showLoading = loadingOperation::showLoading,
             hideLoading = loadingOperation::hideLoading,
@@ -716,6 +783,7 @@ internal class EventRegistrationActionHandler(
                 refreshAfterParticipantMutation = refreshEventAfterParticipantMutation,
                 showLoading = loadingOperation::showLoading,
                 setError = setError,
+                onSubmitted = onSuccessfulJoin,
             )
         } finally {
             loadingOperation.hideLoading()

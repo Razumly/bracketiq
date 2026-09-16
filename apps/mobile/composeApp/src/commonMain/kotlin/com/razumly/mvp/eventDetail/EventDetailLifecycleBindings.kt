@@ -105,12 +105,14 @@ internal class EventDetailLifecycleBindings(
 
     fun bindSelectedEventMode(
         selectedEvent: Flow<Event>,
-        onWeeklyParentChanged: (Boolean) -> Unit,
+        onSelectedEventChanged: (eventId: String, isWeeklyParent: Boolean) -> Unit,
     ): Job = scope.launch {
         selectedEvent
-            .map { event -> event.id to isWeeklyParentEvent(event) }
+            .map { event -> event.id to isWeeklyEventShape(event) }
             .distinctUntilChanged()
-            .collect { (_, weeklyParent) -> onWeeklyParentChanged(weeklyParent) }
+            .collect { (eventId, isWeeklyParent) ->
+                onSelectedEventChanged(eventId, isWeeklyParent)
+            }
     }
 
     fun bindEventTeamCheckIns(

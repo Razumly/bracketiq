@@ -8,6 +8,7 @@ jest.mock("../eventStaffReconciliation", () => ({
   loadEventStaffSnapshot: jest.fn(),
 }));
 
+import type { Prisma } from "@/generated/prisma/client";
 import {
   buildEventEditorSnapshot,
   loadCreateEventEditorSnapshot,
@@ -30,7 +31,121 @@ const buildClient = (
     eventTemplates: { findMany: jest.fn().mockResolvedValue([]) },
     stripeAccounts: { findFirst: jest.fn().mockResolvedValue(null) },
     eventRegistrations: { findFirst: jest.fn().mockResolvedValue(null) },
-  }) as any;
+  }) as unknown as Prisma.TransactionClient;
+
+const buildMaintenanceSnapshot = async ({
+  matches = [],
+  eventType = "LEAGUE",
+  automatedScheduling,
+  generatedEnd,
+  state = "PUBLISHED",
+  actor = { userId: "host_maintenance" },
+}: {
+  matches?: Array<Record<string, unknown>>;
+  eventType?: string;
+  automatedScheduling?: unknown;
+  generatedEnd?: Date;
+  state?: string;
+  actor?: { userId: string; isAdmin?: boolean } | null;
+} = { automatedScheduling: true }) => {
+  const client = {
+    ...buildClient([], []),
+    matches: {
+      findMany: jest.fn().mockResolvedValue(matches),
+    },
+    divisions: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+  } as unknown as Prisma.TransactionClient;
+  return buildEventEditorSnapshot(
+    {
+      id: "event_maintenance",
+      name: "Maintenance event",
+      eventType,
+      automatedScheduling,
+      state,
+      hostId: "host_maintenance",
+      organizationId: null,
+      sourceType: null,
+      start: "2026-08-20T09:00:00.000Z",
+      end: "2026-08-20T17:00:00.000Z",
+      ...(generatedEnd ? { noFixedEndDateTime: true, end: generatedEnd, generatedScheduleEnd: generatedEnd } : {}),
+      sportIds: [],
+      fieldIds: [],
+      timeSlotIds: [],
+      divisions: [],
+      divisionDetails: [],
+      playoffDivisionDetails: [],
+    },
+    { client, mode: "EDIT", actor },
+  );
+};
+
+describe("maintenance operation projection", () => {
+  it.each([true, false])('preserves persisted Date ends in the editor with automation %s', async (automatedScheduling) => {
+    const end = new Date('2026-08-20T19:35:00.000Z');
+    const snapshot = await buildMaintenanceSnapshot({ automatedScheduling, generatedEnd: end });
+    expect(snapshot.draft.schedule).toEqual({
+      mode: 'GENERATED_END', endConstraint: null, generatedScheduleEnd: end.toISOString(), isAutomatedScheduling: automatedScheduling,
+    });
+  });
+
+  const placedMatch = {
+    id: "event_maintenance:match:1",
+    division: "division_1",
+    placementState: "PLACED",
+    fieldId: "field_1",
+  };
+  const unplacedMatch = {
+    id: "event_maintenance:match:2",
+    division: "division_1",
+    placementState: "UNPLACED",
+    fieldId: null,
+  };
+
+  it("advertises Build only when the authoritative graph is empty", async () => {
+    const snapshot = await buildMaintenanceSnapshot();
+
+    expect(snapshot.scheduleState.availableMaintenanceOperations).toEqual([
+      "BUILD",
+    ]);
+  });
+
+  it("advertises Complete and Rebuild for an existing graph with unplaced nodes", async () => {
+    const snapshot = await buildMaintenanceSnapshot({
+      matches: [placedMatch, unplacedMatch],
+      automatedScheduling: true,
+    });
+
+    expect(snapshot.scheduleState.availableMaintenanceOperations).toEqual([
+      "COMPLETE",
+      "REBUILD",
+    ]);
+  });
+
+  it("advertises only Rebuild for an existing fully placed graph", async () => {
+    const snapshot = await buildMaintenanceSnapshot({
+      matches: [placedMatch],
+      automatedScheduling: true,
+    });
+
+    expect(snapshot.scheduleState.availableMaintenanceOperations).toEqual([
+      "REBUILD",
+    ]);
+  });
+
+  it.each([
+    ["disabled automation", { automatedScheduling: false }],
+    ["unknown automation", { automatedScheduling: undefined }],
+    ["unsupported event type", { eventType: "EVENT" }],
+    ["template event", { state: "TEMPLATE" }],
+    ["unmanaged event", { actor: null }],
+  ])("fails closed for %s", async (_label, options) => {
+    const snapshot = await buildMaintenanceSnapshot(options);
+
+    expect(snapshot.scheduleState.availableMaintenanceOperations).toEqual([]);
+  });
+});
 
 describe("buildEventEditorSnapshot", () => {
   it("projects real resource rows into the strict editor resource contract", async () => {
@@ -137,6 +252,7 @@ it("keeps create revisions stable when defaults are omitted", async () => {
     { client },
   );
 
+  expect(initial.scheduleState.availableMaintenanceOperations).toEqual([]);
   expect(initial.draft.schedule.mode).toBe("FIXED_END");
   expect(
     new Date(initial.draft.schedule.endConstraint).getTime() -
@@ -159,6 +275,16 @@ it("keeps competition create defaults on the generated-end schedule policy", asy
   expect(snapshot.draft.schedule.generatedScheduleEnd).toBeNull();
 });
 describe("loadEventScheduleState", () => {
+  it("changes the Schedule revision when an official assignment changes without a timestamp change", async () => {
+    const row: Record<string, unknown> = { id: "match_1", teamOfficialId: "pine", officialIds: [], updatedAt: null };
+    const client = { matches: { findMany: jest.fn(async ({ select }: { select: Record<string, boolean> }) => [
+      Object.fromEntries(Object.keys(select).map((key) => [key, row[key] ?? null])),
+    ]) } } as unknown as Prisma.TransactionClient;
+    const before = await loadEventScheduleState({}, "event_1", client);
+    row.teamOfficialId = "falcon";
+    const after = await loadEventScheduleState({}, "event_1", client);
+    expect(after.revision).not.toBe(before.revision);
+  });
   it("reports persisted Match Graph demand without requiring placements", async () => {
     const client = {
       matches: {
@@ -205,6 +331,33 @@ describe("loadEventScheduleState", () => {
       unplaced: 3,
     });
   });
+  it("locks event type when a Match has started or has a result", async () => {
+    const client = {
+      matches: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: "match_1",
+            status: "IN_PROGRESS",
+            placementState: "PLACED",
+          },
+          {
+            id: "match_2",
+            status: "NOT_STARTED",
+            resultStatus: "FINAL",
+            placementState: "PLACED",
+          },
+        ]),
+      },
+      divisions: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+    } as unknown as Prisma.TransactionClient;
+
+    const state = await loadEventScheduleState({}, "event_1", client);
+
+    expect(state.hasProtectedHistory).toBe(true);
+  });
+
 });
 it("hydrates rental booking slots as immutable create resources", async () => {
   const rentalItem = {
@@ -222,7 +375,7 @@ it("hydrates rental booking slots as immutable create resources", async () => {
     rentalBookings: {
       findUnique: jest
         .fn()
-        .mockResolvedValue({ id: "booking_1", organizationId: "org_1" }),
+        .mockResolvedValue({ id: "booking_1", organizationId: "facility_org", renterOrganizationId: "org_1" }),
     },
     rentalBookingItems: {
       findMany: jest.fn().mockResolvedValue([rentalItem]),
@@ -256,6 +409,13 @@ it("hydrates rental booking slots as immutable create resources", async () => {
   );
 
   expect(snapshot.immutable.rental).toBe(true);
+  expect(snapshot.draft.basics.organizationId).toBe("org_1");
+  expect(snapshot.draft.resources.immutableFieldIds).toEqual(["field_1"]);
+  await expect(loadCreateEventEditorSnapshot({
+    organizationId: "other_org", rentalBookingId: "booking_1",
+  }, { client })).rejects.toMatchObject({
+    name: "EditorImmutableFieldError", fieldName: "organizationId",
+  });
   expect(snapshot.draft.resources.rentalBookingId).toBe("booking_1");
   expect(snapshot.draft.resources.timeSlots).toEqual([
     expect.objectContaining({
@@ -356,11 +516,17 @@ it("hydrates template source values and resources in create snapshots", async ()
 
   expect(snapshot.immutable.template).toBe(true);
   expect(snapshot.draft.basics.name).toBe("Template event");
-  expect(snapshot.draft.resources.requiredTemplateIds).toEqual(["template_1"]);
+  expect(snapshot.draft.resources.sourceTemplateId).toBe("template_1");
+  expect(snapshot.draft.basics.state).toBe("UNPUBLISHED");
+  expect(snapshot.draft.resources.requiredTemplateIds).toEqual([]);
   expect(snapshot.draft.resources.fields).toEqual([
     expect.objectContaining({ name: "Court 1" }),
   ]);
   expect(snapshot.draft.resources.timeSlots).toHaveLength(1);
+  const explicitOrganization = await loadCreateEventEditorSnapshot({
+    organizationId: "organizer_org", templateId: "template_1",
+  }, { client });
+  expect(explicitOrganization.draft.basics.organizationId).toBe("organizer_org");
   expect(snapshot.editorRevision).not.toBe("new");
   expect(snapshot.scheduleState.revision).not.toBe("new");
   const repeatedSourceSnapshot = await loadCreateEventEditorSnapshot(
@@ -371,6 +537,10 @@ it("hydrates template source values and resources in create snapshots", async ()
     { client },
   );
   expect(repeatedSourceSnapshot.editorRevision).toBe(snapshot.editorRevision);
+  const movedStart = await loadCreateEventEditorSnapshot({
+    organizationId: "org_1", templateId: "template_1", start: "2027-02-02T10:00:00Z",
+  }, { client });
+  expect(movedStart.editorRevision).toBe(snapshot.editorRevision);
   expect(repeatedSourceSnapshot.scheduleState.revision).toBe(
     snapshot.scheduleState.revision,
   );

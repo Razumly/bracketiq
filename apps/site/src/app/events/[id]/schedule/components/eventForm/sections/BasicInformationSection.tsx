@@ -1,13 +1,11 @@
 import type { ComponentProps } from 'react';
 import { Controller, type Control, type FieldErrors, type UseFormSetValue } from 'react-hook-form';
-import {
-    Alert,
-    Loader,
-    MultiSelect,
-    Select as MantineSelect,
-    TextInput,
-    Textarea,
-} from '@mantine/core';
+import { Alert,
+Loader,
+MultiSelect,
+Select as MantineSelect,
+TextInput,
+Textarea, } from '@/components/organization/organization-operation-ui';
 import type { Event, EventTag, Sport } from '@/types';
 import { ImageUploader } from '@/components/ui/ImageUploader';
 
@@ -84,7 +82,7 @@ export const BasicInformationSection = ({
                     <p className="text-red-600 text-sm mt-1">{errors.imageId.message as string}</p>
                 ) : null}
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-4 md:items-end">
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-4 md:items-start">
                 <Controller
                     name="name"
                     control={control}

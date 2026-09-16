@@ -1,5 +1,10 @@
 /** @jest-environment node */
 
+jest.mock('@/server/teams/teamInvitationRestrictions', () => {
+  const actual = jest.requireActual('@/server/teams/teamInvitationRestrictions');
+  return { ...actual, assertTeamInvitationAllowed: jest.fn() };
+});
+
 const upsertEventRegistrationMock = jest.fn();
 const acquireEventLockAndLoadStructureMock = jest.fn();
 
@@ -104,7 +109,7 @@ describe('singleton team staff replacement', () => {
         status: { in: ['PENDING', 'INVITED'] },
         id: { not: 'invite_new' },
       },
-      data: { status: 'CANCELLED', updatedAt: now },
+      data: { status: 'CANCELLED', finalizedAt: now, updatedAt: now },
     });
     expect(assignmentUpdateMany).toHaveBeenCalledWith({
       where: {
@@ -322,6 +327,8 @@ describe('syncCanonicalTeamRoster', () => {
       },
       select: {
         id: true,
+        createdAt: true,
+        updatedAt: true,
         email: true,
         status: true,
         userId: true,
@@ -391,10 +398,10 @@ describe('syncCanonicalTeamRoster', () => {
     expect(result.createdPendingInvites).toEqual([]);
   });
 
-  it('deletes pending invite rows when invited players are removed from the pending roster', async () => {
+  it('requires cancellation by invitation ID before removing a pending roster place', async () => {
     const invitesDeleteManyMock = jest.fn().mockResolvedValue({ count: 1 });
 
-    const result = await syncCanonicalTeamRoster({
+    await expect(syncCanonicalTeamRoster({
       teamId: 'team_1',
       captainId: 'captain_1',
       playerIds: ['captain_1'],
@@ -424,18 +431,11 @@ describe('syncCanonicalTeamRoster', () => {
       },
       invites: {
         deleteMany: invitesDeleteManyMock,
+        findFirst: jest.fn().mockResolvedValue({ id: 'pending-attempt' }),
       },
-    });
+    })).rejects.toThrow('Cancel the invitation by its invitation ID');
 
-    expect(invitesDeleteManyMock).toHaveBeenCalledWith({
-      where: {
-        type: 'TEAM',
-        teamId: 'team_1',
-        status: 'PENDING',
-        userId: { in: ['player_2'] },
-      },
-    });
-    expect(result.createdPendingInvites).toEqual([]);
+    expect(invitesDeleteManyMock).not.toHaveBeenCalled();
   });
 });
 
@@ -1248,6 +1248,268 @@ describe('claimOrCreateEventTeamSnapshot', () => {
       divisionTypeId: 'open',
       divisionTypeKey: 'c_skill_open',
     }), expect.anything());
+  });
+
+  it('reuses a claimed phase placeholder on an identical retry without replacing registration', async () => {
+    type PhasePlaceholderTeam = {
+      id: string;
+      eventId: string;
+      kind: string;
+      parentTeamId: string | null;
+      division: string;
+      divisionTypeId: string;
+      wins: number;
+      losses: number;
+      name: string;
+      captainId: string;
+      managerId: string;
+      headCoachId: string | null;
+      coachIds: string[];
+      pending: string[];
+      teamSize: number;
+      profileImageId: string | null;
+      sport: string | null;
+      playerIds: string[];
+      playerRegistrationIds: string[];
+      staffAssignmentIds: string[];
+      createdAt: Date;
+      updatedAt: Date;
+    };
+    type TeamLookupWhere = {
+      eventId?: string;
+      kind?: string;
+      id?: string;
+      parentTeamId?: string | null;
+    };
+    type RegistrationIdFilter = string | { in: string[] };
+    type RegistrationLookupWhere = {
+      eventId?: string;
+      registrantType?: string;
+      status?: { in: string[] };
+      parentId?: { not: string | null };
+      OR?: Array<{
+        registrantId?: RegistrationIdFilter;
+        eventTeamId?: RegistrationIdFilter;
+      }>;
+    };
+    type TeamRegistrationRow = {
+      eventId: string;
+      registrantType: string;
+      registrantId: string;
+      parentId: string | null;
+      rosterRole: string;
+      status: string;
+      eventTeamId: string;
+      divisionId: string | null;
+      divisionTypeId: string | null;
+      divisionTypeKey: string | null;
+      createdBy: string;
+      occurrence?: { slotId: string; occurrenceDate: string } | null;
+    };
+    const phasePlaceholderDivisionId = 'phase_placeholder_l';
+    const entryDivisionId = 'entry_division_e';
+    const placeholderBase: Omit<PhasePlaceholderTeam, 'id' | 'createdAt' | 'updatedAt'> = {
+      eventId: 'event_1',
+      kind: 'PLACEHOLDER',
+      parentTeamId: null,
+      division: phasePlaceholderDivisionId,
+      divisionTypeId: 'open',
+      wins: 0,
+      losses: 0,
+      name: 'Place Holder',
+      captainId: '',
+      managerId: '',
+      headCoachId: null,
+      coachIds: [],
+      pending: [],
+      teamSize: 2,
+      profileImageId: null,
+      sport: null,
+      playerIds: [],
+      playerRegistrationIds: [],
+      staffAssignmentIds: [],
+    };
+    const storedTeams = new Map<string, PhasePlaceholderTeam>([
+      ['event_team_phase_1', {
+        ...placeholderBase,
+        id: 'event_team_phase_1',
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      }],
+      ['event_team_phase_2', {
+        ...placeholderBase,
+        id: 'event_team_phase_2',
+        createdAt: new Date('2026-01-02T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-02T00:00:00.000Z'),
+      }],
+    ]);
+    const teamRegistrationRows: TeamRegistrationRow[] = [];
+    const teamsFindManyMock = jest.fn(({ where }: { where: TeamLookupWhere }) => (
+      Promise.resolve(Array.from(storedTeams.values()).filter((row) => (
+        (!where.eventId || row.eventId === where.eventId)
+        && (!where.kind || row.kind === where.kind)
+        && (!Object.prototype.hasOwnProperty.call(where, 'id') || row.id === where.id)
+        && (!Object.prototype.hasOwnProperty.call(where, 'parentTeamId') || row.parentTeamId === where.parentTeamId)
+      )))
+    ));
+    const teamsUpdateMock = jest.fn(({
+      where,
+      data,
+    }: {
+      where: { id: string };
+      data: Partial<PhasePlaceholderTeam>;
+    }) => {
+      const existing = storedTeams.get(where.id);
+      if (!existing) {
+        throw new Error(`Event team ${where.id} was updated before it was created.`);
+      }
+      const updated = { ...existing, ...data };
+      storedTeams.set(where.id, updated);
+      return Promise.resolve(updated);
+    });
+    const eventRegistrationsFindManyMock = jest.fn(({ where }: { where: RegistrationLookupWhere }) => {
+      if (where.registrantType !== 'TEAM') {
+        return Promise.resolve([]);
+      }
+      const rows = teamRegistrationRows.filter((row) => {
+        if (where.eventId && row.eventId !== where.eventId) {
+          return false;
+        }
+        if (where.status?.in && !where.status.in.includes(row.status)) {
+          return false;
+        }
+        if (where.parentId?.not !== undefined && row.parentId === where.parentId.not) {
+          return false;
+        }
+        if (!Array.isArray(where.OR)) {
+          return true;
+        }
+        return where.OR.some((condition) => {
+          const matches = (value: string, filter?: RegistrationIdFilter) => (
+            typeof filter === 'string'
+              ? value === filter
+              : (filter?.in.includes(value) ?? false)
+          );
+          return matches(row.registrantId, condition.registrantId)
+            || matches(row.eventTeamId, condition.eventTeamId);
+        });
+      });
+      return Promise.resolve(rows);
+    });
+    const eventRegistrationsUpdateManyMock = jest.fn().mockResolvedValue({ count: 0 });
+    const upsertRegistration = (data: TeamRegistrationRow) => {
+      const existingIndex = teamRegistrationRows.findIndex((row) => (
+        row.eventId === data.eventId
+        && row.registrantType === data.registrantType
+        && row.registrantId === data.registrantId
+      ));
+      if (existingIndex === -1) {
+        teamRegistrationRows.push({ ...data });
+      } else {
+        teamRegistrationRows[existingIndex] = {
+          ...teamRegistrationRows[existingIndex],
+          ...data,
+        };
+      }
+      return Promise.resolve({ ...data });
+    };
+    upsertEventRegistrationMock.mockImplementation(upsertRegistration);
+
+    const tx = {
+      $executeRaw: jest.fn(),
+      teams: {
+        findMany: teamsFindManyMock,
+        update: teamsUpdateMock,
+        create: jest.fn(),
+      },
+      eventRegistrations: {
+        findMany: eventRegistrationsFindManyMock,
+        updateMany: eventRegistrationsUpdateManyMock,
+      },
+      eventTeamStaffAssignments: {
+        findMany: jest.fn().mockResolvedValue([]),
+        upsert: jest.fn().mockResolvedValue({}),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
+      eventDivisionPhaseSources: {
+        findMany: jest.fn().mockResolvedValue([{
+          phaseDivisionId: phasePlaceholderDivisionId,
+          phase: 'POOL',
+        }]),
+      },
+    };
+    const canonicalTeam = {
+      id: 'team_1',
+      name: 'Canonical Team',
+      division: 'Open',
+      divisionTypeId: 'open',
+      wins: null,
+      losses: null,
+      teamSize: 2,
+      profileImageId: null,
+      sport: 'volleyball',
+      captainId: '',
+      managerId: 'user_1',
+      headCoachId: null,
+      coachIds: [],
+      pending: [],
+      playerRegistrations: [],
+      staffAssignments: [],
+    };
+    const claimParams = {
+      tx,
+      eventId: 'event_1',
+      canonicalTeamId: 'team_1',
+      createdBy: 'user_1',
+      divisionId: entryDivisionId,
+      divisionTypeId: 'open',
+      divisionTypeKey: 'c_skill_open',
+      canonicalTeam,
+    };
+
+    const firstClaim = await claimOrCreateEventTeamSnapshot(claimParams);
+
+    expect(firstClaim).toEqual(expect.objectContaining({
+      id: 'event_team_phase_1',
+      division: phasePlaceholderDivisionId,
+    }));
+    expect(teamRegistrationRows).toEqual([
+      expect.objectContaining({
+        eventTeamId: 'event_team_phase_1',
+        registrantId: 'event_team_phase_1',
+        divisionId: entryDivisionId,
+        status: 'ACTIVE',
+      }),
+    ]);
+
+    const secondClaim = await claimOrCreateEventTeamSnapshot(claimParams);
+
+    expect(secondClaim).toEqual(expect.objectContaining({
+      id: firstClaim.id,
+      division: phasePlaceholderDivisionId,
+    }));
+    expect(storedTeams.get('event_team_phase_1')).toEqual(expect.objectContaining({
+      kind: 'REGISTERED',
+      parentTeamId: 'team_1',
+      division: phasePlaceholderDivisionId,
+    }));
+    expect(storedTeams.get('event_team_phase_2')).toEqual(expect.objectContaining({
+      kind: 'PLACEHOLDER',
+      parentTeamId: null,
+      division: phasePlaceholderDivisionId,
+    }));
+    expect(teamsUpdateMock).not.toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'event_team_phase_2' },
+    }));
+    expect(eventRegistrationsUpdateManyMock).not.toHaveBeenCalled();
+    expect(teamRegistrationRows).toEqual([
+      expect.objectContaining({
+        eventTeamId: 'event_team_phase_1',
+        registrantId: 'event_team_phase_1',
+        divisionId: entryDivisionId,
+        status: 'ACTIVE',
+      }),
+    ]);
   });
 
   it('claims the lowest seeded placeholder when generated placeholders share timestamps', async () => {

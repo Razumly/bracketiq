@@ -3,10 +3,11 @@ import { prisma } from '@/lib/prisma';
 import { getRequestOrigin } from '@/lib/requestOrigin';
 import { readInitialEmailVerificationToken } from '@/server/authEmailVerification';
 
-const buildRedirect = (req: NextRequest, status: 'success' | 'error', message: string): NextResponse => {
+const buildRedirect = (req: NextRequest, status: 'success' | 'error', message: string, returnTo?: string): NextResponse => {
   const redirectUrl = new URL('/login', getRequestOrigin(req));
   redirectUrl.searchParams.set('verification', status);
   redirectUrl.searchParams.set('verificationMessage', message);
+  if (returnTo) redirectUrl.searchParams.set('next', returnTo);
   return NextResponse.redirect(redirectUrl, { status: 302 });
 };
 
@@ -31,7 +32,7 @@ export async function GET(req: NextRequest) {
   }
 
   if (authUser.emailVerifiedAt) {
-    return buildRedirect(req, 'success', 'Email already verified. You can sign in now.');
+    return buildRedirect(req, 'success', 'Email already verified. You can sign in now.', payload.returnTo);
   }
 
   try {
@@ -47,5 +48,5 @@ export async function GET(req: NextRequest) {
     return buildRedirect(req, 'error', 'Unable to verify email. Please request another verification email.');
   }
 
-  return buildRedirect(req, 'success', 'Email verified successfully. You can sign in now.');
+  return buildRedirect(req, 'success', 'Email verified successfully. You can sign in now.', payload.returnTo);
 }

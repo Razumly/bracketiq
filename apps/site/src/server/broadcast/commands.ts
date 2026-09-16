@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
+import { acquireEventLock } from '@/server/repositories/locks';
 import { BroadcastOverlayNotFoundError } from './access';
 import { buildMatchPresentationState, createEmptyMatchPresentationState } from './presentation';
 import { parseMatchPresentationState } from './schemas';
@@ -111,6 +112,7 @@ export const applyBroadcastOverlayCommand = async (input: {
   command: BroadcastOverlayCommand;
 }): Promise<{ state: MatchPresentationStateV1; action: BroadcastOverlayAction }> => {
   const result = await prisma.$transaction(async (tx) => {
+    await acquireEventLock(tx, input.eventId);
     const overlay = await tx.broadcastOverlays.findFirst({
       where: { id: input.overlayId, eventId: input.eventId, archivedAt: null },
     });

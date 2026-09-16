@@ -10,7 +10,11 @@ jest.mock('@/lib/prisma', () => ({
   prisma: {
     invites: {
       findUnique: (...args: unknown[]) => findUniqueMock(...args),
+      findMany: jest.fn().mockResolvedValue([{ id: 'invite_1' }]),
     },
+    authUser: { findMany: jest.fn().mockResolvedValue([]) },
+    inviteDeliveries: { findMany: jest.fn().mockResolvedValue([]) },
+    userData: { findMany: jest.fn().mockResolvedValue([]) },
   },
 }));
 jest.mock('@/lib/permissions', () => ({
@@ -58,7 +62,6 @@ describe('GET /api/invites/[id]', () => {
 
     expect(response.status).toBe(200);
     expect(payload.invite).toEqual(expect.objectContaining({
-      id: 'invite_1',
       id: 'invite_1',
       teamId: 'team_from_server',
       userId: 'player_1',

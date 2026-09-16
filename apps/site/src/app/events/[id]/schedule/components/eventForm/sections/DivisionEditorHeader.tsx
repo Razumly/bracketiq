@@ -1,8 +1,6 @@
 import type { ComponentProps } from 'react';
-import {
-    Select as MantineSelect,
-    Text,
-} from '@mantine/core';
+import { Select as MantineSelect,
+Text, } from '@/components/organization/organization-operation-ui';
 
 import { AnimatedSection } from '../components/AnimatedSection';
 import type { DivisionEditorKind } from '../divisionForm';

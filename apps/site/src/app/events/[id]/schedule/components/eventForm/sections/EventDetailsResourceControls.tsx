@@ -1,6 +1,6 @@
 import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import { Controller, type Control } from 'react-hook-form';
-import { Button, Collapse, Text, TextInput, Title } from '@mantine/core';
+import { Button, Collapse, Text, TextInput, Title } from '@/components/organization/organization-operation-ui';
 
 import { getFieldDisplayName } from '@/lib/fieldUtils';
 import type { SportResourceLabels } from '@/lib/sportResourceLabels';
@@ -93,7 +93,7 @@ export const EventDetailsResourceControls = ({
                                 Add custom {resourceLabels.plural.toLocaleLowerCase()} for this event and name each one below.
                             </Text>
                         </div>
-                        <div className="flex shrink-0 flex-wrap items-end gap-3 md:justify-end">
+                        <div className="flex shrink-0 flex-wrap items-start gap-3 md:justify-end">
                             {localFieldCreationControl ? (
                                 <div className="w-32">
                                     {localFieldCreationControl}

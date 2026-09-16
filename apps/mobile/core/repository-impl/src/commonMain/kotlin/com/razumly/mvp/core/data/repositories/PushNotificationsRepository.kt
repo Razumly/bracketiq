@@ -1,7 +1,5 @@
 package com.razumly.mvp.core.data.repositories
 
-import com.mmk.kmpnotifier.notification.NotifierManager
-import com.mmk.kmpnotifier.notification.PayloadData
 import com.razumly.mvp.chat.data.IChatGroupRepository
 import com.razumly.mvp.chat.data.IMessageRepository
 import com.razumly.mvp.core.data.CurrentUserDataSource
@@ -109,6 +107,7 @@ class PushNotificationsRepository(
     private val api: MvpApiClient,
     private val messageRepository: IMessageRepository,
     private val databaseService: DatabaseService,
+    private val pushNotificationGateway: PushNotificationGateway,
     private val chatGroupRepositoryProvider: () -> IChatGroupRepository,
 ) : IPushNotificationsRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -123,7 +122,7 @@ class PushNotificationsRepository(
         ensureAuthenticated = ::ensureAuthTokenAvailableForPushSync,
     )
 
-    private val managerListener = object : NotifierManager.Listener {
+    private val gatewayListener = object : PushNotificationListener {
         override fun onNewToken(token: String) {
             scope.launch {
                 var resolvedUserId: String? = null
@@ -144,9 +143,10 @@ class PushNotificationsRepository(
             }
         }
 
-        override fun onNotificationClicked(data: PayloadData) {
+        override fun onNotificationClicked(data: Map<String, String>) {
+            val payloadData = data.normalizedPayloadMap()
             scope.launch {
-                refreshInviteNotificationFromPayloadIfNeeded(data.toStringPayloadMap())
+                refreshInviteNotificationFromPayloadIfNeeded(payloadData)
                 Napier.d(
                     tag = "PushNotificationsRepository",
                     message = "Notification clicked: $data"
@@ -154,15 +154,15 @@ class PushNotificationsRepository(
             }
         }
 
-        override fun onPushNotificationWithPayloadData(
-            title: String?, body: String?, data: PayloadData
+        override fun onNotificationReceived(
+            title: String?, body: String?, data: Map<String, String>
         ) {
             scope.launch {
-                val payloadData = data.toStringPayloadMap()
+                val payloadData = data.normalizedPayloadMap()
                 refreshInviteNotificationFromPayloadIfNeeded(payloadData)
                 val normalizedTopicId =
-                    data["topicId"]?.toString()?.trim()?.takeIf(String::isNotBlank)
-                        ?: data["chatId"]?.toString()?.trim()?.takeIf(String::isNotBlank)
+                    payloadData["topicId"]?.trim()?.takeIf(String::isNotBlank)
+                        ?: payloadData["chatId"]?.trim()?.takeIf(String::isNotBlank)
 
                 refreshChatMessagesFromPushIfNeeded(normalizedTopicId)
 
@@ -193,10 +193,10 @@ class PushNotificationsRepository(
                 }
 
                 runCatching {
-                    NotifierManager.getLocalNotifier().notify(
+                    pushNotificationGateway.showLocalNotification(
                         title = normalizedTitle.ifBlank { "Notification" },
                         body = normalizedBody.ifBlank { "You have a new update." },
-                        payloadData = data.mapValues { (_, value) -> value?.toString().orEmpty() },
+                        payload = payloadData,
                     )
                 }.onFailure { error ->
                     Napier.e(
@@ -214,14 +214,15 @@ class PushNotificationsRepository(
         }
     }
 
+
     init {
         if (pushTokenState.value.isBlank()) {
             scope.launch {
                 delay(1_000)
-                fetchPushTokenFromNotifier()
+                fetchPushTokenFromGateway()
             }
         }
-        NotifierManager.addListener(managerListener)
+        pushNotificationGateway.registerListener(gatewayListener)
     }
 
     override suspend fun subscribeUserToTeamNotifications(userId: String, teamId: String) =
@@ -345,7 +346,7 @@ class PushNotificationsRepository(
         val userId = resolveCurrentOrCachedPushUserId()
             ?: error("Cannot register push target without a signed-in user.")
 
-        val token = currentCachedPushTokenOrNull() ?: fetchPushTokenFromNotifier()
+        val token = currentCachedPushTokenOrNull() ?: fetchPushTokenFromGateway()
         if (token.isNullOrBlank()) {
             Napier.w("Push token unavailable; storing backend target for later token refresh.")
             scheduleDeferredDeviceTargetSync(userId)
@@ -500,18 +501,18 @@ class PushNotificationsRepository(
         )
     }
 
-    private suspend fun fetchPushTokenFromNotifier(): String? {
-        val notifierToken = runCatching {
-            NotifierManager.getPushNotifier().getToken()
+    private suspend fun fetchPushTokenFromGateway(): String? {
+        val gatewayToken = runCatching {
+            pushNotificationGateway.getPushToken()
         }.getOrElse { error ->
-            Napier.w("Failed to fetch push token from notifier: ${error.message}")
+            Napier.w("Failed to fetch push token from notification gateway: ${error.message}")
             null
         }
 
-        val normalizedNotifierToken = notifierToken?.trim()?.takeIf(String::isNotBlank)
-        if (normalizedNotifierToken != null) {
-            userDataSource.savePushToken(normalizedNotifierToken)
-            return normalizedNotifierToken
+        val normalizedGatewayToken = gatewayToken?.trim()?.takeIf(String::isNotBlank)
+        if (normalizedGatewayToken != null) {
+            userDataSource.savePushToken(normalizedGatewayToken)
+            return normalizedGatewayToken
         }
 
         val platformToken = runCatching {
@@ -531,7 +532,7 @@ class PushNotificationsRepository(
     private suspend fun currentCachedPushTokenOrNull(): String? {
         val cached = pushTokenState.value.trim().takeIf(String::isNotBlank)
         if (cached != null) return cached
-        return fetchPushTokenFromNotifier()
+        return fetchPushTokenFromGateway()
     }
 
     private suspend fun syncDeviceTargetWithBackend(userId: String, pushToken: String?) {
@@ -723,16 +724,6 @@ internal fun String?.toChatGroupTopicIdOrNull(): String? {
     }
 }
 
-private fun PayloadData.toStringPayloadMap(): Map<String, String> =
-    entries.mapNotNull { (key, value) ->
-        val normalizedKey = key.trim()
-        val normalizedValue = value?.toString()?.trim()?.takeIf(String::isNotBlank)
-        if (normalizedKey.isBlank() || normalizedValue == null) {
-            null
-        } else {
-            normalizedKey to normalizedValue
-        }
-    }.toMap()
 
 private fun Map<String, String>.normalizedPayloadMap(): Map<String, String> =
     mapNotNull { (key, value) ->
@@ -792,6 +783,7 @@ internal class InvitePushInvalidationRefresher(
     }
 
     private suspend fun refreshInviteById(inviteId: String) {
+        val viewerId = userDataSource.getUserId().first().trim()
         val canonicalInvite = try {
             api.get<InviteResponseDto>("api/invites/${inviteId.encodeURLPathPart()}").invite
         } catch (throwable: ApiException) {
@@ -820,14 +812,8 @@ internal class InvitePushInvalidationRefresher(
             return
         }
 
-        val canonicalStatus = canonicalInvite.status?.trim()?.uppercase() ?: "PENDING"
-        if (canonicalStatus !in setOf("PENDING", "SENT")) {
-            deleteCachedInvite(canonicalInvite.id)
-            return
-        }
-
         try {
-            databaseService.getInviteDao.upsertInvite(canonicalInvite)
+            databaseService.getInviteDao.saveInvitationAttempt(canonicalInvite.copy(viewerId = viewerId))
         } catch (throwable: Throwable) {
             if (throwable is CancellationException) throw throwable
             Napier.w(
@@ -839,8 +825,7 @@ internal class InvitePushInvalidationRefresher(
 
     private suspend fun deleteCachedInvite(inviteId: String) {
         try {
-            // A verified 404 or a canonical terminal status means this row is
-            // no longer actionable. Never remove it for transient/auth errors.
+            // Remove a cached row only after an authorized read returns 404.
             databaseService.getInviteDao.deleteInviteById(inviteId)
         } catch (throwable: Throwable) {
             if (throwable is CancellationException) throw throwable
@@ -853,7 +838,9 @@ internal class InvitePushInvalidationRefresher(
 
     private suspend fun refreshCurrentUserInvites(userId: String) {
         val canonicalInvites = try {
-            fetchAllPendingInvitePages(api = api, userId = userId)
+            val pending = fetchAllPendingInvitePages(api = api, userId = userId)
+            val history = fetchAllPendingInvitePages(api = api, userId = userId, history = true)
+            (history + pending).distinctBy { it.id }
         } catch (throwable: Throwable) {
             if (throwable is CancellationException) throw throwable
             Napier.w(
@@ -864,7 +851,7 @@ internal class InvitePushInvalidationRefresher(
         }
 
         val normalizedInvites = canonicalInvites.map { invite ->
-            if (invite.userId.isNullOrBlank()) invite.copy(userId = userId) else invite
+            invite.copy(userId = invite.userId?.takeIf(String::isNotBlank) ?: userId, viewerId = userId)
         }
         try {
             // Replace rather than append so older payload-created rows disappear

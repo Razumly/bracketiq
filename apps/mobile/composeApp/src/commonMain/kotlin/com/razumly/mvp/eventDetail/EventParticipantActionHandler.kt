@@ -29,6 +29,10 @@ internal class EventParticipantActionHandler(
 ) {
     fun createNewTeam() {
         val event = selectedEvent()
+        if (event.isArchived()) {
+            setMessage(ARCHIVED_EVENT_ACTION_ERROR)
+            return
+        }
         navigationHandler.navigateToTeams(
             freeAgents = event.freeAgents,
             eventId = event.id,
@@ -39,6 +43,10 @@ internal class EventParticipantActionHandler(
     fun inviteFreeAgentToTeam(userId: String) {
         val normalizedUserId = userId.trim().takeIf(String::isNotBlank) ?: return
         val event = selectedEvent()
+        if (event.isArchived()) {
+            setMessage(ARCHIVED_EVENT_ACTION_ERROR)
+            return
+        }
         navigationHandler.navigateToTeams(
             freeAgents = event.freeAgents,
             eventId = event.id,
@@ -48,6 +56,10 @@ internal class EventParticipantActionHandler(
 
     fun startManagingParticipants() {
         val event = selectedEvent()
+        if (event.isArchived()) {
+            setMessage(ARCHIVED_EVENT_ACTION_ERROR)
+            return
+        }
         if (isWeeklyParentEvent(event)) {
             requireSelectedWeeklyOccurrence(
                 event,
@@ -59,6 +71,10 @@ internal class EventParticipantActionHandler(
     fun moveTeamParticipantDivision(team: TeamWithPlayers, divisionId: String) {
         scope.launch {
             val event = selectedEvent()
+            if (event.isArchived()) {
+                setMessage(ARCHIVED_EVENT_ACTION_ERROR)
+                return@launch
+            }
             val occurrence = selectedOccurrenceOrNull(
                 event = event,
                 errorMessage = "Select an occurrence before moving teams.",
@@ -95,6 +111,10 @@ internal class EventParticipantActionHandler(
     fun removeTeamParticipant(team: TeamWithPlayers) {
         scope.launch {
             val event = selectedEvent()
+            if (event.isArchived()) {
+                setMessage(ARCHIVED_EVENT_ACTION_ERROR)
+                return@launch
+            }
             val occurrence = selectedOccurrenceOrNull(
                 event = event,
                 errorMessage = "Select an occurrence before removing participants.",
@@ -123,6 +143,10 @@ internal class EventParticipantActionHandler(
     fun removeUserParticipant(userId: String) {
         scope.launch {
             val event = selectedEvent()
+            if (event.isArchived()) {
+                setMessage(ARCHIVED_EVENT_ACTION_ERROR)
+                return@launch
+            }
             val occurrence = selectedOccurrenceOrNull(
                 event = event,
                 errorMessage = "Select an occurrence before removing participants.",
@@ -149,10 +173,30 @@ internal class EventParticipantActionHandler(
     }
 
     suspend fun getParticipantBillingSnapshot(teamId: String): Result<EventTeamBillingSnapshot> {
+        val event = selectedEvent()
+        val occurrence = selectedOccurrenceOrNull(
+            event = event,
+            errorMessage = "Select an occurrence before loading billing details.",
+        ) ?: if (isWeeklyParentEvent(event)) {
+            return Result.failure(
+                IllegalStateException("Select an occurrence before loading billing details."),
+            )
+        } else {
+            null
+        }
+        if (event.isArchived() && occurrence == null) {
+            return Result.failure(archivedEventFailure())
+        }
         return participantManagementCoordinator.getParticipantBillingSnapshot(
-            eventId = selectedEvent().id,
+            eventId = event.id,
             teamId = teamId,
-            loadSnapshot = billingRepository::getEventTeamBillingSnapshot,
+            loadSnapshot = { targetEventId, targetTeamId ->
+                billingRepository.getEventTeamBillingSnapshot(
+                    eventId = targetEventId,
+                    teamId = targetTeamId,
+                    occurrence = occurrence,
+                )
+            },
         )
     }
 
@@ -160,10 +204,26 @@ internal class EventParticipantActionHandler(
         teamId: String,
         request: EventTeamBillCreateRequest,
     ): Result<Unit> {
+        val event = selectedEvent()
+        if (event.isArchived()) return Result.failure(archivedEventFailure())
+        val occurrence = selectedOccurrenceOrNull(
+            event = event,
+            errorMessage = "Select an occurrence before creating a participant bill.",
+        ) ?: if (isWeeklyParentEvent(event)) {
+            return Result.failure(
+                IllegalStateException("Select an occurrence before creating a participant bill."),
+            )
+        } else {
+            null
+        }
+        val requestWithOccurrence = request.copy(
+            slotId = occurrence?.slotId,
+            occurrenceDate = occurrence?.occurrenceDate,
+        )
         return participantManagementCoordinator.createParticipantBill(
-            eventId = selectedEvent().id,
+            eventId = event.id,
             teamId = teamId,
-            request = request,
+            request = requestWithOccurrence,
             createBill = billingRepository::createEventTeamBill,
             refreshAfterSuccess = {
                 participantBootstrapCoordinator.refreshParticipantComplianceIfNeeded(selectedEvent())
@@ -175,10 +235,26 @@ internal class EventParticipantActionHandler(
         teamId: String,
         request: EventTeamPaymentCheckoutRequest,
     ): Result<EventTeamPaymentCheckout> {
+        val event = selectedEvent()
+        if (event.isArchived()) return Result.failure(archivedEventFailure())
+        val occurrence = selectedOccurrenceOrNull(
+            event = event,
+            errorMessage = "Select an occurrence before starting participant checkout.",
+        ) ?: if (isWeeklyParentEvent(event)) {
+            return Result.failure(
+                IllegalStateException("Select an occurrence before starting participant checkout."),
+            )
+        } else {
+            null
+        }
+        val requestWithOccurrence = request.copy(
+            slotId = occurrence?.slotId,
+            occurrenceDate = occurrence?.occurrenceDate,
+        )
         return participantManagementCoordinator.createParticipantPaymentCheckout(
-            eventId = selectedEvent().id,
+            eventId = event.id,
             teamId = teamId,
-            request = request,
+            request = requestWithOccurrence,
             createCheckout = billingRepository::createEventTeamPaymentCheckout,
         )
     }
@@ -188,11 +264,26 @@ internal class EventParticipantActionHandler(
         billPaymentId: String,
         amountCents: Int,
     ): Result<Unit> {
+        val event = selectedEvent()
+        val occurrence = selectedOccurrenceOrNull(
+            event = event,
+            errorMessage = "Select an occurrence before refunding participants.",
+        ) ?: if (isWeeklyParentEvent(event)) {
+            return Result.failure(
+                IllegalStateException("Select an occurrence before refunding participants."),
+            )
+        } else {
+            null
+        }
+        if (event.isArchived() && occurrence == null) {
+            return Result.failure(archivedEventFailure())
+        }
         return participantManagementCoordinator.refundParticipantPayment(
-            eventId = selectedEvent().id,
+            eventId = event.id,
             teamId = teamId,
             billPaymentId = billPaymentId,
             amountCents = amountCents,
+            occurrence = occurrence,
             refundPayment = billingRepository::refundEventTeamBillPayment,
             refreshAfterSuccess = {
                 participantBootstrapCoordinator.refreshParticipantComplianceIfNeeded(selectedEvent())
@@ -208,6 +299,8 @@ internal class EventParticipantActionHandler(
         amountAcceptedCents: Int?,
         reviewNote: String?,
     ): Result<Unit> {
+        val event = selectedEvent()
+        if (event.isArchived()) return Result.failure(archivedEventFailure())
         return billingRepository.reviewManualPaymentProof(
             billId = billId,
             billPaymentId = billPaymentId,
@@ -219,9 +312,11 @@ internal class EventParticipantActionHandler(
             participantBootstrapCoordinator.refreshParticipantComplianceIfNeeded(selectedEvent())
         }
     }
+    private fun archivedEventFailure(): IllegalStateException =
+        IllegalStateException(ARCHIVED_EVENT_ACTION_ERROR)
 
     private fun selectedOccurrenceOrNull(event: Event, errorMessage: String): EventOccurrenceSelection? {
-        return if (isWeeklyParentEvent(event)) {
+        return if (isWeeklyEventShape(event)) {
             requireSelectedWeeklyOccurrence(event, errorMessage)
         } else {
             null

@@ -147,6 +147,21 @@ export const pushOrganizationHistoryState = (
   browserHistory?.pushState(null, '', path);
 };
 
+export const resolveOrganizationTabSelection = ({
+  activeTab,
+  availableTabs,
+  organizationLoaded,
+}: {
+  activeTab: OrganizationTab;
+  availableTabs: OrganizationTabOption[];
+  organizationLoaded: boolean;
+}): OrganizationTab => {
+  if (!organizationLoaded || availableTabs.length === 0 || availableTabs.some((tab) => tab.value === activeTab)) {
+    return activeTab;
+  }
+  return availableTabs[0].value;
+};
+
 type BuildOrganizationTabsParams = {
   enabledFeatures?: string[];
   viewerCanAccessUsers?: boolean;
@@ -194,6 +209,8 @@ export const buildOrganizationTabs = ({
   const clubToolsEnabled = !hasExplicitFeatureContract || enabledFeatures.includes('CLUB_TEAMS');
   const facilityToolsEnabled = !hasExplicitFeatureContract || enabledFeatures.includes('FACILITIES_RENTALS');
   const eventToolsEnabled = !hasExplicitFeatureContract || enabledFeatures.includes('EVENT_MANAGEMENT');
+  const canAccessTeamsTab = isOwner || isOrganizationRoleMember || canManageTeams;
+  const canAccessFacilitiesTab = isOwner || isOrganizationRoleMember || canManageFields;
   const tabs: OrganizationTabOption[] = [
     { label: 'Overview', value: 'overview' },
     { label: 'Reviews', value: 'reviews' },
@@ -207,7 +224,7 @@ export const buildOrganizationTabs = ({
     tabs.push({ label: 'Club Divisions', value: 'divisions' });
   }
 
-  if ((clubToolsEnabled && (isOrganizationRoleMember || canManageTeams)) || hasTeams) {
+  if (canAccessTeamsTab || (clubToolsEnabled && hasTeams)) {
     tabs.push({ label: 'Teams', value: 'teams' });
   }
 
@@ -240,7 +257,7 @@ export const buildOrganizationTabs = ({
     tabs.push({ label: 'Public Page', value: 'publicPage' });
   }
 
-  if ((facilityToolsEnabled && (isOrganizationRoleMember || canManageFields)) || hasRentals || hasResources) {
+  if (canAccessFacilitiesTab || (facilityToolsEnabled && (hasRentals || hasResources))) {
     tabs.push({ label: 'Facilities', value: 'fields' });
   }
 

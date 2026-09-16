@@ -1,5 +1,5 @@
 import Image from 'next/image';
-import { Text } from '@mantine/core';
+import { Text } from '@/components/organization/organization-operation-ui';
 import { CalendarDays, MapPin, Users } from 'lucide-react';
 
 type EventDetailHeroProps = {
@@ -52,15 +52,15 @@ export function EventDetailHero({
             <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/45 to-slate-950/5" />
             <div className="absolute inset-x-0 bottom-0 p-5 text-white sm:p-8">
                 <div className="mb-5 flex flex-wrap items-center gap-2">
-                    <span className="rounded-full bg-white/95 px-3 py-1 text-xs font-bold text-slate-950 shadow-sm">
+                    <span className="rounded-md bg-white/95 px-3 py-1 text-xs font-bold text-slate-950 shadow-sm">
                         {eventTypeLabel}
                     </span>
                     {sportLabel ? (
-                        <span className="rounded-full border border-white/30 bg-white/15 px-3 py-1 text-xs font-semibold text-white backdrop-blur">
+                        <span className="rounded-md border border-white/30 bg-white/15 px-3 py-1 text-xs font-semibold text-white backdrop-blur">
                             {sportLabel}
                         </span>
                     ) : null}
-                    <span className="rounded-full border border-emerald-200/50 bg-emerald-400/20 px-3 py-1 text-xs font-semibold text-emerald-50 backdrop-blur">
+                    <span className="rounded-md border border-emerald-200/50 bg-emerald-400/20 px-3 py-1 text-xs font-semibold text-emerald-50 backdrop-blur">
                         {registrationTypeLabel}
                     </span>
                 </div>

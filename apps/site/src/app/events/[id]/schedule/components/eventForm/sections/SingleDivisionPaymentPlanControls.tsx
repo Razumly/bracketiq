@@ -1,5 +1,5 @@
-import { ActionIcon, Button, Group, NumberInput, Stack, Switch, Text, Title } from '@mantine/core';
-import { DateTimePicker } from '@mantine/dates';
+import { ActionIcon, Button, Group, NumberInput, Stack, Switch, Text, Title } from '@/components/organization/organization-operation-ui';
+import { DateTimePicker } from '@/components/organization/organization-operation-ui';
 import { motion } from 'motion/react';
 
 import CentsInput from '@/components/ui/CentsInput';
@@ -114,7 +114,7 @@ export const SingleDivisionPaymentPlanControls = ({
                             );
 
                             return (
-                                <Group key={index} align="flex-end" gap="sm" wrap="wrap">
+                                <Group key={index} align="flex-start" gap="sm" wrap="wrap">
                                     {useRelativeDueDates ? (
                                         <NumberInput
                                             label={`Installment ${index + 1} due date offset`}

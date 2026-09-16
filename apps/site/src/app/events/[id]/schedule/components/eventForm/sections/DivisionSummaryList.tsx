@@ -1,12 +1,10 @@
-import {
-    Alert,
-    Badge,
-    Button,
-    Group,
-    Paper,
-    Stack,
-    Text,
-} from '@mantine/core';
+import { Alert,
+Badge,
+Button,
+Group,
+Paper,
+Stack,
+Text, } from '@/components/organization/organization-operation-ui';
 
 import ResponsiveCardGrid from '@/components/ui/ResponsiveCardGrid';
 import { minimumParticipantCountForEventType } from '@/lib/divisionTypes';

@@ -16,7 +16,6 @@ import { formatStaffingPriorityLabel } from '../officials';
 import type {
     EventSetupChoices,
     EventSetupPageId,
-    EventSetupScheduleStyle,
 } from './types';
 
 export type SimpleSetupReviewRow = {
@@ -59,12 +58,6 @@ export type BuildSimpleSetupReviewModelInput = {
     validationErrorIndex?: EventFormErrorIndex;
 };
 
-const SCHEDULE_STYLE_LABELS: Record<EventSetupScheduleStyle, string> = {
-    FIXED_WINDOW: 'Fixed event window',
-    WEEKLY_SLOTS: 'Weekly repeating timeslots',
-    FIXED_SLOTS: 'Fixed one-time timeslots',
-    MIXED_SLOTS: 'Mixed repeating and fixed timeslots',
-};
 
 const PHASE_LABELS: Record<DivisionCompetitionPhase, string> = {
     LEAGUE: 'League',
@@ -410,12 +403,8 @@ export const buildSimpleSetupReviewModel = ({
             if (key) divisionNameByKey.set(String(key).toLowerCase(), division.name || key);
         });
     });
-    const reviewedScheduleSlots = choices.scheduleStyle === 'FIXED_WINDOW'
-        ? []
-        : eventData.leagueSlots;
-    const configuredTimeslotCount = choices.scheduleStyle === 'FIXED_WINDOW'
-        ? 1
-        : reviewedScheduleSlots.length;
+    const reviewedScheduleSlots = eventData.leagueSlots ?? [];
+    const configuredTimeslotCount = reviewedScheduleSlots.length;
     const priceGroups = eventData.singleDivision
         ? []
         : eventData.divisionDetails.map((division) => ({
@@ -486,7 +475,6 @@ export const buildSimpleSetupReviewModel = ({
             title: 'Schedule Structure',
             ownerPageId: 'format',
             rows: [
-                { label: 'Schedule style', value: SCHEDULE_STYLE_LABELS[choices.scheduleStyle] },
                 { label: 'Configured timeslots', value: String(configuredTimeslotCount) },
             ],
             warnings: warningsForPage(validationErrorIndex, 'format'),
@@ -497,7 +485,11 @@ export const buildSimpleSetupReviewModel = ({
             ownerPageId: 'schedule-location',
             rows: [
                 { label: 'Starts', value: formatLocalDateTime(eventData.start) },
-                { label: 'Ends', value: eventData.noFixedEndDateTime ? 'Set during match generation' : formatLocalDateTime(eventData.end) },
+                { label: 'Ends', value: eventData.noFixedEndDateTime
+                    ? eventData.eventType === 'WEEKLY_EVENT'
+                        ? 'No Planned End'
+                        : 'Set during match generation'
+                    : formatLocalDateTime(eventData.end) },
                 { label: 'Time zone', value: eventData.timeZone || 'Not specified' },
                 { label: 'Location', value: eventData.location?.trim() || 'Not specified' },
                 { label: 'Address', value: eventData.address?.trim() || 'Not specified' },

@@ -1,5 +1,5 @@
 import { Controller, type Control } from 'react-hook-form';
-import { Switch, Text } from '@mantine/core';
+import { Switch, Text } from '@/components/organization/organization-operation-ui';
 
 import type { Event } from '@/types';
 

@@ -1,4 +1,4 @@
-import { Button, Group, Image, Select, Stack, TextInput } from '@mantine/core';
+import { Button, Group, Image, Select, Stack, TextInput } from '@/components/organization/organization-operation-ui';
 import { Link as LinkIcon } from 'lucide-react';
 import { useController, type Control } from 'react-hook-form';
 
@@ -96,24 +96,26 @@ const ManualPaymentDestinationRow = ({
 
     return (
         <div
-            className="flex flex-wrap items-end gap-3"
+            className="flex flex-wrap items-start gap-3"
             data-testid="manual-payment-destination-row"
         >
             <Select
                 label="Provider"
+                aria-label={`Provider: ${getManualPaymentProviderLabel(provider)}`}
                 name={providerField.name}
                 value={provider}
                 data={PROVIDER_OPTIONS}
                 className="w-full sm:w-48 sm:flex-none"
                 leftSection={<ManualPaymentProviderMark provider={provider} />}
                 leftSectionWidth={38}
+                hideSelectedLabel
                 renderOption={({ option }) => (
-                    <Group gap="sm" wrap="nowrap">
+                    <span className="flex items-center gap-2">
                         <ManualPaymentProviderMark
                             provider={normalizeManualPaymentProvider(option.value)}
                         />
                         <span>{option.label}</span>
-                    </Group>
+                    </span>
                 )}
                 onBlur={providerField.onBlur}
                 onChange={(value) => {

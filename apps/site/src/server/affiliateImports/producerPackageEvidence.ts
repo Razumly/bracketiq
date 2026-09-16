@@ -246,7 +246,13 @@ export const materializeAffiliateProducerCommit = (input: {
     if (!fs.statSync(materializedSiteRoot, { throwIfNoEntry: false })?.isDirectory()) {
       throw new Error('Producer commit does not contain apps/site.');
     }
-    fs.symlinkSync(nodeModules, path.join(materializedSiteRoot, 'node_modules'), 'dir');
+    // Windows does not support POSIX directory links in all developer environments.
+    // A junction keeps the materialized tree linked without copying dependencies.
+    fs.symlinkSync(
+      nodeModules,
+      path.join(materializedSiteRoot, 'node_modules'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
     fs.rmSync(archivePath, { force: true });
     return {
       repositoryRoot,

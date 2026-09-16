@@ -5,6 +5,10 @@ import { parseDateInput } from '@/server/requestParsing';
 import { getVisibleEventIds } from '@/server/eventVisibility';
 import { canManageScheduledFields } from '@/server/timeSlotAccess';
 import { normalizeEventStaffingResponse } from '@/server/events/eventResponse';
+import { resolveOneTimeTimeSlot } from '@/lib/timeSlotAvailability';
+import { enumerateRepeatingTimeSlotOccurrences } from '@/lib/repeatingTimeSlotAvailability';
+import { repeatingTimeSlotValidationResponse } from '@/server/repeatingTimeSlotValidationResponse';
+
 
 
 export const dynamic = 'force-dynamic';
@@ -18,6 +22,8 @@ type TimeSlotRow = {
   id: string;
   dayOfWeek?: number | null;
   daysOfWeek?: number[] | null;
+  timeZone?: string | null;
+
   startTimeMinutes?: number | null;
   endTimeMinutes?: number | null;
   startDate?: Date | string | null;
@@ -163,6 +169,25 @@ const shouldIncludeEventType = (eventType: string, parentEvent: string | null): 
   return false;
 };
 
+const resolveOneTimeSlotWindow = (
+  slot: TimeSlotRow,
+  fallbackStart?: Date | null,
+  fallbackEnd?: Date | null,
+): TimeWindow | null => {
+  try {
+    const resolved = resolveOneTimeTimeSlot({
+      ...slot,
+      startDate: slot.startDate ?? fallbackStart ?? null,
+      endDate: slot.endDate ?? fallbackEnd ?? null,
+      timeZone: slot.timeZone ?? 'UTC',
+      repeating: false,
+    }, slot.timeZone ?? 'UTC');
+    return { start: resolved.start, end: resolved.end };
+  } catch {
+    return null;
+  }
+};
+
 const slotOverlapsRange = (
   slot: TimeSlotRow,
   rangeStart: Date,
@@ -170,71 +195,26 @@ const slotOverlapsRange = (
   fallbackStart?: Date | null,
   fallbackEnd?: Date | null,
 ): boolean => {
-  const slotStart = normalizeToDate(slot.startDate ?? fallbackStart ?? null);
-  if (!slotStart) {
-    return false;
-  }
-
-  const startMinutes = typeof slot.startTimeMinutes === 'number' ? slot.startTimeMinutes : null;
-  const endMinutes = typeof slot.endTimeMinutes === 'number' ? slot.endTimeMinutes : null;
   const repeating = slot.repeating !== false;
 
   if (!repeating) {
-    const inferredEnd = normalizeToDate(slot.endDate ?? fallbackEnd ?? null);
-    const derivedEnd = inferredEnd
-      ?? (startMinutes !== null && endMinutes !== null && endMinutes > startMinutes
-        ? new Date(slotStart.getTime() + (endMinutes - startMinutes) * 60 * 1000)
-        : null);
-    if (!derivedEnd || derivedEnd.getTime() <= slotStart.getTime()) {
-      return false;
-    }
-    return rangesOverlap(slotStart, derivedEnd, rangeStart, rangeEnd);
+    const resolved = resolveOneTimeSlotWindow(slot, fallbackStart, fallbackEnd);
+    return Boolean(
+      resolved && rangesOverlap(resolved.start, resolved.end, rangeStart, rangeEnd),
+    );
   }
 
-  if (startMinutes === null || endMinutes === null || endMinutes <= startMinutes) {
-    return false;
-  }
-
-  const days = normalizeWeekdays(slot);
-  if (!days.length) {
-    return false;
-  }
-
-  const slotEnd = normalizeToDate(slot.endDate ?? fallbackEnd ?? null) ?? MAX_DATE;
-  if (!rangesOverlap(slotStart, slotEnd, rangeStart, rangeEnd)) {
-    return false;
-  }
-
-  const overlapStart = new Date(Math.max(slotStart.getTime(), rangeStart.getTime()));
-  const overlapEnd = new Date(Math.min(slotEnd.getTime(), rangeEnd.getTime()));
-  if (overlapEnd.getTime() <= overlapStart.getTime()) {
-    return false;
-  }
-
-  const overlapDays = Math.ceil((overlapEnd.getTime() - overlapStart.getTime()) / DAY_MS);
-  if (overlapDays >= 7) {
-    return true;
-  }
-
-  const cursor = new Date(overlapStart.getTime());
-  cursor.setHours(0, 0, 0, 0);
-  const finalDay = new Date(overlapEnd.getTime());
-  finalDay.setHours(0, 0, 0, 0);
-  while (cursor.getTime() <= finalDay.getTime()) {
-    if (days.includes(toMondayIndex(cursor))) {
-      const occurrenceStart = setMinutesOnDay(cursor, startMinutes);
-      const occurrenceEnd = setMinutesOnDay(cursor, endMinutes);
-      if (
-        occurrenceEnd.getTime() > occurrenceStart.getTime()
-        && rangesOverlap(occurrenceStart, occurrenceEnd, overlapStart, overlapEnd)
-      ) {
-        return true;
-      }
-    }
-    cursor.setDate(cursor.getDate() + 1);
-  }
-
-  return false;
+  const resolutionSlot = {
+    ...slot,
+    startDate: slot.startDate ?? fallbackStart ?? null,
+    endDate: slot.endDate ?? fallbackEnd ?? null,
+    timeZone: slot.timeZone ?? 'UTC',
+  };
+  return enumerateRepeatingTimeSlotOccurrences({
+    slot: resolutionSlot,
+    windowStart: rangeStart,
+    windowEnd: rangeEnd,
+  }).length > 0;
 };
 
 const eventOverlapsRange = (
@@ -278,75 +258,43 @@ const buildSlotWindowsInRange = (
   fallbackEnd?: Date | null,
 ): TimeWindow[] => {
   const windows: TimeWindow[] = [];
-  const slotStart = normalizeToDate(slot.startDate ?? fallbackStart ?? null);
-  if (!slotStart) {
-    return windows;
-  }
-
-  const startMinutes = typeof slot.startTimeMinutes === 'number' ? slot.startTimeMinutes : null;
-  const endMinutes = typeof slot.endTimeMinutes === 'number' ? slot.endTimeMinutes : null;
   const repeating = slot.repeating !== false;
 
   if (!repeating) {
-    const inferredEnd = normalizeToDate(slot.endDate ?? fallbackEnd ?? null);
-    const derivedEnd = inferredEnd
-      ?? (startMinutes !== null && endMinutes !== null && endMinutes > startMinutes
-        ? new Date(slotStart.getTime() + (endMinutes - startMinutes) * 60 * 1000)
-        : null);
-    if (!derivedEnd || derivedEnd.getTime() <= slotStart.getTime()) {
+    const resolved = resolveOneTimeSlotWindow(slot, fallbackStart, fallbackEnd);
+    if (
+      !resolved
+      || !rangesOverlap(resolved.start, resolved.end, rangeStart, rangeEnd)
+    ) {
       return windows;
     }
-    if (rangesOverlap(slotStart, derivedEnd, rangeStart, rangeEnd)) {
-      windows.push({
-        start: new Date(Math.max(slotStart.getTime(), rangeStart.getTime())),
-        end: new Date(Math.min(derivedEnd.getTime(), rangeEnd.getTime())),
-      });
+    windows.push({
+      start: new Date(Math.max(resolved.start.getTime(), rangeStart.getTime())),
+      end: new Date(Math.min(resolved.end.getTime(), rangeEnd.getTime())),
+    });
+    return windows;
+  }
+
+  const resolutionSlot = {
+    ...slot,
+    startDate: slot.startDate ?? fallbackStart ?? null,
+    endDate: slot.endDate ?? fallbackEnd ?? null,
+    timeZone: slot.timeZone ?? 'UTC',
+  };
+  const occurrences = enumerateRepeatingTimeSlotOccurrences({
+    slot: resolutionSlot,
+    windowStart: rangeStart,
+    windowEnd: rangeEnd,
+  });
+  occurrences.forEach((occurrence) => {
+    if (!rangesOverlap(occurrence.start, occurrence.end, rangeStart, rangeEnd)) {
+      return;
     }
-    return windows;
-  }
-
-  if (startMinutes === null || endMinutes === null || endMinutes <= startMinutes) {
-    return windows;
-  }
-
-  const days = normalizeWeekdays(slot);
-  if (!days.length) {
-    return windows;
-  }
-
-  const slotEnd = normalizeToDate(slot.endDate ?? fallbackEnd ?? null) ?? MAX_DATE;
-  if (!rangesOverlap(slotStart, slotEnd, rangeStart, rangeEnd)) {
-    return windows;
-  }
-
-  const overlapStart = new Date(Math.max(slotStart.getTime(), rangeStart.getTime()));
-  const overlapEnd = new Date(Math.min(slotEnd.getTime(), rangeEnd.getTime()));
-  if (overlapEnd.getTime() <= overlapStart.getTime()) {
-    return windows;
-  }
-
-  const cursor = new Date(overlapStart.getTime());
-  cursor.setHours(0, 0, 0, 0);
-  const finalDay = new Date(overlapEnd.getTime());
-  finalDay.setHours(0, 0, 0, 0);
-
-  while (cursor.getTime() <= finalDay.getTime()) {
-    if (days.includes(toMondayIndex(cursor))) {
-      const occurrenceStart = setMinutesOnDay(cursor, startMinutes);
-      const occurrenceEnd = setMinutesOnDay(cursor, endMinutes);
-      if (
-        occurrenceEnd.getTime() > occurrenceStart.getTime()
-        && rangesOverlap(occurrenceStart, occurrenceEnd, overlapStart, overlapEnd)
-      ) {
-        windows.push({
-          start: new Date(Math.max(occurrenceStart.getTime(), overlapStart.getTime())),
-          end: new Date(Math.min(occurrenceEnd.getTime(), overlapEnd.getTime())),
-        });
-      }
-    }
-    cursor.setDate(cursor.getDate() + 1);
-  }
-
+    windows.push({
+      start: new Date(Math.max(occurrence.start.getTime(), rangeStart.getTime())),
+      end: new Date(Math.min(occurrence.end.getTime(), rangeEnd.getTime())),
+    });
+  });
   return windows;
 };
 
@@ -461,6 +409,7 @@ const buildPublicRentalBookingBlocker = (
 });
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ fieldId: string }> }) {
+  try {
   const { fieldId } = await params;
   const session = await getOptionalSession(req);
   const canManageField = session
@@ -684,4 +633,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ fiel
     ),
     rentalSlots: filteredRentalSlots.map((slot) => slot),
   }, { status: 200 });
+  } catch (error) {
+    const repeatingTimeSlotResponse = repeatingTimeSlotValidationResponse(error);
+    if (repeatingTimeSlotResponse) {
+      return repeatingTimeSlotResponse;
+    }
+    throw error;
+  }
 }

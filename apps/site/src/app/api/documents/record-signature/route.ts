@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
+import { findGuardianAuthority } from '@/server/guardianAuthority';
+import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { requireSession } from '@/lib/permissions';
 import {
   normalizeSignerContext,
@@ -132,28 +134,14 @@ export async function POST(request: NextRequest) {
   }
 
   if (!session.isAdmin && userId !== session.userId) {
-    const parentLink = await prisma.parentChildLinks.findFirst({
-      where: {
-        parentId: session.userId,
-        childId: userId,
-        status: 'ACTIVE',
-      },
-      select: { id: true },
-    });
+    const parentLink = await findGuardianAuthority(prisma, session.userId, userId);
     if (!parentLink) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
   }
 
   if (!session.isAdmin && signerContext === 'parent_guardian' && childUserId) {
-    const parentLink = await prisma.parentChildLinks.findFirst({
-      where: {
-        parentId: session.userId,
-        childId: childUserId,
-        status: 'ACTIVE',
-      },
-      select: { id: true },
-    });
+    const parentLink = await findGuardianAuthority(prisma, session.userId, childUserId);
     if (!parentLink) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
@@ -162,14 +150,7 @@ export async function POST(request: NextRequest) {
   if (!session.isAdmin && signerContext === 'child') {
     const resolvedChildUserId = childUserId ?? userId;
     if (session.userId !== resolvedChildUserId) {
-      const parentLink = await prisma.parentChildLinks.findFirst({
-        where: {
-          parentId: session.userId,
-          childId: resolvedChildUserId,
-          status: 'ACTIVE',
-        },
-        select: { id: true },
-      });
+      const parentLink = await findGuardianAuthority(prisma, session.userId, resolvedChildUserId);
       if (!parentLink) {
         return NextResponse.json({ error: 'Child signatures must be completed by the child account.' }, { status: 403 });
       }
@@ -390,102 +371,123 @@ export async function POST(request: NextRequest) {
     );
   }
   const existingIsSigned = isSignedStatus(existing.status);
-  const now = new Date();
-  try {
-    await prisma.$transaction(async (tx) => {
-      await ensureDocumentSubject({
-        organizationId,
-        userId,
-        hostId: scopedChildUserId,
-      }, tx);
-      if (!existingIsSigned) {
-        await tx.signedDocuments.update({
-          where: { id: existing.id },
-          data: {
-            ...(existing.organizationId ? {} : { organizationId }),
-            updatedAt: now,
-            ...evidenceFields,
-            status: 'SIGNED',
-            signedAt: now.toISOString(),
-            ipAddress: resolveIpAddress(request),
-            requestId: request.headers.get('x-request-id') ?? null,
-          },
+  const persistAndSync = async (
+    client: PrismaClient | Prisma.TransactionClient,
+    passClient: boolean,
+  ): Promise<void> => {
+    const now = new Date();
+    await ensureDocumentSubject({
+      organizationId,
+      userId,
+      hostId: scopedChildUserId,
+    }, client);
+    if (!existingIsSigned) {
+      await client.signedDocuments.update({
+        where: { id: existing.id },
+        data: {
+          ...(existing.organizationId ? {} : { organizationId }),
+          updatedAt: now,
+          ...evidenceFields,
+          status: 'SIGNED',
+          signedAt: now.toISOString(),
+          ipAddress: resolveIpAddress(request),
+          requestId: request.headers.get('x-request-id') ?? null,
+        },
+      });
+    }
+    await createDocumentRequirementSatisfaction({
+      evidenceId: existing.id,
+      templateDocumentId: parsed.data.templateId,
+      documentRequirementId: signedTemplate.documentRequirementId,
+      organizationId,
+      documentSubjectId: evidenceFields.documentSubjectId,
+      scopeType: evidenceFields.scopeType,
+      scopeId: evidenceFields.scopeId,
+      requiredSignerRoles,
+      signerRole: signerContext,
+    }, client);
+
+    const syncChild = async (params: {
+      eventId?: string | null;
+      childUserId?: string | null;
+      parentUserId?: string | null;
+    }) => {
+      await syncChildRegistrationConsentStatus(
+        passClient ? { ...params, client } : params,
+      );
+    };
+
+    if (scopedChildUserId && signedTemplate?.signOnce) {
+      const registrations = await client.eventRegistrations.findMany({
+        where: {
+          registrantId: scopedChildUserId,
+          registrantType: 'CHILD',
+          status: { in: ['STARTED', 'PENDING', 'ACTIVE'] },
+        },
+        select: {
+          eventId: true,
+          parentId: true,
+        },
+      });
+
+      const syncTargetMap = new Map<string, { eventId: string; parentUserId?: string }>();
+      for (const registration of registrations) {
+        const normalizedEventId = normalizeText(registration.eventId);
+        if (!normalizedEventId) {
+          continue;
+        }
+        const parentUserId = normalizeText(registration.parentId);
+        const targetKey = `${normalizedEventId}:${parentUserId ?? ''}`;
+        if (!syncTargetMap.has(targetKey)) {
+          syncTargetMap.set(targetKey, {
+            eventId: normalizedEventId,
+            parentUserId,
+          });
+        }
+      }
+      for (const target of syncTargetMap.values()) {
+        await syncChild({
+          eventId: target.eventId,
+          childUserId: scopedChildUserId,
+          parentUserId: target.parentUserId,
         });
       }
-      await createDocumentRequirementSatisfaction({
-        evidenceId: existing.id,
-        templateDocumentId: parsed.data.templateId,
-        documentRequirementId: signedTemplate.documentRequirementId,
-        organizationId,
-        documentSubjectId: evidenceFields.documentSubjectId,
-        scopeType: evidenceFields.scopeType,
-        scopeId: evidenceFields.scopeId,
-        requiredSignerRoles,
-        signerRole: signerContext,
-      }, tx);
-    });
+    } else {
+      await syncChild({
+        eventId,
+        childUserId: scopedChildUserId,
+      });
+    }
+
+    if (teamId) {
+      const teamRegistrantId = scopedChildUserId ?? userId;
+      if (signedTemplate?.signOnce) {
+        await syncAllTeamRegistrationConsentStatusesForRegistrant({
+          registrantId: teamRegistrantId,
+          ...(passClient ? { client } : {}),
+        });
+      } else {
+        await syncTeamRegistrationConsentStatus({
+          teamId,
+          registrantId: teamRegistrantId,
+          parentUserId: signerContext === 'parent_guardian' ? userId : undefined,
+          ...(passClient ? { client } : {}),
+        });
+      }
+    }
+  };
+
+  try {
+    if (typeof prisma.$transaction === 'function') {
+      await prisma.$transaction((tx) => persistAndSync(tx, true));
+    } else {
+      await persistAndSync(prisma, false);
+    }
   } catch (error) {
     const message = error instanceof Error
       ? error.message
       : 'Unable to record signature.';
     return NextResponse.json({ error: message }, { status: 400 });
-  }
-
-  if (scopedChildUserId && signedTemplate?.signOnce) {
-    const registrations = await prisma.eventRegistrations.findMany({
-      where: {
-        registrantId: scopedChildUserId,
-        registrantType: 'CHILD',
-        status: { in: ['STARTED', 'PENDING', 'ACTIVE'] },
-      },
-      select: {
-        eventId: true,
-        parentId: true,
-      },
-    });
-
-    const syncTargetMap = new Map<string, { eventId: string; parentUserId?: string }>();
-    for (const registration of registrations) {
-      const normalizedEventId = normalizeText(registration.eventId);
-      if (!normalizedEventId) {
-        continue;
-      }
-      const parentUserId = normalizeText(registration.parentId);
-      const targetKey = `${normalizedEventId}:${parentUserId ?? ''}`;
-      if (!syncTargetMap.has(targetKey)) {
-        syncTargetMap.set(targetKey, {
-          eventId: normalizedEventId,
-          parentUserId,
-        });
-      }
-    }
-    const syncTargets = Array.from(syncTargetMap.values());
-
-    await Promise.all(syncTargets.map((target) => syncChildRegistrationConsentStatus({
-      eventId: target.eventId,
-      childUserId: scopedChildUserId,
-      parentUserId: target.parentUserId,
-    })));
-  } else {
-    await syncChildRegistrationConsentStatus({
-      eventId,
-      childUserId: scopedChildUserId,
-    });
-  }
-
-  if (teamId) {
-    const teamRegistrantId = scopedChildUserId ?? userId;
-    if (signedTemplate?.signOnce) {
-      await syncAllTeamRegistrationConsentStatusesForRegistrant({
-        registrantId: teamRegistrantId,
-      });
-    } else {
-      await syncTeamRegistrationConsentStatus({
-        teamId,
-        registrantId: teamRegistrantId,
-        parentUserId: signerContext === 'parent_guardian' ? userId : undefined,
-      });
-    }
   }
 
   return NextResponse.json({ ok: true }, { status: 200 });

@@ -1,6 +1,8 @@
 /** @jest-environment node */
 
+import { createHash } from 'node:crypto';
 import { NextRequest } from 'next/server';
+import { appVersionIsolationProbeResponseSchema } from '@/contracts/appVersion';
 
 const prismaMock = {
   appReleases: {
@@ -280,5 +282,46 @@ describe('GET /api/app-version', () => {
       ],
     }));
     expect(payload.latestVersion).toEqual(payload.releases[0]);
+  });
+  it('reports outbound provider isolation and database identity only for explicit contract probes', async () => {
+    const originalOutboundProvidersDisabled = process.env.MVP_TEST_DISABLE_OUTBOUND_PROVIDERS;
+    const originalDatabaseUrl = process.env.DATABASE_URL;
+    const databaseUrl = 'postgresql://mvp:mvp_password@127.0.0.1:5433/mvp_contract?schema=public';
+    process.env.MVP_TEST_DISABLE_OUTBOUND_PROVIDERS = '1';
+    process.env.DATABASE_URL = databaseUrl;
+
+    try {
+      prismaMock.appReleases.findMany.mockResolvedValue([androidRelease]);
+
+      const isolatedResponse = await GET(new NextRequest(
+        'http://localhost/api/app-version?platform=ANDROID&versionName=0.0.0&buildNumber=0&mvpTestIsolation=1',
+      ));
+      const isolatedPayload = await isolatedResponse.json();
+
+      const parsedIsolatedPayload = appVersionIsolationProbeResponseSchema.parse(isolatedPayload);
+      expect(parsedIsolatedPayload.outboundProvidersDisabled).toBe(true);
+      expect(parsedIsolatedPayload.databaseUrlHash).toBe(
+        createHash('sha256').update(databaseUrl, 'utf8').digest('hex'),
+      );
+
+      const normalResponse = await GET(new NextRequest(
+        'http://localhost/api/app-version?platform=ANDROID&versionName=0.0.0&buildNumber=0',
+      ));
+      const normalPayload = await normalResponse.json();
+
+      expect(normalPayload.outboundProvidersDisabled).toBeUndefined();
+      expect(normalPayload.databaseUrlHash).toBeUndefined();
+    } finally {
+      if (originalOutboundProvidersDisabled === undefined) {
+        delete process.env.MVP_TEST_DISABLE_OUTBOUND_PROVIDERS;
+      } else {
+        process.env.MVP_TEST_DISABLE_OUTBOUND_PROVIDERS = originalOutboundProvidersDisabled;
+      }
+      if (originalDatabaseUrl === undefined) {
+        delete process.env.DATABASE_URL;
+      } else {
+        process.env.DATABASE_URL = originalDatabaseUrl;
+      }
+    }
   });
 });

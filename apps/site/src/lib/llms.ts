@@ -35,7 +35,7 @@ For public, indexable searches, prefer these stable path forms:
 For combinable filters, use \`/discover\` and keep the complete active filter set in the query string. URL-encode values and repeat multi-value parameters instead of inventing new path segments. The default tab is events.
 
 - Shared parameters: \`tab=events|organizations|rentals|teams\`, \`q\`, and repeated \`sport\` values.
-- Event filters: repeated \`tags\` names, \`eventTypes\` values (\`EVENT\`, \`TOURNAMENT\`, \`LEAGUE\`, \`WEEKLY_EVENT\`, \`TRYOUT\`, or \`AFFILIATE\`), \`genders\` values (\`M\`, \`F\`, or \`C\`), \`skillDivisionTypeIds\`, \`ageDivisionTypeIds\`, \`priceMin\`, \`priceMax\`, \`startDate\`, and \`endDate\`.
+- Event filters: repeated \`tags\` names, \`eventTypes\` values (\`EVENT\`, \`TOURNAMENT\`, \`LEAGUE\`, \`WEEKLY_EVENT\`, or \`TRYOUT\`), \`genders\` values (\`M\`, \`F\`, or \`C\`), \`skillDivisionTypeIds\`, \`ageDivisionTypeIds\`, \`priceMin\`, \`priceMax\`, \`startDate\`, and \`endDate\`.
 - Organization filters: repeated organization-tag slugs in \`tags\`, plus \`genders\`, \`skillDivisionTypeIds\`, \`ageDivisionTypeIds\`, \`priceMin\`, and \`priceMax\`.
 - Rental filters: \`startHour\` and \`endHour\` as whole hours from 0 through 24.
 - Team filters: repeated \`teamDivisionTypeIds\` values.

@@ -92,6 +92,7 @@ jest.mock('@/server/events/eventRegistrations', () => ({
   acquireEventLockAndLoadStructure: (...args: unknown[]) => acquireEventLockAndLoadStructureMock(...args),
 }));
 jest.mock('@/server/events/weeklyOccurrences', () => ({
+  isActiveWeeklyParentEvent: () => false,
   isWeeklyParentEvent: () => false,
   isWeeklyOccurrenceJoinClosed: () => false,
   resolveWeeklyOccurrence: jest.fn(),
@@ -419,8 +420,10 @@ describe('public guest event registration route', () => {
         isComplete: true,
         requiredSignerRoles: ['participant'],
         completedSignerRoles: ['participant'],
+        sourceEvidenceId: 'participant_evidence',
       },
     ]);
+    txMock.signedDocuments.findMany.mockResolvedValueOnce([{ id: 'participant_evidence', status: 'SIGNED' }]);
     upsertEventRegistrationMock.mockResolvedValueOnce({
       id: 'registration_1',
       eventId: 'event_1',

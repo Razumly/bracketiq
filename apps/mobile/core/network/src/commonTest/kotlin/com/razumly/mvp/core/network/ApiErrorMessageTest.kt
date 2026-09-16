@@ -5,6 +5,19 @@ import kotlin.test.assertEquals
 
 class ApiErrorMessageTest {
     @Test
+    fun given_match_boundary_failure_when_decoded_then_both_platforms_use_the_same_error() {
+        val message = "The Match must be within the Event bounds. Set or extend Planned End before moving the Match."
+        val error = ApiException(409, "http://localhost/api/events/event/matches", """
+            {"code":"MATCH_OUTSIDE_EVENT_BOUNDS","error":"$message","eventId":"event",
+             "eventStart":"2027-01-04T08:00:00.000Z","eventEnd":"2027-01-04T20:00:00.000Z","matchIds":["match"]}
+        """.trimIndent())
+        val boundary = kotlin.test.assertNotNull(error.matchBoundaryError)
+        assertEquals(listOf("match"), boundary.matchIds)
+        assertEquals("event", boundary.eventId)
+        assertEquals(message, error.userMessage())
+    }
+
+    @Test
     fun extractApiErrorMessage_returns_error_field_from_http_envelope() {
         val message = extractApiErrorMessage(
             """HTTP 401 for http://10.0.2.2:3000/api/auth/login: {"error":"Invalid credentials"}"""

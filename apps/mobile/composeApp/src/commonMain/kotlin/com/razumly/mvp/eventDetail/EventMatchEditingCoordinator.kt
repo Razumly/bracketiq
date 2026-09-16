@@ -30,6 +30,7 @@ internal data class PreparedMatchBulkUpdate(
     val updates: List<MatchMVP>,
     val creates: List<StagedMatchCreate>,
     val deletes: List<String>,
+    val confirmation: String? = null,
 )
 
 internal sealed class MatchEditCommitPreparation {
@@ -39,11 +40,24 @@ internal sealed class MatchEditCommitPreparation {
 
 internal sealed class MatchEditCommitResult {
     object Success : MatchEditCommitResult()
+    object ConfirmationRequired : MatchEditCommitResult()
+    object Superseded : MatchEditCommitResult()
     data class Invalid(val errorMessage: String) : MatchEditCommitResult()
     data class Failure(val throwable: Exception) : MatchEditCommitResult()
 }
 
 internal class EventMatchEditingCoordinator {
+    private var commitGeneration = 0L
+    private var protectedDeletionPayload: PreparedMatchBulkUpdate? = null
+    private val _protectedDeletionConfirmation = MutableStateFlow<String?>(null)
+    val protectedDeletionConfirmation = _protectedDeletionConfirmation.asStateFlow()
+
+    fun dismissProtectedDeletionConfirmation() {
+        commitGeneration += 1
+        protectedDeletionPayload = null
+        _protectedDeletionConfirmation.value = null
+    }
+
     private val _isEditingMatches = MutableStateFlow(false)
     val isEditingMatches = _isEditingMatches.asStateFlow()
 
@@ -72,6 +86,7 @@ internal class EventMatchEditingCoordinator {
         selectedDivisionId: String?,
         buildRounds: (Map<String, MatchWithRelations>) -> List<List<MatchWithRelations?>>,
     ) {
+        dismissProtectedDeletionConfirmation()
         _editableMatches.value = matches.map { matchRelation ->
             matchRelation.copy(match = matchRelation.match.copy())
         }
@@ -102,6 +117,7 @@ internal class EventMatchEditingCoordinator {
     }
 
     fun cancelEditing() {
+        dismissProtectedDeletionConfirmation()
         _isEditingMatches.value = false
         _editableMatches.value = emptyList()
         _editableRounds.value = emptyList()
@@ -112,6 +128,7 @@ internal class EventMatchEditingCoordinator {
     }
 
     fun finishCommitSuccess() {
+        dismissProtectedDeletionConfirmation()
         _isEditingMatches.value = false
         _editableMatches.value = emptyList()
         _editableRounds.value = emptyList()
@@ -617,20 +634,41 @@ internal class EventMatchEditingCoordinator {
         updateMatchesBulk: suspend (PreparedMatchBulkUpdate) -> Result<List<MatchMVP>>,
         onCommitStarted: () -> Unit = {},
         onCommitFinished: () -> Unit = {},
+        confirmProtectedDeletion: Boolean = false,
     ): MatchEditCommitResult {
         val preparation = prepareCommit(isTournament = isTournament)
         if (preparation is MatchEditCommitPreparation.Invalid) {
             return MatchEditCommitResult.Invalid(preparation.errorMessage)
         }
         val payload = (preparation as MatchEditCommitPreparation.Valid).payload
+        if (confirmProtectedDeletion && protectedDeletionPayload != payload) {
+            dismissProtectedDeletionConfirmation()
+            return MatchEditCommitResult.Invalid("The Match draft changed. Save again to review the deletion.")
+        }
+        val request = if (confirmProtectedDeletion) {
+            payload.copy(confirmation = PROTECTED_MATCH_HISTORY_DELETE_CONFIRMATION)
+        } else {
+            payload
+        }
+        dismissProtectedDeletionConfirmation()
+        val generation = commitGeneration
 
         onCommitStarted()
         return try {
-            updateMatchesBulk(payload).getOrThrow()
+            updateMatchesBulk(request).getOrThrow()
+            if (generation != commitGeneration) return MatchEditCommitResult.Superseded
             finishCommitSuccess()
             MatchEditCommitResult.Success
         } catch (exception: Exception) {
-            MatchEditCommitResult.Failure(exception)
+            if (generation != commitGeneration) return MatchEditCommitResult.Superseded
+            val warning = protectedMatchDeletionWarning(exception, payload.deletes)
+            if (warning == null) {
+                MatchEditCommitResult.Failure(exception)
+            } else {
+                protectedDeletionPayload = payload
+                _protectedDeletionConfirmation.value = warning
+                MatchEditCommitResult.ConfirmationRequired
+            }
         } finally {
             onCommitFinished()
         }

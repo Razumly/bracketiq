@@ -1,27 +1,36 @@
 /** @jest-environment node */
 
-import { NextRequest } from 'next/server';
+import { NextRequest } from "next/server";
 
 const requireSessionMock = jest.fn();
 const hasOrgPermissionMock = jest.fn();
 const canManageEventMock = jest.fn();
+const bootstrapQueryMock = jest.fn();
 const loadCreateSnapshotMock = jest.fn();
 const loadSnapshotMock = jest.fn();
+const attachSnapshotBindingMock = jest.fn();
 const createEventEditorMock = jest.fn();
+const createScheduleProposalMock = jest.fn();
+const acceptScheduleProposalMock = jest.fn();
+const acceptPartialScheduleProposalMock = jest.fn();
+const rejectScheduleProposalMock = jest.fn();
 const saveEventEditorMock = jest.fn();
+const parseAcceptMock = jest.fn();
+const parseRejectMock = jest.fn();
 const parseCreateMock = jest.fn();
-const bootstrapQueryMock = jest.fn();
 const parseSaveMock = jest.fn();
 const prismaMock = { events: { findUnique: jest.fn() } };
 const deliverInvitesMock = jest.fn();
-const getRequestOriginMock = jest.fn(() => 'http://localhost');
+const getRequestOriginMock = jest.fn(() => "http://localhost");
 
 class MockEditorRevisionConflictError extends Error {
-  currentEditorRevision = 'current-editor';
-  currentStaffRevision = 'current-staff';
-  currentScheduleRevision = 'current-schedule';
+  currentEditorRevision = "current-editor";
+  currentStaffRevision = "current-staff";
+  currentScheduleRevision = "current-schedule";
   constructor() {
-    super('The editor changed while you were editing. Reload before saving again.');
+    super(
+      "The editor changed while you were editing. Reload before saving again.",
+    );
   }
 }
 class MockEditorInputError extends Error {
@@ -29,289 +38,581 @@ class MockEditorInputError extends Error {
     super(message);
   }
 }
+class MockEditorScheduleIntentError extends Error {}
+class MockEditorProposalInvalidError extends Error {}
+class MockEditorProposalStaleError extends Error {
+  currentBinding = null;
+}
 class MockEditorPermissionError extends Error {}
 
-
-jest.mock('@/lib/permissions', () => ({ requireSession: (...args: any[]) => requireSessionMock(...args) }));
-jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
-jest.mock('@/server/accessControl', () => ({
+jest.mock("@/lib/permissions", () => ({
+  requireSession: (...args: any[]) => requireSessionMock(...args),
+}));
+jest.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
+jest.mock("@/server/accessControl", () => ({
   hasOrgPermission: (...args: any[]) => hasOrgPermissionMock(...args),
   canManageEvent: (...args: any[]) => canManageEventMock(...args),
 }));
-jest.mock('@/lib/requestOrigin', () => ({ getRequestOrigin: (...args: any[]) => getRequestOriginMock(...args) }));
-jest.mock('@/contracts/eventEditor', () => ({
+jest.mock("@/lib/requestOrigin", () => ({
+  getRequestOrigin: (...args: any[]) => getRequestOriginMock(...args),
+}));
+jest.mock("@/contracts/eventEditor", () => ({
   EVENT_EDITOR_CONTRACT_VERSION: 3,
-  eventEditorBootstrapQuerySchema: { safeParse: (...args: any[]) => bootstrapQueryMock(...args) },
+  eventEditorBootstrapQuerySchema: {
+    safeParse: (...args: any[]) => bootstrapQueryMock(...args),
+  },
   parseCreateEventEditorCommand: (...args: any[]) => parseCreateMock(...args),
+  parseEventEditorAcceptPartialProposalCommand: (...args: any[]) =>
+    parseAcceptMock(...args),
+  parseEventEditorAcceptProposalCommand: (...args: any[]) =>
+    parseAcceptMock(...args),
+  parseEventEditorRejectProposalCommand: (...args: any[]) =>
+    parseRejectMock(...args),
   parseSaveEventEditorCommand: (...args: any[]) => parseSaveMock(...args),
-  projectEventEditorDraftNestedInput: (input: unknown) => (
-    jest.requireActual('@/contracts/eventEditor').projectEventEditorDraftNestedInput(input)
-  ),
+  projectEventEditorDraftNestedInput: (input: unknown) =>
+    jest
+      .requireActual("@/contracts/eventEditor")
+      .projectEventEditorDraftNestedInput(input),
 }));
-jest.mock('@/server/events/eventEditorSnapshot', () => ({
-  loadCreateEventEditorSnapshot: (...args: any[]) => loadCreateSnapshotMock(...args),
-  loadEventEditorSnapshot: (...args: any[]) => loadSnapshotMock(...args),
+jest.mock("@/server/events/eventEditorSnapshot", () => ({
+  loadCreateEventEditorSnapshot: (...args: unknown[]) =>
+    loadCreateSnapshotMock(...args),
+  loadEventEditorSnapshot: (...args: unknown[]) => loadSnapshotMock(...args),
 }));
-jest.mock('@/server/events/eventEditorSave', () => ({
-  createEventEditor: (...args: any[]) => createEventEditorMock(...args),
-  saveEventEditor: (...args: any[]) => saveEventEditorMock(...args),
+jest.mock("@/server/events/eventEditorRevisionBinding", () => ({
+  attachEventEditorRevisionBinding: (...args: unknown[]) =>
+    attachSnapshotBindingMock(...args),
+}));
+jest.mock("@/server/events/eventEditorSave", () => ({
+  acceptPartialScheduleProposalFromEditor: (...args: unknown[]) =>
+    acceptPartialScheduleProposalMock(...args),
+  acceptScheduleProposalFromEditor: (...args: unknown[]) =>
+    acceptScheduleProposalMock(...args),
+  createEventEditor: (...args: unknown[]) => createEventEditorMock(...args),
+  createScheduleProposalFromEditor: (...args: unknown[]) =>
+    createScheduleProposalMock(...args),
+  rejectScheduleProposalFromEditor: (...args: unknown[]) =>
+    rejectScheduleProposalMock(...args),
+  saveEventEditor: (...args: unknown[]) => saveEventEditorMock(...args),
   EditorCapabilityError: class extends Error {},
   EditorImmutableFieldError: class extends Error {},
   EditorInputError: MockEditorInputError,
   EditorPermissionError: MockEditorPermissionError,
   EditorRevisionConflictError: MockEditorRevisionConflictError,
+  EditorScheduleIntentError: MockEditorScheduleIntentError,
+  EventEditorProposalInvalidError: MockEditorProposalInvalidError,
+  EventEditorProposalStaleError: MockEditorProposalStaleError,
 }));
-jest.mock('@/server/events/eventStaffDelivery', () => ({
-  deliverEventStaffInvitesAfterCommit: (...args: any[]) => deliverInvitesMock(...args),
+jest.mock("@/server/events/eventStaffDelivery", () => ({
+  deliverEventStaffInvitesAfterCommit: (...args: unknown[]) =>
+    deliverInvitesMock(...args),
 }));
 
-import { GET as createGet, POST as createPost } from '@/app/api/events/editor/route';
-import { GET as editGet, PUT as editPut } from '@/app/api/events/[eventId]/editor/route';
+import {
+  DELETE as createDelete,
+  GET as createGet,
+  POST as createPost,
+  PUT as createPut,
+} from "@/app/api/events/editor/route";
+import {
+  GET as editGet,
+  PUT as editPut,
+} from "@/app/api/events/[eventId]/editor/route";
 import {
   emptyEditorSnapshot,
   legacyEventToEditorDraft,
-} from '@/app/events/[id]/schedule/components/eventForm/editorContractAdapters';
-import { eventEditorFixtures } from '@/test/eventEditor/fixtures';
+} from "@/app/events/[id]/schedule/components/eventForm/editorContractAdapters";
+import { eventEditorFixtures } from "@/test/eventEditor/fixtures";
 import {
   EventCreateOperationConflictError,
   EventCreateOperationPayloadMismatchError,
-} from '@/server/events/eventCreateOperationReplay';
-import { EventFieldReferenceError } from '@/server/repositories/events';
-import { TimeSlotValidationError } from '@/lib/timeSlotAvailability';
+} from "@/server/events/eventCreateOperationReplay";
+import { EventRegistrationUnitError } from "@/server/events/eventRegistrations";
+import { EventFieldReferenceError } from "@/server/repositories/events";
+import { TimeSlotValidationError } from "@/lib/timeSlotAvailability";
 import {
   EditorInputError,
   EditorPermissionError,
   EditorRevisionConflictError,
-} from '@/server/events/eventEditorSave';
+} from "@/server/events/eventEditorSave";
 
-const request = (url: string, method = 'GET', body?: unknown) => new NextRequest(url, {
-  method,
-  headers: { 'Content-Type': 'application/json' },
-  ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+const request = (url: string, method = "GET", body?: unknown) =>
+  new NextRequest(url, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+
+const editContext = (eventId = "event_1") => ({
+  params: Promise.resolve({ eventId }),
 });
 
-const editContext = (eventId = 'event_1') => ({ params: Promise.resolve({ eventId }) });
-
-describe('canonical editor routes', () => {
+describe("canonical editor routes", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    bootstrapQueryMock.mockImplementation((input: Record<string, string>) => (
-      input.eventType === 'NOT_A_MODE'
+    bootstrapQueryMock.mockImplementation((input: Record<string, string>) =>
+      input.eventType === "NOT_A_MODE"
         ? { success: false, error: { flatten: () => ({ fieldErrors: {} }) } }
-        : { success: true, data: input }
-    ));
-    requireSessionMock.mockResolvedValue({ userId: 'host_1', isAdmin: false });
+        : { success: true, data: input },
+    );
+    requireSessionMock.mockResolvedValue({ userId: "host_1", isAdmin: false });
     hasOrgPermissionMock.mockResolvedValue(true);
     canManageEventMock.mockResolvedValue(true);
-    prismaMock.events.findUnique.mockResolvedValue({ id: 'event_1', hostId: 'host_1' });
+    prismaMock.events.findUnique.mockResolvedValue({
+      id: "event_1",
+      hostId: "host_1",
+    });
     loadCreateSnapshotMock.mockResolvedValue({
       draft: { basics: { organizationId: null } },
       catalogs: { organizations: [] },
     });
+    attachSnapshotBindingMock.mockImplementation(async (snapshot) => snapshot);
   });
 
-  it('rejects malformed create bootstrap queries before loading catalogs', async () => {
-    const response = await createGet(request('http://localhost/api/events/editor?eventType=NOT_A_MODE'));
+  it("rejects malformed create bootstrap queries before loading catalogs", async () => {
+    const response = await createGet(
+      request("http://localhost/api/events/editor?eventType=NOT_A_MODE"),
+    );
     expect(response.status).toBe(400);
-    expect((await response.json()).code).toBe('INVALID_EDITOR_COMMAND');
+    expect((await response.json()).code).toBe("INVALID_EDITOR_COMMAND");
     expect(loadCreateSnapshotMock).not.toHaveBeenCalled();
   });
 
-  it('creates through the canonical command and returns its operation receipt and revisions', async () => {
+  it("creates through the canonical command and returns its operation receipt and revisions", async () => {
     const command = {
       contractVersion: 3,
-      createOperationId: 'create-operation-1',
+      createOperationId: "create-operation-1",
       expectedRevisions: {
-        editorRevision: 'new',
+        editorRevision: "new",
         staffRevision: null,
-        scheduleRevision: 'new',
+        scheduleRevision: "new",
       },
-      draft: { basics: { name: 'Fixture' } },
+      draft: { basics: { name: "Fixture" } },
     };
     const result = {
-      status: 'SAVED',
-      createOperationId: 'create-operation-1',
-      editorRevision: 'editor-revision-1',
-      staffRevision: 'staff-revision-1',
-      scheduleRevision: 'schedule-revision-1',
-      snapshot: { eventId: 'event_1' },
+      status: "SAVED",
+      createOperationId: "create-operation-1",
+      editorRevision: "editor-revision-1",
+      staffRevision: "staff-revision-1",
+      scheduleRevision: "schedule-revision-1",
+      snapshot: { eventId: "event_1" },
       questionIdMap: {},
     };
     parseCreateMock.mockReturnValue(command);
     createEventEditorMock.mockResolvedValue(result);
 
-    const response = await createPost(request('http://localhost/api/events/editor', 'POST', command));
+    const response = await createPost(
+      request("http://localhost/api/events/editor", "POST", command),
+    );
     expect(response.status).toBe(201);
     expect(await response.json()).toEqual(result);
     expect(createEventEditorMock).toHaveBeenCalledWith(
-      { userId: 'host_1', isAdmin: false },
+      { userId: "host_1", isAdmin: false },
       command,
       expect.objectContaining({ sendStaffInvites: expect.any(Function) }),
     );
   });
-  it('returns invalid-editor-input for missing field resources instead of an internal error', async () => {
+  it("returns a scheduled create proposal before calling the immediate create path", async () => {
     const command = {
       contractVersion: 3,
-      createOperationId: 'create-operation-1',
-      draft: { basics: { name: 'Fixture' } },
+      createOperationId: "proposal-operation-1",
+      draft: { basics: { eventType: "LEAGUE" } },
+      completion: { mode: "CREATE_AND_BUILD_SCHEDULE" },
+      hasScheduleProposalSupport: true,
+    };
+    const result = {
+      status: "PROPOSED",
+      createOperationId: command.createOperationId,
+      eventId: "event-proposal-1",
+      proposalRevision: "proposal-revision-1",
+      snapshot: { eventId: "event-proposal-1" },
     };
     parseCreateMock.mockReturnValue(command);
-    createEventEditorMock.mockRejectedValue(new EventFieldReferenceError(['field_missing']));
+    createScheduleProposalMock.mockResolvedValue(result);
 
-    const response = await createPost(request('http://localhost/api/events/editor', 'POST', command));
+    const response = await createPost(
+      request("http://localhost/api/events/editor", "POST", command),
+    );
 
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({
-      error: 'The selected field resources were not found: field_missing.',
-      code: 'INVALID_EDITOR_INPUT',
-    });
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual(result);
+    expect(createScheduleProposalMock).toHaveBeenCalledWith(
+      { userId: "host_1", isAdmin: false },
+      command,
+      expect.objectContaining({
+        sendStaffInvites: expect.any(Function),
+        onEventCreated: expect.any(Function),
+        onScheduleChanged: expect.any(Function),
+      }),
+    );
+    expect(createEventEditorMock).not.toHaveBeenCalled();
   });
-  it('returns typed Time Slot evidence for a create input failure', async () => {
+
+  it("uses the immediate create path for scheduled creates without capability support", async () => {
     const command = {
       contractVersion: 3,
-      createOperationId: 'create-operation-invalid-slot',
-      draft: { basics: { name: 'Fixture' } },
+      createOperationId: "scheduled-operation-1",
+      draft: { basics: { eventType: "LEAGUE" } },
+      completion: { mode: "CREATE_AND_BUILD_SCHEDULE" },
+    };
+    const result = {
+      status: "SAVED",
+      createOperationId: command.createOperationId,
+      snapshot: { eventId: "scheduled-event-1" },
     };
     parseCreateMock.mockReturnValue(command);
-    createEventEditorMock.mockRejectedValue(new TimeSlotValidationError(
-      'ONE_TIME_SLOT_CONFLICT',
-      'The selected Time Slots overlap.',
-      { slotIds: ['slot_1', 'slot_2'] },
-    ));
+    createEventEditorMock.mockResolvedValue(result);
 
-    const response = await createPost(request('http://localhost/api/events/editor', 'POST', command));
+    const response = await createPost(
+      request("http://localhost/api/events/editor", "POST", command),
+    );
 
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({
-      error: 'The selected Time Slots overlap.',
-      code: 'INVALID_TIME_SLOT',
-      slotIds: ['slot_1', 'slot_2'],
-    });
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual(result);
+    expect(createEventEditorMock).toHaveBeenCalled();
+    expect(createScheduleProposalMock).not.toHaveBeenCalled();
   });
-  it('maps invalid staff input to a client-correctable create response', async () => {
+
+  it("accepts a proposal through the canonical PUT route", async () => {
     const command = {
       contractVersion: 3,
-      createOperationId: 'create-operation-invalid-staff',
-      draft: { basics: { name: 'Fixture' } },
+      createOperationId: "proposal-operation-1",
+      proposalRevision: "proposal-revision-1",
+      draft: { basics: { name: "Proposal fixture" } },
+    };
+    const result = {
+      status: "SAVED",
+      snapshot: { eventId: "event-proposal-1" },
+    };
+    parseAcceptMock.mockReturnValue(command);
+    acceptScheduleProposalMock.mockResolvedValue(result);
+
+    const response = await createPut(
+      request("http://localhost/api/events/editor", "PUT", command),
+    );
+
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual(result);
+    expect(acceptScheduleProposalMock).toHaveBeenCalledWith(
+      { userId: "host_1", isAdmin: false },
+      command.createOperationId,
+      command.proposalRevision,
+      command.draft,
+      expect.objectContaining({
+        sendStaffInvites: expect.any(Function),
+        onEventCreated: expect.any(Function),
+        onScheduleChanged: expect.any(Function),
+      }),
+    );
+  });
+  it("dispatches explicit partial acceptance with its fresh identity", async () => {
+    const command = {
+      contractVersion: 3,
+      createOperationId: "proposal-operation-1",
+      proposalRevision: "proposal-revision-1",
+      acceptanceMode: "PARTIAL",
+      acceptanceOperationId: "acceptance-operation-1",
+      draft: { basics: { name: "Proposal fixture" } },
+    };
+    const result = {
+      status: "SAVED",
+      acceptanceOperationId: command.acceptanceOperationId,
+      snapshot: { eventId: "event-proposal-1" },
+    };
+    parseAcceptMock.mockReturnValue(command);
+    acceptPartialScheduleProposalMock.mockResolvedValue(result);
+
+    const response = await createPut(
+      request("http://localhost/api/events/editor", "PUT", command),
+    );
+
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual(result);
+    expect(acceptPartialScheduleProposalMock).toHaveBeenCalledWith(
+      { userId: "host_1", isAdmin: false },
+      command.createOperationId,
+      command.proposalRevision,
+      command.acceptanceOperationId,
+      command.draft,
+      expect.objectContaining({
+        onScheduleChanged: expect.any(Function),
+      }),
+    );
+    expect(acceptScheduleProposalMock).not.toHaveBeenCalled();
+  });
+  it("maps stale partial acceptance to EDITOR_PROPOSAL_STALE", async () => {
+    const command = {
+      contractVersion: 3,
+      createOperationId: "proposal-operation-stale",
+      proposalRevision: "proposal-revision-stale",
+      acceptanceMode: "PARTIAL",
+      acceptanceOperationId: "acceptance-operation-stale",
+      draft: { basics: { name: "Proposal fixture" } },
+    };
+    parseAcceptMock.mockReturnValue(command);
+    acceptPartialScheduleProposalMock.mockRejectedValue(
+      new MockEditorProposalStaleError(
+        "The schedule proposal changed before acceptance.",
+      ),
+    );
+
+    const response = await createPut(
+      request("http://localhost/api/events/editor", "PUT", command),
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: "The schedule proposal changed before acceptance.",
+      code: "EDITOR_PROPOSAL_STALE",
+    });
+    expect(acceptPartialScheduleProposalMock).toHaveBeenCalledTimes(1);
+    expect(acceptScheduleProposalMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a proposal through the canonical DELETE route", async () => {
+    const command = {
+      contractVersion: 3,
+      createOperationId: "proposal-operation-1",
+      proposalRevision: "proposal-revision-1",
+    };
+    parseRejectMock.mockReturnValue(command);
+    rejectScheduleProposalMock.mockResolvedValue(undefined);
+
+    const response = await createDelete(
+      request("http://localhost/api/events/editor", "DELETE", command),
+    );
+
+    expect(response.status).toBe(204);
+    expect(rejectScheduleProposalMock).toHaveBeenCalledWith(
+      { userId: "host_1", isAdmin: false },
+      command.createOperationId,
+      command.proposalRevision,
+    );
+  });
+  it("returns invalid-editor-input for missing field resources instead of an internal error", async () => {
+    const command = {
+      contractVersion: 3,
+      createOperationId: "create-operation-1",
+      draft: { basics: { name: "Fixture" } },
     };
     parseCreateMock.mockReturnValue(command);
     createEventEditorMock.mockRejectedValue(
-      new EditorInputError('Organization events can only assign active organization hosts and officials.'),
+      new EventFieldReferenceError(["field_missing"]),
     );
 
-    const response = await createPost(request('http://localhost/api/events/editor', 'POST', command));
+    const response = await createPost(
+      request("http://localhost/api/events/editor", "POST", command),
+    );
 
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({
-      error: 'Organization events can only assign active organization hosts and officials.',
-      code: 'INVALID_EDITOR_INPUT',
+      error: "The selected field resources were not found: field_missing.",
+      code: "INVALID_EDITOR_INPUT",
     });
   });
-  it('returns current revisions for a stale create command', async () => {
+  it("returns typed registration-unit errors from create", async () => {
     const command = {
       contractVersion: 3,
-      createOperationId: 'create-operation-stale',
-      draft: { basics: { name: 'Fixture' } },
+      createOperationId: "create-operation-invalid-unit",
+      draft: { basics: { name: "League" } },
+    };
+    parseCreateMock.mockReturnValue(command);
+    createEventEditorMock.mockRejectedValue(
+      new EventRegistrationUnitError("LEAGUE", false),
+    );
+
+    const response = await createPost(
+      request("http://localhost/api/events/editor", "POST", command),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "LEAGUE events require team registration.",
+      code: "INVALID_EVENT_REGISTRATION_UNIT",
+      field: "teamSignup",
+      details: { eventType: "LEAGUE", teamSignup: false },
+    });
+  });
+  it("returns typed Time Slot evidence for a create input failure", async () => {
+    const command = {
+      contractVersion: 3,
+      createOperationId: "create-operation-invalid-slot",
+      draft: { basics: { name: "Fixture" } },
+    };
+    parseCreateMock.mockReturnValue(command);
+    createEventEditorMock.mockRejectedValue(
+      new TimeSlotValidationError(
+        "ONE_TIME_SLOT_CONFLICT",
+        "The selected Time Slots overlap.",
+        { slotIds: ["slot_1", "slot_2"] },
+      ),
+    );
+
+    const response = await createPost(
+      request("http://localhost/api/events/editor", "POST", command),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "The selected Time Slots overlap.",
+      code: "INVALID_TIME_SLOT",
+      slotIds: ["slot_1", "slot_2"],
+    });
+  });
+  it("maps invalid staff input to a client-correctable create response", async () => {
+    const command = {
+      contractVersion: 3,
+      createOperationId: "create-operation-invalid-staff",
+      draft: { basics: { name: "Fixture" } },
+    };
+    parseCreateMock.mockReturnValue(command);
+    createEventEditorMock.mockRejectedValue(
+      new EditorInputError(
+        "Organization events can only assign active organization hosts and officials.",
+      ),
+    );
+
+    const response = await createPost(
+      request("http://localhost/api/events/editor", "POST", command),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error:
+        "Organization events can only assign active organization hosts and officials.",
+      code: "INVALID_EDITOR_INPUT",
+    });
+  });
+  it("returns current revisions for a stale create command", async () => {
+    const command = {
+      contractVersion: 3,
+      createOperationId: "create-operation-stale",
+      draft: { basics: { name: "Fixture" } },
     };
     parseCreateMock.mockReturnValue(command);
     createEventEditorMock.mockRejectedValue(new EditorRevisionConflictError());
 
-    const response = await createPost(request('http://localhost/api/events/editor', 'POST', command));
+    const response = await createPost(
+      request("http://localhost/api/events/editor", "POST", command),
+    );
 
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({
-      error: 'The editor changed while you were editing. Reload before saving again.',
-      code: 'EDITOR_REVISION_CONFLICT',
-      editorRevision: 'current-editor',
-      staffRevision: 'current-staff',
-      scheduleRevision: 'current-schedule',
+      error:
+        "The editor changed while you were editing. Reload before saving again.",
+      code: "EDITOR_REVISION_CONFLICT",
+      editorRevision: "current-editor",
+      staffRevision: "current-staff",
+      scheduleRevision: "current-schedule",
     });
   });
 
-  it('returns a typed authority error when creation is not permitted', async () => {
+  it("returns a typed authority error when creation is not permitted", async () => {
     const command = {
       contractVersion: 3,
-      createOperationId: 'create-operation-forbidden',
-      draft: { basics: { name: 'Fixture' } },
+      createOperationId: "create-operation-forbidden",
+      draft: { basics: { name: "Fixture" } },
     };
     parseCreateMock.mockReturnValue(command);
-    createEventEditorMock.mockRejectedValue(new EditorPermissionError('Not permitted.'));
+    createEventEditorMock.mockRejectedValue(
+      new EditorPermissionError("Not permitted."),
+    );
 
-    const response = await createPost(request('http://localhost/api/events/editor', 'POST', command));
+    const response = await createPost(
+      request("http://localhost/api/events/editor", "POST", command),
+    );
 
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({
-      error: 'Not permitted.',
-      code: 'EDITOR_PERMISSION_DENIED',
+      error: "Not permitted.",
+      code: "EDITOR_PERMISSION_DENIED",
     });
   });
-  it('returns diagnostic details for unexpected create failures', async () => {
+  it("returns diagnostic details for unexpected create failures", async () => {
     const command = {
       contractVersion: 3,
-      createOperationId: 'create-operation-unexpected-failure',
-      draft: { basics: { name: 'Fixture' } },
+      createOperationId: "create-operation-unexpected-failure",
+      draft: { basics: { name: "Fixture" } },
     };
     parseCreateMock.mockReturnValue(command);
-    createEventEditorMock.mockRejectedValue(new Error('Database write failed.'));
+    createEventEditorMock.mockRejectedValue(
+      new Error("Database write failed."),
+    );
 
-    const response = await createPost(request('http://localhost/api/events/editor', 'POST', command));
+    const response = await createPost(
+      request("http://localhost/api/events/editor", "POST", command),
+    );
     const body = await response.json();
 
     expect(response.status).toBe(500);
-    expect(body).toEqual(expect.objectContaining({
-      code: 'EDITOR_SAVE_FAILED',
-      details: 'Database write failed.',
-      requestId: expect.any(String),
-    }));
-    expect(body.error).toContain('Database write failed.');
+    expect(body).toEqual(
+      expect.objectContaining({
+        code: "EDITOR_SAVE_FAILED",
+        details: "Database write failed.",
+        requestId: expect.any(String),
+      }),
+    );
+    expect(body.error).toContain("Database write failed.");
     expect(body.error).toContain(body.requestId);
   });
 
-
-
-  it('maps a create payload mismatch to a typed conflict without retrying persistence', async () => {
+  it("maps a create payload mismatch to a typed conflict without retrying persistence", async () => {
     const command = {
       contractVersion: 3,
-      createOperationId: 'create-operation-1',
-      draft: { basics: { name: 'Fixture' } },
+      createOperationId: "create-operation-1",
+      draft: { basics: { name: "Fixture" } },
     };
     parseCreateMock.mockReturnValue(command);
-    createEventEditorMock.mockRejectedValue(new EventCreateOperationPayloadMismatchError());
+    createEventEditorMock.mockRejectedValue(
+      new EventCreateOperationPayloadMismatchError(),
+    );
 
-    const response = await createPost(request('http://localhost/api/events/editor', 'POST', command));
+    const response = await createPost(
+      request("http://localhost/api/events/editor", "POST", command),
+    );
 
     expect(response.status).toBe(409);
-    expect(await response.json()).toEqual(expect.objectContaining({
-      code: 'CREATE_OPERATION_PAYLOAD_MISMATCH',
-    }));
+    expect(await response.json()).toEqual(
+      expect.objectContaining({
+        code: "CREATE_OPERATION_PAYLOAD_MISMATCH",
+      }),
+    );
     expect(createEventEditorMock).toHaveBeenCalledTimes(1);
   });
 
-  it('maps an in-flight create operation to a retryable typed conflict', async () => {
+  it("maps an in-flight create operation to a retryable typed conflict", async () => {
     const command = {
       contractVersion: 3,
-      createOperationId: 'create-operation-1',
-      draft: { basics: { name: 'Fixture' } },
+      createOperationId: "create-operation-1",
+      draft: { basics: { name: "Fixture" } },
     };
     parseCreateMock.mockReturnValue(command);
-    createEventEditorMock.mockRejectedValue(new EventCreateOperationConflictError());
+    createEventEditorMock.mockRejectedValue(
+      new EventCreateOperationConflictError(),
+    );
 
-    const response = await createPost(request('http://localhost/api/events/editor', 'POST', command));
+    const response = await createPost(
+      request("http://localhost/api/events/editor", "POST", command),
+    );
 
     expect(response.status).toBe(409);
-    expect(await response.json()).toEqual(expect.objectContaining({
-      code: 'CREATE_OPERATION_CONFLICT',
-    }));
+    expect(await response.json()).toEqual(
+      expect.objectContaining({
+        code: "CREATE_OPERATION_CONFLICT",
+      }),
+    );
   });
-  it('returns a versioned create bootstrap with one operation identity and preserves query intent', async () => {
+  it("returns a versioned create bootstrap with one operation identity and preserves query intent", async () => {
     const snapshot = {
       draft: { basics: { organizationId: null } },
       catalogs: { organizations: [] },
     };
     loadCreateSnapshotMock.mockResolvedValue(snapshot);
-    const response = await createGet(request(
-      'http://localhost/api/events/editor?eventType=EVENT&sportId=sport_1&start=2026-09-01T10%3A00%3A00.000Z',
-    ));
+    const response = await createGet(
+      request(
+        "http://localhost/api/events/editor?eventType=EVENT&sportId=sport_1&start=2026-09-01T10%3A00%3A00.000Z",
+      ),
+    );
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -322,68 +623,82 @@ describe('canonical editor routes', () => {
     });
     expect(loadCreateSnapshotMock).toHaveBeenCalledWith(
       {
-        eventType: 'EVENT',
-        sportId: 'sport_1',
-        start: '2026-09-01T10:00:00.000Z',
+        eventType: "EVENT",
+        sportId: "sport_1",
+        start: "2026-09-01T10:00:00.000Z",
       },
-      { actor: { userId: 'host_1', isAdmin: false } },
+      { actor: { userId: "host_1", isAdmin: false } },
     );
   });
 
-  it('maps stale edit revisions to a conflict without invoking persistence twice', async () => {
-    const command = { contractVersion: 1, editorRevision: 'old', staffRevision: 'old', draft: {} };
+  it("maps stale edit revisions to a conflict without invoking persistence twice", async () => {
+    const command = {
+      contractVersion: 1,
+      editorRevision: "old",
+      staffRevision: "old",
+      draft: {},
+    };
     parseSaveMock.mockReturnValue(command);
     saveEventEditorMock.mockRejectedValue(new EditorRevisionConflictError());
 
-    const response = await editPut(request('http://localhost/api/events/event_1/editor', 'PUT', command), editContext());
+    const response = await editPut(
+      request("http://localhost/api/events/event_1/editor", "PUT", command),
+      editContext(),
+    );
     expect(response.status).toBe(409);
-    expect(await response.json()).toEqual(expect.objectContaining({
-      code: 'EDITOR_REVISION_CONFLICT',
-      editorRevision: 'current-editor',
-      staffRevision: 'current-staff',
-    }));
+    expect(await response.json()).toEqual(
+      expect.objectContaining({
+        code: "EDITOR_REVISION_CONFLICT",
+        editorRevision: "current-editor",
+        staffRevision: "current-staff",
+      }),
+    );
     expect(saveEventEditorMock).toHaveBeenCalledTimes(1);
   });
-  it('normalizes a version-3 legacy BUILD_IF_MISSING Save at the PUT boundary', async () => {
-    const fixture = eventEditorFixtures.find(({ name }) => name === 'single-division league')!.event;
+  it("normalizes a version-3 legacy BUILD_IF_MISSING Save at the PUT boundary", async () => {
+    const fixture = eventEditorFixtures.find(
+      ({ name }) => name === "single-division league",
+    )!.event;
     const draft = legacyEventToEditorDraft(fixture);
     const command = {
       contractVersion: 3,
-      editorRevision: 'editor-revision-1',
+      editorRevision: "editor-revision-1",
       staffRevision: null,
       draft,
       scheduleTransition: {
-        mode: 'BUILD_IF_MISSING',
-        expectedScheduleRevision: 'schedule-revision-1',
+        mode: "BUILD_IF_MISSING",
+        expectedScheduleRevision: "schedule-revision-1",
       },
     };
-    const snapshot = emptyEditorSnapshot(draft, 'EDIT');
+    const snapshot = emptyEditorSnapshot(draft, "EDIT");
     const result = {
-      status: 'SAVED',
+      status: "SAVED",
       snapshot: {
         ...snapshot,
-        eventId: 'event_1',
-        editorRevision: 'editor-revision-2',
+        eventId: "event_1",
+        editorRevision: "editor-revision-2",
         scheduleState: {
           ...snapshot.scheduleState,
-          revision: 'schedule-revision-2',
+          revision: "schedule-revision-2",
         },
       },
       questionIdMap: {},
-      staffEmailDelivery: 'NOT_REQUESTED',
+      staffEmailDelivery: "NOT_REQUESTED",
       scheduleOutcome: {
-        status: 'NOT_REQUESTED',
+        status: "NOT_REQUESTED",
         matchCount: 0,
         warnings: [],
       },
     };
-    parseSaveMock.mockImplementation((input: unknown) => (
-      jest.requireActual('@/contracts/eventEditor').parseSaveEventEditorCommand(input)
-    ));
+    parseSaveMock.mockImplementation((input: unknown) =>
+      jest
+        .requireActual("@/contracts/eventEditor")
+        .parseSaveEventEditorCommand(input),
+    );
     saveEventEditorMock.mockResolvedValue(result);
 
     const response = await editPut(
-      request('http://localhost/api/events/event_1/editor', 'PUT', command),
+      request("http://localhost/api/events/event_1/editor", "PUT", command),
       editContext(),
     );
     const body = await response.json();
@@ -391,68 +706,87 @@ describe('canonical editor routes', () => {
 
     expect(response.status).toBe(200);
     expect(saveEventEditorMock).toHaveBeenCalledTimes(1);
-    expect(domainCommand).toEqual(expect.objectContaining({
-      scheduleTransition: { mode: 'PRESERVE' },
-    }));
-    expect(domainCommand).toEqual(expect.objectContaining({
-      scheduleTransition: expect.not.objectContaining({
-        expectedScheduleRevision: expect.anything(),
+    expect(domainCommand).toEqual(
+      expect.objectContaining({
+        scheduleTransition: { mode: "PRESERVE" },
       }),
-    }));
-    expect(body).toEqual(expect.objectContaining({
-      status: 'SAVED',
-      scheduleOutcome: {
-        status: 'NOT_REQUESTED',
-        matchCount: 0,
-        warnings: [],
-      },
-    }));
+    );
+    expect(domainCommand).toEqual(
+      expect.objectContaining({
+        scheduleTransition: expect.not.objectContaining({
+          expectedScheduleRevision: expect.anything(),
+        }),
+      }),
+    );
+    expect(body).toEqual(
+      expect.objectContaining({
+        status: "SAVED",
+        scheduleOutcome: {
+          status: "NOT_REQUESTED",
+          matchCount: 0,
+          warnings: [],
+        },
+      }),
+    );
   });
-  it('returns diagnostic details for unexpected edit failures', async () => {
-    const command = { contractVersion: 1, editorRevision: 'current', staffRevision: 'current', draft: {} };
+  it("returns diagnostic details for unexpected edit failures", async () => {
+    const command = {
+      contractVersion: 1,
+      editorRevision: "current",
+      staffRevision: "current",
+      draft: {},
+    };
     parseSaveMock.mockReturnValue(command);
-    saveEventEditorMock.mockRejectedValue(new Error('Database update failed.'));
+    saveEventEditorMock.mockRejectedValue(new Error("Database update failed."));
 
-    const response = await editPut(request('http://localhost/api/events/event_1/editor', 'PUT', command), editContext());
+    const response = await editPut(
+      request("http://localhost/api/events/event_1/editor", "PUT", command),
+      editContext(),
+    );
     const body = await response.json();
 
     expect(response.status).toBe(500);
-    expect(body).toEqual(expect.objectContaining({
-      code: 'EDITOR_SAVE_FAILED',
-      details: 'Database update failed.',
-      requestId: expect.any(String),
-    }));
-    expect(body.error).toContain('Database update failed.');
+    expect(body).toEqual(
+      expect.objectContaining({
+        code: "EDITOR_SAVE_FAILED",
+        details: "Database update failed.",
+        requestId: expect.any(String),
+      }),
+    );
+    expect(body.error).toContain("Database update failed.");
     expect(body.error).toContain(body.requestId);
   });
 
-
-  it('returns the canonical snapshot with read-only capabilities when mutation is not authorized', async () => {
+  it("returns the canonical snapshot with read-only capabilities when mutation is not authorized", async () => {
     loadSnapshotMock.mockResolvedValueOnce({
-      eventId: 'event_1',
+      eventId: "event_1",
       capabilities: {
         canEdit: false,
         canManageStaff: false,
         canDelegateHost: false,
         readOnly: true,
-        readOnlyReason: 'NOT_AUTHORIZED',
+        readOnlyReason: "NOT_AUTHORIZED",
       },
     });
 
-    const response = await editGet(request('http://localhost/api/events/event_1/editor'), editContext());
+    const response = await editGet(
+      request("http://localhost/api/events/event_1/editor"),
+      editContext(),
+    );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual(expect.objectContaining({
-      eventId: 'event_1',
-      capabilities: expect.objectContaining({
-        canEdit: false,
-        readOnly: true,
-        readOnlyReason: 'NOT_AUTHORIZED',
+    expect(await response.json()).toEqual(
+      expect.objectContaining({
+        eventId: "event_1",
+        capabilities: expect.objectContaining({
+          canEdit: false,
+          readOnly: true,
+          readOnlyReason: "NOT_AUTHORIZED",
+        }),
       }),
-    }));
-    expect(loadSnapshotMock).toHaveBeenCalledWith(
-      'event_1',
-      { actor: { userId: 'host_1', isAdmin: false } },
     );
+    expect(loadSnapshotMock).toHaveBeenCalledWith("event_1", {
+      actor: { userId: "host_1", isAdmin: false },
+    });
   });
 });

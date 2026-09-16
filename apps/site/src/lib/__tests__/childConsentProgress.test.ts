@@ -1,12 +1,16 @@
 /** @jest-environment node */
 
 const prismaMock = {
+  $executeRaw: jest.fn(),
   eventRegistrations: {
     findFirst: jest.fn(),
     update: jest.fn(),
   },
   events: {
     findUnique: jest.fn(),
+  },
+  divisions: {
+    findMany: jest.fn().mockResolvedValue([]),
   },
   templateDocuments: {
     findMany: jest.fn(),

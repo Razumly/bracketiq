@@ -3,15 +3,11 @@ import { act, renderHook } from '@testing-library/react';
 import type { EventFormValues } from '../../formTypes';
 import { useEventFormSectionsController } from '../useEventFormSectionsController';
 
-const mockExpandSection = jest.fn();
 const mockNavigation = {
     activeSectionId: 'section-basic-information',
-    collapsedSections: {},
-    expandSection: mockExpandSection,
     fieldNamesCollapsed: false,
     scrollToSection: jest.fn(),
     setFieldNamesCollapsed: jest.fn(),
-    toggleSectionCollapse: jest.fn(),
 };
 
 jest.mock('../useEventFormSectionNavigation', () => ({
@@ -36,7 +32,6 @@ const buildEventData = (overrides: Partial<EventFormValues> = {}): EventFormValu
 const renderController = (overrides: Partial<Parameters<typeof useEventFormSectionsController>[0]> = {}) => {
     const setManualPaymentsEnabled = jest.fn();
     const rendered = renderHook(() => useEventFormSectionsController({
-        collapseDefaults: {},
         eventData: buildEventData(),
         isAffiliateEvent: false,
         manualPaymentsEnabled: true,
@@ -70,29 +65,32 @@ describe('useEventFormSectionsController', () => {
             'Schedule',
         ]));
     });
+    it.each([false, true])('shows schedule construction when automated scheduling is disabled (rental slots: %s)', (usesRentalSlots) => {
+        const { result } = renderController({
+            eventData: buildEventData({ isAutomatedScheduling: false }),
+            usesRentalSlots,
+        });
 
-    it('hides operational sections for affiliate listings', () => {
+        expect(result.current.showScheduleConfig).toBe(true);
+        expect(result.current.visibleSectionNavItems.map((item) => item.label)).toContain('Schedule');
+    });
+
+    it('keeps operational sections for external registration', () => {
         const { result } = renderController({ isAffiliateEvent: true });
 
         expect(result.current.showManualPaymentsSection).toBe(false);
-        expect(result.current.showMatchRulesSection).toBe(false);
-        expect(result.current.showStaffSection).toBe(false);
-        expect(result.current.showScoringConfigSection).toBe(false);
-        expect(result.current.showScheduleConfig).toBe(false);
-        expect(result.current.visibleSectionNavItems.map((item) => item.label)).toEqual([
-            'Basic Information',
-            'Event Details',
-            'Divisions',
-        ]);
+        expect(result.current.showMatchRulesSection).toBe(true);
+        expect(result.current.showStaffSection).toBe(true);
+        expect(result.current.showScoringConfigSection).toBe(true);
+        expect(result.current.showScheduleConfig).toBe(true);
     });
 
-    it('expands manual payment settings when they are enabled', () => {
+    it('updates manual payment settings when they are enabled', () => {
         const { result, setManualPaymentsEnabled } = renderController({ manualPaymentsEnabled: false });
 
         act(() => result.current.handleManualPaymentsChange(true));
 
         expect(setManualPaymentsEnabled).toHaveBeenCalledWith(true);
-        expect(mockExpandSection).toHaveBeenCalledWith('section-manual-payments');
     });
 
     it('adds validation counts to visible navigation items', () => {

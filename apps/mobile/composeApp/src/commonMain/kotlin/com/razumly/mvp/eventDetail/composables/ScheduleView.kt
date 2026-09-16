@@ -147,6 +147,7 @@ private const val EVENT_CARD_IMAGE_WIDTH_DP = 96
 fun ScheduleView(
     items: List<ScheduleItem>,
     fields: List<FieldWithMatches>,
+    unscheduledMatches: List<MatchWithRelations> = emptyList(),
     resourceLabels: SportResourceLabels = GENERIC_SPORT_RESOURCE_LABELS,
     resourceLabelsByFieldId: Map<String, SportResourceLabels> = emptyMap(),
     showFab: (Boolean) -> Unit,
@@ -180,7 +181,7 @@ fun ScheduleView(
     },
 ) {
     val currentShowFab by rememberUpdatedState(showFab)
-    if (items.isEmpty()) {
+    if (items.isEmpty() && unscheduledMatches.isEmpty()) {
         LaunchedEffect(Unit) {
             currentShowFab(true)
         }
@@ -198,11 +199,16 @@ fun ScheduleView(
         items.sortedBy { it.start }
     }
     var showOnlyMyMatches by rememberSaveable { mutableStateOf(false) }
-    val hasTrackedMatches = remember(sortedItems, trackedUserIds) {
-        trackedUserIds.isNotEmpty() && sortedItems.any { item ->
+    val hasTrackedMatches = remember(sortedItems, unscheduledMatches, trackedUserIds) {
+        trackedUserIds.isNotEmpty() && (sortedItems.any { item ->
             val match = (item as? ScheduleItem.MatchEntry)?.match ?: return@any false
             matchIncludesTrackedUsers(match, trackedUserIds)
-        }
+        } || unscheduledMatches.any { matchIncludesTrackedUsers(it, trackedUserIds) })
+    }
+    val displayedUnscheduledMatches = remember(unscheduledMatches, showOnlyMyMatches, trackedUserIds) {
+        unscheduledMatches.filter {
+            !showOnlyMyMatches || matchIncludesTrackedUsers(it, trackedUserIds)
+        }.sortedBy { it.match.matchId }
     }
     LaunchedEffect(hasTrackedMatches) {
         if (!hasTrackedMatches && showOnlyMyMatches) {
@@ -357,6 +363,31 @@ fun ScheduleView(
             if (topContentPadding > 0.dp) {
                 item(key = "division_pill_spacer") {
                     Spacer(modifier = Modifier.height(topContentPadding))
+                }
+            }
+            if (displayedUnscheduledMatches.isNotEmpty()) {
+                item(key = "unscheduled_heading") {
+                    Text(
+                        "Unscheduled matches (${displayedUnscheduledMatches.size})",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(16.dp),
+                    )
+                }
+                items(displayedUnscheduledMatches, key = { "unscheduled-${it.match.id}" }) { match ->
+                    Column(
+                        modifier = Modifier.fillMaxWidth()
+                            .clickable(role = Role.Button) { onMatchClick(match) }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text("Match ${match.match.matchId}", style = MaterialTheme.typography.titleSmall)
+                        val team1 = match.team1?.name ?: if (match.match.team1Id == null) "TBD" else "Team unavailable"
+                        val team2 = match.team2?.name ?: if (match.match.team2Id == null) "TBD" else "Team unavailable"
+                        Text("$team1 vs $team2")
+                        Text("Time: Unscheduled · Resource: Unassigned")
+                        match.match.phase?.let { Text("Phase: $it") }
+                        match.match.phaseDivisionId?.let { Text("Competition Phase: $it") }
+                    }
                 }
             }
             item(key = "schedule_calendar") {

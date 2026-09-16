@@ -1,9 +1,7 @@
-import {
-    NumberInput,
-    Select,
-    Stack,
-    Switch,
-} from '@mantine/core';
+import { NumberInput,
+Select,
+Stack,
+Switch, } from '@/components/organization/organization-operation-ui';
 import {
     Controller,
     type Control,

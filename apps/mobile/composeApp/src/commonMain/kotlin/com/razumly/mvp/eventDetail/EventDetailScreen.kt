@@ -1,5 +1,8 @@
 package com.razumly.mvp.eventDetail
 
+import androidx.compose.material3.Button
+import androidx.compose.material3.Text
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -11,6 +14,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
@@ -30,6 +36,7 @@ import com.razumly.mvp.core.data.dataTypes.addOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.addOfficialUser
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
+import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.hasAnyPaidDivision
 import com.razumly.mvp.core.data.dataTypes.removeOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.removeOfficialUser
@@ -41,6 +48,7 @@ import com.razumly.mvp.core.data.dataTypes.usesTeamOfficialScheduling
 import com.razumly.mvp.core.data.dataTypes.withDoTeamsOfficiate
 import com.razumly.mvp.core.data.dataTypes.withStaffingPriority
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceOperation
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.presentation.EventDetailInitialTab
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
@@ -82,6 +90,7 @@ fun EventDetailScreen(
     val divisionTypeParameters by component.divisionTypeParameters.collectAsState()
     val currentUser by component.currentUser.collectAsState()
     val notificationPermissionPrimer by component.notificationPermissionPrimer.collectAsState()
+    val protectedMatchDeletionConfirmation by component.protectedMatchDeletionConfirmation.collectAsState()
     val showEventTeamCheckInDialog by component.showEventTeamCheckInDialog.collectAsState()
     val eventTeamCheckInSaving by component.eventTeamCheckInSaving.collectAsState()
     val currentUserManagedEventTeamId by component.currentUserManagedEventTeamId.collectAsState()
@@ -90,6 +99,9 @@ fun EventDetailScreen(
     }
     val scheduleTrackedUserIds by component.scheduleTrackedUserIds.collectAsState()
     val validTeams by component.validTeams.collectAsState()
+    val registrationSignup by component.registrationSignup.collectAsState()
+    val registrationSignupBusy by component.registrationSignupBusy.collectAsState()
+    val registrationTeams by component.registrationTeams.collectAsState()
     val showDetails by component.showDetails.collectAsState()
     val eventTeamsAndParticipantsLoading by component.eventTeamsAndParticipantsLoading.collectAsState()
     val participantDivisionWarnings by component.participantDivisionWarnings.collectAsState()
@@ -98,6 +110,9 @@ fun EventDetailScreen(
     val eventEditorControlLocks by component.eventEditorControlLocks.collectAsState()
     val eventTypeTransitionConfirmation by
         component.eventTypeTransitionConfirmation.collectAsState()
+    val eventEditorSnapshot by component.eventEditorSnapshot.collectAsState()
+    val scheduleMaintenanceReview by component.scheduleMaintenanceReview.collectAsState()
+    val scheduleMaintenanceOptions by component.scheduleMaintenanceOptions.collectAsState()
     val showMap by mapComponent.showMap.collectAsState()
     val editableMatches by component.editableMatches.collectAsState()
     val eventFields by component.eventFields.collectAsState()
@@ -184,7 +199,9 @@ fun EventDetailScreen(
     val isCaptain by component.isUserCaptain.collectAsState()
     val isDark = isSystemInDarkTheme()
     val isEditingMatches by component.isEditingMatches.collectAsState()
+    val authorityVerified by component.authorityVerified.collectAsState()
     val accessPresentation = remember(
+        authorityVerified,
         selectedEvent,
         editedEvent,
         sports,
@@ -194,6 +211,7 @@ fun EventDetailScreen(
         isEditingMatches,
     ) {
         buildEventDetailAccessPresentation(
+            authorityVerified = authorityVerified,
             selectedEvent = selectedEvent,
             editedEvent = editedEvent,
             sports = sports,
@@ -229,6 +247,34 @@ fun EventDetailScreen(
     val currentUserManagedEventTeam = accessPresentation.currentUserManagedEventTeam
 
     var showTeamSelectionDialog by remember { mutableStateOf(false) }
+    var signupForm by remember(selectedEvent.event.id, currentUser.id, selectedWeeklyOccurrence) { mutableStateOf<TeamWithPlayers?>(null) }
+    var signupFormStep by remember { mutableStateOf("team") }
+    var signupReview by remember(selectedEvent.event.id, currentUser.id, selectedWeeklyOccurrence) { mutableStateOf<TeamWithPlayers?>(null) }
+    fun createSignupTeam() {
+        component.prepareRegistrationTeam { draft ->
+            showTeamSelectionDialog = false
+            signupForm = draft
+            signupFormStep = "team"
+        }
+    }
+    fun selectSignupTeam(team: TeamWithPlayers) {
+        component.selectRegistrationTeam(team.team.id) {
+            showTeamSelectionDialog = false
+            if (registrationSignup?.draft?.step == "players") {
+                signupForm = team
+                signupFormStep = "players"
+            } else signupReview = team
+        }
+    }
+    fun openTeamSignup(divisionId: String? = null) {
+        divisionId?.let(component::selectDivision)
+        if (registrationSignupBusy || registrationSignup?.available != true) return
+        val selected = registrationTeams.firstOrNull { it.team.id == registrationSignup?.selectedTeamId }
+        if (registrationSignup?.draft?.let { it.step == "team" && it.teamCreationId != null } == true) createSignupTeam()
+        else if (selected != null) selectSignupTeam(selected)
+        else if (registrationSignup?.eligibleTeams?.isEmpty() == true) createSignupTeam()
+        else showTeamSelectionDialog = true
+    }
     var showOptionsDropdown by remember { mutableStateOf(false) }
     var showQrCodeDialog by remember { mutableStateOf(false) }
     var showEventStateDropdown by remember { mutableStateOf(false) }
@@ -241,6 +287,10 @@ fun EventDetailScreen(
     var refundReason by remember { mutableStateOf("") }
     var showNotifyDialog by remember { mutableStateOf(false) }
     var showJoinOptionsSheet by remember { mutableStateOf(false) }
+    fun returnToCheckoutRegistration() {
+        val team = registrationTeams.firstOrNull { it.team.id == registrationSignup?.selectedTeamId }
+        if (team != null) signupReview = team else showJoinOptionsSheet = true
+    }
     var showInviteTeamDialog by rememberSaveable { mutableStateOf(false) }
     var showInvitePlayerDialog by rememberSaveable { mutableStateOf(false) }
     var selectedJoinOptionDivisionId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -473,6 +523,7 @@ fun EventDetailScreen(
         }
     }
     val joinPresentation = remember(
+        registrationSignup, registrationSignupBusy, registrationTeams,
         selectedEvent.event,
         selectedDivision,
         selectedJoinOptionDivisionId,
@@ -502,10 +553,7 @@ fun EventDetailScreen(
             isAffiliateEvent = isAffiliateEvent,
             isRegistrationPaymentFailed = isRegistrationPaymentFailed,
             onJoinEvent = component::joinEvent,
-            onSelectTeam = { divisionId ->
-                divisionId?.let(component::selectDivision)
-                showTeamSelectionDialog = true
-            },
+            onSelectTeam = ::openTeamSignup,
         )
     }
     val joinOptions = joinPresentation.options
@@ -643,6 +691,7 @@ fun EventDetailScreen(
                                 topInset = innerPadding.calculateTopPadding(),
                                 editView = isEditing,
                                 eventEditorControlLocks = eventEditorControlLocks,
+                                eventEditorSnapshot = eventEditorSnapshot,
                                 showOfficialsPanel = showOfficialsPanel,
                                 showMap = showMap,
                                 imageScheme = imageScheme,
@@ -896,6 +945,17 @@ fun EventDetailScreen(
                 ) {
                     Column(Modifier.padding(innerPadding).padding(top = 4.dp)) {
                         EventDetailTabsRouteHost(
+                            scheduleActions = {
+                                EventScheduleMaintenanceScreen(
+                                    canRequest = showScheduleMatchManagement && !isEditingMatches && !isEditing &&
+                                        selectedEvent.event.isAutomatedScheduling &&
+                                        !selectedEvent.event.isArchived() && !isTemplateEvent,
+                                    options = scheduleMaintenanceOptions,
+                                    onOpen = component::openScheduleMaintenance,
+                                    onDismiss = component::dismissScheduleMaintenanceOptions,
+                                    onSelect = component::selectScheduleMaintenanceOperation,
+                                )
+                            },
                             state = EventDetailTabsRouteState(
                                 initialTab = initialTab,
                                 showDetails = showDetails,
@@ -1024,10 +1084,15 @@ fun EventDetailScreen(
                     isUserInEvent = isUserInEvent,
                     directionsEnabled = hasDirectionsTarget,
                     selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
+                    isArchivedEvent = selectedEvent.event.isArchived(),
+                    hasSavedRegistration = registrationSignup?.draft?.let { it.completedAt == null } == true,
                 ),
                 actions = EventDetailOverviewStickyActionActions(
                     onAffiliateJoin = component::joinEvent,
-                    onOpenJoinOptions = { showJoinOptionsSheet = true },
+                    onOpenJoinOptions = {
+                        if (selectedEvent.event.teamSignup && registrationSignup?.draft?.let { it.completedAt == null } == true) openTeamSignup()
+                        else showJoinOptionsSheet = true
+                    },
                     onViewEvent = component::viewEvent,
                     onMapClick = mapComponent::toggleMap,
                     onDirectionsClick = component::openEventDirections,
@@ -1040,7 +1105,33 @@ fun EventDetailScreen(
                 }
         }
 
-        EventDetailOverlayHost(
+        androidx.compose.runtime.CompositionLocalProvider(
+            LocalCheckoutEventName provides selectedEvent.event.name,
+            com.razumly.mvp.core.presentation.composables.LocalFormDialogContent provides { dismiss, title, content, confirm, back ->
+                EventCheckoutDialog(dismiss, title, content, confirm, back, EventCheckoutStep.REVIEW)
+            },
+        ) {
+        val checkoutReview by component.checkoutReview.collectAsState()
+        val checkoutCompleted by component.checkoutCompleted.collectAsState()
+        checkoutReview?.let { review ->
+            EventCheckoutReview(review, component::confirmCheckoutReview, onBack = {
+                component.dismissCheckoutReview()
+                if (review.team != null) signupReview = review.team else showJoinOptionsSheet = true
+            })
+        }
+        if (checkoutCompleted) {
+            EventCheckoutDialog(
+                step = EventCheckoutStep.COMPLETE,
+                onDismissRequest = component::dismissCheckoutCompleted,
+                title = { Text("Registration saved") },
+                text = { Text("Your registration is saved. View the Event roster for Player and guardian actions that remain.") },
+                confirmButton = { Button(onClick = component::dismissCheckoutCompleted) { Text("View Event") } },
+            )
+        }
+        EventSignupDialogs(component, selectedEvent.event, currentUser, sports, signupForm, signupFormStep, signupReview,
+        onFormChange = { form, step -> signupForm = form; signupFormStep = step },
+        onReviewChange = { signupReview = it }, onChangeTeam = { showTeamSelectionDialog = true })
+    EventDetailOverlayHost(
             state = EventDetailOverlayHostState(
                 showWithdrawTargetDialog = showWithdrawTargetDialog,
                 withdrawTargets = actionWithdrawTargets,
@@ -1069,7 +1160,7 @@ fun EventDetailScreen(
                 resourceLabelsByFieldId = resourceLabelsByFieldId,
                 showTeamSelectionDialog = showTeamSelectionDialog,
                 teamSelectionSportLabel = teamSelectionSportLabel,
-                validTeams = validTeams,
+                validTeams = registrationTeams,
                 showEventTeamCheckInDialog = showEventTeamCheckInDialog,
                 eventTeamCheckInSaving = eventTeamCheckInSaving,
                 eventTeamName = currentUserManagedEventTeam
@@ -1083,8 +1174,10 @@ fun EventDetailScreen(
                 eventRegistrationQuestionDialog = eventRegistrationQuestionDialog,
                 paymentPlanPreviewDialog = paymentPlanPreviewDialog,
                 showStandingsConfirmDialog = showStandingsConfirmDialog,
+                scheduleMaintenanceReview = scheduleMaintenanceReview,
                 eventTypeTransitionConfirmation = eventTypeTransitionConfirmation,
-                buildScheduleIsRebuild = selectedEvent.matches.isNotEmpty(),
+                buildScheduleIsRebuild = EventEditorMaintenanceOperation.BUILD !in
+                    eventEditorSnapshot?.scheduleState?.availableMaintenanceOperations.orEmpty(),
                 showBuildScheduleConfirmDialog = showBuildScheduleConfirmDialog,
                 showRebuildWithoutPlaceholdersConfirmDialog =
                     showRebuildWithoutPlaceholdersConfirmDialog,
@@ -1151,12 +1244,9 @@ fun EventDetailScreen(
                 onDismissMatchEdit = component::dismissMatchEditDialog,
                 onConfirmMatchEdit = component::updateMatchFromDialog,
                 onDeleteMatch = component::deleteMatchFromDialog,
-                onJoinTeamSelected = { selectedTeam ->
-                    showTeamSelectionDialog = false
-                    component.joinEventAsTeam(selectedTeam)
-                },
+                onJoinTeamSelected = ::selectSignupTeam,
                 onDismissJoinTeamSelection = { showTeamSelectionDialog = false },
-                onCreateTeam = component::createNewTeam,
+                onCreateTeam = ::createSignupTeam,
                 onDismissEventTeamCheckIn = component::dismissEventTeamCheckInDialog,
                 onConfirmEventTeamCheckIn = component::confirmEventTeamCheckIn,
                 onDismissJoinChoice = component::dismissJoinChoiceDialog,
@@ -1166,11 +1256,17 @@ fun EventDetailScreen(
                 onChildSelected = component::selectChildForJoin,
                 onDismissTeamJoinQuestions = component::dismissTeamJoinQuestionDialog,
                 onSubmitTeamJoinQuestions = component::submitTeamJoinQuestionAnswers,
-                onDismissRegistrationQuestions = component::dismissEventRegistrationQuestionDialog,
+                onDismissRegistrationQuestions = {
+                    component.dismissEventRegistrationQuestionDialog()
+                    returnToCheckoutRegistration()
+                },
                 onSubmitRegistrationQuestions =
                     component::submitEventRegistrationQuestionDialogAnswers,
                 onContinuePaymentPlan = component::confirmPaymentPlanPreviewDialog,
-                onCancelPaymentPlan = component::dismissPaymentPlanPreviewDialog,
+                onCancelPaymentPlan = {
+                    component.dismissPaymentPlanPreviewDialog()
+                    returnToCheckoutRegistration()
+                },
                 onDismissStandingsConfirmation = { showStandingsConfirmDialog = false },
                 onConfirmStandings = { applyReassignment ->
                     showStandingsConfirmDialog = false
@@ -1180,6 +1276,12 @@ fun EventDetailScreen(
                 onDismissEventTypeTransitionConfirmation =
                     component::dismissEventTypeTransitionConfirmation,
                 onConfirmEventTypeTransition = component::confirmEventTypeTransition,
+                onAcceptScheduleMaintenanceProposal = component::acceptScheduleMaintenanceProposal,
+                onRejectScheduleMaintenanceProposal = component::rejectScheduleMaintenanceProposal,
+                onDismissScheduleMaintenanceReview = component::dismissScheduleMaintenanceReview,
+                onRequestFreshScheduleMaintenanceProposal =
+                    component::requestFreshScheduleMaintenanceProposal,
+                onRetryAcceptedScheduleSync = component::retryAcceptedScheduleSync,
                 onDismissBuildScheduleConfirmation = {
                     showBuildScheduleConfirmDialog = false
                 },
@@ -1256,16 +1358,47 @@ fun EventDetailScreen(
                     selectedWithdrawalTarget = null
                 },
                 onConfirmTextSignature = component::confirmTextSignature,
-                onDismissTextSignature = component::dismissTextSignature,
-                onDismissWebSignature = component::dismissWebSignaturePrompt,
+                onDismissTextSignature = {
+                    component.dismissTextSignature()
+                    returnToCheckoutRegistration()
+                },
+                onDismissWebSignature = {
+                    component.dismissWebSignaturePrompt()
+                    returnToCheckoutRegistration()
+                },
                 onApplyDiscountCode = component::applyDiscountCodePrompt,
                 onDiscountCodeChanged = component::clearDiscountCodePromptFeedback,
                 onContinueDiscountCode = component::continueFromDiscountCodePrompt,
-                onDismissDiscountCode = component::dismissDiscountCodePrompt,
+                onDismissDiscountCode = {
+                    component.dismissDiscountCodePrompt()
+                    returnToCheckoutRegistration()
+                },
                 onSubmitBillingAddress = component::submitBillingAddress,
-                onDismissBillingAddress = component::dismissBillingAddressPrompt,
+                onDismissBillingAddress = {
+                    component.dismissBillingAddressPrompt()
+                    returnToCheckoutRegistration()
+                },
             ),
         )
+        protectedMatchDeletionConfirmation?.let { message ->
+            AlertDialog(
+                onDismissRequest = component::dismissProtectedMatchDeletionConfirmation,
+                title = { Text("Delete protected Match history?") },
+                text = { Text(message) },
+                confirmButton = {
+                    TextButton(onClick = component::confirmProtectedMatchDeletion) {
+                        Text("Delete protected Matches")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = component::dismissProtectedMatchDeletionConfirmation) {
+                        Text("Cancel")
+                    }
+                },
+            )
+        }
+
+        }
         notificationPermissionPrimer?.let { state ->
             PermissionPrimerDialog(
                 state = state,

@@ -82,13 +82,14 @@ internal fun ExpandedMatchDetailsPanel(
     team2Name: String,
     team2CheckedIn: Boolean,
     canUseMatchStatusActions: Boolean,
-    canUsePreStartMatchActions: Boolean,
+    canForfeitMatch: Boolean,
     canSuspendMatch: Boolean,
     canResumeMatch: Boolean,
     canAddIncident: Boolean,
     matchActionSaving: Boolean,
     onForfeitClick: () -> Unit,
     onCancelMatchClick: () -> Unit,
+    onNoContestMatchClick: () -> Unit,
     onSuspendMatchClick: () -> Unit,
     onResumeMatchClick: () -> Unit,
     onAddIncidentClick: () -> Unit,
@@ -138,13 +139,15 @@ internal fun ExpandedMatchDetailsPanel(
                 }
                 if (canUseMatchStatusActions || canAddIncident) {
                     MatchDetailsActionsSection(
-                        canUsePreStartMatchActions = canUsePreStartMatchActions,
+                        canForfeitMatch = canForfeitMatch,
+                        canEndMatch = canUseMatchStatusActions,
                         canSuspendMatch = canSuspendMatch,
                         canResumeMatch = canResumeMatch,
                         canAddIncident = canAddIncident,
                         matchActionSaving = matchActionSaving,
                         onForfeitClick = onForfeitClick,
                         onCancelMatchClick = onCancelMatchClick,
+                        onNoContestMatchClick = onNoContestMatchClick,
                         onSuspendMatchClick = onSuspendMatchClick,
                         onResumeMatchClick = onResumeMatchClick,
                         onAddIncidentClick = onAddIncidentClick,
@@ -265,13 +268,15 @@ private fun MatchDetailsTeamCheckInRow(
 
 @Composable
 private fun MatchDetailsActionsSection(
-    canUsePreStartMatchActions: Boolean,
+    canForfeitMatch: Boolean,
+    canEndMatch: Boolean,
     canSuspendMatch: Boolean,
     canResumeMatch: Boolean,
     canAddIncident: Boolean,
     matchActionSaving: Boolean,
     onForfeitClick: () -> Unit,
     onCancelMatchClick: () -> Unit,
+    onNoContestMatchClick: () -> Unit,
     onSuspendMatchClick: () -> Unit,
     onResumeMatchClick: () -> Unit,
     onAddIncidentClick: () -> Unit,
@@ -286,15 +291,22 @@ private fun MatchDetailsActionsSection(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (canUsePreStartMatchActions) {
+            if (canForfeitMatch) {
                 MatchDetailsActionButton(
                     label = "Forfeit",
                     onClick = onForfeitClick,
                     enabled = !matchActionSaving,
                 )
+            }
+            if (canEndMatch) {
                 MatchDetailsActionButton(
                     label = "Cancel",
                     onClick = onCancelMatchClick,
+                    enabled = !matchActionSaving,
+                )
+                MatchDetailsActionButton(
+                    label = "No contest",
+                    onClick = onNoContestMatchClick,
                     enabled = !matchActionSaving,
                 )
             }

@@ -44,17 +44,19 @@ describe('affiliate outbound protection', () => {
     expect(verifyAffiliateOutboundSignature('team', 'event_1', signature)).toBe(false);
   });
 
-  it('replaces public affiliate destinations and removes event source provenance', () => {
+  it('protects public destinations and source URLs while retaining source classification', () => {
     const row = protectAffiliateRow({
       id: 'event_1',
       affiliateUrl: 'https://partner.example.com/register',
       sourceUrl: 'https://partner.example.com/source',
+      sourceType: 'AFFILIATE_IMPORT',
       name: 'Summer League',
     }, 'event');
 
     expect(row).toEqual(expect.objectContaining({
       name: 'Summer League',
       sourceUrl: null,
+      sourceType: 'AFFILIATE_IMPORT',
       affiliateUrl: expect.stringMatching(/^https:\/\/bracket-iq\.com\/out\/event\/event_1\//),
       affiliateActionUrl: expect.stringMatching(/^https:\/\/bracket-iq\.com\/out\/event\/event_1\//),
     }));

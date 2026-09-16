@@ -937,8 +937,10 @@ actual fun EventMap(
             if (!canClickPOI) {
                 eventMarkerGroups.forEach { group ->
                     key(group.key) {
-                        val markerState = eventMarkerStates.getOrPut(group.key) {
-                            MarkerState(position = group.position)
+                        val markerState = remember(group.key) {
+                            eventMarkerStates.getOrPut(group.key) {
+                                MarkerState(position = group.position)
+                            }
                         }
                         if (markerState.position != group.position) {
                             markerState.position = group.position
@@ -1034,8 +1036,10 @@ actual fun EventMap(
             if (!canClickPOI) {
                 discoverPlaceMarkerGroups.forEach { group ->
                     key(group.key) {
-                        val markerState = discoverPlaceMarkerStates.getOrPut(group.key) {
-                            MarkerState(position = group.position)
+                        val markerState = remember(group.key) {
+                            discoverPlaceMarkerStates.getOrPut(group.key) {
+                                MarkerState(position = group.position)
+                            }
                         }
                         if (markerState.position != group.position) {
                             markerState.position = group.position
@@ -1111,8 +1115,10 @@ actual fun EventMap(
             } else {
                 places.forEach { place ->
                     key("place:${place.id}") {
-                        val markerState = placeMarkerStates.getOrPut(place.id) {
-                            MarkerState(position = LatLng(place.latitude, place.longitude))
+                        val markerState = remember(place.id) {
+                            placeMarkerStates.getOrPut(place.id) {
+                                MarkerState(position = LatLng(place.latitude, place.longitude))
+                            }
                         }
                         val newPosition = LatLng(place.latitude, place.longitude)
                         if (markerState.position != newPosition) {
@@ -1197,8 +1203,10 @@ actual fun EventMap(
                 if (overlapsExistingPlace(place)) return@forEach
                 val placeMarkerKey = searchPlaceMarkerKey(place)
                 key(placeMarkerKey) {
-                    val markerState = searchedPlaceMarkerStates.getOrPut(placeMarkerKey) {
-                        MarkerState(position = place.location!!)
+                    val markerState = remember(placeMarkerKey) {
+                        searchedPlaceMarkerStates.getOrPut(placeMarkerKey) {
+                            MarkerState(position = place.location!!)
+                        }
                     }
                     val markerColor = when {
                         matchesSearchPlace(place, distinctSelectedPlace) -> MAP_SELECTED_MARKER_COLOR

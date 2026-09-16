@@ -1,10 +1,8 @@
 import type { ComponentProps } from 'react';
 import { Controller, type Control } from 'react-hook-form';
-import {
-    Alert,
-    NumberInput,
-    Select as MantineSelect,
-} from '@mantine/core';
+import { Alert,
+NumberInput,
+Select as MantineSelect, } from '@/components/organization/organization-operation-ui';
 
 import CentsInput from '@/components/ui/CentsInput';
 import HostPriceInput from '@/components/ui/HostPriceInput';
@@ -84,6 +82,7 @@ export const SingleDivisionPricingControls = ({
         <AnimatedLayoutSection
             in={visible}
             className={DIVISION_PRICE_FIELD_CLASS}
+            allowOverflow
         >
             <Controller
                 name="price"

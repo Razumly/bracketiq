@@ -60,7 +60,7 @@ const createClient = () => {
         divisions: ['open'],
         fieldIds: ['field_1'],
         teamIds: [],
-        timeSlotIds: [],
+        timeSlotIds: ['slot_1', 'slot_2'],
         officialIds: [],
         waitListIds: [],
         freeAgentIds: [],
@@ -96,23 +96,46 @@ const createClient = () => {
     teams: {
       findMany: jest.fn().mockResolvedValue([
         {
-          id: 'team_1',
-          captainId: 'captain_1',
-          division: 'open',
-          name: 'Team One',
-          playerIds: ['player_1', 'player_2'],
-        },
-        {
           id: 'team_2',
           captainId: 'captain_2',
           division: 'open',
           name: 'Team Two',
           playerIds: ['player_3', 'player_4'],
         },
+        {
+          id: 'team_1',
+          captainId: 'captain_1',
+          division: 'open',
+          name: 'Team One',
+          playerIds: ['player_1', 'player_2'],
+        },
       ]),
     },
     timeSlots: {
-      findMany: jest.fn().mockResolvedValue([]),
+      findMany: jest.fn().mockResolvedValue([
+        {
+          id: 'slot_2',
+          startDate: new Date('2026-04-22T18:00:00.000Z'),
+          endDate: new Date('2026-04-22T19:00:00.000Z'),
+          dayOfWeek: 1,
+          startTimeMinutes: 600,
+          endTimeMinutes: 660,
+          repeating: false,
+          scheduledFieldIds: [],
+          divisions: [],
+        },
+        {
+          id: 'slot_1',
+          startDate: new Date('2026-04-22T19:00:00.000Z'),
+          endDate: new Date('2026-04-22T20:00:00.000Z'),
+          dayOfWeek: 1,
+          startTimeMinutes: 660,
+          endTimeMinutes: 720,
+          repeating: false,
+          scheduledFieldIds: [],
+          divisions: [],
+        },
+      ]),
     },
     userData: {
       findMany: jest.fn().mockResolvedValue([]),
@@ -202,12 +225,29 @@ const createClient = () => {
     eventDivisionPhaseParticipants: {
       findMany: jest.fn().mockResolvedValue([]),
     },
+    eventDivisionPhaseSources: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
   };
 };
 
 describe('loadEventForMatchMutation', () => {
   it('hydrates the target match child rows and event teams while skipping user roster detail', async () => {
     const client = createClient();
+    client.eventRegistrations.findMany.mockResolvedValue([
+      {
+        id: 'team_registration_1',
+        eventId: 'event_1',
+        eventTeamId: 'team_1',
+        registrantId: 'team_1',
+        registrantType: 'TEAM',
+        rosterRole: 'PARTICIPANT',
+        status: 'ACTIVE',
+        jerseyNumber: null,
+        position: null,
+        isCaptain: false,
+      },
+    ]);
 
     const loaded = await loadEventForMatchMutation('event_1', 'match_target', client as any);
 
@@ -225,6 +265,9 @@ describe('loadEventForMatchMutation', () => {
     expect(loaded.matches.match_target.segments).toHaveLength(1);
     expect(loaded.matches.match_target.incidents).toHaveLength(1);
     expect(loaded.matches.match_other.segments).toEqual([]);
+    expect(Object.keys(loaded.teams)).toEqual(['team_1', 'team_2']);
+    expect(loaded.timeSlots.map((slot) => slot.id)).toEqual(['slot_1', 'slot_2']);
+    expect(loaded.registeredTeamIds).toEqual(['team_1']);
     expect(loaded.matches.match_other.incidents).toEqual([]);
 
     await saveMatches('event_1', Object.values(loaded.matches), client as any);
@@ -278,6 +321,19 @@ describe('loadEventForMatchMutation', () => {
     });
 
     const loaded = await loadEventForMatchMutation('event_1', 'match_target', client as any);
+    expect(client.eventDivisionPhaseParticipants.findMany).toHaveBeenCalledWith({
+      where: { eventId: 'event_1' },
+      select: { phaseDivisionId: true, eventTeamId: true },
+      orderBy: [
+        { phaseDivisionId: 'asc' },
+        { eventTeamId: 'asc' },
+      ],
+    });
+    expect(client.eventDivisionPhaseSources.findMany).toHaveBeenCalledWith({
+      where: { eventId: 'event_1' },
+      select: { phaseDivisionId: true, entryDivisionId: true },
+      orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+    });
 
     expect(loaded.divisions).toHaveLength(1);
     expect(loaded.divisions[0]).toEqual(expect.objectContaining({

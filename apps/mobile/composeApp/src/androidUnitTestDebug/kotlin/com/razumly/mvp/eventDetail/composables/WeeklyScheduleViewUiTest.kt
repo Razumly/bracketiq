@@ -18,6 +18,8 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import kotlin.test.assertEquals
 import kotlin.time.Instant
@@ -30,6 +32,34 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = Application::class)
 class WeeklyScheduleViewUiTest {
+
+    @Test
+    fun given_only_unscheduled_matches_when_schedule_renders_then_rows_remain_visible_and_selectable() {
+        val match = MatchWithRelations(
+            match = MatchMVP(id = "pending-7", matchId = 7, eventId = "event-1",
+                phase = "PLAYOFF", phaseDivisionId = "playoff-a"),
+            field = null, team1 = null, team2 = null, teamOfficial = null,
+            winnerNextMatch = null, loserNextMatch = null,
+            previousLeftMatch = null, previousRightMatch = null,
+        )
+        var selected: MatchWithRelations? = null
+        composeRule.setContent {
+            CompositionLocalProvider(LocalNavBarPadding provides PaddingValues()) {
+                MaterialTheme {
+                    ScheduleView(
+                        items = emptyList(), fields = emptyList(), unscheduledMatches = listOf(match),
+                        showFab = {}, onMatchClick = { selected = it },
+                    )
+                }
+            }
+        }
+        composeRule.onNodeWithText("Unscheduled matches (1)").assertIsDisplayed()
+        composeRule.onNodeWithText("Time: Unscheduled · Resource: Unassigned").assertIsDisplayed()
+        composeRule.onNodeWithText("Competition Phase: playoff-a").assertIsDisplayed()
+        composeRule.onNodeWithText("No scheduled entries yet.").assertDoesNotExist()
+        composeRule.onNodeWithText("Match 7").performClick()
+        assertEquals(match, selected)
+    }
 
     @get:Rule
     val composeRule = createComposeRule()

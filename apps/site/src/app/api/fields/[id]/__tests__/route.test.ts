@@ -31,18 +31,24 @@ const prismaMock = {
   organizations: {
     findUnique: jest.fn(),
   },
+  $transaction: jest.fn(),
 };
 
 const requireSessionMock = jest.fn();
 const hasOrgPermissionMock = jest.fn();
+const acquireFieldLocksMock = jest.fn();
 
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 jest.mock('@/lib/permissions', () => ({ requireSession: requireSessionMock }));
 jest.mock('@/server/accessControl', () => ({
   hasOrgPermission: (...args: any[]) => hasOrgPermissionMock(...args),
 }));
+jest.mock('@/server/repositories/locks', () => ({
+  acquireFieldLocks: (...args: unknown[]) => acquireFieldLocksMock(...args),
+}));
 
 import { DELETE, GET, PATCH } from '@/app/api/fields/[id]/route';
+
 
 const patchRequest = (body: unknown) => new NextRequest('http://localhost/api/fields/field_1', {
   method: 'PATCH',
@@ -53,6 +59,10 @@ const patchRequest = (body: unknown) => new NextRequest('http://localhost/api/fi
 describe('PATCH /api/fields/[id]', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    prismaMock.$transaction.mockImplementation(
+      async (callback: (tx: typeof prismaMock) => unknown) => callback(prismaMock),
+    );
+    acquireFieldLocksMock.mockResolvedValue(undefined);
     requireSessionMock.mockResolvedValue({ userId: 'user_1', isAdmin: false });
     hasOrgPermissionMock.mockResolvedValue(true);
     prismaMock.facilities.findFirst.mockResolvedValue({
@@ -166,6 +176,37 @@ describe('PATCH /api/fields/[id]', () => {
     const json = await response.json();
     expect(json.id).toBe('field_1');
     expect(json).not.toHaveProperty('$id');
+  });
+  it('backfills legacy ownership only after taking the field lock', async () => {
+    prismaMock.fields.findUnique.mockResolvedValueOnce({
+      id: 'field_1',
+      organizationId: null,
+      createdBy: null,
+    });
+    prismaMock.events.findFirst.mockResolvedValueOnce({ hostId: 'user_1' });
+    prismaMock.fields.update
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({
+        id: 'field_1',
+        name: 'Court A',
+        organizationId: null,
+        createdBy: 'user_1',
+        rentalSlotIds: [],
+      });
+
+    const response = await PATCH(
+      patchRequest({ field: { name: 'Court A' } }),
+      { params: Promise.resolve({ id: 'field_1' }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(acquireFieldLocksMock).toHaveBeenCalledWith(prismaMock, ['field_1']);
+    expect(acquireFieldLocksMock.mock.invocationCallOrder[0])
+      .toBeLessThan(prismaMock.fields.update.mock.invocationCallOrder[0]);
+    expect(prismaMock.fields.update).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      where: { id: 'field_1' },
+      data: expect.objectContaining({ createdBy: 'user_1' }),
+    }));
   });
 
   it('rejects updating a field location without selected coordinates', async () => {

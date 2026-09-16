@@ -1,4 +1,4 @@
-import { Button, Group } from '@mantine/core';
+import { Button, Group } from '@/components/organization/organization-operation-ui';
 import { QrCode } from 'lucide-react';
 
 import type { Event, Team } from '@/types';
@@ -16,6 +16,7 @@ import type { useWeeklyEventSelectionModel } from './hooks/useWeeklyEventSelecti
 import { ChildRegistrationPanel } from './ChildRegistrationPanel';
 import { EventIndividualRegistrationPanel } from './EventIndividualRegistrationPanel';
 import { EventTeamRegistrationPanel } from './EventTeamRegistrationPanel';
+import type { EventCheckoutPageRenderer, EventCheckoutPresentation } from './EventCheckoutLayout';
 
 const SHEET_POPOVER_Z_INDEX = 1800;
 const sharedComboboxProps = { withinPortal: true, zIndex: SHEET_POPOVER_Z_INDEX };
@@ -24,6 +25,8 @@ type EventDetailRegistrationPanelsProps = {
     childrenError: string | null;
     childrenLoading: boolean;
     currentEvent: Event;
+    checkoutPresentation?: EventCheckoutPresentation;
+    renderPage?: EventCheckoutPageRenderer;
     currentUserPaymentFailed: boolean;
     divisionModel: ReturnType<typeof useEventDivisionRegistrationModel>;
     eventTeams: Team[];
@@ -33,6 +36,10 @@ type EventDetailRegistrationPanelsProps = {
     joiningChildFreeAgent: boolean;
     joinFinalizationController: ReturnType<typeof useEventJoinFinalizationController>;
     onManageTeams: () => void;
+    onAddPlayers?: () => void;
+    onEditTeam?: () => void;
+    hasDraft?: boolean;
+    onResumePreparation?: () => void;
     onSelectedChildChange: (childId: string) => void;
     onSelectedTeamChange: (teamId: string) => void;
     onViewBracket: () => void;
@@ -80,6 +87,8 @@ export const EventDetailRegistrationPanels = ({
     childrenError,
     childrenLoading,
     currentEvent,
+    checkoutPresentation = 'modal',
+    renderPage,
     currentUserPaymentFailed,
     divisionModel,
     eventTeams,
@@ -89,6 +98,10 @@ export const EventDetailRegistrationPanels = ({
     joiningChildFreeAgent,
     joinFinalizationController,
     onManageTeams,
+    onAddPlayers,
+    onEditTeam,
+    hasDraft,
+    onResumePreparation,
     onSelectedChildChange,
     onSelectedTeamChange,
     onViewBracket,
@@ -187,8 +200,11 @@ export const EventDetailRegistrationPanels = ({
         return (
             <EventTeamRegistrationPanel
                 eventHasStarted={divisionModel.eventHasStarted}
+                eventName={currentEvent.name}
+                checkoutPresentation={checkoutPresentation}
+                renderPage={renderPage}
                 selectedWeeklySession={Boolean(weeklyModel.isWeeklyParentEvent && weeklyModel.selectedWeeklyOccurrenceOption)}
-                showTeamJoinOptions={presentationController.teamJoinOptionsOpened}
+                showTeamJoinOptions={true}
                 isLoadingTeams={isLoadingTeams}
                 userTeams={userTeams}
                 selectedTeamId={selectedTeamId}
@@ -216,12 +232,13 @@ export const EventDetailRegistrationPanels = ({
                     : currentEvent.sport?.name}
                 totalParticipants={participantModel.totalParticipants}
                 participantCapacity={participantModel.participantCapacity}
-                comboboxProps={sharedComboboxProps}
-                onToggleTeamOptions={presentationController.toggleTeamJoinOptions}
                 onSelectedTeamChange={onSelectedTeamChange}
                 onManageTeams={onManageTeams}
+                onAddPlayers={onAddPlayers}
+                onEditTeam={onEditTeam}
+                hasDraft={hasDraft}
                 onJoinTeamWaitlist={() => { void joinActions.handleJoinTeamWaitlist(); }}
-                onJoinAsTeam={() => { void joinActions.handleJoinAsTeam(); }}
+                onJoinAsTeam={onResumePreparation ?? (() => { void joinActions.handleJoinAsTeam(); })}
                 onWithdrawTeam={() => { void joinActions.handleWithdrawTeam(); }}
                 onLeaveFreeAgents={() => { void participantActions.handleLeaveFreeAgents(); }}
                 onJoinFreeAgents={() => { void participantActions.handleJoinFreeAgents(); }}
@@ -230,8 +247,10 @@ export const EventDetailRegistrationPanels = ({
         );
     }
 
-    return (
+    const content = (
         <EventIndividualRegistrationPanel
+            canChooseChild={participantModel.shouldShowChildRegistrationPanel && participantModel.childOptions.length > 0}
+            onChooseSelf={() => onSelectedChildChange('')}
             selfRegistrationBlockedReason={divisionModel.selfRegistrationBlockedReason}
             isMinor={divisionModel.isMinor}
             showSelfWaitlistActions={showSelfWaitlistActions}
@@ -252,4 +271,5 @@ export const EventDetailRegistrationPanels = ({
             onJoinEvent={() => { void joinActions.handleJoinEvent(); }}
         />
     );
+    return checkoutPresentation === 'page' && renderPage ? renderPage(content) : content;
 };

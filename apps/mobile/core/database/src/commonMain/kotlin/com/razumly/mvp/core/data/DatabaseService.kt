@@ -7,6 +7,7 @@ import com.razumly.mvp.core.data.dataTypes.daos.EventComplianceDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventParticipantManagementDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventRegistrationDao
+import com.razumly.mvp.core.data.dataTypes.daos.EventTimeSlotDao
 import com.razumly.mvp.core.data.dataTypes.daos.FieldDao
 import com.razumly.mvp.core.data.dataTypes.daos.InviteDao
 import com.razumly.mvp.core.data.dataTypes.daos.MatchDao
@@ -21,6 +22,14 @@ import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchOperationOutboxEntry
 
 interface DatabaseService {
+    val getMatchRosterDao: com.razumly.mvp.core.data.dataTypes.daos.MatchRosterDao
+        get() = error("MatchRosterDao is not configured.")
+    val getEventSignupDao: com.razumly.mvp.core.data.dataTypes.daos.EventSignupDao
+        get() = error("EventSignupDao is not configured.")
+    suspend fun clearEventSignupCache() {}
+    suspend fun clearMatchRosterCache() {}
+    val getFamilyCacheDao: com.razumly.mvp.core.data.dataTypes.daos.FamilyCacheDao
+        get() = error("FamilyCacheDao is not configured.")
     suspend fun <R> withTransaction(block: suspend () -> R): R = block()
 
     val getMatchDao: MatchDao
@@ -32,6 +41,8 @@ interface DatabaseService {
     val getFieldDao: FieldDao
     val getUserDataDao: UserDataDao
     val getEventDao: EventDao
+    val getEventTimeSlotDao: EventTimeSlotDao
+        get() = error("EventTimeSlotDao is not configured.")
     val getEventRegistrationDao: EventRegistrationDao
     val getEventParticipantManagementDao: EventParticipantManagementDao
         get() = error("EventParticipantManagementDao is not configured.")

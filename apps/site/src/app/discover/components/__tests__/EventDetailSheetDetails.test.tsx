@@ -26,6 +26,15 @@ jest.mock('@/lib/apiClient', () => ({
   isApiRequestError: jest.fn(() => false),
 }));
 
+jest.mock('@/lib/eventRegistrationDraftService', () => ({
+  eventRegistrationDraftService: {
+    get: jest.fn(async () => ({
+      version: 1, draft: null, eligibleTeams: [], selectedTeamId: null, selectionSource: null,
+      available: true, unavailableReason: null, invalidations: [],
+    })),
+  },
+}));
+
 jest.mock('@/lib/eventService', () => ({
   eventService: {
     getEventWithRelations: jest.fn(),
@@ -612,6 +621,7 @@ describe('EventDetailSheet details layout', () => {
 
     expect(screen.getByText('Selected weekly session')).toBeInTheDocument();
     expect(screen.getByText('Selected')).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: /^(Register|Continue registration)$/i }));
     expect(screen.getByRole('button', { name: /join event/i })).toBeInTheDocument();
     expect(screen.queryByText('No upcoming weekly sessions are available.')).not.toBeInTheDocument();
   });
@@ -701,6 +711,7 @@ describe('EventDetailSheet details layout', () => {
     });
 
     expect(screen.getByText('Selected weekly session')).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: /^(Register|Continue registration)$/i }));
     expect(screen.getByRole('button', { name: /unavailable/i })).toBeDisabled();
   });
 

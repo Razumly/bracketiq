@@ -8,6 +8,7 @@ import { formatLocalDateTime, parseLocalDateTime } from '@/lib/dateUtils';
 import { stripEventTemplateSuffix } from '@/lib/eventTemplates';
 import type { Event, Field, TimeSlot } from '@/types';
 import { normalizeStaffingPriority } from '@/server/officials/config';
+import { acquireEventTemplateLocks } from '@/server/repositories/locks';
 
 type PrismaClientLike = typeof prisma;
 
@@ -161,7 +162,7 @@ const getCoordinates = (value: unknown): [number, number] => {
 
 const getTemplateEventType = (value: unknown): Event['eventType'] => {
   const normalized = typeof value === 'string' ? value.toUpperCase() : '';
-  if (['EVENT', 'TOURNAMENT', 'LEAGUE', 'WEEKLY_EVENT', 'TRYOUT', 'AFFILIATE'].includes(normalized)) {
+  if (['EVENT', 'TOURNAMENT', 'LEAGUE', 'WEEKLY_EVENT', 'TRYOUT'].includes(normalized)) {
     return normalized as Event['eventType'];
   }
   return 'EVENT';
@@ -362,10 +363,7 @@ export const mapSourceEventToTemplateBundle = (
       setsPerMatch: source.setsPerMatch ?? null,
       restTimeMinutes: source.restTimeMinutes ?? null,
       pointsToVictory: normalizeNumberArray(source.pointsToVictory),
-      staffingPriority: normalizeStaffingPriority(
-        source.staffingPriority,
-        source.officialSchedulingMode,
-      ),
+      staffingPriority: normalizeStaffingPriority(source.staffingPriority),
       doTeamsOfficiate: source.doTeamsOfficiate ?? null,
       teamOfficialsMaySwap: source.teamOfficialsMaySwap ?? null,
       officialPositions: Array.isArray(source.officialPositions) ? source.officialPositions : [],
@@ -463,10 +461,7 @@ export const listEventTemplates = async (
     organizationId: row.organizationId,
     sportIds: normalizeStringArray(row.sportIds),
     eventType: row.eventType,
-    staffingPriority: normalizeStaffingPriority(
-      row.staffingPriority,
-      row.officialSchedulingMode,
-    ),
+    staffingPriority: normalizeStaffingPriority(row.staffingPriority),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     $createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt ?? '',
@@ -488,17 +483,10 @@ export const getEventTemplate = async (
   if (!template || template.archivedAt) {
     return null;
   }
-  const {
-    officialSchedulingMode: legacyOfficialSchedulingMode,
-    ...canonicalTemplate
-  } = template;
   return {
     template: {
-      ...canonicalTemplate,
-      staffingPriority: normalizeStaffingPriority(
-        canonicalTemplate.staffingPriority,
-        legacyOfficialSchedulingMode,
-      ),
+      ...template,
+      staffingPriority: normalizeStaffingPriority(template.staffingPriority),
     },
     resources,
     timeSlots,
@@ -646,7 +634,7 @@ export const buildSeedEventFromTemplate = (
     imageId: template.imageId ?? '',
     hostId: params.hostId,
     noFixedEndDateTime: template.noFixedEndDateTime !== false,
-    state: 'DRAFT',
+    state: 'UNPUBLISHED',
     maxParticipants: template.maxParticipants ?? 0,
     teamSizeLimit: template.teamSizeLimit ?? 1,
     restTimeMinutes: template.restTimeMinutes ?? undefined,
@@ -659,10 +647,7 @@ export const buildSeedEventFromTemplate = (
     fieldIds: eventFieldIds,
     timeSlotIds: timeSlots.map((slot) => slot.$id),
     officialIds: [],
-    staffingPriority: normalizeStaffingPriority(
-      template.staffingPriority,
-      template.officialSchedulingMode,
-    ),
+    staffingPriority: normalizeStaffingPriority(template.staffingPriority),
     officialPositions: Array.isArray(template.officialPositions) ? template.officialPositions : [],
     eventOfficials: [],
     assistantHostIds: normalizeStringArray(template.assistantHostIds),
@@ -744,13 +729,15 @@ const serializeSeedValue = (value: unknown): unknown => {
 export const serializeSeedEvent = (event: Event): Record<string, unknown> => (
   serializeSeedValue(event) as Record<string, unknown>
 );
-
 export const archiveEventTemplate = async (
   templateId: string,
   client: PrismaClientLike = prisma,
 ) => {
-  await (client as any).eventTemplates.update({
-    where: { id: templateId },
-    data: { archivedAt: new Date() },
+  await client.$transaction(async (tx) => {
+    await acquireEventTemplateLocks(tx, [templateId]);
+    await (tx as any).eventTemplates.update({
+      where: { id: templateId },
+      data: { archivedAt: new Date() },
+    });
   });
 };

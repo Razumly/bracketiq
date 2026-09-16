@@ -26,14 +26,8 @@ export type EventSetupPageStatus =
 
 export type DivisionConfigurationMode = 'SHARED' | 'SPLIT';
 
-export type EventSetupScheduleStyle =
-    | 'FIXED_WINDOW'
-    | 'WEEKLY_SLOTS'
-    | 'FIXED_SLOTS'
-    | 'MIXED_SLOTS';
 
 export interface EventSetupChoices {
-    scheduleStyle: EventSetupScheduleStyle;
     paidRegistration: boolean;
     useRequiredDocuments: boolean;
     useRegistrationQuestions: boolean;
@@ -61,7 +55,6 @@ export interface EventSetupResolverInput {
 
 export interface EventSetupCapabilities {
     isExternal: boolean;
-    isManaged: boolean;
     isTryout: boolean;
     isLeague: boolean;
     isTournament: boolean;

@@ -1,5 +1,5 @@
 import { UserData, getUserAvatarUrl, getUserFullName, getUserHandle, isUserSocialInteractionRestricted } from '@/types';
-import { Card, Group, Avatar, Text } from '@mantine/core';
+import { Avatar, Group, Paper, Text } from '@/components/organization/organization-operation-ui';
 
 interface UserCardProps {
     user: UserData;
@@ -25,7 +25,7 @@ export default function UserCard({
     const canClick = Boolean(onClick) && !isUserSocialInteractionRestricted(user);
 
     return (
-        <Card
+        <Paper
             p="md"
             onClick={canClick ? onClick : undefined}
             className={className}
@@ -50,6 +50,6 @@ export default function UserCard({
                 </div>
                 {actions}
             </Group>
-        </Card>
+        </Paper>
     );
 }

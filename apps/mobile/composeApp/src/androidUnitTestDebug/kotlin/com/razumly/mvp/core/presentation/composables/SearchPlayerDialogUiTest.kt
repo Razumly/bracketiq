@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -67,7 +68,7 @@ class SearchPlayerDialogUiTest {
     fun close_button_dismisses_dialog() {
         val searchQueries = mutableListOf<String>()
         composeRule.setContent {
-            var isDialogVisible by mutableStateOf(true)
+            var isDialogVisible by remember { mutableStateOf(true) }
 
             MaterialTheme {
                 if (isDialogVisible) {

@@ -17,9 +17,10 @@ import {
   verifyGuestRegistrationToken,
 } from '@/server/publicGuestRegistration';
 import {
-  EventConfigurationChangedError,
   acquireEventLockAndLoadStructure,
+  transitionEventRegistrationStatus,
 } from '@/server/events/eventRegistrations';
+import { eventRegistrationErrorResponse } from '@/server/events/eventRegistrationErrorResponse';
 import { sendEventRegistrationHostNotification } from '@/server/registrationHostNotifications';
 import {
   ensureDocumentSubject,
@@ -254,10 +255,7 @@ const promoteGuestRegistrationIfComplete = async (params: {
     updatedAt: new Date(),
   };
   await prisma.$transaction(async (tx) => {
-    await acquireEventLockAndLoadStructure(tx, params.event.id, {
-      eventType: params.event.eventType,
-      teamSignup: params.event.teamSignup,
-    });
+    const lockedEvent = await acquireEventLockAndLoadStructure(tx, params.event.id);
     const current = await tx.eventRegistrations.findUnique({
       where: { id: params.registration.id },
       select: {
@@ -269,11 +267,11 @@ const promoteGuestRegistrationIfComplete = async (params: {
     });
     const currentStatus = current?.status;
     if (
-      !current ||
-      (
-        currentStatus !== 'STARTED' &&
-        currentStatus !== 'PENDING' &&
-        currentStatus !== 'ACTIVE'
+      !current
+      || (
+        currentStatus !== 'STARTED'
+        && currentStatus !== 'PENDING'
+        && currentStatus !== 'ACTIVE'
       )
     ) {
       return;
@@ -288,13 +286,12 @@ const promoteGuestRegistrationIfComplete = async (params: {
       client: tx,
     });
     const guardedNextStatus = priceCents > 0 ? currentStatus : 'ACTIVE';
-    await tx.eventRegistrations.update({
-      where: { id: params.registration.id },
-      data: {
-        ...update,
-        status: guardedNextStatus,
-      },
-    });
+    await transitionEventRegistrationStatus({
+      registrationId: params.registration.id,
+      event: lockedEvent,
+      status: guardedNextStatus,
+      consentStatus: update.consentStatus,
+    }, tx);
     becameActive = guardedNextStatus === 'ACTIVE' && currentStatus !== 'ACTIVE';
   });
   if (becameActive) {
@@ -503,12 +500,8 @@ export async function POST(req: NextRequest, context: RouteContext) {
       requiredTemplateIds,
     });
   } catch (error) {
-    if (error instanceof EventConfigurationChangedError) {
-      return NextResponse.json(
-        { error: error.message, code: error.code },
-        { status: error.status },
-      );
-    }
+    const registrationResponse = eventRegistrationErrorResponse(error);
+    if (registrationResponse) return registrationResponse;
     throw error;
   }
 

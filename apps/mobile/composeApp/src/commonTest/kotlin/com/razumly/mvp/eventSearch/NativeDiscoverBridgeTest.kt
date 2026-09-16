@@ -3,12 +3,14 @@
 package com.razumly.mvp.eventSearch
 
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventSearchOccurrence
 import com.razumly.mvp.core.data.repositories.EventSearchSort
 import com.razumly.mvp.eventSearch.util.EventFilter
 import kotlinx.coroutines.CancellationException
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Instant
@@ -103,13 +105,15 @@ class NativeDiscoverBridgeTest {
 
         val snapshot = buildNativeDiscoverSearchSnapshot(
             query = "  gReShAm   basketball ",
-            events = listOf(matching, nonMatching),
+            eventCards = listOf(matching, nonMatching).map { event ->
+                DiscoverEventSearchResult(event = event, nextOccurrence = null)
+            },
             organizations = emptyList(),
             teams = emptyList(),
             rentals = emptyList(),
         )
 
-        assertEquals(listOf("matching"), snapshot.events.map(Event::id))
+        assertEquals(listOf("matching"), snapshot.events.map { result -> result.event.id })
     }
 
     @Test
@@ -121,12 +125,65 @@ class NativeDiscoverBridgeTest {
 
         val snapshot = buildNativeDiscoverSearchSnapshot(
             query = "  ",
-            events = events,
+            eventCards = events.map { event ->
+                DiscoverEventSearchResult(event = event, nextOccurrence = null)
+            },
             organizations = emptyList(),
             teams = emptyList(),
             rentals = emptyList(),
         )
 
-        assertEquals(events, snapshot.events)
+        assertEquals(events, snapshot.events.map { result -> result.event })
+    }
+
+    @Test
+    fun givenSameCanonicalEvent_whenOccurrenceChanges_thenSearchResultIdentityChanges() {
+        val event = Event(id = "weekly", name = "Weekly")
+        val first = DiscoverEventSearchResult(
+            event = event,
+            nextOccurrence = EventSearchOccurrence(
+                slotId = "slot",
+                occurrenceDate = "2030-07-01",
+                start = Instant.parse("2030-07-01T09:00:00Z"),
+                end = Instant.parse("2030-07-01T10:00:00Z"),
+            ),
+        )
+        val second = first.copy(
+            nextOccurrence = first.nextOccurrence?.copy(
+                occurrenceDate = "2030-07-08",
+                start = Instant.parse("2030-07-08T09:00:00Z"),
+                end = Instant.parse("2030-07-08T10:00:00Z"),
+            ),
+        )
+
+        assertNotEquals(first, second)
+        assertNotEquals(listOf(first), listOf(second))
+    }
+
+    @Test
+    fun givenSameCanonicalEvent_whenComponentCardStateRefreshes_thenOccurrenceUpdateIsObservable() {
+        val event = Event(id = "weekly", name = "Weekly")
+        val firstOccurrence = EventSearchOccurrence(
+            slotId = "slot",
+            occurrenceDate = "2030-07-01",
+            start = Instant.parse("2030-07-01T09:00:00Z"),
+            end = Instant.parse("2030-07-01T10:00:00Z"),
+        )
+        val secondOccurrence = firstOccurrence.copy(
+            occurrenceDate = "2030-07-08",
+            start = Instant.parse("2030-07-08T09:00:00Z"),
+            end = Instant.parse("2030-07-08T10:00:00Z"),
+        )
+        val state = kotlinx.coroutines.flow.MutableStateFlow(
+            listOf(DiscoverEventSearchResult(event = event, nextOccurrence = firstOccurrence)),
+        )
+
+        state.value = listOf(
+            DiscoverEventSearchResult(event = event, nextOccurrence = secondOccurrence),
+        )
+
+        assertEquals("2030-07-08", state.value.single().nextOccurrence?.occurrenceDate)
+        assertEquals(event, state.value.single().event)
+        assertNotEquals(firstOccurrence, state.value.single().nextOccurrence)
     }
 }

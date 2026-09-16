@@ -2,15 +2,27 @@
 
 package com.razumly.mvp.eventDetail.data
 
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.emptyPreferences
+import com.razumly.mvp.core.data.CurrentUserDataSource
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlin.test.assertNull
 import android.content.Context
 import androidx.room.Room
+import androidx.room.RoomDatabase
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.DatabaseService
+import com.razumly.mvp.core.data.dataTypes.daos.MatchDao
 import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
 import com.razumly.mvp.core.data.dataTypes.OfficialAssignmentHolderType
 import com.razumly.mvp.core.db.MVPDatabaseService
 import com.razumly.mvp.core.network.AuthTokenStore
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.configureMvpHttpClient
+import com.razumly.mvp.core.network.dto.MatchActionOperationDto
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -130,8 +142,124 @@ class MatchRepositoryRoomPersistenceTest {
         }
     }
 
+    @Test
+    fun given_terminal_action_when_server_rejects_reflow_then_room_schedule_is_unchanged() = runTest {
+        val expected = roomBackedSchedule().copy(status = "IN_PROGRESS")
+        val database = openDatabase()
+        var requests = 0
+        val http = HttpClient(MockEngine { request ->
+            requests += 1
+            assertEquals(HttpMethod.Patch, request.method)
+            assertEquals(expected, database.getMatchDao.getMatchById(expected.id)?.match)
+            respond("""{"code":"TERMINAL_REFLOW_INFEASIBLE","error":"No valid Schedule","warnings":[]}""",
+                HttpStatusCode.Conflict, headersOf(HttpHeaders.ContentType, "application/json"))
+        }) { configureMvpHttpClient() }
+        try {
+            database.getMatchDao.upsertMatch(expected)
+            val repository = MatchRepository(MvpApiClient(http, "http://example.test",
+                MatchRepositoryRoomPersistence_EmptyAuthTokenStore), database, autoSyncOperations = false)
+            val result = repository.updateMatchOperations(expected,
+                matchAction = MatchActionOperationDto("FORFEIT", forfeitingEventTeamId = expected.team2Id))
+            assertTrue(result.isFailure)
+            assertEquals(1, requests)
+            assertEquals(expected, database.getMatchDao.getMatchById(expected.id)?.match)
+            assertEquals(listOf(expected), database.getMatchDao.getMatchesOfTournament(expected.eventId))
+        } finally {
+            http.close()
+            database.close()
+        }
+    }
+
+    @Test
+    fun given_confirmed_deletion_when_local_commit_fails_then_room_restores_the_match() = runTest {
+        val expected = roomBackedSchedule()
+        val real = openDatabase()
+        val database = object : DatabaseService by real {
+            override val getMatchDao = object : MatchDao by real.getMatchDao {
+                override suspend fun deleteMatchesById(ids: List<String>) {
+                    real.getMatchDao.deleteMatchesById(ids)
+                    error("Local commit failed")
+                }
+            }
+        }
+        val http = HttpClient(MockEngine {
+            respond("""{"matches":[],"created":{},"deleted":["match-room"]}""",
+                HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+        }) { configureMvpHttpClient() }
+        try {
+            real.getMatchDao.upsertMatch(expected)
+            val repository = MatchRepository(MvpApiClient(http, "http://example.test",
+                MatchRepositoryRoomPersistence_EmptyAuthTokenStore), database, autoSyncOperations = false)
+            val result = repository.updateMatchesBulk(emptyList(), deletes = listOf(expected.id),
+                confirmation = "DELETE_PROTECTED_MATCH_HISTORY")
+            assertTrue(result.isFailure)
+            assertEquals(expected, real.getMatchDao.getMatchById(expected.id)?.match)
+        } finally {
+            http.close()
+            real.close()
+        }
+        val reopened = openDatabase()
+        try {
+            assertEquals(expected, reopened.getMatchDao.getMatchById(expected.id)?.match)
+        } finally {
+            reopened.close()
+        }
+    }
+
+    @Test
+    fun given_protected_deletion_when_server_requires_confirmation_then_room_remains_unchanged() = runTest {
+        val expected = roomBackedSchedule()
+        val database = openDatabase()
+        val http = HttpClient(MockEngine {
+            respond("""{"code":"PROTECTED_MATCH_HISTORY","confirmation":"DELETE_PROTECTED_MATCH_HISTORY","matchIds":["match-room"],"error":"Confirmation required"}""",
+                HttpStatusCode.Conflict, headersOf(HttpHeaders.ContentType, "application/json"))
+        }) { configureMvpHttpClient() }
+        try {
+            database.getMatchDao.upsertMatch(expected)
+            val repository = MatchRepository(MvpApiClient(http, "http://example.test",
+                MatchRepositoryRoomPersistence_EmptyAuthTokenStore), database, autoSyncOperations = false)
+            val result = repository.updateMatchesBulk(emptyList(), deletes = listOf(expected.id))
+            assertTrue(result.isFailure)
+            assertEquals(expected, database.getMatchDao.getMatchById(expected.id)?.match)
+        } finally {
+            http.close()
+            database.close()
+        }
+    fun given_private_roster_when_refreshed_and_reopened_then_room_preserves_readiness_and_account_scope() = runTest {
+        val accounts = CurrentUserDataSource(RosterPreferences())
+        accounts.saveUserId("official")
+        var forbidden = false
+        val http = HttpClient(MockEngine {
+            respond(
+                content = if (forbidden) """{"error":"Forbidden"}""" else """{"rosters":[{"eventTeamId":"team","canEdit":false,"teamName":"River Crew","entries":[{"userId":"managed","firstName":"Alex","documentReadiness":{"documents":{"signedCount":0,"requiredCount":1},"requiredDocuments":[{"templateId":"version","title":"Waiver","signerContext":"participant","status":"UNSIGNED"}]}}]}]}""",
+                status = if (forbidden) HttpStatusCode.Forbidden else HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }) { configureMvpHttpClient() }
+        val api = MvpApiClient(http, "http://example.test", MatchRepositoryRoomPersistence_EmptyAuthTokenStore)
+        val first = openDatabase()
+        try {
+            val repository = MatchRepository(api, first, currentUserDataSource = accounts, autoSyncOperations = false)
+            val response = repository.getMatchRosters("event", "match").getOrThrow()
+            assertEquals(response, repository.observeMatchRosters("event", "match").first())
+            assertEquals(0, response.rosters.single().entries.single().documentReadiness?.documents?.signedCount)
+        } finally { first.close() }
+        val reopened = openDatabase()
+        try {
+            val repository = MatchRepository(api, reopened, currentUserDataSource = accounts, autoSyncOperations = false)
+            assertEquals("managed", repository.observeMatchRosters("event", "match").first()?.rosters?.single()?.entries?.single()?.userId)
+            accounts.saveUserId("member")
+            assertNull(repository.observeMatchRosters("event", "match").first())
+            accounts.saveUserId("official")
+            forbidden = true
+            assertTrue(repository.getMatchRosters("event", "match").isFailure)
+            assertNull(repository.observeMatchRosters("event", "match").first())
+        } finally { reopened.close(); http.close() }
+    }
+
     private fun openDatabase(): MVPDatabaseService =
         Room.databaseBuilder<MVPDatabaseService>(context, databaseName)
+            .setJournalMode(RoomDatabase.JournalMode.TRUNCATE)
             .allowMainThreadQueries()
             .build()
 
@@ -165,4 +293,11 @@ class MatchRepositoryRoomPersistenceTest {
         ),
         teamOfficialId = "placeholder-team-duty",
     )
+}
+
+private class RosterPreferences : DataStore<Preferences> {
+    private val state = MutableStateFlow<Preferences>(emptyPreferences())
+    override val data: Flow<Preferences> = state
+    override suspend fun updateData(transform: suspend (Preferences) -> Preferences): Preferences =
+        transform(state.value).also { state.value = it }
 }

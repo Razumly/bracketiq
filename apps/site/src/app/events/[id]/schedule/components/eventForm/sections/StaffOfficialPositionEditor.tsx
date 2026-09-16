@@ -1,17 +1,15 @@
 import type { ComponentProps } from 'react';
-import {
-    ActionIcon,
-    Alert,
-    Button,
-    Group,
-    NumberInput,
-    Paper,
-    Select as MantineSelect,
-    Stack,
-    Text,
-    TextInput,
-    Title,
-} from '@mantine/core';
+import { ActionIcon,
+Alert,
+Button,
+Group,
+NumberInput,
+Paper,
+Select as MantineSelect,
+Stack,
+Text,
+TextInput,
+Title, } from '@/components/organization/organization-operation-ui';
 
 import type { EventOfficialPosition } from '@/types';
 import type { StaffingPriority } from '@/server/officials/config';
@@ -57,7 +55,6 @@ export const StaffOfficialPositionEditor = ({
                 value={staffingPriority}
                 onChange={onStaffingPriorityChange}
                 comboboxProps={comboboxProps}
-                error={coverageError ?? undefined}
             />
             {coverageError ? (
                 <Alert color="yellow" variant="light">
@@ -88,7 +85,7 @@ export const StaffOfficialPositionEditor = ({
             </Group> : null}
             {showPositions ? <Stack gap="xs">
                 {officialPositions.map((position) => (
-                    <Group key={position.id} align="flex-end" gap="sm" wrap="nowrap">
+                    <Group key={position.id} align="flex-start" gap="sm" wrap="nowrap">
                         <TextInput
                             label="Position"
                             placeholder="Referee"

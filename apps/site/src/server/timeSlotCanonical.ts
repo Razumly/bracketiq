@@ -181,12 +181,6 @@ export const canonicalizeTimeSlots = ({
       ? slotEndMinutesRaw
       : (slotEndMinutesRaw ?? endMinutesFromDate);
 
-    if (
-      repeating
-      && (startTimeMinutes === null || endTimeMinutes === null || endTimeMinutes <= startTimeMinutes)
-    ) {
-      return [];
-    }
 
     let resolvedStartDate = startDate;
     let endDate: Date | null = null;

@@ -99,32 +99,38 @@ const reload = jest.fn();
 const navigateToCompletion = jest.fn();
 const clearProgress = jest.fn();
 
-function useHarness(options: HarnessOptions = {}) {
+function useHarness(overrides: HarnessOptions = {}) {
+    const options = {
+        activeEvent: event, priceCents: 0, allowPaymentPlans: false, weeklySelectionRequired: false,
+        isDivisionSelectionMissing: false, registrationByDivisionType: false, selectedDivisionAtCapacity: false,
+        isFreeForUser: true, selectedTeamId: '', userTeams: [] as Team[], playerCount: 0, teamCount: 0,
+        ...overrides,
+    };
     const [joinError, setJoinError] = useState<string | null>(null);
     const [joinNotice, setJoinNotice] = useState<string | null>(null);
     const [manualPaymentOpened, setManualPaymentOpened] = useState(false);
     const controller = useEventJoinFinalizationController({
-        event: options.activeEvent ?? event,
-        checkoutEvent: options.activeEvent ?? event,
+        event: options.activeEvent,
+        checkoutEvent: options.activeEvent,
         user,
         billing: {
-            priceCents: options.priceCents ?? 0,
-            allowPaymentPlans: options.allowPaymentPlans ?? false,
+            priceCents: options.priceCents,
+            allowPaymentPlans: options.allowPaymentPlans,
             installmentAmounts: options.allowPaymentPlans ? [1_250, 1_250] : [],
             installmentDueDates: [],
             installmentDueRelativeDays: [],
         },
         occurrence: { slotId: 'slot_1', occurrenceDate: '2026-07-15' },
         selection: { divisionId: 'division_1', divisionTypeId: 'type_1' },
-        weeklySelectionRequired: options.weeklySelectionRequired ?? false,
-        isDivisionSelectionMissing: options.isDivisionSelectionMissing ?? false,
-        registrationByDivisionType: options.registrationByDivisionType ?? false,
-        selectedDivisionAtCapacity: options.selectedDivisionAtCapacity ?? false,
-        isFreeForUser: options.isFreeForUser ?? true,
-        selectedTeamId: options.selectedTeamId ?? '',
-        userTeams: options.userTeams ?? [],
-        playerCount: options.playerCount ?? 0,
-        teamCount: options.teamCount ?? 0,
+        weeklySelectionRequired: options.weeklySelectionRequired,
+        isDivisionSelectionMissing: options.isDivisionSelectionMissing,
+        registrationByDivisionType: options.registrationByDivisionType,
+        selectedDivisionAtCapacity: options.selectedDivisionAtCapacity,
+        isFreeForUser: options.isFreeForUser,
+        selectedTeamId: options.selectedTeamId,
+        userTeams: options.userTeams,
+        playerCount: options.playerCount,
+        teamCount: options.teamCount,
         timeoutMs: 5_000,
         prepareCheckout,
         reload,
@@ -318,6 +324,19 @@ describe('useEventJoinFinalizationController', () => {
             answers: undefined,
         });
         expect(mockedJoinEvent).not.toHaveBeenCalled();
+    });
+
+    it('adds the current user as a free agent without charging or requiring a division', async () => {
+        const { result } = renderHook(() => useHarness({ isDivisionSelectionMissing: true, priceCents: 2_500, isFreeForUser: false }));
+
+        await act(async () => {
+            await result.current.controller.finalizeJoin({ mode: 'user_free_agent' });
+        });
+
+        expect(mockedAddFreeAgent).toHaveBeenCalledWith('event_1', 'user_1', { slotId: 'slot_1', occurrenceDate: '2026-07-15' });
+        expect(prepareCheckout).not.toHaveBeenCalled();
+        expect(mockedRegisterSelf).not.toHaveBeenCalled();
+        expect(reload).toHaveBeenCalledTimes(1);
     });
 
     it('adds a child free agent without requiring a division selection', async () => {

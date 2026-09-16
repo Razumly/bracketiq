@@ -202,12 +202,13 @@ describe('useEventCheckoutController', () => {
         expect(setWorkflowPhase).toHaveBeenNthCalledWith(2, 'checkout-preview', false);
     });
 
-    it('clears checkout state and reports an expired registration hold', () => {
+    it('retains saved progress and clears checkout after the registration hold expires', () => {
         const { result } = renderHook(() => useCheckoutHarness());
 
         act(() => result.current.checkout.expireHold());
 
-        expect(progress.clear).toHaveBeenCalledTimes(1);
+        expect(progress.clear).not.toHaveBeenCalled();
+        expect(progress.save).toHaveBeenCalledWith({ registrationId: null, step: 'review' });
         expect(result.current.checkout.paymentData).toBeNull();
         expect(result.current.checkout.pendingCheckout).toBeNull();
         expect(result.current.joinError).toBe(

@@ -220,6 +220,11 @@ describe('public guest record signature route', () => {
       registrantId: 'event_team_1',
       eventTeamId: 'event_team_1',
     });
+    acquireEventLockAndLoadStructureMock.mockResolvedValueOnce({
+      id: 'event_1',
+      eventType: 'EVENT',
+      teamSignup: true,
+    });
     prismaMock.eventRegistrations.findUnique.mockResolvedValue({
       id: 'team_registration_1',
       eventId: 'event_1',
@@ -287,13 +292,13 @@ describe('public guest record signature route', () => {
         divisionTypeKey: 'coed_age_u12',
       },
     }));
-    expect(prismaMock.eventRegistrations.update).toHaveBeenCalledWith({
+    expect(prismaMock.eventRegistrations.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 'team_registration_1' },
       data: expect.objectContaining({
         status: 'ACTIVE',
         consentStatus: 'completed',
       }),
-    });
+    }));
     expect(sendEventRegistrationHostNotificationMock).toHaveBeenCalledWith({
       eventId: 'event_1',
       registrationId: 'team_registration_1',

@@ -1,7 +1,6 @@
 "use client";
 
-import { Badge, Button, Group, MultiSelect, Paper, Select, SimpleGrid, Stack, Text } from '@mantine/core';
-import { DateTimePicker } from '@mantine/dates';
+import { Badge, Button, DateTimePicker, Group, MultiSelect, Paper, Select, SimpleGrid, Stack, Text } from '@/components/organization/organization-operation-ui';
 import { formatPrice, type Field } from '@/types';
 import { formatLocalDateTime, parseLocalDateTime } from '@/lib/dateUtils';
 import { getFacilityScopedFieldDisplayName } from '@/lib/fieldUtils';
@@ -100,8 +99,8 @@ export default function PublicRentalSelectionsPanel({
                 shadow="xs"
                 style={{
                   alignSelf: 'start',
-                  borderColor: hasConflict ? 'var(--mantine-color-red-5)' : undefined,
-                  backgroundColor: hasConflict ? 'var(--mantine-color-red-0)' : undefined,
+                  borderColor: hasConflict ? 'var(--destructive)' : undefined,
+                  backgroundColor: hasConflict ? 'color-mix(in srgb, var(--destructive) 8%, var(--card))' : undefined,
                 }}
               >
                 <div className="space-y-2 overflow-y-auto pr-1">

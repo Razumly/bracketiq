@@ -1,34 +1,16 @@
-import { MantineProvider } from '@mantine/core';
-import { render, screen } from '@testing-library/react';
+import { act, render, renderHook, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { PaymentResultView } from "../PaymentResultView";
+import { usePaymentDialogState } from "../usePaymentDialogState";
+import { billingAddressService } from "@/lib/billingAddressService";
+import type { PaymentIntent } from "@/types";
 
-import PaymentModal from '../PaymentModal';
-import type { PaymentIntent } from '@/types';
-
-jest.mock('@stripe/stripe-js', () => ({
-  loadStripe: jest.fn(() => Promise.resolve({})),
-}));
-
-jest.mock('@stripe/react-stripe-js', () => ({
-  Elements: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}));
-
-jest.mock('@/lib/billingAddressService', () => ({
-  billingAddressService: {
-    getBillingAddressProfile: jest.fn(() => Promise.resolve({
-      billingAddress: null,
-      email: 'payer@example.com',
-    })),
-  },
-}));
-
-jest.mock('../PaymentForm', () => ({
-  __esModule: true,
-  default: () => <div data-testid="payment-form" />,
+jest.mock("@/lib/billingAddressService", () => ({
+  billingAddressService: { getBillingAddressProfile: jest.fn() },
 }));
 
 const paymentData: PaymentIntent = {
-  publishableKey: 'pk_test_mock',
-  paymentIntent: 'pi_mock_secret_mock',
+  paymentIntent: "checkout-reference",
   feeBreakdown: {
     eventPrice: 1500,
     processingFee: 100,
@@ -37,77 +19,156 @@ const paymentData: PaymentIntent = {
     totalCharge: 1600,
     hostReceives: 1500,
     feePercentage: 0,
-    purchaseType: 'event',
+    purchaseType: "product",
   },
 };
 
-describe('PaymentModal', () => {
-  it('can open after an initial closed render without changing hook order', async () => {
-    const { rerender } = render(
-      <PaymentModal
-        isOpen={false}
-        onClose={() => {}}
-        event={{
-          name: 'Paid Event',
-          location: 'New York, NY',
-          eventType: 'EVENT',
-          price: 1500,
-        }}
-        paymentData={null}
-        onPaymentSuccess={() => {}}
-      />,
-      {
-        wrapper: ({ children }) => (
-          <MantineProvider>{children}</MantineProvider>
-        ),
-      },
-    );
-
-    expect(screen.queryByText('Payment')).not.toBeInTheDocument();
-
-    rerender(
-      <PaymentModal
-        isOpen
-        onClose={() => {}}
-        event={{
-          name: 'Paid Event',
-          location: 'New York, NY',
-          eventType: 'EVENT',
-          price: 1500,
-        }}
-        paymentData={paymentData}
-        onPaymentSuccess={() => {}}
-      />,
-    );
-
-    expect(await screen.findByText('Payment')).toBeInTheDocument();
-    expect(screen.getByTestId('payment-form')).toBeInTheDocument();
-    expect(screen.queryByText('Price Breakdown')).not.toBeInTheDocument();
+describe("Payment dialog state", () => {
+  beforeEach(() => {
+    jest.resetAllMocks();
+    jest
+      .mocked(billingAddressService.getBillingAddressProfile)
+      .mockResolvedValue({ billingAddress: null, email: "payer@example.com" });
   });
 
-  it('opens directly to payment without a price breakdown step', async () => {
-    render(
-      <PaymentModal
-        isOpen
-        onClose={() => {}}
-        event={{
-          name: 'Paid Event',
-          location: 'New York, NY',
-          eventType: 'EVENT',
-          price: 1500,
-        }}
-        paymentData={paymentData}
-        onPaymentSuccess={() => {}}
-      />,
-      {
-        wrapper: ({ children }) => (
-          <MantineProvider>{children}</MantineProvider>
-        ),
-      },
+  it("keeps the successful result visible while product details refresh", async () => {
+    let finish!: () => void;
+    const onPaymentSuccess = jest.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
     );
+    const { result } = renderHook(() =>
+      usePaymentDialogState({ isOpen: true, paymentData, onPaymentSuccess }),
+    );
+    let completion!: Promise<void>;
+    act(() => {
+      completion = result.current.handleSuccess();
+    });
+    expect(result.current.view).toBe("success");
+    expect(result.current.reloading).toBe(true);
+    expect(onPaymentSuccess).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      finish();
+      await completion;
+    });
+    expect(result.current.view).toBe("success");
+    expect(result.current.reloading).toBe(false);
+    expect(result.current.error).toBeNull();
+  });
 
-    expect(await screen.findByText('Payment')).toBeInTheDocument();
-    expect(screen.getByTestId('payment-form')).toBeInTheDocument();
-    expect(screen.queryByText('Price Breakdown')).not.toBeInTheDocument();
+  it("keeps a successful payment distinct from a failed product refresh", async () => {
+    const onPaymentSuccess = jest
+      .fn()
+      .mockRejectedValue(new Error("Refresh unavailable"));
+    const { result } = renderHook(() =>
+      usePaymentDialogState({ isOpen: true, paymentData, onPaymentSuccess }),
+    );
+    await act(async () => {
+      await result.current.handleSuccess();
+    });
+    expect(result.current.view).toBe("success");
+    expect(result.current.reloading).toBe(false);
+    expect(result.current.error).toBe(
+      "Payment succeeded but failed to refresh the product details. Please contact support.",
+    );
+    act(() => result.current.reset());
+    expect(result.current.view).toBe("payment");
+    expect(result.current.error).toBeNull();
+  });
+
+  it("uses the pending callback without calling the success callback", async () => {
+    const onPaymentSuccess = jest.fn();
+    const onPaymentPending = jest.fn();
+    const { result } = renderHook(() =>
+      usePaymentDialogState({
+        isOpen: true,
+        paymentData,
+        onPaymentSuccess,
+        onPaymentPending,
+      }),
+    );
+    await act(async () => {
+      await result.current.handlePending();
+    });
+    expect(result.current.view).toBe("pending");
+    expect(onPaymentPending).toHaveBeenCalledTimes(1);
+    expect(onPaymentSuccess).not.toHaveBeenCalled();
+  });
+
+  it("keeps payments pending without reporting success when no pending callback is provided", async () => {
+    const onPaymentSuccess = jest.fn();
+    const { result } = renderHook(() =>
+      usePaymentDialogState({ isOpen: true, paymentData, onPaymentSuccess }),
+    );
+    await act(async () => {
+      await result.current.handlePending();
+    });
+    expect(result.current.view).toBe("pending");
+    expect(onPaymentSuccess).not.toHaveBeenCalled();
+  });
+
+  it("shows the exact paid amount only after success, not while payment is pending", async () => {
+    const user = userEvent.setup();
+    const onPaymentSuccess = jest.fn();
+    const onClose = jest.fn();
+    const { result } = renderHook(() =>
+      usePaymentDialogState({ isOpen: true, paymentData, onPaymentSuccess }),
+    );
+    const renderResult = () => result.current.view === "payment" ? null : (
+      <PaymentResultView
+        view={result.current.view}
+        reloading={result.current.reloading}
+        copy={result.current.copy}
+        feeBreakdown={paymentData.feeBreakdown}
+        orderName="Training shirt"
+        onClose={onClose}
+      />
+    );
+    const { rerender } = render(renderResult());
+    expect(screen.queryByText("Paid today")).not.toBeInTheDocument();
+    await act(async () => { await result.current.handlePending(); });
+    rerender(renderResult());
+    expect(screen.getByText("$16.00")).toBeInTheDocument();
+    expect(screen.queryByText("Paid today")).not.toBeInTheDocument();
+    expect(onPaymentSuccess).not.toHaveBeenCalled();
+    await act(async () => { await result.current.handleSuccess(); });
+    rerender(renderResult());
+    expect(screen.getByText("Paid today")).toBeInTheDocument();
+    expect(screen.getByText("$16.00")).toBeInTheDocument();
+    expect(onPaymentSuccess).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores billing-profile results after the dialog closes", async () => {
+    let finish!: (value: { billingAddress: null; email: string }) => void;
+    jest.mocked(billingAddressService.getBillingAddressProfile).mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const onPaymentSuccess = jest.fn();
+    const { result, rerender } = renderHook(
+      ({ isOpen }) =>
+        usePaymentDialogState({ isOpen, paymentData, onPaymentSuccess }),
+      { initialProps: { isOpen: false } },
+    );
+    expect(
+      billingAddressService.getBillingAddressProfile,
+    ).not.toHaveBeenCalled();
+    rerender({ isOpen: true });
+    await waitFor(() =>
+      expect(
+        billingAddressService.getBillingAddressProfile,
+      ).toHaveBeenCalledTimes(1),
+    );
+    rerender({ isOpen: false });
+    await act(async () => {
+      finish({ billingAddress: null, email: "old@example.com" });
+    });
+    expect(result.current.billingEmail).toBeNull();
+    expect(result.current.billingAddress).toBeNull();
   });
 });

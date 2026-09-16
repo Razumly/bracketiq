@@ -7,12 +7,11 @@ import type { Event, Field, TimeSlot } from '@/types';
 
 import type { SlotDivisionLookup } from '../../divisionForm';
 import type { EventFormValues } from '../../formTypes';
-import type { EventSetupScheduleStyle } from '../../simpleSetup/types';
 import { useEventSlotController } from '../useEventSlotController';
 
 jest.mock('@/lib/eventService', () => ({
     eventService: {
-        getBlockingForFieldInRange: jest.fn(),
+        getFieldSchedulingConflicts: jest.fn(),
     },
 }));
 
@@ -21,8 +20,8 @@ jest.mock('@/lib/clientId', () => ({
     createClientId: jest.fn(() => `slot_new_${++clientIdSequence}`),
 }));
 
-const mockedGetBlockingForFieldInRange = eventService.getBlockingForFieldInRange as jest.MockedFunction<
-    typeof eventService.getBlockingForFieldInRange
+const mockedGetFieldSchedulingConflicts = eventService.getFieldSchedulingConflicts as jest.MockedFunction<
+    typeof eventService.getFieldSchedulingConflicts
 >;
 
 const SLOT_DIVISION_KEYS = ['open'];
@@ -79,34 +78,40 @@ const buildEditingEvent = (): Event => ({
     end: '2026-08-31T21:00:00',
 } as Event);
 
-const buildBlockingEvent = (): Event => ({
-    $id: 'event_blocking',
-    name: 'Conflicting League',
-    eventType: 'LEAGUE',
-    start: '2026-07-20T09:00:00',
-    end: '2026-08-31T21:00:00',
-    timeSlots: [{
-        $id: 'blocking_slot_1',
-        scheduledFieldId: FIELD.$id,
-        scheduledFieldIds: [FIELD.$id],
-        dayOfWeek: 0,
-        daysOfWeek: [0],
+const buildServerFieldConflict = () => ({
+    slotKey: 'slot_1',
+    fieldId: FIELD.$id,
+    kind: 'EVENT_TIME_SLOT',
+    start: '2026-07-20T18:30:00.000Z',
+    end: '2026-07-20T19:30:00.000Z',
+    source: {
+        id: 'blocking_slot_1',
+        eventId: 'event_blocking',
+        parentId: 'event_blocking',
+        kind: 'EVENT_TIME_SLOT',
+        eventType: 'LEAGUE',
+        eventStart: '2026-07-20T09:00:00.000Z',
+        eventEnd: '2026-08-31T21:00:00.000Z',
+        eventTimeZone: 'America/Los_Angeles',
+        noFixedEndDateTime: false,
+        repeating: true,
+        startDate: '2026-07-20T00:00:00.000Z',
+        endDate: '2026-08-31T00:00:00.000Z',
+        timeZone: 'America/Los_Angeles',
         startTimeMinutes: 18 * 60 + 30,
         endTimeMinutes: 19 * 60 + 30,
-        startDate: '2026-07-20T09:00:00',
-        endDate: '2026-08-31T21:00:00',
-        repeating: true,
-    } as TimeSlot],
-} as Event);
+        daysOfWeek: [0],
+        scheduledFieldIds: [FIELD.$id],
+    },
+});
 
 type HarnessProps = {
     eventData: EventFormValues;
     eventSupportsScheduleSlots?: boolean;
     hasImmutableTimeSlots?: boolean;
     immutableTimeSlots?: TimeSlot[];
+    isEditMode?: boolean;
     rentalLockedSlotsForDraft?: TimeSlot[];
-    simpleScheduleStyle?: EventSetupScheduleStyle;
-    fixedWindowFieldIds?: string[];
 };
 
 const useSlotHarness = ({
@@ -114,38 +119,35 @@ const useSlotHarness = ({
     eventSupportsScheduleSlots = true,
     hasImmutableTimeSlots = false,
     immutableTimeSlots = EMPTY_TIME_SLOTS,
+    isEditMode = true,
     rentalLockedSlotsForDraft = EMPTY_TIME_SLOTS,
-    simpleScheduleStyle,
-    fixedWindowFieldIds,
 }: HarnessProps) => {
     const form = useForm<EventFormValues>({ defaultValues: eventData });
     // eslint-disable-next-line react-hooks/incompatible-library -- exercise the production React Hook Form subscription boundary.
     const formValues = form.watch();
     const isDirty = form.formState.isDirty;
     const controller = useEventSlotController({
-        activeEditingEvent: buildEditingEvent(),
+        activeEditingEvent: isEditMode ? buildEditingEvent() : null,
         clearErrors: form.clearErrors,
         eventEnd: formValues.end,
         eventId: formValues.$id,
         eventStart: formValues.start,
         eventSupportsScheduleSlots,
         eventTimeZone: formValues.timeZone,
+        isAutomatedScheduling: formValues.isAutomatedScheduling,
         eventType: formValues.eventType,
         fields: formValues.fields,
-        fixedWindowFieldIds,
         getValues: form.getValues,
         hasExternalRentalField: false,
         hasImmutableTimeSlots,
         immutableFields: [],
         immutableTimeSlots,
-        isAffiliateEvent: false,
-        isEditMode: true,
+        isEditMode,
         leagueSlots: formValues.leagueSlots,
         parentEvent: formValues.parentEvent,
         rentalLockedSlotsForDraft,
         resolvedOrganizationId: 'org_1',
         resourceLabels: RESOURCE_LABELS,
-        simpleScheduleStyle,
         setLeagueData: jest.fn(),
         setPlayoffData: jest.fn(),
         setValue: form.setValue as unknown as (
@@ -174,7 +176,7 @@ describe('useEventSlotController', () => {
     beforeEach(() => {
         jest.clearAllMocks();
         clientIdSequence = 0;
-        mockedGetBlockingForFieldInRange.mockResolvedValue({ events: [], rentalSlots: [] });
+        mockedGetFieldSchedulingConflicts.mockResolvedValue({ conflicts: [] });
     });
 
     it('normalizes add, update, and remove commands through the React Hook Form slot field', async () => {
@@ -187,7 +189,6 @@ describe('useEventSlotController', () => {
             })],
         });
         const { result } = renderHook(() => useSlotHarness({ eventData }));
-
         act(() => result.current.handleAddSlot());
         await waitFor(() => expect(result.current.formValues.leagueSlots).toHaveLength(2));
         expect(result.current.formValues.leagueSlots[1]).toEqual(expect.objectContaining({
@@ -218,37 +219,169 @@ describe('useEventSlotController', () => {
         expect(result.current.isDirty).toBe(true);
     });
 
-    it('keeps a Simple Setup fixed window synchronized with event timing and ownership', async () => {
+    it('creates a timezone-owned repeating slot from the first Weekly Event selection', async () => {
+        const placeholder = buildSlot({
+            scheduledFieldId: undefined,
+            scheduledFieldIds: [],
+            dayOfWeek: undefined,
+            daysOfWeek: [],
+            startDate: undefined,
+            endDate: undefined,
+            startTimeMinutes: undefined,
+            endTimeMinutes: undefined,
+        });
+        const { result } = renderHook(() => useSlotHarness({
+            eventData: buildEventData({
+                eventType: 'WEEKLY_EVENT',
+                start: '2026-07-20T08:00:00',
+                leagueSlots: [placeholder],
+            }),
+        }));
+
+        act(() => result.current.handleCreateCalendarSelection({
+            start: new Date('2026-07-20T16:00:00.000Z'),
+            end: new Date('2026-07-20T17:00:00.000Z'),
+            resourceId: FIELD.$id,
+        }));
+
+        await waitFor(() => expect(result.current.formValues.leagueSlots[0]).toEqual(expect.objectContaining({
+            repeating: true,
+            scheduledFieldIds: [FIELD.$id],
+            startDate: '2026-07-20T09:00:00',
+            endDate: undefined,
+            startTimeMinutes: 9 * 60,
+            endTimeMinutes: 10 * 60,
+            dayOfWeek: 0,
+            daysOfWeek: [0],
+            timeZone: 'America/Los_Angeles',
+        })));
+    });
+    it('uses an unscheduled competition calendar selection as an Event boundary only', async () => {
+        const { result } = renderHook(() => useSlotHarness({
+            eventData: buildEventData({
+                eventType: 'TOURNAMENT',
+                isAutomatedScheduling: false,
+                leagueSlots: [],
+                noFixedEndDateTime: true,
+            }),
+        }));
+
+        await waitFor(() => expect(result.current.formValues.leagueSlots).toHaveLength(0));
+        act(() => result.current.handleCreateCalendarSelection({
+            start: new Date('2026-07-20T16:00:00.000Z'),
+            end: new Date('2026-07-20T17:00:00.000Z'),
+            resourceId: '',
+        }));
+
+        await waitFor(() => expect(result.current.formValues.start).toBe('2026-07-20T09:00:00'));
+        expect(result.current.formValues.end).toBe('2026-07-20T10:00:00');
+        expect(result.current.formValues.noFixedEndDateTime).toBe(false);
+        expect(result.current.formValues.leagueSlots).toHaveLength(0);
+    });
+    it('clears one-time date overrides when switching a slot to repeating', async () => {
+        const { result } = renderHook(() => useSlotHarness({
+            eventData: buildEventData({
+                leagueSlots: [buildSlot({
+                    repeating: false,
+                    startDate: '2026-07-20T18:00:00',
+                    endDate: '2026-07-20T20:00:00',
+                })],
+            }),
+        }));
+
+        act(() => result.current.handleUpdateSlot(0, { repeating: true }));
+
+        await waitFor(() => expect(result.current.formValues.leagueSlots[0]).toEqual(expect.objectContaining({
+            repeating: true,
+            startDate: undefined,
+            endDate: undefined,
+            startTimeMinutes: 18 * 60,
+            endTimeMinutes: 20 * 60,
+        })));
+    });
+
+
+    it('keeps calendar slots independent from Event boundary edits', async () => {
         const eventData = buildEventData({
-            leagueSlots: [buildSlot(), buildSlot({ key: 'slot-2' })],
+            leagueSlots: [buildSlot()],
+        });
+        const { result } = renderHook(() => useSlotHarness({ eventData }));
+
+        act(() => result.current.setValue('start', '2026-07-21T10:30:00'));
+        await waitFor(() => expect(result.current.formValues.start).toBe('2026-07-21T10:30:00'));
+        expect(result.current.formValues.leagueSlots[0].startDate).toBeUndefined();
+    });
+
+    it('moves a repeating calendar entry by local day without replacing its slot', async () => {
+        const { result } = renderHook(() => useSlotHarness({ eventData: buildEventData() }));
+
+        act(() => result.current.handleMoveCalendarSlot(
+            { slotIndex: 0, resourceId: FIELD.$id, occurrenceDate: '2026-07-20' },
+            {
+                resourceId: FIELD.$id,
+                start: new Date(2026, 6, 21, 10, 0),
+                end: new Date(2026, 6, 21, 12, 0),
+            },
+        ));
+
+        await waitFor(() => expect(result.current.formValues.leagueSlots[0]).toEqual(expect.objectContaining({
+            scheduledFieldIds: [FIELD.$id],
+            daysOfWeek: [1],
+            dayOfWeek: 1,
+            startTimeMinutes: 10 * 60,
+            endTimeMinutes: 12 * 60,
+        })));
+    });
+
+    it('resizes a calendar entry while preserving its Resource assignment', async () => {
+        const { result } = renderHook(() => useSlotHarness({ eventData: buildEventData() }));
+
+        act(() => result.current.handleResizeCalendarSlot(
+            { slotIndex: 0, resourceId: FIELD.$id, occurrenceDate: '2026-07-20' },
+            {
+                resourceId: FIELD.$id,
+                start: new Date(2026, 6, 20, 18, 0),
+                end: new Date(2026, 6, 20, 21, 0),
+            },
+        ));
+
+        await waitFor(() => expect(result.current.formValues.leagueSlots[0]).toEqual(expect.objectContaining({
+            scheduledFieldIds: [FIELD.$id],
+            startTimeMinutes: 18 * 60,
+            endTimeMinutes: 21 * 60,
+        })));
+    });
+    it('preserves a calendar selection when derived Event timing changes the boundary', async () => {
+        const eventData = buildEventData({
+            leagueSlots: [],
         });
         const { result } = renderHook(() => useSlotHarness({
             eventData,
-            simpleScheduleStyle: 'FIXED_WINDOW',
-            fixedWindowFieldIds: [FIELD.$id],
+            isEditMode: false,
         }));
 
         await waitFor(() => expect(result.current.formValues.leagueSlots).toHaveLength(1));
-        expect(result.current.formValues.leagueSlots[0]).toEqual(expect.objectContaining({
-            repeating: false,
-            startDate: '2026-07-20T09:00:00',
-            endDate: '2026-08-31T21:00:00',
-            scheduledFieldIds: [FIELD.$id],
-            divisions: ['open'],
+        act(() => result.current.handleCreateCalendarSelection({
+            start: new Date('2026-07-20T16:00:00.000Z'),
+            end: new Date('2026-07-20T17:00:00.000Z'),
+            resourceId: FIELD.$id,
         }));
-        expect(result.current.isDirty).toBe(false);
-
-        act(() => result.current.setValue('start', '2026-07-21T10:30:00'));
         await waitFor(() => expect(result.current.formValues.leagueSlots[0]).toEqual(expect.objectContaining({
-            startDate: '2026-07-21T10:30:00',
-            startTimeMinutes: 10 * 60 + 30,
+            scheduledFieldIds: [FIELD.$id],
+            startTimeMinutes: 9 * 60,
+            endTimeMinutes: 10 * 60,
         })));
 
-        act(() => result.current.setValue('timeZone', 'America/New_York'));
-        await waitFor(() => expect(result.current.formValues.leagueSlots[0].timeZone).toBe('America/New_York'));
+        act(() => result.current.setValue('start', '2026-07-21T10:30:00'));
+        await waitFor(() => expect(result.current.formValues.start).toBe('2026-07-21T10:30:00'));
+        expect(result.current.formValues.leagueSlots[0]).toEqual(expect.objectContaining({
+            scheduledFieldIds: [FIELD.$id],
+            startTimeMinutes: 9 * 60,
+            endTimeMinutes: 10 * 60,
+        }));
     });
 
-    it('does not replace immutable rental slots for a Simple Setup schedule style', async () => {
+    it('does not replace immutable rental slots', async () => {
         const immutableSlot = {
             ...buildSlot({ key: 'rental-slot' }),
             $id: 'rental-slot',
@@ -258,7 +391,6 @@ describe('useEventSlotController', () => {
         const eventData = buildEventData({ leagueSlots: [buildSlot({ key: 'rental-slot' })] });
         const { result } = renderHook(() => useSlotHarness({
             eventData,
-            simpleScheduleStyle: 'FIXED_WINDOW',
             hasImmutableTimeSlots: true,
             immutableTimeSlots: [immutableSlot],
         }));
@@ -271,9 +403,8 @@ describe('useEventSlotController', () => {
     });
 
     it('applies a successful external-conflict response and auto-resolves the slot', async () => {
-        mockedGetBlockingForFieldInRange.mockResolvedValue({
-            events: [buildBlockingEvent()],
-            rentalSlots: [],
+        mockedGetFieldSchedulingConflicts.mockResolvedValue({
+            conflicts: [buildServerFieldConflict()],
         });
         const { result } = renderHook(() => useSlotHarness({ eventData: buildEventData() }));
 
@@ -281,9 +412,11 @@ describe('useEventSlotController', () => {
         expect(result.current.formValues.leagueSlots[0].checking).toBe(false);
         expect(result.current.leagueWarning).toMatch(/Timeslot court conflicts are warnings/i);
 
-        const previousStart = result.current.formValues.leagueSlots[0].startTimeMinutes;
         act(() => result.current.handleAutoResolveSlotConflict(0));
-        await waitFor(() => expect(result.current.formValues.leagueSlots[0].startTimeMinutes).not.toBe(previousStart));
+        await waitFor(() =>
+            expect(result.current.formValues.leagueSlots[0].startTimeMinutes).toBeGreaterThanOrEqual(19 * 60 + 30),
+        );
+        expect(result.current.formValues.leagueSlots[0].startTimeMinutes).toBe(19 * 60 + 30);
         expect(result.current.formValues.leagueSlots[0].endTimeMinutes).toBeGreaterThan(
             result.current.formValues.leagueSlots[0].startTimeMinutes ?? 0,
         );
@@ -291,7 +424,7 @@ describe('useEventSlotController', () => {
 
     it('clears pending conflict metadata when the external lookup fails', async () => {
         const warningSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-        mockedGetBlockingForFieldInRange.mockRejectedValue(new Error('Conflict lookup failed'));
+        mockedGetFieldSchedulingConflicts.mockRejectedValue(new Error('Conflict lookup failed'));
         const { result } = renderHook(() => useSlotHarness({ eventData: buildEventData() }));
 
         await waitFor(() => expect(warningSpy).toHaveBeenCalledWith(
@@ -358,19 +491,19 @@ describe('useEventSlotController', () => {
     });
 
     it('ignores a stale conflict response after the event schedule changes', async () => {
-        const firstRequest = createDeferred<{ events: Event[]; rentalSlots: TimeSlot[] }>();
-        const secondRequest = createDeferred<{ events: Event[]; rentalSlots: TimeSlot[] }>();
-        mockedGetBlockingForFieldInRange
+        const firstRequest = createDeferred<{ conflicts: any[] }>();
+        const secondRequest = createDeferred<{ conflicts: any[] }>();
+        mockedGetFieldSchedulingConflicts
             .mockReturnValueOnce(firstRequest.promise)
             .mockReturnValueOnce(secondRequest.promise);
         const { result } = renderHook(() => useSlotHarness({ eventData: buildEventData() }));
 
-        await waitFor(() => expect(mockedGetBlockingForFieldInRange).toHaveBeenCalledTimes(1));
+        await waitFor(() => expect(mockedGetFieldSchedulingConflicts).toHaveBeenCalledTimes(1));
         act(() => result.current.setValue('start', '2026-07-27T09:00:00'));
-        await waitFor(() => expect(mockedGetBlockingForFieldInRange).toHaveBeenCalledTimes(2));
+        await waitFor(() => expect(mockedGetFieldSchedulingConflicts).toHaveBeenCalledTimes(2));
 
         await act(async () => {
-            secondRequest.resolve({ events: [], rentalSlots: [] });
+            secondRequest.resolve({ conflicts: [] });
             await secondRequest.promise;
         });
         await waitFor(() => expect(result.current.formValues.leagueSlots[0]).toEqual(expect.objectContaining({
@@ -379,7 +512,7 @@ describe('useEventSlotController', () => {
         })));
 
         await act(async () => {
-            firstRequest.resolve({ events: [buildBlockingEvent()], rentalSlots: [] });
+            firstRequest.resolve({ conflicts: [buildServerFieldConflict()] });
             await firstRequest.promise;
         });
         expect(result.current.formValues.leagueSlots[0].conflicts).toEqual([]);

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { parseDateInput } from '@/server/requestParsing';
-import { serializeMatchRecords } from '@/server/matches/instantPayloads';
+import { serializeMatchRecord } from '@/server/matches/instantPayloads';
 import { getVisibleEventIds } from '@/server/eventVisibility';
 
 export const dynamic = 'force-dynamic';
@@ -86,5 +86,41 @@ export async function GET(req: NextRequest) {
     orderBy: { start: 'asc' },
   });
 
-  return NextResponse.json({ matches: serializeMatchRecords(matches) }, { status: 200 });
+  const divisionIds = Array.from(
+    new Set(
+      matches
+        .map((match) => match.division)
+        .filter((divisionId): divisionId is string => typeof divisionId === 'string' && divisionId.length > 0),
+    ),
+  );
+  const divisionRows = divisionIds.length > 0
+    ? await prisma.divisions.findMany({
+      where: { id: { in: divisionIds } },
+      select: {
+        id: true,
+        role: true,
+        phase: true,
+        sourceDivisionId: true,
+      },
+    })
+    : [];
+  const divisionsById = new Map(divisionRows.map((division) => [division.id, division]));
+
+  return NextResponse.json({
+    matches: matches.map((match) => {
+      const division = typeof match.division === 'string'
+        ? divisionsById.get(match.division)
+        : undefined;
+      const isPhaseMatch = division?.role === 'PHASE';
+      return serializeMatchRecord({
+        ...match,
+        phase: isPhaseMatch ? division.phase : null,
+        sourceDivisionId: isPhaseMatch ? division.sourceDivisionId : null,
+        phaseDivisionId: isPhaseMatch ? division.id : null,
+        division: isPhaseMatch
+          ? (division.sourceDivisionId ?? division.id)
+          : match.division,
+      });
+    }),
+  }, { status: 200 });
 }

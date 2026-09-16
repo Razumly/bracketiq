@@ -11,6 +11,17 @@ export type MatchScheduleSnapshotEntry = {
   fieldId: string | null;
   teamIds: string[];
   teamNames: string[];
+  teamOfficialId?: string | null;
+  officialUserIds?: string[];
+  officialAssignments?: MatchScheduleOfficialAssignmentSnapshot[];
+};
+
+export type MatchScheduleOfficialAssignmentSnapshot = {
+  positionId: string | null;
+  slotIndex: number | null;
+  holderType: string | null;
+  userId: string | null;
+  eventOfficialId: string | null;
 };
 
 export type MatchScheduleChange = {
@@ -19,8 +30,12 @@ export type MatchScheduleChange = {
   teamIds: string[];
   teamNames: string[];
   scheduleChanged: boolean;
+  isAssignmentChanged?: boolean;
   teamAdded: boolean;
   deleted: boolean;
+  officialUserIds?: string[];
+  before?: MatchScheduleSnapshotEntry | null;
+  after?: MatchScheduleSnapshotEntry | null;
 };
 
 export type MatchScheduleNotificationPlan = {
@@ -102,6 +117,10 @@ export const snapshotMatchScheduleState = (
       .filter((team): team is { id: string; name: string } => Boolean(team.id && team.name))
       .map((team) => team.name);
     const fieldRecord = readRecord(matchRecord.field);
+    const teamOfficial = readRecord(matchRecord.teamOfficial);
+    const official = readRecord(matchRecord.official);
+    const assignments = Array.isArray(matchRecord.officialAssignments) ? matchRecord.officialAssignments
+      : Array.isArray(matchRecord.officialIds) ? matchRecord.officialIds : [];
     const rawMatchNumber = Number(matchRecord.matchId);
     const matchNumber = Number.isInteger(rawMatchNumber) && rawMatchNumber > 0
       ? rawMatchNumber
@@ -115,6 +134,15 @@ export const snapshotMatchScheduleState = (
       fieldId: normalizeId(fieldRecord.id ?? fieldRecord.$id ?? matchRecord.fieldId),
       teamIds,
       teamNames,
+      teamOfficialId: normalizeId(teamOfficial.id ?? matchRecord.teamOfficialId),
+      officialUserIds: uniqueIds([official.id, matchRecord.officialId, ...assignments.map((entry) => readRecord(entry).userId)]),
+      officialAssignments: assignments.map((entry) => {
+        const value = readRecord(entry);
+        return { positionId: normalizeId(value.positionId),
+          slotIndex: Number.isInteger(value.slotIndex) ? Number(value.slotIndex) : null,
+          holderType: normalizeId(value.holderType), userId: normalizeId(value.userId),
+          eventOfficialId: normalizeId(value.eventOfficialId) };
+      }),
     });
   }
 
@@ -129,6 +157,17 @@ const snapshotsDiffer = (
   || before.end !== after.end
   || before.fieldId !== after.fieldId
 );
+
+const assignmentIdentity = (entries: unknown[] = []) => entries.map((entry) => {
+  const assignment = readRecord(entry);
+  return [assignment.positionId ?? null, assignment.slotIndex ?? null, assignment.holderType ?? null,
+    assignment.userId ?? null, assignment.eventOfficialId ?? null];
+}).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+
+const assignmentsDiffer = (before: MatchScheduleSnapshotEntry, after: MatchScheduleSnapshotEntry): boolean =>
+  before.teamOfficialId !== after.teamOfficialId
+  || JSON.stringify(assignmentIdentity(before.officialAssignments)) !== JSON.stringify(assignmentIdentity(after.officialAssignments))
+  || JSON.stringify(before.teamIds) !== JSON.stringify(after.teamIds);
 
 export const collectMatchScheduleChanges = (params: {
   before: Map<string, MatchScheduleSnapshotEntry>;
@@ -155,6 +194,7 @@ export const collectMatchScheduleChanges = (params: {
           teamIds: before.teamIds,
           teamNames: before.teamNames,
           scheduleChanged: true,
+          isAssignmentChanged: false,
           teamAdded: false,
           deleted: true,
         });
@@ -168,20 +208,24 @@ export const collectMatchScheduleChanges = (params: {
 
     const addedTeamIds = after.teamIds.filter((teamId) => !before.teamIds.includes(teamId));
     const scheduleChanged = snapshotsDiffer(before, after);
+    const isAssignmentChanged = assignmentsDiffer(before, after);
     const teamAdded = addedTeamIds.length > 0;
 
-    if (!scheduleChanged && !teamAdded) {
+    if (!scheduleChanged && !isAssignmentChanged && !teamAdded) {
       continue;
     }
 
     changes.push({
       matchId,
       matchNumber: after.matchNumber ?? before.matchNumber,
-      teamIds: uniqueIds([...before.teamIds, ...after.teamIds]),
+      teamIds: uniqueIds([...before.teamIds, ...after.teamIds, before.teamOfficialId, after.teamOfficialId]),
       teamNames: after.teamNames.length ? after.teamNames : before.teamNames,
       scheduleChanged,
+      isAssignmentChanged,
       teamAdded,
       deleted: false,
+      officialUserIds: uniqueIds([...(before.officialUserIds ?? []), ...(after.officialUserIds ?? [])]),
+      before, after,
     });
   }
 
@@ -298,18 +342,19 @@ export const notifyTeamsOfMatchScheduleUpdate = async (
   }
 
   const eventName = formatEventName(plan.eventName);
-  const changes = plan.changes.filter((change) => change.teamIds.length > 0);
+  const changes = plan.changes.filter((change) => change.teamIds.length > 0 || change.officialUserIds?.length);
   if (!changes.length) {
     return null;
   }
 
   const isBatch = Boolean(plan.forceBatch) || changes.length > 1;
   const teamIds = uniqueIds(changes.flatMap((change) => change.teamIds));
-  const userIds = await resolveTeamNotificationUserIds({
+  const teamUserIds = await resolveTeamNotificationUserIds({
     eventId: plan.eventId,
     teamIds,
     client,
   });
+  const userIds = uniqueIds([...teamUserIds, ...changes.flatMap((change) => change.officialUserIds ?? [])]);
 
   if (!userIds.length) {
     return null;
@@ -326,6 +371,24 @@ export const notifyTeamsOfMatchScheduleUpdate = async (
       return `${eventName} has ${verb} ${formatMatchLabel(change)}. Please review the changes.`;
     })();
 
+  const compact = (snapshot: MatchScheduleSnapshotEntry | null | undefined) => snapshot ? {
+    start: snapshot.start, end: snapshot.end, fieldId: snapshot.fieldId,
+    teamOfficialId: snapshot.teamOfficialId,
+    officialAssignments: (snapshot.officialAssignments ?? []).slice(0, 4).map((entry) => {
+      const assignment = readRecord(entry);
+      return { positionId: assignment.positionId ?? null, slotIndex: assignment.slotIndex ?? null,
+        holderType: assignment.holderType ?? null, userId: assignment.userId ?? null,
+        eventOfficialId: assignment.eventOfficialId ?? null };
+    }),
+  } : null;
+  const preview: unknown[] = [];
+  for (const change of changes) {
+    const entry = { matchId: change.matchId, before: compact(change.before), after: compact(change.after) };
+    if (JSON.stringify([...preview, entry]).length > 1_800) break;
+    preview.push(entry);
+  }
+  const previewMatchIds = changes.slice(0, preview.length).map((change) => change.matchId);
+
   return sendPushToUsers({
     userIds,
     notificationType: 'matchScheduleUpdates',
@@ -335,9 +398,41 @@ export const notifyTeamsOfMatchScheduleUpdate = async (
       type: 'match_schedule_update',
       eventId: plan.eventId,
       updateScope: isBatch ? 'event' : 'match',
-      matchIds: changes.map((change) => change.matchId),
-      teamIds,
+      matchIds: previewMatchIds,
+      teamIds: uniqueIds(changes.slice(0, preview.length).flatMap((change) => change.teamIds)),
+      changes: preview,
+      changeCount: changes.length,
+      omittedChangeCount: changes.length - preview.length,
       ...(isBatch ? {} : { matchId: changes[0].matchId }),
     },
   });
+};
+
+/** Store the complete terminal change before the transaction commits. */
+export const persistTerminalMatchScheduleNotifications = async (
+  plan: MatchScheduleNotificationPlan,
+  operationId: string,
+  client: PrismaLike,
+): Promise<number> => {
+  const changes = plan.changes.filter((change) => change.teamIds.length > 0 || change.officialUserIds?.length);
+  if (!changes.length || typeof client.userNotifications?.createMany !== 'function') return 0;
+  const teamUserIds = await resolveTeamNotificationUserIds({
+    eventId: plan.eventId,
+    teamIds: uniqueIds(changes.flatMap((change) => change.teamIds)),
+    client,
+  });
+  const userIds = uniqueIds([...teamUserIds, ...changes.flatMap((change) => change.officialUserIds ?? [])]);
+  if (!userIds.length) return 0;
+  const eventName = formatEventName(plan.eventName);
+  const data = { type: 'match_schedule_update', eventId: plan.eventId, operationId,
+    matchIds: changes.map((change) => change.matchId),
+    changes: changes.map((change) => ({ matchId: change.matchId,
+      before: change.before ?? null, after: change.after ?? null })) };
+  const result = await client.userNotifications.createMany({
+    data: userIds.map((userId) => ({ id: `terminal:${operationId}:${userId}`, userId,
+      notificationType: 'matchScheduleUpdates', title: `${eventName} schedule updated`,
+      body: `${eventName} changed the Schedule. Review the previous and new Match values.`, data })),
+    skipDuplicates: true,
+  });
+  return Number(result?.count ?? 0);
 };

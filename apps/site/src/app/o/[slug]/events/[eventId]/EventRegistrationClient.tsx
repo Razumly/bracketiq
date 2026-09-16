@@ -44,6 +44,7 @@ export default function EventRegistrationClient({
       isOpen
       onClose={() => undefined}
       renderInline
+      checkoutPresentation="page"
       selectedOccurrence={selectedOccurrence}
       onWeeklyOccurrenceChange={handleWeeklyOccurrenceChange}
       publicCompletion={publicCompletion}

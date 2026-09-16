@@ -106,8 +106,8 @@ describe('POST /api/events/search', () => {
     prismaMock.eventRegistrations.findMany.mockResolvedValue([{ eventId: 'event_registered_canonical' }]);
     prismaMock.events.findMany.mockResolvedValue([
       eventRow('event_team', 'Unrelated event', {
-        staffingPriority: null,
-        officialSchedulingMode: 'TEAM_STAFFING',
+        staffingPriority: 'TEAM_COVERAGE_REQUIRED',
+        doTeamsOfficiate: true,
       }),
       eventRow('event_canonical'),
       eventRow('event_registered_canonical'),
@@ -151,7 +151,6 @@ describe('POST /api/events/search', () => {
       staffingPriority: 'TEAM_COVERAGE_REQUIRED',
       doTeamsOfficiate: true,
     }));
-    expect(json.events[0]).toHaveProperty('officialSchedulingMode', 'TEAM_STAFFING');
   });
 
   it('includes real affiliate events in discover search results', async () => {
@@ -224,8 +223,29 @@ describe('POST /api/events/search', () => {
       },
     ]));
   });
+  it('rejects bounded date ranges beyond the mobile search horizon', async () => {
+    const response = await searchEvents(new NextRequest('http://localhost/api/events/search', {
+      method: 'POST',
+      body: JSON.stringify({
+        filters: {
+          dateFrom: '2026-01-01T00:00:00.000Z',
+          dateTo: '2028-01-02T00:00:00.000Z',
+        },
+        limit: 10,
+        offset: 0,
+      }),
+      headers: { 'content-type': 'application/json' },
+    }));
 
-  it('applies the start-date lower bound to weekly events', async () => {
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: 'Event search date ranges cannot exceed two years.',
+    });
+    expect(prismaMock.events.findMany).not.toHaveBeenCalled();
+  });
+
+
+  it('uses the Weekly lifecycle overlap instead of the parent start date', async () => {
     const dateFrom = '2026-07-16T07:00:00.000Z';
     const response = await searchEvents(new NextRequest('http://localhost/api/events/search', {
       method: 'POST',
@@ -240,7 +260,249 @@ describe('POST /api/events/search', () => {
     expect(response.status).toBe(200);
     const searchWhere = prismaMock.events.findMany.mock.calls[0][0].where;
     expect(searchWhere.AND).toEqual(expect.arrayContaining([
-      { start: { gte: new Date(dateFrom) } },
+      {
+        OR: expect.arrayContaining([
+          {
+            eventType: 'WEEKLY_EVENT',
+            parentEvent: null,
+            OR: [
+              { end: null },
+              { end: { gte: new Date(dateFrom) } },
+            ],
+          },
+          {
+            eventType: 'WEEKLY_EVENT',
+            parentEvent: { not: null },
+            start: { gte: new Date(dateFrom) },
+          },
+        ]),
+      },
+    ]));
+  });
+
+  it('includes a past-start open Weekly parent and projects its next occurrence', async () => {
+    const dateFrom = '2026-07-16T00:00:00.000Z';
+    prismaMock.events.findMany.mockResolvedValue([
+      eventRow('weekly-open', 'Open gym', {
+        eventType: 'WEEKLY_EVENT',
+        start: new Date('2026-06-01T18:00:00.000Z'),
+        end: null,
+        timeSlotIds: ['slot_weekly'],
+      }),
+    ]);
+    prismaMock.events.count.mockResolvedValue(1);
+    prismaMock.timeSlots.findMany.mockResolvedValue([
+      {
+        id: 'slot_weekly',
+        repeating: true,
+        daysOfWeek: [3],
+        startDate: '2026-06-01',
+        endDate: null,
+        startTimeMinutes: 18 * 60,
+        endTimeMinutes: 20 * 60,
+        timeZone: 'UTC',
+      },
+    ]);
+
+    const response = await searchEvents(new NextRequest('http://localhost/api/events/search', {
+      method: 'POST',
+      body: JSON.stringify({
+        filters: { dateFrom },
+        sort: 'SOONEST',
+        limit: 10,
+        offset: 0,
+      }),
+      headers: { 'content-type': 'application/json' },
+    }));
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json.events).toEqual([
+      expect.objectContaining({
+        id: 'weekly-open',
+        start: '2026-06-01T18:00:00.000Z',
+        end: null,
+        nextOccurrence: {
+          slotId: 'slot_weekly',
+          occurrenceDate: '2026-07-16',
+          start: '2026-07-16T18:00:00.000Z',
+          end: '2026-07-16T20:00:00.000Z',
+          timeZone: 'UTC',
+        },
+      }),
+    ]);
+  });
+  it('excludes a Weekly parent with no occurrence in a bounded date range', async () => {
+    const dateFrom = '2026-07-01T00:00:00.000Z';
+    const dateTo = '2026-07-02T23:59:59.999Z';
+    prismaMock.events.findMany.mockResolvedValue([
+      eventRow('weekly-july-8', 'Weekly July 8', {
+        eventType: 'WEEKLY_EVENT',
+        start: new Date('2026-06-01T00:00:00.000Z'),
+        end: null,
+        timeSlotIds: ['slot_july_8'],
+      }),
+    ]);
+    prismaMock.events.count.mockResolvedValue(1);
+    prismaMock.timeSlots.findMany.mockResolvedValue([
+      {
+        id: 'slot_july_8',
+        repeating: true,
+        daysOfWeek: [2],
+        startDate: '2026-07-08',
+        endDate: null,
+        startTimeMinutes: 18 * 60,
+        endTimeMinutes: 20 * 60,
+        timeZone: 'UTC',
+      },
+    ]);
+
+    const response = await searchEvents(new NextRequest('http://localhost/api/events/search', {
+      method: 'POST',
+      body: JSON.stringify({
+        filters: { dateFrom, dateTo },
+        sort: 'SOONEST',
+        limit: 10,
+        offset: 0,
+      }),
+      headers: { 'content-type': 'application/json' },
+    }));
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json.events).toEqual([]);
+    expect(json.pagination).toEqual({ hasMore: false, nextOffset: 0, totalCount: 0 });
+    expect(prismaMock.timeSlots.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('includes a bounded Weekly occurrence that starts before dateFrom', async () => {
+    const dateFrom = '2026-07-01T00:00:00.000Z';
+    const dateTo = '2026-07-02T23:59:59.999Z';
+    prismaMock.events.findMany.mockResolvedValue([
+      eventRow('weekly-overnight', 'Overnight weekly', {
+        eventType: 'WEEKLY_EVENT',
+        start: new Date('2026-06-01T00:00:00.000Z'),
+        end: null,
+        timeSlotIds: ['slot_overnight'],
+      }),
+    ]);
+    prismaMock.events.count.mockResolvedValue(1);
+    prismaMock.timeSlots.findMany.mockResolvedValue([
+      {
+        id: 'slot_overnight',
+        repeating: true,
+        daysOfWeek: [1],
+        startDate: '2026-06-01',
+        endDate: null,
+        startTimeMinutes: 23 * 60,
+        endTimeMinutes: 60,
+        timeZone: 'UTC',
+      },
+    ]);
+
+    const response = await searchEvents(new NextRequest('http://localhost/api/events/search', {
+      method: 'POST',
+      body: JSON.stringify({
+        filters: { dateFrom, dateTo },
+        sort: 'SOONEST',
+        limit: 10,
+        offset: 0,
+      }),
+      headers: { 'content-type': 'application/json' },
+    }));
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json.events).toEqual([
+      expect.objectContaining({
+        id: 'weekly-overnight',
+        start: '2026-06-01T00:00:00.000Z',
+        end: null,
+        nextOccurrence: {
+          slotId: 'slot_overnight',
+          occurrenceDate: '2026-06-30',
+          start: '2026-06-30T23:00:00.000Z',
+          end: '2026-07-01T01:00:00.000Z',
+          timeZone: 'UTC',
+        },
+      }),
+    ]);
+    expect(json.pagination).toEqual({ hasMore: false, nextOffset: 1, totalCount: 1 });
+  });
+  it('does not cap candidates before filtering Weekly occurrences', async () => {
+    const weeklyRows = Array.from({ length: 50 }, (_, index) => eventRow(`weekly-stale-${index}`, 'Stale weekly', {
+      eventType: 'WEEKLY_EVENT',
+      start: new Date('2026-06-01T00:00:00.000Z'),
+      end: null,
+      timeSlotIds: [],
+    }));
+    const eligibleEvent = eventRow('eligible-event', 'Eligible candidate');
+    const rows = [...weeklyRows, eligibleEvent];
+    prismaMock.events.findMany.mockImplementation(({ take }: { take?: number }) => (
+      Promise.resolve(rows.slice(0, take ?? rows.length))
+    ));
+    prismaMock.events.count.mockResolvedValue(rows.length);
+
+    const response = await searchEvents(new NextRequest('http://localhost/api/events/search', {
+      method: 'POST',
+      body: JSON.stringify({
+        filters: { query: 'candidate', dateFrom: '2026-07-01T00:00:00.000Z' },
+        sort: 'SOONEST',
+        limit: 10,
+        offset: 0,
+      }),
+      headers: { 'content-type': 'application/json' },
+    }));
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json.events.map((event: { id: string }) => event.id)).toEqual(['eligible-event']);
+    expect(json.pagination).toEqual({ hasMore: false, nextOffset: 1, totalCount: 1 });
+    expect(prismaMock.events.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      take: undefined,
+      skip: 0,
+    }));
+  });
+
+
+
+  it('keeps a fixed Weekly season when it overlaps the selected date range', async () => {
+    const dateFrom = '2026-07-01T00:00:00.000Z';
+    const dateTo = '2026-08-01T23:59:59.999Z';
+    const response = await searchEvents(new NextRequest('http://localhost/api/events/search', {
+      method: 'POST',
+      body: JSON.stringify({
+        filters: { dateFrom, dateTo },
+        limit: 10,
+        offset: 0,
+      }),
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    expect(response.status).toBe(200);
+    const searchWhere = prismaMock.events.findMany.mock.calls[0][0].where;
+    expect(searchWhere.AND).toEqual(expect.arrayContaining([
+      {
+        OR: expect.arrayContaining([
+          expect.objectContaining({
+            eventType: 'WEEKLY_EVENT',
+            parentEvent: null,
+            OR: [
+              { end: null },
+              { end: { gte: new Date(dateFrom) } },
+            ],
+          }),
+        ]),
+      },
+      {
+        OR: expect.arrayContaining([
+          {
+            eventType: 'WEEKLY_EVENT',
+            parentEvent: null,
+            start: { lte: new Date(dateTo) },
+          },
+        ]),
+      },
     ]));
   });
 

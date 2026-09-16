@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { TextInput, Button, Paper } from '@mantine/core';
+import { Button, Paper, TextInput } from '@/components/organization/organization-operation-ui';
 import { GoogleMap, useJsApiLoader } from '@react-google-maps/api';
 import { locationService, type PlacePrediction, type PlacePredictionOptions } from '@/lib/locationService';
 import { GOOGLE_MAP_OPTIONS_WITH_MAP_ID, GOOGLE_MAPS_LIBRARIES, GOOGLE_MAPS_MAP_ID, GOOGLE_MAPS_SCRIPT_ID } from '@/lib/googleMapsLoader';
@@ -51,6 +51,7 @@ const LocationSelector: React.FC<LocationSelectorProps> = ({
     alwaysShowMap = false,
 }) => {
     const [showMap, setShowMap] = useState(alwaysShowMap);
+    const [mapsAuthFailed, setMapsAuthFailed] = useState(false);
     const [center, setCenter] = useState({ lat: 40.7128, lng: -74.0060 }); // NYC default
     const [mapSearchQuery, setMapSearchQuery] = useState('');
     const [mapInstance, setMapInstance] = useState<google.maps.Map | null>(null);
@@ -73,7 +74,7 @@ const LocationSelector: React.FC<LocationSelectorProps> = ({
     const selectionInvalid = requireSelection && hasLocationText && !isSelectionConfirmed;
     const inputError = !isValid ? errorMessage : selectionInvalid ? selectionErrorMessage : undefined;
 
-    const { isLoaded } = useJsApiLoader({
+    const { isLoaded, loadError } = useJsApiLoader({
         id: GOOGLE_MAPS_SCRIPT_ID,
         googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY!,
         libraries: GOOGLE_MAPS_LIBRARIES,
@@ -119,6 +120,29 @@ const LocationSelector: React.FC<LocationSelectorProps> = ({
         setAddressPredictions([]);
         setAddressPredictionsLoading(false);
     }, []);
+    useEffect(() => {
+        if (loadError) {
+            setMapsAuthFailed(true);
+        }
+    }, [loadError]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const authWindow = window as typeof window & { gm_authFailure?: () => void };
+        const previousAuthFailure = authWindow.gm_authFailure;
+        const handleAuthFailure = () => {
+            previousAuthFailure?.();
+            setMapsAuthFailed(true);
+            resetPredictionSession();
+        };
+        authWindow.gm_authFailure = handleAuthFailure;
+        return () => {
+            if (authWindow.gm_authFailure === handleAuthFailure) {
+                authWindow.gm_authFailure = previousAuthFailure;
+            }
+        };
+    }, [resetPredictionSession]);
+
 
     useEffect(() => {
         return () => {
@@ -465,6 +489,7 @@ const LocationSelector: React.FC<LocationSelectorProps> = ({
         }
     }, [disabled, onChange, predictionSessionToken, resetPredictionSession, searchLocation]);
 
+
     return (
         <div>
             <div className="space-y-2">
@@ -565,7 +590,16 @@ const LocationSelector: React.FC<LocationSelectorProps> = ({
                 ) : null}
             </div>
 
-            {showMap && isLoaded && (
+            {showMap && mapsAuthFailed && (
+                <div
+                    role="status"
+                    className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"
+                >
+                    Map search is unavailable. Try again after Maps is restored.
+                </div>
+            )}
+
+            {showMap && !mapsAuthFailed && isLoaded && (
                 <Paper
                     mt="md"
                     withBorder

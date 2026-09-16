@@ -122,4 +122,29 @@ class EventWeeklyOccurrenceCoordinatorTest {
         )
         assertNull(coordinator.selectedWeeklyOccurrenceSummary.value)
     }
+
+    @Test
+    fun selected_occurrence_survives_same_event_refresh_and_clears_for_new_event() {
+        val coordinator = EventWeeklyOccurrenceCoordinator()
+        val start = Instant.parse("2026-06-22T16:00:00Z")
+        val end = Instant.parse("2026-06-22T17:00:00Z")
+        coordinator.handleSelectedEventChanged("event-1", isWeeklyParent = true)
+        coordinator.selectWeeklySession(
+            isWeeklyParent = true,
+            sessionStart = start,
+            sessionEnd = end,
+            slotId = "slot-1",
+            occurrenceDate = "2026-06-22",
+            label = "June 22",
+        )
+
+        coordinator.handleSelectedEventChanged("event-1", isWeeklyParent = true)
+        assertEquals(
+            EventOccurrenceSelection("slot-1", "2026-06-22", "June 22"),
+            coordinator.currentSelection(),
+        )
+
+        coordinator.handleSelectedEventChanged("event-2", isWeeklyParent = true)
+        assertNull(coordinator.currentSelection())
+    }
 }

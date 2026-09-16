@@ -17,7 +17,10 @@ internal class EventDetailRemoteGateway(
 ) {
     suspend fun fetchEvent(eventId: String): Event {
         val dto = fetchEventDto(eventId)
-        return dto.toEventOrThrow("Event $eventId response")
+        return dto.toEventOrThrow(
+            context = "Event $eventId response",
+            requireOwnerIdentity = false,
+        )
     }
 
     suspend fun fetchEventDto(eventId: String): EventApiDto =

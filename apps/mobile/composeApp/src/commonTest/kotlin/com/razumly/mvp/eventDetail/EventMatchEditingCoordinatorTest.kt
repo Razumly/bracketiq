@@ -4,7 +4,11 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.network.ApiException
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.test.runCurrent
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -309,6 +313,117 @@ class EventMatchEditingCoordinatorTest {
         assertIs<MatchEditCommitResult.Failure>(failure)
         assertTrue(coordinator.isEditingMatches.value)
         assertEquals(listOf("start", "finish", "failure-start", "failure-finish"), loadingEvents)
+    }
+
+    @Test
+    fun given_protected_deletion_when_server_requires_confirmation_then_editing_waits_for_review() = runTest {
+        val coordinator = EventMatchEditingCoordinator()
+        val event = Event(id = "event-1", eventType = EventType.LEAGUE)
+        coordinator.beginEditing(listOf(relation(match("match-1", 1))), event, null, ::simpleRounds)
+        coordinator.deleteMatchFromDialog("match-1", event, null, ::simpleRounds)
+        var requests = 0
+        val result = coordinator.commitChanges(
+            isTournament = false,
+            updateMatchesBulk = {
+                requests += 1
+                Result.failure(ApiException(409, "/api/events/event-1/matches", """
+                    {"code":"PROTECTED_MATCH_HISTORY","error":"Deleting this match erases protected history.",
+                    "confirmation":"DELETE_PROTECTED_MATCH_HISTORY","matchIds":["match-1"]}
+                """.trimIndent()))
+            },
+        )
+        assertEquals(MatchEditCommitResult.ConfirmationRequired, result)
+        assertEquals("Deleting this match erases protected history.", coordinator.protectedDeletionConfirmation.value)
+        assertTrue(coordinator.isEditingMatches.value)
+        assertEquals(1, requests)
+    }
+
+    @Test
+    fun given_reviewed_deletion_when_confirmed_then_only_reviewed_changes_are_sent() = runTest {
+        val coordinator = reviewedDeletion()
+        var submitted: PreparedMatchBulkUpdate? = null
+        val result = coordinator.commitChanges(
+            isTournament = false,
+            confirmProtectedDeletion = true,
+            updateMatchesBulk = { payload -> submitted = payload; Result.success(emptyList()) },
+        )
+        assertEquals(MatchEditCommitResult.Success, result)
+        assertEquals(listOf("match-1"), submitted?.deletes)
+        assertEquals("DELETE_PROTECTED_MATCH_HISTORY", submitted?.confirmation)
+        assertFalse(coordinator.isEditingMatches.value)
+        assertEquals(null, coordinator.protectedDeletionConfirmation.value)
+    }
+
+    @Test
+    fun given_reviewed_deletion_when_cancelled_then_draft_remains_and_confirmation_cannot_be_reused() = runTest {
+        val coordinator = reviewedDeletion()
+        val before = coordinator.prepareCommit(false)
+        coordinator.dismissProtectedDeletionConfirmation()
+        var requests = 0
+        val result = coordinator.commitChanges(
+            isTournament = false,
+            confirmProtectedDeletion = true,
+            updateMatchesBulk = { requests++; Result.success(emptyList()) },
+        )
+        assertTrue(result is MatchEditCommitResult.Invalid)
+        assertEquals(0, requests)
+        assertEquals(before, coordinator.prepareCommit(false))
+        assertTrue(coordinator.isEditingMatches.value)
+        assertEquals(null, coordinator.protectedDeletionConfirmation.value)
+    }
+
+    @Test
+    fun given_reviewed_deletion_when_another_match_is_deleted_then_confirmation_requires_new_review() = runTest {
+        val coordinator = reviewedDeletion()
+        coordinator.deleteMatchFromDialog("match-2", Event(id = "event-1", eventType = EventType.LEAGUE), null, ::simpleRounds)
+        var requests = 0
+        val result = coordinator.commitChanges(
+            isTournament = false,
+            confirmProtectedDeletion = true,
+            updateMatchesBulk = { requests++; Result.success(emptyList()) },
+        )
+        assertTrue(result is MatchEditCommitResult.Invalid)
+        assertEquals(0, requests)
+        assertTrue(coordinator.isEditingMatches.value)
+    }
+
+    @Test
+    fun given_pending_deletion_when_edit_session_changes_then_late_warning_is_ignored() = runTest {
+        val coordinator = reviewedDeletion()
+        val response = CompletableDeferred<Result<List<MatchMVP>>>()
+        val commit = async {
+            coordinator.commitChanges(false, { response.await() }, confirmProtectedDeletion = true)
+        }
+        runCurrent()
+        coordinator.cancelEditing()
+        val event = Event(id = "event-1", eventType = EventType.LEAGUE)
+        coordinator.beginEditing(listOf(relation(match("new-match", 3))), event, null, ::simpleRounds)
+        response.complete(Result.failure(ApiException(409, "/api/events/event-1/matches", """
+            {"code":"PROTECTED_MATCH_HISTORY","error":"Confirmation required",
+            "confirmation":"DELETE_PROTECTED_MATCH_HISTORY","matchIds":["match-1"]}
+        """.trimIndent())))
+        assertEquals(MatchEditCommitResult.Superseded, commit.await())
+        assertEquals(null, coordinator.protectedDeletionConfirmation.value)
+        assertEquals(listOf("new-match"), coordinator.editableMatches.value.map { it.match.id })
+        assertTrue(coordinator.isEditingMatches.value)
+    }
+
+    private suspend fun reviewedDeletion(): EventMatchEditingCoordinator {
+        val coordinator = EventMatchEditingCoordinator()
+        val event = Event(id = "event-1", eventType = EventType.LEAGUE)
+        coordinator.beginEditing(listOf(relation(match("match-1", 1)), relation(match("match-2", 2))), event, null, ::simpleRounds)
+        coordinator.deleteMatchFromDialog("match-1", event, null, ::simpleRounds)
+        coordinator.commitChanges(
+            isTournament = false,
+            updateMatchesBulk = { payload ->
+                assertEquals(null, payload.confirmation)
+                Result.failure(ApiException(409, "/api/events/event-1/matches", """
+                    {"code":"PROTECTED_MATCH_HISTORY","error":"Deleting this match erases protected history.",
+                    "confirmation":"DELETE_PROTECTED_MATCH_HISTORY","matchIds":["match-1"]}
+                """.trimIndent()))
+            },
+        )
+        return coordinator
     }
 
     private fun simpleRounds(matches: Map<String, MatchWithRelations>): List<List<MatchWithRelations?>> =

@@ -1,5 +1,5 @@
 import { Controller, type Control } from 'react-hook-form';
-import { Text } from '@mantine/core';
+import { Text } from '@/components/organization/organization-operation-ui';
 
 import LeagueFields, {
     type LeagueFieldOption,
@@ -16,6 +16,10 @@ import type { Event, Field, LeagueConfig, Sport } from '@/types';
 import type { EventFormValues } from '../formTypes';
 import { AnimatedSection } from '../components/AnimatedSection';
 import { FacilityResourceSelector } from '../components/FacilityResourceSelector';
+import type { EventCalendarSlotSelection } from '../components/EventResourceCalendar';
+import type { EventResourceCalendarEntry } from '../eventResourceCalendar';
+import type { EventResourceCalendarTimelineRange } from '../components/EventResourceCalendarWeekTimeline';
+import EventResourceCalendar from '../components/EventResourceCalendar';
 
 type DivisionOption = {
     value: string;
@@ -29,6 +33,7 @@ type ScheduleConfigBodyProps = {
     isWeeklyChildEvent: boolean;
     requiresWeeklyRepeatingSlot: boolean;
     isSchedulableEventType: boolean;
+    eventType: Event['eventType'];
     isOrganizationManagedEvent: boolean;
     organizationHostedEventId?: string | null;
     selectedFields: Field[];
@@ -43,7 +48,11 @@ type ScheduleConfigBodyProps = {
     leagueFieldOptions?: LeagueFieldOption[];
     divisionOptions: DivisionOption[];
     eventStartDate?: string;
+    eventEndDate?: string;
+    eventTimeZone?: string;
     timeslotMode?: LeagueTimeslotMode;
+    showBoundaryOnlyRange: boolean;
+    showTimeslotHeading?: boolean;
     lockSlotDivisions: boolean;
     lockedDivisionKeys: string[];
     readOnly: boolean;
@@ -54,6 +63,17 @@ type ScheduleConfigBodyProps = {
     onUpdateSlot: (index: number, updates: Partial<LeagueSlotForm>) => void;
     onRemoveSlot: (index: number) => void;
     onAutoResolveSlotConflict: (index: number) => void;
+    onCreateCalendarSelection: (selection: EventCalendarSlotSelection) => void;
+    onMoveCalendarSlot: (
+        entry: EventResourceCalendarEntry,
+        range: EventResourceCalendarTimelineRange,
+    ) => void;
+    onResizeCalendarSlot: (
+        entry: EventResourceCalendarEntry,
+        range: EventResourceCalendarTimelineRange,
+    ) => void;
+    onSelectCalendarSlot: (slotIndex: number) => void;
+    onAssignCalendarResource: (slotIndex: number, resourceId: string) => void;
 };
 
 export const ScheduleConfigBody = ({
@@ -63,6 +83,7 @@ export const ScheduleConfigBody = ({
     isWeeklyChildEvent,
     requiresWeeklyRepeatingSlot,
     isSchedulableEventType,
+    eventType,
     isOrganizationManagedEvent,
     organizationHostedEventId,
     selectedFields,
@@ -77,7 +98,11 @@ export const ScheduleConfigBody = ({
     leagueFieldOptions,
     divisionOptions,
     eventStartDate,
+    eventEndDate,
+    eventTimeZone,
+    showBoundaryOnlyRange,
     timeslotMode,
+    showTimeslotHeading = true,
     lockSlotDivisions,
     lockedDivisionKeys,
     readOnly,
@@ -88,8 +113,14 @@ export const ScheduleConfigBody = ({
     onUpdateSlot,
     onRemoveSlot,
     onAutoResolveSlotConflict,
+    onCreateCalendarSelection,
+    onMoveCalendarSlot,
+    onResizeCalendarSlot,
+    onSelectCalendarSlot,
+    onAssignCalendarResource,
 }: ScheduleConfigBodyProps) => (
     <div className="mt-4 space-y-6">
+
         {!isSchedulableEventType && usesRentalSlots ? (
             <div className="rounded-lg border border-gray-200 bg-white p-4">
                 <Text fw={600} size="sm">Rental Slot Schedule</Text>
@@ -140,6 +171,26 @@ export const ScheduleConfigBody = ({
                         Select event {resourceLabels.plural.toLocaleLowerCase()} directly inside each timeslot.
                     </Text>
                 </AnimatedSection>
+                <EventResourceCalendar
+                    eventType={eventType}
+                    slots={leagueSlots}
+                    fields={selectedFields}
+                    eventStart={eventStartDate}
+                    eventEnd={eventEndDate}
+                    eventTimeZone={eventTimeZone}
+                    showBoundaryOnlyRange={showBoundaryOnlyRange}
+                    resourceLabelSingular={resourceLabels.singular}
+                    resourceLabelPlural={resourceLabels.plural}
+                    loading={resourceSelectorLoading}
+                    readOnly={readOnly}
+                    onCreateSelection={onCreateCalendarSelection}
+                    onSelectSlot={onSelectCalendarSlot}
+                    onMoveSlot={onMoveCalendarSlot}
+                    onResizeSlot={onResizeCalendarSlot}
+                    onAssignResource={onAssignCalendarResource}
+                    onDeleteSlot={onRemoveSlot}
+                />
+
 
                 <LeagueFields
                     leagueData={leagueData}
@@ -157,6 +208,8 @@ export const ScheduleConfigBody = ({
                     fieldOptions={leagueFieldOptions}
                     divisionOptions={divisionOptions}
                     eventStartDate={eventStartDate}
+                    eventEndDate={eventEndDate}
+                    eventTimeZone={eventTimeZone}
                     timeslotMode={timeslotMode}
                     lockSlotDivisions={lockSlotDivisions}
                     lockedDivisionKeys={lockedDivisionKeys}

@@ -1,7 +1,7 @@
 "use client";
 
 import { type Dispatch, type SetStateAction } from 'react';
-import { Alert, Button, Checkbox, Collapse, Group, Modal, Stack, Text, TextInput } from '@mantine/core';
+import { Alert, Button, Checkbox, Collapse, Group, Modal, Stack, Text, TextInput } from '@/components/organization/organization-operation-ui';
 import FieldCalendarFilter, { type FieldCalendarFilterItem } from '@/components/calendar/FieldCalendarFilter';
 import LocationSelector, { type LocationSelectionMeta } from '@/components/location/LocationSelector';
 import type { EntityColorReferenceValue } from '@/lib/entityColors';
@@ -230,12 +230,12 @@ export default function FacilityEditorModal({
             position: 'sticky',
             bottom: 0,
             zIndex: 1,
-            marginLeft: 'calc(var(--mantine-spacing-md) * -1)',
-            marginRight: 'calc(var(--mantine-spacing-md) * -1)',
-            marginBottom: 'calc(var(--mantine-spacing-md) * -1)',
-            padding: 'var(--mantine-spacing-sm) var(--mantine-spacing-md) var(--mantine-spacing-md)',
-            background: 'var(--mantine-color-body)',
-            borderTop: '1px solid var(--mantine-color-gray-3)',
+             marginLeft: -16,
+             marginRight: -16,
+             marginBottom: -16,
+             padding: '8px 16px 16px',
+             background: 'var(--background)',
+             borderTop: '1px solid var(--border)',
           }}
         >
           <Button variant="default" onClick={onClose} disabled={submitting}>

@@ -31,6 +31,8 @@ describe('DELETE /api/users/social/blocked/[targetUserId]', () => {
     requireSessionMock.mockResolvedValue({ userId: 'user_1', isAdmin: false });
     prismaMock.$transaction.mockImplementation(async (callback: any) => {
       const tx = {
+        $executeRaw: jest.fn(),
+        authUser: { findUnique: jest.fn().mockResolvedValue({ id: 'user_2', passwordHash: 'active-test-account', disabledAt: null }) },
         userData: {
           findUnique: jest.fn().mockResolvedValue({
             id: 'user_1',

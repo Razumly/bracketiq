@@ -4,6 +4,7 @@ export const teamDetailTabFromPathSegment = (segment?: string | null): TeamDetai
   const normalized = String(segment ?? '').trim().toLowerCase();
   if (normalized === 'finance') return 'finance';
   if (normalized === 'schedule') return 'schedule';
+  if (normalized === 'invitations') return 'invitations';
   return 'roster';
 };
 
@@ -34,8 +35,5 @@ export const buildTeamManagementPath = (
   tab: TeamDetailPageTab = 'roster',
 ): string => {
   const encodedTeamId = encodeURIComponent(teamId);
-  if (tab === 'schedule') {
-    return `/teams/${encodedTeamId}/schedule`;
-  }
-  return tab === 'finance' ? `/teams/${encodedTeamId}/finance` : `/teams/${encodedTeamId}`;
+  return tab === 'roster' ? `/teams/${encodedTeamId}` : `/teams/${encodedTeamId}/${tab}`;
 };

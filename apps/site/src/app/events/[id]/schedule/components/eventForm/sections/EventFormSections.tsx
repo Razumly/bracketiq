@@ -1,5 +1,5 @@
 import type { ComponentProps } from 'react';
-import { NumberInput } from '@mantine/core';
+import { NumberInput } from '@/components/organization/organization-operation-ui';
 
 import type { Division, Event, EventTag, RegistrationQuestionDraft } from '@/types';
 import { resolveEventResourceLabels } from '@/lib/sportResourceLabels';
@@ -9,6 +9,7 @@ import type { EventFormValues } from '../formTypes';
 import type { EventFormErrorIndex, EventFormAdvancedSectionId } from '../errorOwnership';
 import { coordinatesAreSet } from '../locationHelpers';
 import { normalizeNumber } from '../configDefaults';
+import { isUnscheduledCompetition } from '../eventRules';
 import type { useDivisionCommitController } from '../hooks/useDivisionCommitController';
 import type { useDivisionEditorController } from '../hooks/useDivisionEditorController';
 import type { useEventFormConfigurationActions } from '../hooks/useEventFormConfigurationActions';
@@ -17,6 +18,7 @@ import type { useEventFormSectionsController } from '../hooks/useEventFormSectio
 import type { useEventPaymentController } from '../hooks/useEventPaymentController';
 import type { useEventResourceController } from '../hooks/useEventResourceController';
 import type { useEventSlotController } from '../hooks/useEventSlotController';
+import type { EventTimingController } from '../hooks/useEventTimingSource';
 import type { useStaffOfficialController } from '../hooks/useStaffOfficialController';
 import { EventFormShell } from '../components/EventFormShell';
 import { BasicInformationSection } from './BasicInformationSection';
@@ -112,6 +114,7 @@ export type EventFormSectionsProps = {
     sectionsController: ReturnType<typeof useEventFormSectionsController>;
     setValue: SetFormValue;
     slotController: ReturnType<typeof useEventSlotController>;
+    timingController?: EventTimingController;
     slotDivisionKeys: string[];
     staffController: ReturnType<typeof useStaffOfficialController>;
     templates: TemplateModel;
@@ -155,6 +158,7 @@ export const EventFormSections = ({
     slotDivisionKeys,
     staffController,
     templates,
+    timingController,
     validationErrorIndex = EMPTY_ERROR_INDEX,
 }: EventFormSectionsProps) => {
     const leagueData = eventData.leagueData;
@@ -341,11 +345,19 @@ export const EventFormSections = ({
                 onToggle={() => toggleSectionCollapse('section-event-details')}
                 onEventTypeChange={handleEventTypeChange}
                 onAffiliateEventChange={handleAffiliateEventChange}
+                onAffiliateUrlChange={(value) => setValue('affiliateUrl', value, { shouldDirty: true })}
                 onIncludePlayoffsChange={handleIncludePlayoffsToggle}
                 onIncludePoolPlayChange={handleIncludePoolPlayChange}
-                onStartChange={handleStartChange}
-                onEndChange={handleEndChange}
-                onNoFixedEndDateTimeChange={handleNoFixedEndDateTimeChange}
+                onStartChange={timingController?.handleStartChange ?? handleStartChange}
+                onEndChange={timingController?.handleEndChange ?? handleEndChange}
+                startTimingSource={isSchedulableEventType ? timingController?.startSource : undefined}
+                endTimingSource={isSchedulableEventType ? timingController?.endSource : undefined}
+                onResetStartToCalendar={isSchedulableEventType ? timingController?.resetStartToCalendar : undefined}
+                onResetEndToCalendar={isSchedulableEventType ? timingController?.resetEndToCalendar : undefined}
+                scheduleBoundaryError={isSchedulableEventType ? timingController?.scheduleBoundaryError : undefined}
+                scheduleBoundaryWarning={isSchedulableEventType ? timingController?.scheduleBoundaryWarning : undefined}
+                onAutomatedSchedulingChange={configurationActions.handleAutomatedSchedulingChange}
+                onNoFixedEndDateTimeChange={timingController?.handleNoFixedEndDateTimeChange ?? handleNoFixedEndDateTimeChange}
                 coordinatesSelected={coordinatesAreSet(eventData.coordinates)}
                 defaultCoordinates={defaultCoordinates}
                 onSelectedAddressChange={handleSelectedAddressChange}
@@ -357,15 +369,15 @@ export const EventFormSections = ({
                 normalizeNumberValue={normalizeNumber}
                 showAffiliateListingControls={isAffiliateEvent}
                 showRequiredDocumentControls={!isAffiliateEvent}
-                localFieldCreationControl={isAffiliateEvent ? null : localFieldCreationControl}
+                localFieldCreationControl={localFieldCreationControl}
                 registrationQuestionsEditor={isAffiliateEvent ? null : registrationQuestionsEditor}
                 hasUnsetTeamCapacityLimits={hasUnsetTeamCapacityLimits}
-                showOrganizationFields={!isAffiliateEvent && showOrganizationFieldsInEventDetails}
+                showOrganizationFields={showOrganizationFieldsInEventDetails}
                 organizationResourcePool={organizationResourcePool}
                 resourceSelectorLoading={resourceSelectorLoading}
                 organizationHostedEventId={organizationHostedEventId}
                 rentalResourcesError={rentalResourcesError}
-                showLocalFieldCreationControls={!isAffiliateEvent && showLocalFieldCreationControls}
+                showLocalFieldCreationControls={showLocalFieldCreationControls}
                 eventLocalFields={eventLocalFields}
                 fieldNamesCollapsed={fieldNamesCollapsed}
                 setFieldNamesCollapsed={setFieldNamesCollapsed}
@@ -425,7 +437,6 @@ export const EventFormSections = ({
                 staffController={staffController}
                 onToggle={() => toggleSectionCollapse('section-officials')}
                 errorCount={staffErrors.length}
-                firstErrorMessage={staffErrors[0]?.message}
             />
 
             <EventFormDivisionSection
@@ -508,11 +519,45 @@ export const EventFormSections = ({
                     leagueFieldOptions={leagueFieldOptions}
                     divisionOptions={divisionOptions}
                     eventStartDate={eventData.start}
+                    eventEndDate={eventData.end}
+                    showBoundaryOnlyRange={isUnscheduledCompetition(
+                        eventData.eventType,
+                        eventData.isAutomatedScheduling,
+                    )}
+                    eventTimeZone={eventData.timeZone}
                     lockSlotDivisions={Boolean(eventData.singleDivision)}
                     lockedDivisionKeys={slotDivisionKeys}
                     readOnly={hasImmutableTimeSlots}
                     allowDivisionEditsWhenReadOnly={hasExternalRentalField && !eventData.singleDivision}
                     allowResourceEditsWhenReadOnly={hasExternalRentalField}
+                    timeslotMode="MIXED"
+                    eventType={eventData.eventType}
+                    onCreateCalendarSelection={(selection) => {
+                        if (timingController && isUnscheduledCompetition(
+                            eventData.eventType,
+                            eventData.isAutomatedScheduling,
+                        )) {
+                            timingController.handleStartChange(selection.start);
+                            timingController.handleEndChange(selection.end);
+                        }
+                        slotController.handleCreateCalendarSelection(selection);
+                    }}
+                    onMoveCalendarSlot={slotController.handleMoveCalendarSlot}
+                    onResizeCalendarSlot={slotController.handleResizeCalendarSlot}
+                    onSelectCalendarSlot={(slotIndex) => {
+                        const slot = eventData.leagueSlots[slotIndex];
+                        if (!slot || typeof document === 'undefined') {
+                            return;
+                        }
+                        const escapedKey =
+                            typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+                                ? CSS.escape(slot.key)
+                                : slot.key.replace(/"/g, '\\"');
+                        document
+                            .querySelector(`[data-event-slot-key="${escapedKey}"]`)
+                            ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }}
+                    onAssignCalendarResource={slotController.handleAssignCalendarResource}
                     onLeagueDataChange={(updates) => setLeagueData((previous) => ({ ...previous, ...updates }))}
                     onAddSlot={handleAddSlot}
                     onUpdateSlot={handleUpdateSlot}

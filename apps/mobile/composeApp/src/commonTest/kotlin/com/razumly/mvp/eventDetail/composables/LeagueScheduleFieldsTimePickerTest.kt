@@ -24,4 +24,12 @@ class LeagueScheduleFieldsTimePickerTest {
     fun minutes_to_picker_time_preserves_valid_values() {
         assertEquals(PickerTimeValue(hour = 10, minute = 30), minutesToPickerTime(10 * 60 + 30))
     }
+
+    @Test
+    fun given_monday_overnight_slot_when_formatting_warning_then_names_tuesday() {
+        assertEquals(
+            "Overnight slot ends on the next local weekday: Tuesday.",
+            formatOvernightWeekdayWarning(listOf(0)),
+        )
+    }
 }

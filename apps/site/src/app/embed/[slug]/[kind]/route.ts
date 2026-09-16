@@ -477,6 +477,39 @@ const renderDivisionSelect = (
   `;
 };
 
+type PublicIncompleteSchedulePage = Pick<
+  PublicStandingsWidgetPage,
+  | 'isScheduleIncomplete'
+  | 'unscheduledMatchCount'
+  | 'unscheduledMatchIds'
+  | 'affectedCompetitionPhaseIds'
+  | 'affectedCompetitionPhaseLabels'
+>;
+
+const renderIncompleteScheduleStatus = (page: PublicIncompleteSchedulePage): string => (
+  page.isScheduleIncomplete
+    ? `
+      <div class="public-schedule-status public-schedule-status-incomplete" role="status">
+        <strong>Schedule incomplete</strong>
+        <span>${escapeHtml(page.unscheduledMatchCount)} unscheduled ${
+          page.unscheduledMatchCount === 1 ? 'match' : 'matches'
+        }</span>
+        <span>Unscheduled match IDs: ${escapeHtml(page.unscheduledMatchIds.join(', '))}</span>
+        <span>Affected Competition Phases: ${
+          page.affectedCompetitionPhaseLabels.length > 0
+            ? escapeHtml(page.affectedCompetitionPhaseLabels.join(', '))
+            : 'Competition Phase details unavailable'
+        }</span>
+        ${
+          page.affectedCompetitionPhaseIds.length > 0
+            ? `<span>Competition Phase IDs: ${escapeHtml(page.affectedCompetitionPhaseIds.join(', '))}</span>`
+            : ''
+        }
+      </div>
+    `
+    : ''
+);
+
 const renderStandingsTable = (
   page: PublicStandingsWidgetPage & { options: WidgetRenderOptions },
 ): string => {
@@ -489,6 +522,7 @@ const renderStandingsTable = (
     renderDivisionSelect(page.divisionOptions, page.selectedDivisionId),
     renderWidgetPagination(page.eventPageInfo, 'Standings events'),
   ].filter(Boolean).join('');
+  const incompleteSchedule = renderIncompleteScheduleStatus(page);
 
   if (!page.division || page.division.standings.length === 0) {
     return `
@@ -501,6 +535,7 @@ const renderStandingsTable = (
           </div>
           <div class="widget-detail-controls">${controls}</div>
         </div>
+        ${incompleteSchedule}
         <p class="empty">No standings are available for this division yet.</p>
       </section>
     `;
@@ -516,6 +551,7 @@ const renderStandingsTable = (
         </div>
         <div class="widget-detail-controls">${controls}</div>
       </div>
+      ${incompleteSchedule}
       <div class="standings-table-wrap">
         <table class="standings-table">
           <thead>
@@ -678,6 +714,7 @@ const renderBracketWidget = (
     renderDivisionSelect(page.divisionOptions, page.selectedDivisionId),
     renderWidgetPagination(page.eventPageInfo, 'Bracket events'),
   ].filter(Boolean).join('');
+  const incompleteSchedule = renderIncompleteScheduleStatus(page);
 
   const hasWinnersLane = Boolean(page.winnersLane?.matchIds.length);
   const hasLosersLane = Boolean(page.losersLane?.matchIds.length);
@@ -692,6 +729,7 @@ const renderBracketWidget = (
           </div>
           <div class="widget-detail-controls">${controls}</div>
         </div>
+        ${incompleteSchedule}
         <p class="empty">No bracket has been generated for this division yet.</p>
       </section>
     `;
@@ -707,6 +745,7 @@ const renderBracketWidget = (
         </div>
         <div class="widget-detail-controls">${controls}</div>
       </div>
+      ${incompleteSchedule}
       ${page.winnersLane ? renderBracketLane(page.winnersLane, {
         title: 'Winners Bracket',
         markerId: 'public-bracket-winners-arrowhead',
@@ -784,6 +823,9 @@ const renderWidgetDocument = (
     .empty { grid-column: 1 / -1; }
     .empty[hidden] { display: none; }
     .widget-detail-header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 16px; }
+    .public-schedule-status { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 0 0 16px; padding: 12px 14px; border: 1px solid #f5c76a; border-radius: 8px; background: #fff8e1; color: #6b4f00; }
+    .public-schedule-status strong { margin: 0; color: #6b4f00; }
+    .public-schedule-status span { color: #6b4f00; }
     .widget-subtitle { margin-top: 6px; color: #53645d; font-size: 0.95rem; font-weight: 600; }
     .widget-detail-controls { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: flex-end; gap: 12px; }
     .widget-filter-group { display: grid; gap: 8px; min-width: 180px; margin: 0; padding: 0; border: 0; }

@@ -1,12 +1,13 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { useLocation } from '../useLocation';
-import { locationService } from '@/lib/locationService';
+import { locationService, type LocationInfo } from '@/lib/locationService';
 
 jest.mock('@/lib/locationService', () => ({
   locationService: {
     getCurrentLocation: jest.fn(),
     reverseGeocode: jest.fn(),
     geocodeLocation: jest.fn(),
+    getApproximateLocation: jest.fn(),
   },
 }));
 
@@ -17,11 +18,15 @@ describe('useLocation', () => {
     mockedLocationService.getCurrentLocation.mockReset();
     mockedLocationService.reverseGeocode.mockReset();
     mockedLocationService.geocodeLocation.mockReset();
+    mockedLocationService.getApproximateLocation.mockReset();
     localStorage.clear();
     (navigator as any).permissions = undefined;
+    const { result, unmount } = renderHook(() => useLocation());
+    act(() => result.current.clearLocation());
+    unmount();
   });
 
-  it('initializes from saved location before effects run', () => {
+  it('uses a saved location instead of requesting an approximate location', () => {
     localStorage.setItem('user-location', JSON.stringify({ lat: 45.5, lng: -122.6 }));
     localStorage.setItem('user-location-info', JSON.stringify({
       lat: 45.5,
@@ -29,13 +34,20 @@ describe('useLocation', () => {
       city: 'Portland',
     }));
 
-    const { result } = renderHook(() => useLocation());
+    const { result } = renderHook(() => useLocation({ loadApproximate: true }));
 
     expect(result.current.location).toEqual({ lat: 45.5, lng: -122.6 });
     expect(result.current.locationInfo).toMatchObject({ city: 'Portland' });
+    expect(mockedLocationService.getApproximateLocation).not.toHaveBeenCalled();
   });
 
-  it('requests current location and stores it', async () => {
+  it('replaces approximate location with exact browser location and stores it', async () => {
+    mockedLocationService.getApproximateLocation.mockResolvedValue({
+      lat: 39.7,
+      lng: -104.9,
+      city: 'Denver',
+      source: 'approximate',
+    });
     mockedLocationService.getCurrentLocation.mockResolvedValue({ lat: 40, lng: -105 });
     mockedLocationService.reverseGeocode.mockResolvedValue({
       lat: 40,
@@ -43,15 +55,18 @@ describe('useLocation', () => {
       city: 'Boulder',
     });
 
-    const { result } = renderHook(() => useLocation());
+    const { result } = renderHook(() => useLocation({ loadApproximate: true }));
+    await waitFor(() => expect(result.current.locationInfo?.source).toBe('approximate'));
+    expect(mockedLocationService.getCurrentLocation).not.toHaveBeenCalled();
 
     await act(async () => {
       await result.current.requestLocation();
     });
 
     expect(result.current.location).toEqual({ lat: 40, lng: -105 });
-    expect(result.current.locationInfo).toMatchObject({ city: 'Boulder' });
+    expect(result.current.locationInfo).toMatchObject({ city: 'Boulder', source: 'exact' });
     expect(localStorage.getItem('user-location')).toBe(JSON.stringify({ lat: 40, lng: -105 }));
+    expect(JSON.parse(localStorage.getItem('user-location-info')!)).toMatchObject({ source: 'exact' });
   });
 
   it('starts geolocation without awaiting the Permissions API', async () => {
@@ -78,6 +93,32 @@ describe('useLocation', () => {
     expect(result.current.locationInfo).toMatchObject({ city: 'Washougal', state: 'WA' });
   });
 
+  it('uses approximate location when browser permission is blocked', async () => {
+    mockedLocationService.getCurrentLocation.mockRejectedValue(
+      new Error('Location access is blocked. Enable location permission, then try again.'),
+    );
+    mockedLocationService.getApproximateLocation.mockResolvedValue({
+      lat: 45.5,
+      lng: -122.6,
+      city: 'Portland',
+      state: 'OR',
+      source: 'approximate',
+    });
+
+    const { result } = renderHook(() => useLocation());
+
+    await act(async () => {
+      await result.current.requestLocation();
+    });
+
+    expect(mockedLocationService.getApproximateLocation).toHaveBeenCalledWith(expect.any(AbortSignal));
+    expect(result.current.locationInfo).toMatchObject({
+      city: 'Portland',
+      source: 'approximate',
+    });
+    expect(result.current.error).toBeNull();
+  });
+
   it('searches for a location via geocode', async () => {
     mockedLocationService.geocodeLocation.mockResolvedValue({
       lat: 51.5,
@@ -95,7 +136,7 @@ describe('useLocation', () => {
     expect(found).toBe(true);
     expect(mockedLocationService.geocodeLocation).toHaveBeenCalledWith('London');
     expect(result.current.location).toEqual({ lat: 51.5, lng: -0.12 });
-    expect(result.current.locationInfo?.city).toBe('London');
+    expect(result.current.locationInfo).toMatchObject({ city: 'London', source: 'manual' });
   });
 
   it('clears stored location', async () => {
@@ -125,5 +166,50 @@ describe('useLocation', () => {
     expect(found).toBe(false);
     expect(result.current.error).toBe('Location not found');
     expect(result.current.location).toBeNull();
+  });
+
+  it('does not request approximate location unless a consumer opts in', () => {
+    renderHook(() => useLocation());
+    expect(mockedLocationService.getApproximateLocation).not.toHaveBeenCalled();
+  });
+
+  it('keeps a shared manual location when an approximate request finishes later', async () => {
+    let resolveApproximate!: (info: LocationInfo) => void;
+    mockedLocationService.getApproximateLocation.mockImplementation(() => (
+      new Promise(resolve => { resolveApproximate = resolve; })
+    ));
+    const approximate = renderHook(() => useLocation({ loadApproximate: true }));
+    const manual = renderHook(() => useLocation());
+    const selectedLocation = { lat: 51.5, lng: -0.12, city: 'London' };
+
+    act(() => manual.result.current.setLocationFromInfo(selectedLocation));
+    await act(async () => {
+      resolveApproximate({ lat: 45.5, lng: -122.6, city: 'Portland', source: 'approximate' });
+    });
+
+    expect(approximate.result.current.locationInfo).toEqual({ ...selectedLocation, source: 'manual' });
+    expect(JSON.parse(localStorage.getItem('user-location-info')!)).toEqual({
+      ...selectedLocation,
+      source: 'manual',
+    });
+  });
+
+  it('does not restore an approximate location after its consumer unmounts', async () => {
+    let resolveApproximate!: (info: LocationInfo) => void;
+    mockedLocationService.getApproximateLocation.mockImplementation(() => (
+      new Promise(resolve => { resolveApproximate = resolve; })
+    ));
+    const { unmount } = renderHook(() => useLocation({ loadApproximate: true }));
+    const signal = mockedLocationService.getApproximateLocation.mock.calls[0][0];
+    unmount();
+
+    await act(async () => {
+      resolveApproximate({ lat: 45.5, lng: -122.6, city: 'Portland', source: 'approximate' });
+    });
+
+    const { result } = renderHook(() => useLocation());
+    expect(signal?.aborted).toBe(true);
+    expect(result.current.location).toBeNull();
+    expect(localStorage.getItem('user-location-info')).toBeNull();
   });
 });

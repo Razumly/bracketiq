@@ -20,6 +20,8 @@ const checkoutSchema = z.object({
   taxAmountCents: z.number().optional(),
   divisionId: z.string().optional(),
   label: z.string().optional(),
+  slotId: z.string().optional(),
+  occurrenceDate: z.string().optional(),
 }).passthrough();
 
 const normalizeId = (value: unknown): string | null => {
@@ -28,6 +30,25 @@ const normalizeId = (value: unknown): string | null => {
   }
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
+};
+const resolveOccurrenceFromRequest = (
+  req: NextRequest,
+  body: { slotId?: unknown; occurrenceDate?: unknown },
+): {
+  occurrence: { slotId: string; occurrenceDate: string } | null;
+  error: string | null;
+} => {
+  const slotId = normalizeId(body.slotId)
+    ?? normalizeId(req.nextUrl.searchParams.get('slotId'));
+  const occurrenceDate = normalizeId(body.occurrenceDate)
+    ?? normalizeId(req.nextUrl.searchParams.get('occurrenceDate'));
+  if (!slotId && !occurrenceDate) {
+    return { occurrence: null, error: null };
+  }
+  if (!slotId || !occurrenceDate) {
+    return { occurrence: null, error: 'slotId and occurrenceDate are both required for weekly checkout.' };
+  }
+  return { occurrence: { slotId, occurrenceDate }, error: null };
 };
 
 const appendMetadata = (
@@ -108,7 +129,15 @@ export async function POST(
     : 0;
 
   const requestedOwnerId = normalizeId(parsed.data.ownerId);
-  const participantIds = await getEventParticipantIdsForEvent(event.id);
+  const participantOccurrence = resolveOccurrenceFromRequest(req, parsed.data);
+  if (participantOccurrence.error) {
+    return NextResponse.json({ error: participantOccurrence.error }, { status: 400 });
+  }
+  const participantIds = await getEventParticipantIdsForEvent(
+    event.id,
+    prisma,
+    participantOccurrence.occurrence,
+  );
 
   let billOwnerType: 'TEAM' | 'USER';
   let billOwnerId: string;
@@ -220,6 +249,8 @@ export async function POST(
   appendMetadata(metadata, 'team_name', teamName);
   appendMetadata(metadata, 'organization_id', event.organizationId);
   appendMetadata(metadata, 'division_id', parsed.data.divisionId);
+  appendMetadata(metadata, 'slot_id', participantOccurrence.occurrence?.slotId);
+  appendMetadata(metadata, 'occurrence_date', participantOccurrence.occurrence?.occurrenceDate);
 
   const stripe = new Stripe(secretKey);
 	  const transferData = await buildDestinationTransferData({

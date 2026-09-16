@@ -47,7 +47,7 @@ const createEvent = (overrides: Partial<Event> = {}): Event => ({
   singleDivision: true,
   waitListIds: [],
   freeAgentIds: [],
-  eventType: 'AFFILIATE',
+  eventType: 'EVENT',
   sport: {
     $id: 'sport_volleyball',
     name: 'Indoor Volleyball',
@@ -75,6 +75,27 @@ describe('EventCard affiliate schedule display', () => {
     expect(screen.queryByText(/duplicate scraped text/i)).not.toBeInTheDocument();
     expect(screen.getByText('Beaverton Hoop YMCA')).toBeInTheDocument();
     expect(screen.getByText('Hosted by Rose City Volleyball')).toBeInTheDocument();
+  });
+
+  it('shows the next Weekly occurrence while keeping the season start separate', () => {
+    renderWithMantine(
+      <EventCard
+        event={createEvent({
+          eventType: 'WEEKLY_EVENT',
+          start: '2025-06-01T18:00:00.000Z',
+          end: null,
+          nextOccurrence: {
+            slotId: 'slot-weekly',
+            occurrenceDate: '2026-07-16',
+            start: '2026-07-16T18:00:00.000Z',
+            end: '2026-07-16T20:00:00.000Z',
+          },
+        })}
+      />,
+    );
+
+    expect(screen.getByText('07/16/2026 at 06:00 PM')).toBeInTheDocument();
+    expect(screen.queryByText('06/01/2025 at 06:00 PM')).not.toBeInTheDocument();
   });
 
   it('keeps no-fixed-date affiliate programs on their display text', () => {

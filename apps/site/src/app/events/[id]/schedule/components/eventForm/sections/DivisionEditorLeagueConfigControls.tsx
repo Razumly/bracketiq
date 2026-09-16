@@ -1,5 +1,5 @@
 import type { ComponentProps, Dispatch, SetStateAction } from 'react';
-import { NumberInput } from '@mantine/core';
+import { NumberInput } from '@/components/organization/organization-operation-ui';
 
 import LeagueFields from '@/app/discover/components/LeagueFields';
 import TournamentFields from '@/app/discover/components/TournamentFields';

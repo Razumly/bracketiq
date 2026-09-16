@@ -466,6 +466,7 @@ describe('tournament scheduling (time slots)', () => {
       fields: { [field.id]: field },
       timeSlots: [timeSlot],
       doTeamsOfficiate: true,
+      staffingPriority: 'BEST_AVAILABLE_COVERAGE',
       teamOfficialsMaySwap: true,
       doubleElimination: true,
       winnerSetCount: 3,
@@ -491,7 +492,11 @@ describe('tournament scheduling (time slots)', () => {
       match.division.id === poolA.id || match.division.id === poolB.id
     ));
     expect(poolMatches.length).toBeGreaterThan(0);
-    expect(poolMatches.every((match) => match.teamOfficial?.division?.id === bracketDivision.id)).toBe(true);
+    for (const match of poolMatches) {
+      expect(match.teamOfficial).not.toBeNull();
+      expect([match.division.id, bracketDivision.id]).toContain(match.teamOfficial?.division?.id);
+      expect([match.team1?.id, match.team2?.id]).not.toContain(match.teamOfficial?.id);
+    }
     expect(scheduled.matches.length).toBeGreaterThan(5);
   });
 

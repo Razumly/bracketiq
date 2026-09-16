@@ -5,7 +5,6 @@ const getReviewsMock = jest.fn();
 const saveReviewMock = jest.fn();
 const deleteReviewMock = jest.fn();
 const notificationShowMock = jest.fn();
-const openConfirmModalMock = jest.fn();
 
 jest.mock('@/lib/organizationReviewService', () => ({
   organizationReviewService: {
@@ -16,13 +15,10 @@ jest.mock('@/lib/organizationReviewService', () => ({
   },
 }));
 
-jest.mock('@mantine/notifications', () => ({
+jest.mock('@/lib/organizationNotifications', () => ({
   notifications: { show: (...args: unknown[]) => notificationShowMock(...args) },
 }));
 
-jest.mock('@mantine/modals', () => ({
-  modals: { openConfirmModal: (...args: unknown[]) => openConfirmModalMock(...args) },
-}));
 
 import OrganizationReviewsPanel from '@/app/organizations/[id]/OrganizationReviewsPanel';
 
@@ -71,7 +67,40 @@ const deferred = <T,>() => {
 describe('OrganizationReviewsPanel pagination', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    openConfirmModalMock.mockImplementation((options: { onConfirm: () => void }) => options.onConfirm());
+  });
+
+  it('applies a search entered before the reviews request finishes', async () => {
+    const request = deferred<ReturnType<typeof payload>>();
+    getReviewsMock.mockReturnValueOnce(request.promise);
+    render(<OrganizationReviewsPanel organizationId="org_1" />);
+    const search = screen.getByRole('textbox', { name: 'Search reviews' });
+    search.focus();
+    fireEvent.change(search, { target: { value: 'Jordan' } });
+    expect(screen.getByRole('status', { name: 'Loading reviews' })).toBeInTheDocument();
+    expect(screen.queryByText(/No reviews yet/)).not.toBeInTheDocument();
+    await act(async () => {
+      request.resolve(payload([review('one', 'Jordan Rivers'), review('two', 'Casey Morgan')], null));
+      await request.promise;
+    });
+    expect(search).toHaveFocus();
+    expect(search).toHaveValue('Jordan');
+    expect(screen.getByText('Jordan Rivers')).toBeInTheDocument();
+    expect(screen.queryByText('Casey Morgan')).not.toBeInTheDocument();
+  });
+
+  it('keeps a search through a failed request and retry', async () => {
+    const request = deferred<ReturnType<typeof payload>>();
+    getReviewsMock.mockReturnValueOnce(request.promise).mockResolvedValueOnce(payload([review('one', 'Jordan Rivers'), review('two', 'Casey Morgan')], null));
+    render(<OrganizationReviewsPanel organizationId="org_1" />);
+    const search = screen.getByRole('textbox', { name: 'Search reviews' });
+    fireEvent.change(search, { target: { value: 'Casey' } });
+    await act(async () => { request.reject(new Error('Request failed')); await request.promise.catch(() => {}); });
+    expect(search).toHaveValue('Casey');
+    expect(screen.queryByText(/No reviews yet/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByText('Casey Morgan')).toBeInTheDocument();
+    expect(screen.queryByText('Jordan Rivers')).not.toBeInTheDocument();
+    expect(search).toHaveValue('Casey');
   });
 
   it('appends the next page, deduplicates boundary rows, and stops at the terminal cursor', async () => {
@@ -172,6 +201,7 @@ describe('OrganizationReviewsPanel pagination', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Load more reviews' }));
     fireEvent.click(screen.getByRole('button', { name: 'Edit review' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete review' }));
 
     expect(await screen.findByText('No reviews yet. Be the first to share your experience.')).toBeInTheDocument();
     expect(deleteReviewMock).toHaveBeenCalledWith('org_1', original.id);

@@ -8,6 +8,7 @@ import { findPresentKeys, findUnknownKeys } from '@/server/http/strictPatch';
 import { getFacilityForOrganization } from '@/server/facilities';
 import { attachFacilitiesToFieldRows, toFieldResponse } from '@/server/fieldFacilityPayload';
 import { deleteOrArchiveField, toDeleteOrArchiveResponse } from '@/server/deletion/archivePolicy';
+import { acquireFieldLocks } from '@/server/repositories/locks';
 
 export const dynamic = 'force-dynamic';
 
@@ -184,6 +185,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   let resolvedCreatedBy = normalizeId(existing.createdBy);
+  let legacyDerivedOwnerId: string | null = null;
   if (existing.organizationId) {
     const org = await prisma.organizations.findUnique({
       where: { id: existing.organizationId },
@@ -201,19 +203,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       const derivedOwnerId = await deriveLegacyOrglessFieldOwner(id);
       if (derivedOwnerId) {
         resolvedCreatedBy = derivedOwnerId;
-        try {
-          await (prisma.fields as any).update({
-            where: { id },
-            data: {
-              createdBy: derivedOwnerId,
-              updatedAt: new Date(),
-            },
-          });
-        } catch (error) {
-          if (!isUnknownPrismaCreatedByArgError(error)) {
-            throw error;
-          }
-        }
+        legacyDerivedOwnerId = derivedOwnerId;
       }
     }
     if (!session.isAdmin) {
@@ -279,9 +269,27 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       updateData[key] = safePayload[key];
     }
   }
-  const updated = await prisma.fields.update({
-    where: { id },
-    data: { ...updateData, updatedAt: new Date() } as any,
+  const updated = await prisma.$transaction(async (tx) => {
+    await acquireFieldLocks(tx, [id]);
+    if (legacyDerivedOwnerId) {
+      try {
+        await (tx.fields as any).update({
+          where: { id },
+          data: {
+            createdBy: legacyDerivedOwnerId,
+            updatedAt: new Date(),
+          },
+        });
+      } catch (error) {
+        if (!isUnknownPrismaCreatedByArgError(error)) {
+          throw error;
+        }
+      }
+    }
+    return tx.fields.update({
+      where: { id },
+      data: { ...updateData, updatedAt: new Date() } as any,
+    });
   });
 
   const [fieldWithFacility] = await attachFacilitiesToFieldRows([updated]);
@@ -317,11 +325,11 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
-  const result = await deleteOrArchiveField({
-    client: prisma,
+  const result = await prisma.$transaction((tx) => deleteOrArchiveField({
+    client: tx,
     entity: existing,
     actorUserId: session.userId,
     reason: 'delete_requested',
-  });
+  }));
   return NextResponse.json(toDeleteOrArchiveResponse(result), { status: 200 });
 }

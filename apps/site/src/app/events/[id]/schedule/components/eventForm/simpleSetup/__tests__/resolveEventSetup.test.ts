@@ -17,7 +17,6 @@ const input = (overrides: Partial<EventSetupResolverInput> = {}): EventSetupReso
     hasImmutableRentalResources: false,
     organizationFeatures: [],
     choices: {
-        scheduleStyle: 'FIXED_WINDOW',
         paidRegistration: false,
         useRequiredDocuments: false,
         useRegistrationQuestions: false,
@@ -46,7 +45,7 @@ describe('resolveEventSetupCapabilities', () => {
         expect(capabilities.usesOperationsPlanning).toBe(false);
     });
 
-    it('keeps external leagues split-capable while disabling internal competition', () => {
+    it('keeps competition available for external leagues', () => {
         const capabilities = resolveEventSetupCapabilities(input({
             eventType: 'LEAGUE',
             isExternalRegistration: true,
@@ -56,7 +55,7 @@ describe('resolveEventSetupCapabilities', () => {
 
         expect(capabilities.divisionMode).toBe('SPLIT');
         expect(capabilities.canChooseDivisionMode).toBe(true);
-        expect(capabilities.usesCompetition).toBe(false);
+        expect(capabilities.usesCompetition).toBe(true);
         expect(capabilities.usesInternalRegistration).toBe(false);
     });
 
@@ -66,9 +65,9 @@ describe('resolveEventSetupCapabilities', () => {
         ['LEAGUE', false, true, true, true],
         ['TOURNAMENT', false, true, true, true],
         ['TRYOUT', false, false, true, false],
-        ['EVENT', true, false, false, false],
-        ['LEAGUE', true, false, false, false],
-        ['TOURNAMENT', true, false, false, false],
+        ['EVENT', true, false, false, true],
+        ['LEAGUE', true, true, false, true],
+        ['TOURNAMENT', true, true, false, true],
         ['TRYOUT', true, false, false, false],
     ] as const)(
         'resolves the %s external=%s capability path',
@@ -212,7 +211,7 @@ describe('resolveEventSetupPages', () => {
         ['LEAGUE', false, true],
         ['TOURNAMENT', false, true],
         ['TRYOUT', false, false],
-        ['LEAGUE', true, false],
+        ['LEAGUE', true, true],
     ] as const)(
         'uses the expected optional pages for %s external=%s',
         (eventType, isExternalRegistration, operationsUsed) => {
@@ -259,8 +258,7 @@ describe('describeEventSetupTransition', () => {
             input({ eventType: 'LEAGUE', isExternalRegistration: true }),
         );
 
-        expect(impact.pageIds).toContain('divisions');
-        expect(impact.pageIds).toContain('staff-operations');
+        expect(impact.pageIds).toEqual(['pricing-registration', 'documents-questions']);
         expect(impact.categories).toContain('BracketIQ payments and registration requirements');
     });
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Collapse } from '@mantine/core';
+import { Collapse } from '@/components/organization/organization-operation-ui';
 import { AnimatePresence, motion } from 'motion/react';
 
 import {
@@ -17,9 +17,9 @@ export const AnimatedSection = ({
     children: React.ReactNode;
     className?: string;
     collapseClassName?: string;
-}) => (
+}) => inProp ? (
     <Collapse
-        in={inProp}
+        in
         transitionDuration={SECTION_ANIMATION_DURATION_MS}
         transitionTimingFunction="ease"
         animateOpacity
@@ -27,16 +27,18 @@ export const AnimatedSection = ({
     >
         {className ? <div className={className}>{children}</div> : children}
     </Collapse>
-);
+) : null;
 
 export const AnimatedLayoutSection = ({
     in: inProp,
     children,
     className,
+    allowOverflow = false,
 }: {
     in: boolean;
     children: React.ReactNode;
     className?: string;
+    allowOverflow?: boolean;
 }) => (
     <AnimatePresence initial={false} mode="popLayout">
         {inProp ? (
@@ -47,7 +49,7 @@ export const AnimatedLayoutSection = ({
                 animate={{ opacity: 1, height: 'auto', y: 0 }}
                 exit={{ opacity: 0, height: 0, y: -6 }}
                 transition={DIVISION_LAYOUT_TRANSITION}
-                style={{ overflow: 'hidden' }}
+                style={{ overflow: allowOverflow ? 'visible' : 'hidden' }}
             >
                 {children}
             </motion.div>

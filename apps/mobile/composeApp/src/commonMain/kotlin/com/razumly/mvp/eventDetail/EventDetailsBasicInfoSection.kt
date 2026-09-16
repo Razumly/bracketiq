@@ -54,6 +54,7 @@ import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import com.razumly.mvp.eventDetail.composables.TextInputField
 import com.razumly.mvp.eventDetail.readonly.HostedByReadOnlyRow
+import com.razumly.mvp.eventDetail.shared.EventRegistrationWebsiteField
 import com.razumly.mvp.eventDetail.shared.DetailKeyValueList
 import com.razumly.mvp.eventDetail.shared.DetailRowSpec
 import com.razumly.mvp.eventDetail.shared.FormSectionDivider
@@ -138,6 +139,9 @@ internal fun LazyListScope.eventDetailsBasicInfoSection(
                 thickness = 1.dp,
             )
             DetailKeyValueList(rows = state.readOnlyBasicsRows)
+            state.event.capabilities?.managementRestrictionMessage()?.let { message ->
+                Text(message)
+            }
             if (state.event.description.isNotBlank()) {
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
@@ -155,6 +159,9 @@ internal fun LazyListScope.eventDetailsBasicInfoSection(
             }
         },
         editContent = {
+            EventRegistrationWebsiteField(state.editEvent.affiliateUrl) { website ->
+                actions.onEditEvent { copy(affiliateUrl = website) }
+            }
             TextInputField(
                 value = state.editEvent.description,
                 label = "Description",
@@ -240,10 +247,14 @@ internal fun LazyListScope.eventDetailsBasicInfoSection(
                 state.editEvent.eventType == EventType.LEAGUE ||
                     state.editEvent.eventType == EventType.TOURNAMENT ||
                     state.editEvent.eventType == EventType.WEEKLY_EVENT
-            val canEditNoFixedEndDateTime = supportsNoFixedEndDateTime &&
-                state.editEvent.eventType != EventType.WEEKLY_EVENT
+            val usesGeneratedEnd = state.editEvent.noFixedEndDateTime
+            val canEditNoFixedEndDateTime = supportsNoFixedEndDateTime
 
-            if (state.editEvent.eventType == EventType.EVENT || supportsNoFixedEndDateTime) {
+            if (
+                state.editEvent.eventType == EventType.EVENT ||
+                    state.editEvent.eventType == EventType.TRYOUT ||
+                    supportsNoFixedEndDateTime
+            ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -274,12 +285,12 @@ internal fun LazyListScope.eventDetailsBasicInfoSection(
                             ""
                         },
                         enabled = !state.scheduleTimeLocked &&
-                            !(supportsNoFixedEndDateTime && state.editEvent.noFixedEndDateTime),
+                            !usesGeneratedEnd,
                         readOnly = true,
                         onTap = {
                             if (
                                 !state.scheduleTimeLocked &&
-                                !(supportsNoFixedEndDateTime && state.editEvent.noFixedEndDateTime)
+                                !usesGeneratedEnd
                             ) {
                                 actions.onShowEndPicker()
                             }
@@ -302,41 +313,43 @@ internal fun LazyListScope.eventDetailsBasicInfoSection(
                 )
             }
 
-            if (supportsNoFixedEndDateTime) {
-                val minimumFixedEnd = Instant.fromEpochMilliseconds(
-                    state.editEvent.start.toEpochMilliseconds() + 60L * 60L * 1000L,
-                )
+            if (
+                supportsNoFixedEndDateTime &&
+                    (
+                        state.editEvent.eventType == EventType.WEEKLY_EVENT ||
+                            state.editEvent.isAutomatedScheduling || state.editEvent.noFixedEndDateTime
+                        )
+            ) {
+                val copy = generatedEndDateCopy(state.editEvent.eventType)
+                val onPolicyChange: (Boolean) -> Unit = { checked ->
+                    if (checked) {
+                        actions.onEditEvent { copy(noFixedEndDateTime = true) }
+                    } else {
+                        actions.onShowEndPicker()
+                    }
+                }
+                val canChangePolicy = canEditNoFixedEndDateTime && !state.scheduleTimeLocked
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().clickable(enabled = canChangePolicy) {
+                        onPolicyChange(!usesGeneratedEnd)
+                    },
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Checkbox(
-                        checked = canEditNoFixedEndDateTime && state.editEvent.noFixedEndDateTime,
-                        enabled = canEditNoFixedEndDateTime && !state.scheduleTimeLocked,
-                        onCheckedChange = { checked ->
-                            if (canEditNoFixedEndDateTime) {
-                                actions.onEditEvent {
-                                    copy(
-                                        noFixedEndDateTime = checked,
-                                        end = when {
-                                            end <= start -> minimumFixedEnd
-                                            else -> end
-                                        },
-                                    )
-                                }
-                            }
-                        },
+                        checked = canEditNoFixedEndDateTime && usesGeneratedEnd,
+                        enabled = canChangePolicy,
+                        onCheckedChange = null,
                     )
                     Text(
-                        text = "No fixed end datetime scheduling",
+                        text = copy.label,
                         style = MaterialTheme.typography.bodyMedium,
                         color = Color(localImageScheme.current.onSurface),
                     )
                 }
-                if (state.editEvent.noFixedEndDateTime) {
+                if (usesGeneratedEnd) {
                     Text(
-                        text = "Scheduling can extend past the displayed end date/time. Turn this off to enforce the end date/time.",
+                        text = copy.description,
                         style = MaterialTheme.typography.bodySmall,
                         color = Color(localImageScheme.current.onSurface),
                     )

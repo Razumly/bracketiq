@@ -1,30 +1,43 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight } from 'lucide-react';
 import {
-  NumberInput,
-  Switch,
-  Select as MantineSelect,
-  MultiSelect as MantineMultiSelect,
-  Button,
-  Group,
-  Text,
   Alert,
-  Loader,
-  Stack,
   Badge,
+  Button,
+  DatePickerInput,
+  Group,
+  Loader,
+  MultiSelect as MantineMultiSelect,
+  NumberInput,
   Paper,
-  Title,
+  Select as MantineSelect,
+  Stack,
+  Switch,
+  Text,
   TextInput,
-} from '@mantine/core';
-import { DatePickerInput } from '@mantine/dates';
+  Title,
+} from '@/components/organization/organization-operation-ui';
 import type { Field, LeagueConfig, Sport, TimeSlot } from '@/types';
 import { MIN_BRACKET_TEAM_COUNT } from '@/lib/divisionTypes';
 import { BRACKET_TEAM_COUNT_ERROR } from '@/app/events/[id]/schedule/components/eventForm/divisionMessages';
 import { parseOptionalWholeNumber } from '@/app/events/[id]/schedule/components/eventForm/divisionNumbers';
 import type { WeeklySlotConflict } from '@/lib/leagueService';
-import { formatDisplayDate, formatLocalDateTime, parseLocalDateTime } from '@/lib/dateUtils';
+import {
+  formatDisplayDate,
+  formatLocalDateTime,
+  parseDateTimeInTimeZone,
+  parseLocalDateTime,
+} from '@/lib/dateUtils';
 import { getFacilityScopedFieldDisplayName, getFieldDisplayName } from '@/lib/fieldUtils';
 import { applySportResourceLabels, GENERIC_RESOURCE_LABELS, type SportResourceLabels } from '@/lib/sportResourceLabels';
+import {
+  RepeatingTimeSlotValidationError,
+  formatOvernightWeekdayWarning,
+  listRepeatingTimeSlotDstAdjustments,
+  normalizeRepeatingTimeSlotTimeZone,
+  repeatingTimeSlotHasOvernightWindow,
+  type RepeatingTimeSlotTimeAdjustment,
+} from '@/lib/repeatingTimeSlotAvailability';
 
 const DROPDOWN_PROPS = { withinPortal: true, zIndex: 1800 };
 const MAX_STANDARD_NUMBER = 99_999;
@@ -54,6 +67,7 @@ const DAYS_OF_WEEK = [
   { value: '6', label: 'Sunday' },
 ];
 
+
 const formatClockTime = (date: Date): string => new Intl.DateTimeFormat('en-US', {
   hour: 'numeric',
   minute: '2-digit',
@@ -65,6 +79,26 @@ const formatMinutesLabel = (minutes: number): string => {
   const date = new Date(2000, 0, 1, 0, 0, 0, 0);
   date.setMinutes(normalized);
   return formatClockTime(date);
+};
+const formatAdjustmentDate = (value: string): string =>
+  formatDisplayDate(`${value}T00:00:00.000Z`, { timeZone: 'UTC' });
+
+const formatDstAdjustmentMessage = (
+  adjustment: RepeatingTimeSlotTimeAdjustment,
+  timeZone: string,
+): string => {
+  const boundary = adjustment.boundary === 'start' ? 'start' : 'end';
+  const requestedDate = formatAdjustmentDate(adjustment.requestedDate);
+  const requestedTime = formatMinutesLabel(adjustment.requestedTimeMinutes);
+  const effectiveTime = formatMinutesLabel(adjustment.effectiveTimeMinutes);
+  if (adjustment.kind === 'GAP_SHIFT_FORWARD') {
+    const effectiveDate =
+      adjustment.effectiveDate === adjustment.requestedDate
+        ? ''
+        : ` on ${formatAdjustmentDate(adjustment.effectiveDate)}`;
+    return `On ${requestedDate}, the ${boundary} time ${requestedTime} does not exist in ${timeZone}. This occurrence uses ${effectiveTime}${effectiveDate}.`;
+  }
+  return `On ${requestedDate}, the ${boundary} time ${requestedTime} occurs twice in ${timeZone}. This occurrence uses the first ${effectiveTime}.`;
 };
 
 const MAX_TIME_SELECT_MINUTES = 24 * 60;
@@ -658,6 +692,8 @@ interface LeagueFieldsProps {
   fieldOptions?: LeagueFieldOption[];
   divisionOptions?: { value: string; label: string }[];
   eventStartDate?: string;
+  eventEndDate?: string;
+  eventTimeZone?: string;
   timeslotMode?: LeagueTimeslotMode;
   lockSlotDivisions?: boolean;
   lockedDivisionKeys?: string[];
@@ -669,8 +705,10 @@ interface LeagueFieldsProps {
   configurationTitle?: string;
   showPlayoffSettings?: boolean;
   showTimeslots?: boolean;
+  showTimeslotHeading?: boolean;
   unstyled?: boolean;
   emptyFieldsMessage?: string;
+  configurationAction?: React.ReactNode;
 }
 
 const LeagueFields: React.FC<LeagueFieldsProps> = ({
@@ -688,6 +726,8 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
   fieldOptions,
   divisionOptions = [],
   eventStartDate,
+  eventEndDate,
+  eventTimeZone,
   timeslotMode = 'ALL',
   lockSlotDivisions = false,
   lockedDivisionKeys = [],
@@ -699,13 +739,62 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
   configurationTitle = 'League Configuration',
   showPlayoffSettings = true,
   showTimeslots = true,
+  showTimeslotHeading = true,
   unstyled = false,
+  configurationAction,
   emptyFieldsMessage,
 }) => {
   const fieldLookup = useMemo(
     () => new Map(fields.map((field) => [field.$id, field])),
     [fields],
   );
+  const repeatingSlotDstAdjustmentsByKey = useMemo(() => {
+    const adjustmentsByKey = new Map<
+      string,
+      RepeatingTimeSlotTimeAdjustment[]
+    >();
+    if (!eventStartDate || !eventEndDate) {
+      return adjustmentsByKey;
+    }
+    const eventStart = parseDateTimeInTimeZone(
+      eventStartDate,
+      eventTimeZone,
+    );
+    const finalGeneratedEnd = parseDateTimeInTimeZone(
+      eventEndDate,
+      eventTimeZone,
+    );
+    if (!eventStart || !finalGeneratedEnd) {
+      return adjustmentsByKey;
+    }
+    slots.forEach((slot) => {
+      if (slot.repeating === false) {
+        return;
+      }
+      try {
+        const adjustments = listRepeatingTimeSlotDstAdjustments({
+          slot,
+          eventStart,
+          finalGeneratedEnd,
+        });
+        if (adjustments.length > 0) {
+          adjustmentsByKey.set(slot.key, adjustments);
+        }
+      } catch (error) {
+        if (!(error instanceof RepeatingTimeSlotValidationError)) {
+          throw error;
+        }
+        // The form schema reports invalid slot data.
+      }
+    });
+    return adjustmentsByKey;
+  }, [
+    eventEndDate,
+    eventStartDate,
+    eventTimeZone,
+    slots,
+  ]);
+
   const requiresSets = Boolean(sport?.usePointsPerSetWin);
 
   const availableFieldOptions: SlotResourceOption[] = useMemo(() => {
@@ -874,6 +963,9 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
     let next = [...current];
     let rentalUpdates: Partial<LeagueSlotForm> = {};
     const optionSelected = isSlotResourceOptionSelected(slot, option);
+    if (optionSelected && current.length === 1) {
+      return;
+    }
     const slotHasSelectedResources = current.length > 0;
     const currentRentalFieldId = slot.rentalBookingItemId
       ? fieldOptionsForSlot.find((candidate) => getOptionRentalMetadata(candidate).rentalBookingItemId === slot.rentalBookingItemId)?.fieldId
@@ -1046,6 +1138,11 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
                   </div>
                 </>
               )}
+              {configurationAction ? (
+                <div className="flex w-full self-end sm:w-56 sm:flex-none">
+                  {configurationAction}
+                </div>
+              ) : null}
             </div>
 
           {showPlayoffSettings && (
@@ -1113,45 +1210,49 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
 
         {showTimeslots && (
         <div>
-          <div className="flex items-center justify-between mb-4 gap-3">
-            <Title order={4} className="m-0">
-              {timeslotMode === 'FIXED_WINDOW'
-                ? 'Fixed event window'
-                : timeslotMode === 'FIXED'
-                  ? 'One-time Timeslots'
-                  : timeslotMode === 'MIXED'
-                    ? 'Schedule Timeslots'
-                    : 'Weekly Timeslots'}
-            </Title>
-            {timeslotMode === 'FIXED_WINDOW' ? null : timeslotMode === 'MIXED' ? (
-              <Group gap="xs">
-                <Button variant="light" onClick={() => onAddSlot(true)} disabled={readOnly}>
-                  Add Weekly Timeslot
+          {showTimeslotHeading || timeslotMode !== 'FIXED_WINDOW' ? (
+            <div className={`mb-4 flex items-center gap-3 ${showTimeslotHeading ? 'justify-between' : 'justify-end'}`}>
+              {showTimeslotHeading ? (
+                <Title order={4} className="m-0">
+                  {timeslotMode === 'FIXED_WINDOW'
+                    ? 'Fixed event window'
+                    : timeslotMode === 'FIXED'
+                      ? 'One-time Timeslots'
+                      : timeslotMode === 'MIXED'
+                        ? 'Schedule Timeslots'
+                        : 'Weekly Timeslots'}
+                </Title>
+              ) : null}
+              {timeslotMode === 'FIXED_WINDOW' ? null : timeslotMode === 'MIXED' ? (
+                <Group gap="xs">
+                  <Button variant="light" onClick={() => onAddSlot(true)} disabled={readOnly}>
+                    Add Weekly Timeslot
+                  </Button>
+                  <Button variant="light" onClick={() => onAddSlot(false)} disabled={readOnly}>
+                    Add One-time Timeslot
+                  </Button>
+                </Group>
+              ) : (
+                <Button
+                  variant="light"
+                  onClick={() => {
+                    if (timeslotMode === 'ALL') {
+                      onAddSlot();
+                      return;
+                    }
+                    onAddSlot(timeslotMode !== 'FIXED');
+                  }}
+                  disabled={readOnly}
+                >
+                  {timeslotMode === 'ALL'
+                    ? 'Add Timeslot'
+                    : timeslotMode === 'FIXED'
+                      ? 'Add One-time Timeslot'
+                      : 'Add Weekly Timeslot'}
                 </Button>
-                <Button variant="light" onClick={() => onAddSlot(false)} disabled={readOnly}>
-                  Add One-time Timeslot
-                </Button>
-              </Group>
-            ) : (
-              <Button
-                variant="light"
-                onClick={() => {
-                  if (timeslotMode === 'ALL') {
-                    onAddSlot();
-                    return;
-                  }
-                  onAddSlot(timeslotMode !== 'FIXED');
-                }}
-                disabled={readOnly}
-              >
-                {timeslotMode === 'ALL'
-                  ? 'Add Timeslot'
-                  : timeslotMode === 'FIXED'
-                    ? 'Add One-time Timeslot'
-                    : 'Add Weekly Timeslot'}
-              </Button>
-            )}
-          </div>
+              )}
+            </div>
+          ) : null}
 
           {fieldsLoading && (
             <div className="flex items-center gap-2 mb-4 text-sm text-gray-600">
@@ -1275,8 +1376,14 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
               slotEndDate &&
               slotEndDate.getTime() <= slotStartDate.getTime(),
             );
+            const hasOvernightWindow = isRepeating
+              && repeatingTimeSlotHasOvernightWindow(slot.startTimeMinutes, slot.endTimeMinutes);
+            const dstAdjustments = repeatingSlotDstAdjustmentsByKey.get(slot.key) ?? [];
+            const slotTimeZone = normalizeRepeatingTimeSlotTimeZone(
+              slot.timeZone ?? eventTimeZone,
+            );
             const divisionsReadOnly = readOnly && !allowDivisionEditsWhenReadOnly;
-            const resourcesReadOnly = readOnly && !allowResourceEditsWhenReadOnly;
+            const resourcesReadOnly = slot.rentalLocked === true || (readOnly && !allowResourceEditsWhenReadOnly);
             const resourceError = isRentalSlotMismatchError(slot.error) ? slot.error : null;
             const hasConflicts = conflictCount > 0;
             const slotTimingReadOnly = readOnly || slot.rentalLocked === true;
@@ -1293,6 +1400,7 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
                 </Text>
               ) : null}
               <div
+                data-event-slot-key={slot.key}
                 className={`border-t border-gray-200 pt-5 first:border-t-0 first:pt-0 ${hasConflicts ? 'bg-yellow-50/40' : ''}`}
               >
                 <div className="flex flex-col gap-4">
@@ -1307,7 +1415,7 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
                         variant="subtle"
                         color="red"
                         onClick={() => onRemoveSlot(index)}
-                        disabled={slots.length === 1 || readOnly}
+                        disabled={slots.length === 1 || slotTimingReadOnly}
                       >
                         Remove
                       </Button>}
@@ -1501,6 +1609,21 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
                             disabled={slotTimingReadOnly}
                             maw={320}
                           />
+                          <DatePickerInput
+                            label="End Date Override"
+                            placeholder="No end date"
+                            description="Optional. Leave blank for open availability."
+                            value={slotEndDate}
+                            onChange={(value) => onUpdateSlot(index, {
+                              endDate: value ? formatLocalDateTime(value) : undefined,
+                            })}
+                            valueFormat="MM/DD/YYYY"
+                            minDate={slotStartDate ?? parsedEventStartDate ?? undefined}
+                            clearable={!slotTimingReadOnly}
+                            disabled={slotTimingReadOnly}
+                            error={explicitRangeInvalid && !slotTimingReadOnly ? 'End date must be after the start date' : undefined}
+                            maw={320}
+                          />
 
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:items-end">
                             <TimeOfDaySelect
@@ -1519,6 +1642,11 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
                               error={endMissing && !slotTimingReadOnly ? 'Select an end time' : undefined}
                             />
                           </div>
+                          {hasOvernightWindow ? (
+                            <Text size="xs" c="orange" mt={4}>
+                              {formatOvernightWeekdayWarning(selectedDays)}
+                            </Text>
+                          ) : null}
                         </>
                       ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:items-end">
@@ -1614,6 +1742,30 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
                     </Alert>
                   )}
 
+                  {dstAdjustments.length > 0 ? (
+                    <Alert color="yellow" radius="md">
+                      <Stack gap="xs">
+                        <Text fw={600} size="sm">
+                          Daylight-saving time adjustment.
+                        </Text>
+                        {dstAdjustments.map((adjustment) => (
+                          <Text
+                            key={[
+                              adjustment.boundary,
+                              adjustment.kind,
+                              adjustment.requestedDate,
+                              adjustment.requestedTimeMinutes,
+                              adjustment.effectiveDate,
+                              adjustment.effectiveTimeMinutes,
+                            ].join('-')}
+                            size="sm"
+                          >
+                            {formatDstAdjustmentMessage(adjustment, slotTimeZone)}
+                          </Text>
+                        ))}
+                      </Stack>
+                    </Alert>
+                  ) : null}
                   {slot.error && !resourceError && (
                     <Alert color="red" radius="md">
                       {applySportResourceLabels(slot.error, resourceLabels)}
@@ -1631,7 +1783,7 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
   );
 
   if (unstyled) {
-    return <div className={showLeagueConfiguration ? 'border-t border-gray-200 pt-5' : undefined}>{content}</div>;
+    return <div className={showLeagueConfiguration ? 'pt-1' : undefined}>{content}</div>;
   }
 
   return (

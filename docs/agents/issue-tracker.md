@@ -18,8 +18,21 @@ Use the organization [BracketIQ Project](https://github.com/orgs/Razumly/project
 ## Issue completion
 
 - **Close an issue** when its scoped work or answer is resolved and its acceptance criteria are satisfied.
+- **Reconcile completion** after implementation or review. If the evidence shows that scoped work is already complete, mark the requirement complete in the durable progress record. Close the issue when its acceptance criteria are satisfied. Do not leave completed work in a reviewed-only state.
 - **Delivery gate**: require push, merge, or release before closing only when the issue's acceptance criteria explicitly require that step. Otherwise, delivery is separate from issue resolution.
 - **Close with context**: add a comment summarizing the outcome and verification, with commit, PR, or deployment references when available.
+## Cross-application contract issues
+
+When an issue changes an HTTP request or response, an API path, or a site/mobile workflow:
+
+- Classify it as `Shared` when both `apps/site` and `apps/mobile` must change.
+- Name `apps/site` as the contract owner.
+- List every client DTO, encoder, mapper, and API caller that must change.
+- State whether the contract version stays compatible or must increase.
+- Add an acceptance criterion that sends a client-produced request to the backend parser or API.
+- Do not close the issue until the client-to-site check runs. A mocked transport test is not enough.
+
+Do not add a required field under an unchanged contract version unless every supported client is updated in the same workstream. Do not write that an issue has no API impact without checking the current server schema and every client serializer.
 
 ## Pull requests as a triage surface
 

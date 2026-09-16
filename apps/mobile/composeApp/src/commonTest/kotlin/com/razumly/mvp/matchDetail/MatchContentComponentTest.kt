@@ -36,6 +36,9 @@ import com.razumly.mvp.core.network.dto.MatchSegmentOperationDto
 import com.razumly.mvp.core.network.dto.MatchUpdateDto
 import com.razumly.mvp.core.network.dto.TeamCheckInDto
 import com.razumly.mvp.core.network.dto.TeamCheckInsResponseDto
+import com.razumly.mvp.core.network.dto.TerminalMatchEventDto
+import com.razumly.mvp.core.network.dto.TerminalMatchResultDto
+import com.razumly.mvp.core.network.dto.TerminalMatchStatus
 import com.razumly.mvp.eventCreate.CreateEvent_FakeEventRepository
 import com.razumly.mvp.eventCreate.CreateEvent_FakeMatchRepository
 import com.razumly.mvp.eventCreate.CreateEvent_FakeUserRepository
@@ -61,6 +64,94 @@ import kotlin.time.Instant
 private const val TEST_ACTUAL_START = "2026-06-08T07:52:35.109Z"
 
 class MatchContentComponentTest : MainDispatcherTest() {
+    @Test
+    fun given_background_terminal_replay_when_observed_then_typed_outcome_is_visible() = runTest(testDispatcher) {
+        val user = createUser(id = "host-1")
+        val event = createEvent(listOf("team-a", "team-b")).copy(hostId = user.id)
+        val match = createMatch(event.id, "team-a", "team-b", "team-c", true)
+        val harness = MatchDetailHarness(event = event, initialMatch = match, currentUser = user, teams = emptyList())
+        advance()
+        val outcome = TerminalMatchResultDto(
+            contractVersion = 1,
+            operationId = "operation-1",
+            eventId = event.id,
+            matchId = match.id,
+            status = TerminalMatchStatus.REPLAYED,
+            event = TerminalMatchEventDto(event.id, event.end.toString(), null),
+            matches = emptyList(),
+            affectedMatchIds = emptyList(),
+            protectedMatchIds = emptyList(),
+            placementChanges = emptyList(),
+            assignmentChanges = emptyList(),
+            warnings = emptyList(),
+            exploredStates = 0,
+        )
+
+        harness.matchRepository.emitTerminalMatchOutcome(outcome)
+        advance()
+
+        assertEquals(outcome, harness.component.terminalMatchOutcome.value)
+        assertTrue(harness.component.errorState.value?.contains("already applied") == true)
+    }
+
+    @Test
+    fun given_host_with_unresolved_teams_when_ending_without_winner_then_canonical_action_is_sent() = runTest(testDispatcher) {
+        for (action in listOf("CANCEL", "NO_CONTEST")) {
+            val user = createUser(id = "host-1")
+            val event = createEvent(emptyList()).copy(hostId = user.id)
+            val initial = createMatch(event.id, "team-a", "team-b", "team-c", false)
+                .copy(team1Id = null, team2Id = null, status = "SCHEDULED", actualStart = null)
+            val harness = MatchDetailHarness(event = event, initialMatch = initial, currentUser = user, teams = emptyList())
+            advance()
+            harness.matchRepository.savedMatches.clear()
+            if (action == "CANCEL") harness.component.cancelMatch() else harness.component.noContestMatch()
+            advance()
+            assertEquals(action, harness.matchRepository.operationCalls.single().matchAction?.action)
+            assertTrue(harness.matchRepository.savedMatches.isEmpty())
+        }
+    }
+
+    @Test
+    fun given_terminal_or_unauthorized_match_when_ending_then_no_action_is_sent() = runTest(testDispatcher) {
+        for (terminal in listOf(false, true)) {
+            val user = createUser(id = "user-1")
+            val event = createEvent(listOf("team-a", "team-b")).copy(hostId = if (terminal) user.id else "host-1")
+            val initial = createMatch(event.id, "team-a", "team-b", "team-c", false)
+                .copy(status = if (terminal) "CANCELLED" else "SCHEDULED")
+            val harness = MatchDetailHarness(event = event, initialMatch = initial, currentUser = user, teams = emptyList())
+            advance()
+            harness.component.cancelMatch()
+            harness.component.noContestMatch()
+            harness.component.forfeitTeam("team-b")
+            advance()
+            assertTrue(harness.matchRepository.operationCalls.isEmpty())
+        }
+    }
+
+    @Test
+    fun given_terminal_action_when_request_is_pending_then_visible_match_is_not_ended() = runTest(testDispatcher) {
+        val user = createUser(id = "host-1")
+        val event = createEvent(listOf("team-a", "team-b")).copy(hostId = user.id)
+        val initial = createMatch(event.id, "team-a", "team-b", "team-c", true)
+            .copy(status = "IN_PROGRESS", actualStart = TEST_ACTUAL_START)
+        val harness = MatchDetailHarness(event = event, initialMatch = initial, currentUser = user,
+            teams = listOf(createTeam("team-a", "captain-a"), createTeam("team-b", "captain-b")),
+            updateDelayMillis = 1_000, operationFailure = IllegalStateException("No valid Reflow"))
+        advance()
+        val before = harness.component.matchWithTeams.value.match
+        harness.matchRepository.savedMatches.clear()
+        harness.component.forfeitTeam("team-b")
+        testScheduler.runCurrent()
+        assertEquals(before, harness.component.matchWithTeams.value.match)
+        assertFalse(harness.component.matchFinished.value)
+        assertTrue(harness.matchRepository.savedMatches.isEmpty())
+        testScheduler.advanceTimeBy(1_001)
+        testScheduler.runCurrent()
+        assertEquals(before, harness.component.matchWithTeams.value.match)
+        assertTrue(harness.component.errorState.value?.contains("No valid Reflow") == true)
+        assertTrue(harness.matchRepository.savedMatches.isEmpty())
+    }
+
     @Test
     fun given_unstarted_set_match_when_displaying_score_then_scores_are_unset() {
         val segments = listOf(
@@ -3251,6 +3342,8 @@ private class MatchDetailFakeMatchRepository(
     private val publishLocalSavesToFlow: Boolean = true,
 ) : IMatchRepository by CreateEvent_FakeMatchRepository() {
     private val matchFlow = MutableStateFlow(Result.success(initialMatch.toMatchWithRelations()))
+    private val terminalOutcomeFlow = MutableStateFlow<TerminalMatchResultDto?>(null)
+    override val terminalMatchOutcome = terminalOutcomeFlow
     private val scoreSetDelaySequence = scoreSetDelaySequence.toMutableList()
     var operationFailure: Throwable? = operationFailure
     var updateFailure: Throwable? = updateFailure
@@ -3279,6 +3372,10 @@ private class MatchDetailFakeMatchRepository(
 
     fun emitRemoteMatch(match: MatchMVP) {
         matchFlow.value = Result.success(match.toMatchWithRelations())
+    }
+
+    fun emitTerminalMatchOutcome(outcome: TerminalMatchResultDto) {
+        terminalOutcomeFlow.value = outcome
     }
 
     override suspend fun saveMatchLocally(match: MatchMVP): Result<Unit> {

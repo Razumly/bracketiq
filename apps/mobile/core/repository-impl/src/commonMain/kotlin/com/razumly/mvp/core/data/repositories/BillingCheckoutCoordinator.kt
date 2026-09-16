@@ -57,6 +57,7 @@ internal class BillingCheckoutCoordinator(
         divisionId: String?,
         answers: Map<String, String>,
         discountCode: String?,
+        childUserId: String? = null,
     ): Result<PurchaseIntent> = runCatching {
         val user = userRepository.currentUser.value.getOrThrow()
         val email = userRepository.currentAccount.value.getOrNull()?.email
@@ -122,6 +123,9 @@ internal class BillingCheckoutCoordinator(
             path = "api/billing/purchase-intent",
             body = PurchaseIntentRequestDto(
                 user = BillingUserRefDto(id = user.id, email = email),
+                eventRegistration = childUserId?.let {
+                    com.razumly.mvp.core.network.dto.BillingEventRegistrationTargetDto(it, "CHILD", user.id)
+                },
                 event = BillingEventRefDto(
                     id = event.id,
                     eventType = event.eventType.name,

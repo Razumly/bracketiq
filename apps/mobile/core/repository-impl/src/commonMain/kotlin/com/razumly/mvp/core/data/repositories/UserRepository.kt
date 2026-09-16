@@ -42,6 +42,9 @@ import com.razumly.mvp.core.network.dto.TeamPlayerRegistrationApiDto
 import com.razumly.mvp.core.network.dto.UpdateUserRequestDto
 import com.razumly.mvp.core.network.dto.UserResponseDto
 import com.razumly.mvp.core.network.dto.UserProfileDto
+import com.razumly.mvp.core.network.dto.ManagedPlayerClaimRequestDto
+import com.razumly.mvp.core.network.dto.ManagedPlayerClaimResponseDto
+import com.razumly.mvp.core.network.dto.ManagedPlayerClaimPreviewResponseDto
 import com.razumly.mvp.core.network.dto.UserUpdateDto
 import com.razumly.mvp.core.network.dto.UsersResponseDto
 import com.razumly.mvp.core.network.dto.toTeamPlayerRegistrationOrNull
@@ -65,6 +68,17 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.delay
+import kotlinx.serialization.encodeToString
+import com.razumly.mvp.core.data.dataTypes.TeamBlock
+import com.razumly.mvp.core.network.dto.DeclineTeamInvitationRequestDto
+import com.razumly.mvp.core.network.dto.InvitationActionResponseDto
+import com.razumly.mvp.core.network.dto.TeamBlocksResponseDto
+import com.razumly.mvp.core.data.dataTypes.FamilyCacheEntry
 import kotlinx.coroutines.launch
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
@@ -249,6 +263,18 @@ interface IUserRepository : IMVPRepository {
         userIds: List<String>,
         visibilityContext: UserVisibilityContext = UserVisibilityContext(),
     ): Result<List<UserData>>
+
+    /**
+     * Fetches remote user rows without changing the local cache.
+     *
+     * The default keeps existing repository fakes source-compatible. The concrete repository
+     * overrides this method for acceptance flows that must defer all Room writes to one
+     * transaction.
+     */
+    suspend fun fetchUsers(
+        userIds: List<String>,
+        visibilityContext: UserVisibilityContext = UserVisibilityContext(),
+    ): Result<List<UserData>> = getUsers(userIds, visibilityContext)
     fun getUsersFlow(
         userIds: List<String>,
         visibilityContext: UserVisibilityContext = UserVisibilityContext(),
@@ -277,8 +303,33 @@ interface IUserRepository : IMVPRepository {
     suspend fun listInvites(userId: String, type: String? = null): Result<List<Invite>>
     suspend fun acceptInvite(inviteId: String): Result<Unit>
     suspend fun declineInvite(inviteId: String): Result<Unit>
+    suspend fun declineAndBlockInvite(inviteId: String, blockScope: String, leaveSharedChats: Boolean): Result<Unit> = Result.failure(UnsupportedOperationException())
+    fun observeRecipientInvitations(userId: String): Flow<List<Invite>> = flowOf(emptyList())
+    fun observeTeamBlocks(): Flow<List<TeamBlock>> = flowOf(emptyList())
+    suspend fun refreshTeamBlocks(): Result<Unit> = Result.success(Unit)
+    suspend fun removeTeamBlock(teamId: String, playerId: String): Result<Unit> = Result.failure(UnsupportedOperationException())
+
+    suspend fun claimManagedPlayerProfile(
+        profileId: String,
+        inviteId: String,
+        confirmation: Boolean,
+        dateOfBirth: String? = null,
+        version: String? = null,
+        expiresAt: String? = null,
+        signature: String? = null,
+        guardianDeclaration: Boolean? = null,
+        acceptTeamInvitation: Boolean? = null,
+        reviewGuardianInvitation: Boolean? = null,
+    ): Result<ManagedPlayerClaimResult> = Result.failure(NotImplementedError("Managed player claims are not implemented."))
+    suspend fun previewManagedPlayerClaim(
+        inviteId: String,
+        version: String? = null,
+        expiresAt: String? = null,
+        signature: String? = null,
+    ): Result<ManagedPlayerClaimPreview> = Result.failure(NotImplementedError("Managed player claim previews are not implemented."))
     suspend fun isCurrentUserChild(minorAgeThreshold: Int = 18): Result<Boolean>
     suspend fun listChildren(): Result<List<FamilyChild>>
+    fun observeChildren(): Flow<List<FamilyChild>> = flowOf(emptyList())
     suspend fun listPendingChildJoinRequests(): Result<List<FamilyJoinRequest>>
     suspend fun resolveChildJoinRequest(
         registrationId: String,
@@ -369,6 +420,30 @@ interface IUserRepository : IMVPRepository {
     suspend fun setCachedCurrentUserProfile(profile: UserData): Result<UserData> =
         Result.failure(NotImplementedError("Caching the current user profile is not implemented"))
 }
+
+data class ManagedPlayerClaimResult(
+    val status: String? = null,
+    val primaryProfileId: String? = null,
+    val sourceProfileId: String? = null,
+    val mergeId: String? = null,
+    val refreshError: String? = null,
+)
+
+data class ManagedPlayerClaimPreview(
+    val available: Boolean,
+    val inviteId: String,
+    val profileId: String,
+    val displayName: String,
+    val hasAttachedEmail: Boolean,
+    val isMinor: Boolean,
+    val teamId: String?,
+    val teamName: String?,
+    val guardianSetupRequired: Boolean = false,
+    val guardianContactRequired: Boolean = false,
+    val guardianDeclaration: String? = null,
+    val dateOfBirth: String? = null,
+    val birthdateRequired: Boolean = false,
+)
 
 class UserRepository(
     internal val databaseService: DatabaseService,
@@ -1079,8 +1154,10 @@ class UserRepository(
     }
 
     override suspend fun deleteInvite(inviteId: String): Result<Unit> = runCatching {
+        val viewerId = currentUser.value.getOrThrow().id
         val normalizedInviteId = inviteId.trim().takeIf(String::isNotBlank) ?: error("Invite id is required")
-        api.deleteNoResponse("api/invites/${normalizedInviteId.encodeURLQueryComponent()}")
+        val response = api.delete<SocialEmptyRequestDto, InvitationActionResponseDto>("api/invites/${normalizedInviteId.encodeURLQueryComponent()}", SocialEmptyRequestDto())
+        cacheInvitationAction(normalizedInviteId, response, viewerId)
     }
 
     override suspend fun findEmailMembership(
@@ -1131,12 +1208,15 @@ class UserRepository(
                 type = normalizedType,
             )
                 .map { invite -> invite.withFallbackInviteUserId(normalizedUserId) }
+            val history = if (normalizedType == null || normalizedType.equals("TEAM", ignoreCase = true))
+                fetchAllPendingInvitePages(api, userId = normalizedUserId, type = normalizedType, history = true)
+            else emptyList()
             cacheInvitesForUser(
                 userId = normalizedUserId,
                 type = normalizedType,
-                invites = invites,
+                invites = (history + invites).distinctBy { it.id },
             )
-            invites
+            databaseService.getInviteDao.getRecipientInvitations(normalizedUserId, normalizedType)
         }.recoverCatching { throwable ->
             val cachedInvites = getCachedInvitesForUser(
                 userId = normalizedUserId,
@@ -1146,16 +1226,173 @@ class UserRepository(
         }
     }
 
-    override suspend fun acceptInvite(inviteId: String): Result<Unit> = runCatching {
-        val normalizedInviteId = inviteId.trim().takeIf(String::isNotBlank) ?: error("Invite id is required")
-        api.postNoResponse("api/invites/${normalizedInviteId.encodeURLQueryComponent()}/accept")
-        deleteCachedInvite(normalizedInviteId)
+    override fun observeRecipientInvitations(userId: String): Flow<List<Invite>> =
+        databaseService.getInviteDao.observeRecipientInvitations(userId)
+
+    override fun observeTeamBlocks(): Flow<List<TeamBlock>> = currentUser.flatMapLatest { user ->
+        user.getOrNull()?.id?.let(databaseService.getInviteDao::observeTeamBlocks) ?: flowOf(emptyList())
     }
 
-    override suspend fun declineInvite(inviteId: String): Result<Unit> = runCatching {
-        val normalizedInviteId = inviteId.trim().takeIf(String::isNotBlank) ?: error("Invite id is required")
-        api.postNoResponse("api/invites/${normalizedInviteId.encodeURLQueryComponent()}/decline")
-        deleteCachedInvite(normalizedInviteId)
+    override suspend fun refreshTeamBlocks(): Result<Unit> = runCatching {
+        val viewerId = currentUser.value.getOrNull()?.id ?: error("Sign in to view Team Blocks.")
+        val response = api.get<TeamBlocksResponseDto>("api/users/team-blocks")
+        databaseService.getInviteDao.replaceTeamBlocks(viewerId, response.blocks)
+    }
+
+    override suspend fun removeTeamBlock(teamId: String, playerId: String): Result<Unit> = runCatching {
+        api.deleteNoResponse("api/users/team-blocks/${teamId.encodeURLQueryComponent()}?playerId=${playerId.encodeURLQueryComponent()}")
+        try { databaseService.getInviteDao.deleteTeamBlock(teamId, playerId) }
+        catch (error: Exception) { throw IllegalStateException("The Team Block was removed. Reload to update local data.", error) }
+    }
+
+    override suspend fun acceptInvite(inviteId: String): Result<Unit> = runCatching {
+        val viewerId = currentUser.value.getOrThrow().id
+        val response = api.post<SocialEmptyRequestDto, InvitationActionResponseDto>(
+            "api/invites/${inviteId.encodeURLQueryComponent()}/accept", SocialEmptyRequestDto(),
+        )
+        cacheInvitationAction(inviteId, response, viewerId)
+    }
+
+    override suspend fun declineInvite(inviteId: String): Result<Unit> = saveInvitationDecline(inviteId, DeclineTeamInvitationRequestDto())
+
+    override suspend fun declineAndBlockInvite(inviteId: String, blockScope: String, leaveSharedChats: Boolean): Result<Unit> =
+        saveInvitationDecline(inviteId, DeclineTeamInvitationRequestDto(blockScope, leaveSharedChats))
+
+    private suspend fun saveInvitationDecline(inviteId: String, input: DeclineTeamInvitationRequestDto): Result<Unit> = runCatching {
+        val viewerId = currentUser.value.getOrThrow().id
+        val response = api.post<DeclineTeamInvitationRequestDto, InvitationActionResponseDto>(
+            "api/invites/${inviteId.encodeURLQueryComponent()}/decline", input,
+        )
+        cacheInvitationAction(inviteId, response, viewerId)
+        if (input.blockScope != null && response.block?.active != true) error("The invitation is already declined. The block is no longer active.")
+    }
+
+    private suspend fun cacheInvitationAction(inviteId: String, response: InvitationActionResponseDto, viewerId: String) {
+        try {
+            check(currentUser.value.getOrNull()?.id == viewerId) { "The Account changed. Reload invitation data." }
+            databaseService.withTransaction {
+                val existing = databaseService.getInviteDao.getInvite(inviteId)?.takeIf { it.viewerId == viewerId }
+                response.invite?.let { saved ->
+                    databaseService.getInviteDao.saveInvitationAttempt(saved.copy(
+                        viewerId = viewerId,
+                        viewerCanAcceptForChild = existing?.viewerCanAcceptForChild ?: saved.viewerCanAcceptForChild,
+                        childUserId = existing?.childUserId ?: saved.childUserId,
+                        childFullName = existing?.childFullName ?: saved.childFullName,
+                    ))
+                } ?: databaseService.getInviteDao.deleteInviteById(inviteId)
+                response.teamBlock?.let { block ->
+                    databaseService.getInviteDao.upsertTeamBlocks(listOf(block.copy(viewerId = viewerId)))
+                }
+                val blockState = response.block
+                if (blockState?.scope == "team" && !blockState.active) {
+                    blockState.teamId?.let { teamId -> blockState.playerId?.let { playerId ->
+                        databaseService.getInviteDao.deleteTeamBlock(teamId, playerId)
+                    } }
+                }
+                if (response.removedChatIds.isNotEmpty()) databaseService.getChatGroupDao.deleteChatGroupsByIds(response.removedChatIds)
+            }
+            response.user?.let { refreshCurrentUserFromSocialResponse(it) }
+        } catch (error: Exception) {
+            throw IllegalStateException("The invitation action was saved. Reload to update local data.", error)
+        }
+    }
+
+    override suspend fun claimManagedPlayerProfile(
+        profileId: String,
+        inviteId: String,
+        confirmation: Boolean,
+        dateOfBirth: String?,
+        version: String?,
+        expiresAt: String?,
+        signature: String?,
+        guardianDeclaration: Boolean?,
+        acceptTeamInvitation: Boolean?,
+        reviewGuardianInvitation: Boolean?,
+    ): Result<ManagedPlayerClaimResult> = runCatching {
+        val normalizedProfileId = profileId.trim().takeIf(String::isNotBlank)
+            ?: error("Profile id is required")
+        val normalizedInviteId = inviteId.trim().takeIf(String::isNotBlank)
+            ?: error("Invite id is required")
+        val response = api.post<ManagedPlayerClaimRequestDto, ManagedPlayerClaimResponseDto>(
+            path = "api/user-profiles/${normalizedProfileId.encodeURLQueryComponent()}/claim",
+            body = ManagedPlayerClaimRequestDto(
+                inviteId = normalizedInviteId,
+                confirmation = confirmation,
+                dateOfBirth = dateOfBirth,
+                version = version,
+                expiresAt = expiresAt,
+                signature = signature,
+                guardianDeclaration = guardianDeclaration,
+                acceptTeamInvitation = acceptTeamInvitation,
+                reviewGuardianInvitation = reviewGuardianInvitation,
+            ),
+        )
+        if (!response.ok) error(response.error ?: "Profile claim failed")
+        val refreshError = if (response.status in setOf("GUARDIAN_ACCEPTED", "GUARDIAN_READY")) runCatching {
+            listChildren().getOrThrow()
+            currentUser.value.getOrNull()?.id?.let { listInvites(it, "TEAM").getOrThrow() }
+        }.exceptionOrNull()?.message else null
+        if (response.status == "CLAIMED" || response.status == "MERGED") {
+            response.primaryProfileId?.let { primaryId ->
+                databaseService.getUserDataDao.getUserDataById(primaryId)?.let { current ->
+                    databaseService.getUserDataDao.upsertUserData(current.copy(isManagedPlayer = false, mergedIntoProfileId = null))
+                }
+            }
+            val sourceProfileId = response.sourceProfileId
+            val primaryProfileId = response.primaryProfileId
+            if (response.status == "MERGED" && sourceProfileId != null && primaryProfileId != null) {
+                databaseService.getUserDataDao.getUserDataById(sourceProfileId)?.let { source ->
+                    databaseService.getUserDataDao.upsertUserData(
+                        source.copy(
+                            isManagedPlayer = false,
+                            mergedIntoProfileId = primaryProfileId,
+                        ),
+                    )
+                }
+            }
+        }
+        ManagedPlayerClaimResult(
+            status = response.status,
+            primaryProfileId = response.primaryProfileId,
+            sourceProfileId = response.sourceProfileId,
+            mergeId = response.mergeId,
+            refreshError = refreshError,
+        )
+    }
+
+    override suspend fun previewManagedPlayerClaim(
+        inviteId: String,
+        version: String?,
+        expiresAt: String?,
+        signature: String?,
+    ): Result<ManagedPlayerClaimPreview> = runCatching {
+        val normalizedInviteId = inviteId.trim().takeIf(String::isNotBlank)
+            ?: error("Invite id is required")
+        val query = buildList {
+            version?.trim()?.takeIf(String::isNotBlank)?.let { add("v=${it.encodeURLQueryComponent()}") }
+            expiresAt?.trim()?.takeIf(String::isNotBlank)?.let { add("e=${it.encodeURLQueryComponent()}") }
+            signature?.trim()?.takeIf(String::isNotBlank)?.let { add("s=${it.encodeURLQueryComponent()}") }
+        }.joinToString("&")
+        val response = api.get<ManagedPlayerClaimPreviewResponseDto>(
+            "api/public/profile-claims/${normalizedInviteId.encodeURLQueryComponent()}${if (query.isBlank()) "" else "?$query"}",
+        )
+        val invite = response.invite ?: error("Claim invitation is unavailable")
+        val profile = response.profile ?: error("Claim profile is unavailable")
+        ManagedPlayerClaimPreview(
+            available = response.available,
+            inviteId = invite.id,
+            profileId = invite.profileId,
+            displayName = profile.displayName,
+            hasAttachedEmail = invite.hasAttachedEmail,
+            isMinor = invite.isMinor,
+            teamId = invite.teamId,
+            teamName = response.team?.name,
+            guardianSetupRequired = invite.guardianSetupRequired,
+            guardianContactRequired = invite.guardianContactRequired,
+            guardianDeclaration = invite.guardianDeclaration,
+            dateOfBirth = profile.dateOfBirth,
+            birthdateRequired = invite.birthdateRequired,
+        )
     }
 
     override suspend fun isCurrentUserChild(minorAgeThreshold: Int): Result<Boolean> = runCatching {
@@ -1171,12 +1408,37 @@ class UserRepository(
     }
 
     override suspend fun listChildren(): Result<List<FamilyChild>> = runCatching {
+        val parentId = currentUser.value.getOrThrow().id
         val response = api.get<FamilyChildrenResponseDto>(path = "api/family/children")
         response.error?.takeIf(String::isNotBlank)?.let { error(it) }
-        response.children.mapIndexed { index, child ->
+        response.children.forEachIndexed { index, child ->
             child.toFamilyChildOrNull()
                 ?: error("Family children response row ${index + 1} is missing canonical userId.")
         }
+        check(currentUser.value.getOrNull()?.id == parentId) { "Account changed during family refresh" }
+        databaseService.getFamilyCacheDao.upsert(FamilyCacheEntry(parentId, jsonMVP.encodeToString(response)))
+        cachedChildren(databaseService.getFamilyCacheDao.get(parentId))
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    override fun observeChildren(): Flow<List<FamilyChild>> = currentUser.flatMapLatest { user ->
+        val parentId = user.getOrNull()?.id
+        if (parentId == null) flowOf(emptyList())
+        else combine(databaseService.getFamilyCacheDao.observe(parentId), flow {
+            while (true) {
+                emit(Unit)
+                val dayMillis = 86_400_000L
+                delay(dayMillis - Clock.System.now().toEpochMilliseconds() % dayMillis)
+            }
+        }) { entry, _ -> cachedChildren(entry) }
+    }
+
+    private fun cachedChildren(entry: FamilyCacheEntry?): List<FamilyChild> {
+        if (entry == null) return emptyList()
+        return jsonMVP.decodeFromString<FamilyChildrenResponseDto>(entry.childrenJson).children
+            .filter { child -> child.linkStatus == "active" && child.dateOfBirth != null &&
+                isMinorDateOfBirth(child.dateOfBirth, 18) }
+            .mapNotNull { it.toFamilyChildOrNull() }
     }
 
     override suspend fun listPendingChildJoinRequests(): Result<List<FamilyJoinRequest>> = runCatching {
@@ -1303,6 +1565,18 @@ class UserRepository(
             saveData = { usersData -> databaseService.getUserDataDao.upsertUsersData(usersData) },
             deleteData = { databaseService.getUserDataDao.deleteUsersById(it) },
         )
+    }
+
+    override suspend fun fetchUsers(
+        userIds: List<String>,
+        visibilityContext: UserVisibilityContext,
+    ): Result<List<UserData>> {
+        val ids = userIds.distinct().filter(String::isNotBlank)
+        if (ids.isEmpty()) return Result.success(emptyList())
+
+        return runCatching {
+            fetchUsersByIds(ids, visibilityContext)
+        }
     }
 
     override fun getUsersFlow(
@@ -1729,20 +2003,16 @@ class UserRepository(
         type: String?,
         invites: List<Invite>,
     ) {
-        runCatching {
-            databaseService.getInviteDao.replaceInvitesForUser(
-                userId = userId,
-                type = type,
-                invites = invites.map { invite -> invite.withFallbackInviteUserId(userId) },
-            )
-        }.onFailure { throwable ->
-            Napier.w("Failed to cache invites for user $userId: ${throwable.message}")
-        }
+        databaseService.getInviteDao.replaceInvitesForUser(
+            userId = userId,
+            type = type,
+            invites = invites.map { invite -> invite.withFallbackInviteUserId(userId) },
+        )
     }
 
     private suspend fun getCachedInvitesForUser(userId: String, type: String?): List<Invite> =
         runCatching {
-            databaseService.getInviteDao.getInvitesForUser(userId, type)
+            databaseService.getInviteDao.getRecipientInvitations(userId, type)
         }.onFailure { throwable ->
             Napier.w("Failed to read cached invites for user $userId: ${throwable.message}")
         }.getOrDefault(emptyList())

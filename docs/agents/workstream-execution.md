@@ -54,6 +54,9 @@ Return an issue with a missing decision to triage. Apply `needs-info` or `needs-
 5. The worker implements each issue in the batch.
    - Read the complete issue body.
    - Read all issue comments.
+   - Use the issue body and comments as the requirement boundary.
+   - Read a parent or blocker issue only when an acceptance criterion leaves a required decision or contract unresolved.
+   - Read a historical plan only when the active issue or plan names it.
    - Record every changed API, Prisma, Room, or fixture contract before another issue consumes it.
    - Run focused type checks during implementation.
    - Run focused tests during implementation.

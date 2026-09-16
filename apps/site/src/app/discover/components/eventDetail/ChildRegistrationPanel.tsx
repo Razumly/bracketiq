@@ -1,4 +1,4 @@
-import { Alert, Button, Group, Paper, Select, Text } from '@mantine/core';
+import { Alert, Button, Group, Paper, Select, Text } from '@/components/organization/organization-operation-ui';
 
 import type { ConsentLinks, EventRegistration } from '@/lib/registrationService';
 import { formatAgeRange } from '@/lib/age';
@@ -124,7 +124,7 @@ export function ChildRegistrationPanel({
             )}
             {!childrenLoading && childOptions.length === 0 && (
                 <Text size="xs" c="dimmed">
-                    No active children linked yet. Add one from your profile.
+                        No linked children meet this Event&apos;s age rules. Check their birthdates in your profile.
                 </Text>
             )}
             {isTeamSignup && (

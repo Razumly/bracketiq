@@ -71,10 +71,32 @@ describe('useEventFormInvariantSynchronization', () => {
         });
     });
 
-    it('clears generated-end-date mode for Weekly Events', async () => {
+    it('preserves No Planned End for Weekly Events', async () => {
         const { result } = renderHook(() => useInvariantSynchronizationHarness({
             eventData: buildEventData({
                 eventType: 'WEEKLY_EVENT',
+                noFixedEndDateTime: true,
+            }),
+        }));
+
+        await waitFor(() => expect(result.current.noFixedEndDateTime).toBe(true));
+    });
+
+    it('clears generated-end mode for Tryouts', async () => {
+        const { result } = renderHook(() => useInvariantSynchronizationHarness({
+            eventData: buildEventData({
+                eventType: 'TRYOUT',
+                noFixedEndDateTime: true,
+            }),
+        }));
+
+        await waitFor(() => expect(result.current.noFixedEndDateTime).toBe(false));
+    });
+    it('clears generated-end mode for unscheduled competition events', async () => {
+        const { result } = renderHook(() => useInvariantSynchronizationHarness({
+            eventData: buildEventData({
+                eventType: 'LEAGUE',
+                isAutomatedScheduling: false,
                 noFixedEndDateTime: true,
             }),
         }));

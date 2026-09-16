@@ -16,6 +16,7 @@ import kotlin.time.Clock
 data class LoginRequestDto(
     val email: String,
     val password: String,
+    val returnTo: String? = null,
 )
 
 @Serializable
@@ -78,6 +79,7 @@ data class RegisterRequestDto(
     val dateOfBirth: String? = null,
     val enforceProfileConflictSelection: Boolean? = null,
     val profileSelection: RegisterProfileSelectionDto? = null,
+    val returnTo: String? = null,
 )
 
 @Serializable
@@ -157,6 +159,9 @@ data class UserProfileDto(
     val displayName: String? = null,
     val isMinor: Boolean? = null,
     val isIdentityHidden: Boolean? = null,
+    val isManagedPlayer: Boolean? = null,
+    val hasActiveAccount: Boolean? = null,
+    val mergedIntoProfileId: String? = null,
     val chatTermsAcceptedAt: String? = null,
     val chatTermsVersion: String? = null,
     val notificationSettings: NotificationSettings? = null,
@@ -247,6 +252,9 @@ fun UserProfileDto.toUserDataOrNull(): UserData? {
         privacyDisplayName = displayName,
         isMinor = isMinor ?: inferIsMinorFromDateOfBirth(dateOfBirth),
         isIdentityHidden = isIdentityHidden ?: false,
+        isManagedPlayer = isManagedPlayer ?: false,
+        hasActiveAccount = hasActiveAccount ?: false,
+        mergedIntoProfileId = mergedIntoProfileId,
         chatTermsAcceptedAt = chatTermsAcceptedAt,
         chatTermsVersion = chatTermsVersion,
         notificationSettings = normalizeNotificationSettings(notificationSettings ?: defaultNotificationSettings()),

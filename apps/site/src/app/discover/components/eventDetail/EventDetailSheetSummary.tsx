@@ -1,4 +1,4 @@
-import { Paper, Text } from '@mantine/core';
+import { Paper, Text } from '@/components/organization/organization-operation-ui';
 
 import { formatAgeRange } from '@/lib/age';
 import { formatEnumDisplayLabel } from '@/lib/enumUtils';
@@ -78,7 +78,7 @@ export function EventDetailSheetSummary({
                             <span className="text-sm text-gray-600">Divisions</span>
                             <div className="mt-1 flex flex-wrap gap-2">
                                 {divisionLabels.map((divisionLabel) => (
-                                    <span key={divisionLabel} className="rounded-full bg-blue-100 px-2 py-1 text-xs text-blue-800">
+                                    <span key={divisionLabel} className="rounded-md bg-blue-100 px-2 py-1 text-xs text-blue-800">
                                         {divisionLabel}
                                     </span>
                                 ))}

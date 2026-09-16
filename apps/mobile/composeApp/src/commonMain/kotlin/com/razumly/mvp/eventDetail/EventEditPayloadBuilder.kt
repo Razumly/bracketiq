@@ -1,10 +1,15 @@
 package com.razumly.mvp.eventDetail
 
+import com.razumly.mvp.core.data.dataTypes.canonicalizedOneTime
+import com.razumly.mvp.core.data.dataTypes.assertFutureOneTimeEnd
+
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfig
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.isRentalBacked
+import com.razumly.mvp.core.data.dataTypes.normalizeScheduleConstructionTimeSlots
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
@@ -52,11 +57,7 @@ private data class FieldDraftResult(
 
 internal object EventEditPayloadBuilder {
     fun prepareForUpdate(input: EventEditPayloadInput): EventEditPayloadResult {
-        val eventDraft = if (input.editedEvent.eventType == EventType.WEEKLY_EVENT) {
-            input.editedEvent.copy(noFixedEndDateTime = false)
-        } else {
-            input.editedEvent
-        }
+        val eventDraft = input.editedEvent
         val hasRentalBackedSlots = input.editableLeagueTimeSlots.any { slot -> slot.isRentalBacked() }
         val selectedRentalFieldIds = (
             input.selectedRentalFields.map { field -> field.id.trim() } +
@@ -79,9 +80,9 @@ internal object EventEditPayloadBuilder {
         } else {
             null
         }
-        val preparedFields = fieldDraftResult?.drafts
+        val preparedFields = fieldDraftResult?.allFields
         val preparedEventWithFields = if (preparedFields != null) {
-            eventDraft.copy(fieldIds = selectedRentalFieldIds + preparedFields.map { field -> field.id })
+            eventDraft.copy(fieldIds = (selectedRentalFieldIds + preparedFields.map { field -> field.id }).distinct())
         } else {
             eventDraft
         }
@@ -157,11 +158,13 @@ internal object EventEditPayloadBuilder {
             )
 
             if (!slot.repeating) {
-                val slotStartDate = slot.startDate.takeUnless { it == Instant.DISTANT_PAST } ?: event.start
-                val slotEndDate = slot.endDate ?: return@mapNotNull null
-                if (slotEndDate <= slotStartDate) {
-                    return@mapNotNull null
-                }
+                val canonical = slot.copy(
+                    startDate = slot.startDate.takeUnless { it == Instant.DISTANT_PAST } ?: event.start,
+                    startTimeMinutes = null,
+                    endTimeMinutes = null,
+                ).canonicalizedOneTime()
+                val slotStartDate = canonical.startDate
+                val slotEndDate = requireNotNull(canonical.endDate)
                 val slotDayOfWeek = slotStartDate.toMondayFirstDay(slotTimeZone)
                 return@mapNotNull slot.copy(
                     id = slot.id.ifBlank { idFactory() },
@@ -182,9 +185,6 @@ internal object EventEditPayloadBuilder {
             val startMinutes = slot.startTimeMinutes
             val endMinutes = slot.endTimeMinutes
             if (normalizedDays.isEmpty() || startMinutes == null || endMinutes == null) {
-                return@mapNotNull null
-            }
-            if (endMinutes <= startMinutes) {
                 return@mapNotNull null
             }
 
@@ -250,17 +250,22 @@ internal object EventEditPayloadBuilder {
         return eventType == EventType.LEAGUE ||
             eventType == EventType.TOURNAMENT ||
             eventType == EventType.WEEKLY_EVENT ||
+            eventType == EventType.TRYOUT ||
             hasRentalBackedSlots
     }
 }
-internal fun EventEditPayloadResult.omitUnchangedManagedCollections(
+internal fun EventEditPayloadResult.validateAndKeepChangedManagedCollections(
     currentFields: List<Field>,
     baselineFields: List<Field>?,
     currentTimeSlots: List<TimeSlot>,
     baselineTimeSlots: List<TimeSlot>?,
+    now: Instant = Clock.System.now(),
 ): EventEditPayloadResult {
     val fieldsChanged = baselineFields == null || !editableFieldsMatch(currentFields, baselineFields)
     val timeSlotsChanged = baselineTimeSlots == null || currentTimeSlots != baselineTimeSlots
+    if (timeSlotsChanged) {
+        prepared.timeSlots?.forEach { it.assertFutureOneTimeEnd(now) }
+    }
     return copy(
         prepared = prepared.copy(
             fields = prepared.fields?.takeIf { fieldsChanged },
@@ -274,9 +279,13 @@ internal fun editableLeagueTimeSlotsForEvent(
     event: Event,
     timeSlots: List<TimeSlot>,
 ): List<TimeSlot> {
-    return timeSlots
+    val normalizedSlots = timeSlots
         .map { slot -> normalizeEditableLeagueTimeSlotForEvent(event, slot) }
         .sortedBy { slot -> slot.startTimeMinutes ?: Int.MAX_VALUE }
+    return normalizeScheduleConstructionTimeSlots(
+        event = event,
+        slots = normalizedSlots,
+    )
 }
 
 internal fun syncEditableLeagueSlotBoundaries(
@@ -293,8 +302,16 @@ internal fun syncEditableLeagueSlotBoundaries(
     }
 
     return slots.map { slot ->
+        if (slot.isRentalBacked()) return@map slot
         if (!slot.repeating) {
-            slot
+            if (updatedEvent.eventType == EventType.TRYOUT) {
+                slot.copy(
+                    startDate = updatedEvent.start,
+                    endDate = updatedEvent.end,
+                )
+            } else {
+                slot
+            }
         } else {
             val normalizedStart = when {
                 slot.startDate == Instant.DISTANT_PAST -> Instant.DISTANT_PAST
@@ -374,10 +391,12 @@ internal fun syncEditableFieldsForEvent(
     previousEvent: Event,
     updatedEvent: Event,
     fields: List<Field>,
+    bookedFieldIds: Set<String> = emptySet(),
 ): List<Field> {
     if (fields.isEmpty()) return fields
 
     return fields.mapIndexed { index, field ->
+        if (field.id in bookedFieldIds) return@mapIndexed field
         field.copy(
             fieldNumber = index + 1,
             divisions = field.divisions

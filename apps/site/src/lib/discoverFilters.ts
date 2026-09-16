@@ -1,6 +1,6 @@
 export const DISCOVER_SPORT_PARAM = 'sport';
 const LEGACY_DISCOVER_SPORTS_PARAM = 'sports';
-const DISCOVER_EVENT_TYPES = new Set(['EVENT', 'TOURNAMENT', 'LEAGUE', 'WEEKLY_EVENT', 'TRYOUT', 'AFFILIATE']);
+const DISCOVER_EVENT_TYPES = new Set(['EVENT', 'TOURNAMENT', 'LEAGUE', 'WEEKLY_EVENT', 'TRYOUT']);
 const DISCOVER_GENDERS = new Set(['M', 'F', 'C']);
 export type DiscoverTabValue = 'events' | 'organizations' | 'rentals' | 'teams';
 
@@ -129,6 +129,11 @@ export const discoverDateParamToDate = (value: string | null | undefined): Date 
   if (!normalized) return null;
   const [year, month, day] = normalized.split('-').map(Number);
   return new Date(year, month - 1, day);
+};
+
+export const discoverStartOfToday = (): Date => {
+  const today = new Date();
+  return new Date(today.getFullYear(), today.getMonth(), today.getDate());
 };
 
 export const parseDiscoverPreset = (searchParams: SearchParamsLike): DiscoverPreset => {

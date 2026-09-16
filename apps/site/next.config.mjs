@@ -33,6 +33,7 @@ const allowedDevOrigins = Array.from(
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  distDir: process.env.MVP_NEXT_DIST_DIR || '.next',
   allowedDevOrigins,
   pageExtensions: ['js', 'jsx', 'md', 'mdx', 'ts', 'tsx'],
   poweredByHeader: false,

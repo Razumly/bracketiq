@@ -47,6 +47,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -638,20 +639,14 @@ fun MatchDetailScreen(
     val bottomDockBottomPadding = maxOf(navBottomPadding, safeBottomPadding) + MatchDetailBottomDockLift
     val team1 = match.team1
     val team2 = match.team2
-    val currentUserManagedMatchTeam = remember(currentUserManagedMatchTeamId, team1, team2) {
-        when (currentUserManagedMatchTeamId) {
-            team1?.team?.id -> team1
-            team2?.team?.id -> team2
-            else -> null
-        }
-    }
-    val currentUserManagedMatchRoster = remember(matchRosters, currentUserManagedMatchTeamId) {
-        matchRosters?.rosters?.firstOrNull { roster -> roster.eventTeamId == currentUserManagedMatchTeamId }
-    }
-    val canEditMatchRoster = event?.teamSignup == true &&
-        event?.allowMatchRosterEdits == true &&
-        (matchFinished || event?.let { isTeamCheckInWindowOpen(match.match, it) } == true) &&
-        currentUserManagedMatchTeamId != null
+    val currentUserManagedMatchTeam = listOfNotNull(team1, team2)
+        .firstOrNull { it.team.id == currentUserManagedMatchTeamId }
+    var selectedRosterTeamId by remember(match.match.id) { mutableStateOf<String?>(null) }
+    val selectedRoster = matchRosters?.rosters?.firstOrNull { it.eventTeamId == selectedRosterTeamId }
+        ?: matchRosters?.rosters?.firstOrNull { it.eventTeamId == currentUserManagedMatchTeamId }
+        ?: matchRosters?.rosters?.firstOrNull()
+    val canViewMatchRoster = event?.teamSignup == true &&
+        (canManageMatchActions || isOfficial || currentUserManagedMatchTeamId != null)
     val matchCheckInEnabled = event?.teamSignup == true && event?.teamCheckInMode?.name == "MATCH"
     val incidentDefinitionsByCode = remember(rules.incidentTypeDefinitions) {
         rules.incidentTypeDefinitions.associateBy { definition ->
@@ -1117,9 +1112,6 @@ fun MatchDetailScreen(
 
     val canUseMatchStatusActions = (canManageMatchActions || (isOfficial && officialCheckedIn && officialMatchWindowOpen)) &&
         !matchFinished
-    val canUsePreStartMatchActions = canUseMatchStatusActions &&
-        match.match.actualStart.isNullOrBlank() &&
-        !matchSuspended
     val canSuspendMatch = canUseMatchStatusActions && !matchSuspended
     val canResumeMatch = canUseMatchStatusActions && matchSuspended
 
@@ -1211,16 +1203,19 @@ fun MatchDetailScreen(
         )
     }
 
-    val managedRosterTeamId = currentUserManagedMatchTeamId
-    if (showMatchRosterDialog && managedRosterTeamId != null) {
+    val managedRosterTeamId = selectedRoster?.eventTeamId ?: currentUserManagedMatchTeamId ?: match.match.team1Id.orEmpty()
+    if (showMatchRosterDialog) {
         MatchRosterDialog(
-            teamName = currentUserManagedMatchTeam?.team?.name?.takeIf(String::isNotBlank) ?: "Team",
+            teamName = selectedRoster?.teamName ?: "Team",
+            rosters = matchRosters?.rosters.orEmpty(),
+            onSelectTeam = { selectedRosterTeamId = it },
+            canEdit = selectedRoster?.canEdit == true && matchRosters?.allowMatchRosterEdits == true,
             eventTeamId = managedRosterTeamId,
-            roster = currentUserManagedMatchRoster,
+            roster = selectedRoster,
             loading = matchRosterLoading,
             saving = matchRosterSaving,
             completed = matchFinished,
-            allowTemporaryMatchPlayers = matchRosters?.allowTemporaryMatchPlayers == true,
+            allowTemporaryMatchPlayers = selectedRoster?.canEdit == true && matchRosters?.allowTemporaryMatchPlayers == true,
             onRemovePlayer = { userId ->
                 component.removeMatchRosterPlayer(managedRosterTeamId, userId)
             },
@@ -1369,6 +1364,7 @@ fun MatchDetailScreen(
                         when (actionTarget.action) {
                             "FORFEIT" -> actionTarget.forfeitingEventTeamId?.let(component::forfeitTeam)
                             "CANCEL" -> component.cancelMatch()
+                            "NO_CONTEST" -> component.noContestMatch()
                             "SUSPEND" -> component.suspendMatch()
                             "RESUME" -> component.resumeMatch()
                         }
@@ -1831,7 +1827,7 @@ fun MatchDetailScreen(
                 actualEndDraft = actualEndDraft,
                 actualTimeError = actualTimeError,
                 matchTimeSaving = matchTimeSaving,
-                canEditRoster = canEditMatchRoster,
+                canEditRoster = canViewMatchRoster,
                 onEditRoster = component::openMatchRoster,
                 showMatchTeamCheckIns = matchCheckInEnabled,
                 team1Name = team1Text,
@@ -1843,9 +1839,9 @@ fun MatchDetailScreen(
                     ?.let { teamId -> matchTeamCheckIns[teamId]?.status?.equals("CHECKED_IN", ignoreCase = true) == true }
                     == true,
                 canUseMatchStatusActions = canUseMatchStatusActions,
-                canUsePreStartMatchActions = canUsePreStartMatchActions &&
+                canForfeitMatch = canUseMatchStatusActions &&
                     !match.match.team1Id.isNullOrBlank() &&
-                    !match.match.team2Id.isNullOrBlank(),
+                    !match.match.team2Id.isNullOrBlank() && match.match.team1Id != match.match.team2Id,
                 canSuspendMatch = canSuspendMatch,
                 canResumeMatch = canResumeMatch,
                 canAddIncident = canAddIncident,
@@ -1865,6 +1861,14 @@ fun MatchDetailScreen(
                         title = "Suspend match?",
                         message = "This match will be suspended and can be resumed later.",
                         confirmLabel = "Suspend",
+                    )
+                },
+                onNoContestMatchClick = {
+                    pendingMatchAction = MatchActionDialogTarget(
+                        action = "NO_CONTEST",
+                        title = "Record no contest?",
+                        message = "This match will end without a winner. Dependent matches will not advance.",
+                        confirmLabel = "No contest",
                     )
                 },
                 onResumeMatchClick = {
@@ -2186,7 +2190,7 @@ private fun MatchDetailBottomActions(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Warning,
-                        contentDescription = "Field differs from event location",
+                        contentDescription = "Resource differs from event location",
                         tint = MaterialTheme.colorScheme.error,
                     )
                     Text(
@@ -2494,6 +2498,9 @@ private fun matchRosterEntryName(entry: MatchRosterEntryDto): String =
 @Composable
 private fun MatchRosterDialog(
     teamName: String,
+    rosters: List<MatchRosterDto>,
+    onSelectTeam: (String) -> Unit,
+    canEdit: Boolean,
     eventTeamId: String,
     roster: MatchRosterDto?,
     loading: Boolean,
@@ -2526,6 +2533,13 @@ private fun MatchRosterDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                if (rosters.size > 1) {
+                    rosters.forEach { option ->
+                        TextButton(onClick = { option.eventTeamId?.let(onSelectTeam) }) {
+                            Text(option.teamName ?: "Team")
+                        }
+                    }
+                }
                 when {
                     loading -> Text("Loading roster...", style = MaterialTheme.typography.bodyMedium)
                     entries.isEmpty() -> Text("No roster entries found.", style = MaterialTheme.typography.bodyMedium)
@@ -2534,6 +2548,8 @@ private fun MatchRosterDialog(
                             entry = entry,
                             saving = saving,
                             completed = completed,
+                            canEdit = canEdit,
+                            canLink = allowTemporaryMatchPlayers,
                             linkEmail = linkEmailByEntryId[entry.id.orEmpty()] ?: entry.email.orEmpty(),
                             onLinkEmailChange = { value ->
                                 entry.id?.let { entryId ->
@@ -2622,6 +2638,8 @@ private fun MatchRosterEntryRow(
     entry: MatchRosterEntryDto,
     saving: Boolean,
     completed: Boolean,
+    canEdit: Boolean,
+    canLink: Boolean,
     linkEmail: String,
     onLinkEmailChange: (String) -> Unit,
     onRemovePlayer: (String) -> Unit,
@@ -2660,15 +2678,12 @@ private fun MatchRosterEntryRow(
                         if (temporary) {
                             Text("Temporary", style = MaterialTheme.typography.labelSmall)
                         }
-                        if (entry.noAccount == true) {
-                            Text("No account", style = MaterialTheme.typography.labelSmall)
-                        }
                         if (removed) {
                             Text("Removed", style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 }
-                if (!completed && !temporary && entryUserId != null) {
+                if (canEdit && !completed && !temporary && entryUserId != null) {
                     Button(
                         onClick = {
                             if (removed) {
@@ -2683,7 +2698,14 @@ private fun MatchRosterEntryRow(
                     }
                 }
             }
-            if (temporary && entryUserId == null && entryId != null) {
+            entry.documentReadiness?.let { readiness ->
+                Text("Signatures: ${readiness.documents?.signedCount ?: 0}/${readiness.documents?.requiredCount ?: 0}")
+                readiness.requiredDocuments.filter { it.status != "SIGNED" }.forEach { document ->
+                    Text("Missing: ${document.title.orEmpty()} (${document.signerLabel.orEmpty()})",
+                        style = MaterialTheme.typography.bodySmall)
+                }
+            } ?: Text("Document readiness unavailable", style = MaterialTheme.typography.bodySmall)
+            if (canLink && !completed && temporary && entryUserId == null && entryId != null) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,

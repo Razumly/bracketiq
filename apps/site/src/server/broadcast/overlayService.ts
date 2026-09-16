@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
+import { acquireEventLock } from '@/server/repositories/locks';
 import { BroadcastOverlayNotFoundError } from './access';
 import {
   DEFAULT_BROADCAST_OVERLAY_CONFIG,
@@ -78,6 +79,7 @@ export const createBroadcastOverlay = async (input: {
     venue: event.location || event.address,
   });
   const overlay = await prisma.$transaction(async (tx) => {
+    await acquireEventLock(tx, event.id);
     const created = await tx.broadcastOverlays.create({
       data: {
         id: overlayId,
@@ -176,29 +178,35 @@ export const updateBroadcastOverlayDraft = async (input: {
   });
   return updated;
 };
-
 export const publishBroadcastOverlay = async (input: {
   eventId: string;
   overlayId: string;
   publishedByUserId: string;
 }) => {
-  const overlay = await prisma.broadcastOverlays.findFirst({
-    where: { id: input.overlayId, eventId: input.eventId, archivedAt: null },
-  });
-  const state = await prisma.broadcastOverlayStates.findUnique({ where: { overlayId: input.overlayId } });
-  if (!overlay || !state) {
-    throw new BroadcastOverlayNotFoundError();
-  }
-  const config = parseConfig(overlay.draftConfig);
-  const projection = await buildMatchPresentationState({
-    overlay: { ...overlay, publishedConfig: config as any },
-    state,
-    eventId: input.eventId,
-    matchId: state.activeMatchId,
-  });
-  const nextRevision = state.revision + 1;
-  const publishedState: MatchPresentationStateV1 = { ...projection, revision: nextRevision };
-  await prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
+    await acquireEventLock(tx, input.eventId);
+    const overlay = await tx.broadcastOverlays.findFirst({
+      where: { id: input.overlayId, eventId: input.eventId, archivedAt: null },
+    });
+    const state = await tx.broadcastOverlayStates.findUnique({
+      where: { overlayId: input.overlayId },
+    });
+    if (!overlay || !state) {
+      throw new BroadcastOverlayNotFoundError();
+    }
+    const config = parseConfig(overlay.draftConfig);
+    const projection = await buildMatchPresentationState({
+      overlay: { ...overlay, publishedConfig: config },
+      state,
+      eventId: input.eventId,
+      matchId: state.activeMatchId,
+      client: tx,
+    });
+    const nextRevision = state.revision + 1;
+    const publishedState: MatchPresentationStateV1 = {
+      ...projection,
+      revision: nextRevision,
+    };
     await tx.broadcastOverlays.update({
       where: { id: overlay.id },
       data: {
@@ -235,14 +243,25 @@ export const publishBroadcastOverlay = async (input: {
         payload: { configRevision: overlay.publishedConfigRevision + 1 },
       },
     });
+    return {
+      overlay,
+      publishedState,
+      config,
+      publishedConfigRevision: overlay.publishedConfigRevision + 1,
+    };
   });
   const { publishBroadcastOverlayState } = await import('@/server/realtime/broadcastOverlayRealtime');
   publishBroadcastOverlayState({
-    overlayId: overlay.id,
-    state: publishedState,
+    overlayId: result.overlay.id,
+    state: result.publishedState,
     event: { type: 'PUBLISHED_CONFIG', animate: false },
   });
-  return { ...overlay, status: 'PUBLISHED', publishedConfig: config, publishedConfigRevision: overlay.publishedConfigRevision + 1 };
+  return {
+    ...result.overlay,
+    status: 'PUBLISHED',
+    publishedConfig: result.config,
+    publishedConfigRevision: result.publishedConfigRevision,
+  };
 };
 
 export const archiveBroadcastOverlay = async (input: {

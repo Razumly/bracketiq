@@ -6,6 +6,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -46,7 +47,7 @@ class SearchBoxUiTest {
     @Test
     fun parent_query_reset_clears_the_visible_search_field() {
         composeRule.setContent {
-            var query by mutableStateOf("stale query")
+            var query by remember { mutableStateOf("stale query") }
             MaterialTheme {
                 SearchBox(
                     placeholder = "Search",
@@ -72,8 +73,8 @@ class SearchBoxUiTest {
     @Test
     fun search_ime_action_submits_the_current_controlled_query() {
         composeRule.setContent {
-            var query by mutableStateOf("")
-            var submittedQuery by mutableStateOf("")
+            var query by remember { mutableStateOf("") }
+            var submittedQuery by remember { mutableStateOf("") }
             MaterialTheme {
                 SearchBox(
                     placeholder = "Search",
@@ -98,8 +99,8 @@ class SearchBoxUiTest {
     @Test
     fun search_icon_submits_the_current_controlled_query() {
         composeRule.setContent {
-            var query by mutableStateOf("")
-            var submittedQuery by mutableStateOf("")
+            var query by remember { mutableStateOf("") }
+            var submittedQuery by remember { mutableStateOf("") }
             MaterialTheme {
                 SearchBox(
                     placeholder = "Search",
@@ -151,7 +152,7 @@ class SearchBoxUiTest {
     @Test
     fun given_event_filter_sheet_when_apply_is_tapped_then_it_closes() {
         composeRule.setContent {
-            var showingFilter by mutableStateOf(true)
+            var showingFilter by remember { mutableStateOf(true) }
             MaterialTheme {
                 if (showingFilter) {
                     EventFilterSheet(

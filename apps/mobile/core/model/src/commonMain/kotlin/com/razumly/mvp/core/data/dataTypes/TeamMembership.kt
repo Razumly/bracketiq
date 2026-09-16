@@ -21,6 +21,8 @@ private const val TEAM_KIND_PLACEHOLDER = "PLACEHOLDER"
 
 @Serializable
 data class TeamPlayerRegistration(
+    val invitationId: String? = null,
+    val invitationLabel: String? = null,
     val id: String = "",
     val teamId: String? = null,
     val userId: String = "",
@@ -153,6 +155,8 @@ private fun Team.normalizeExplicitPlayerRegistrations(): List<TeamPlayerRegistra
             val userId = normalizeIdToken(row.userId) ?: return@mapNotNull null
             val normalizedStatus = normalizeTeamMembershipStatus(row.status)
             TeamPlayerRegistration(
+                invitationId = row.invitationId,
+                invitationLabel = row.invitationLabel,
                 id = normalizeIdToken(row.id) ?: buildTeamPlayerRegistrationId(
                     teamId = id,
                     userId = userId,

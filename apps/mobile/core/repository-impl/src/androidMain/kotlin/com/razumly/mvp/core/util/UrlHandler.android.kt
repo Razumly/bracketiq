@@ -9,6 +9,15 @@ import androidx.core.net.toUri
 import io.github.aakira.napier.Napier
 
 actual class UrlHandler(private val context: Context) {
+    actual suspend fun openRegistrationUrl(url: String): Result<String> {
+        val registrationUrl = registrationUrlOrNull(url)
+            ?: return Result.failure(IllegalArgumentException("Enter a valid HTTP or HTTPS registration website."))
+        return runCatching {
+            launchCustomTab(registrationUrl.toUri())
+            "opened"
+        }
+    }
+
     actual suspend fun openUrlInWebView(url: String): Result<String> {
         val trustedUrl = trustedExternalHttpsUrlOrNull(url)
             ?: return Result.failure(IllegalArgumentException("Only secure HTTPS links can be opened."))

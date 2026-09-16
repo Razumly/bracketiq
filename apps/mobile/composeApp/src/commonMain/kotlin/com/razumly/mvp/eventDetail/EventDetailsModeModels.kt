@@ -81,9 +81,11 @@ internal fun selectableMobileEventTypes(
     isNewEvent: Boolean,
     rentalTimeLocked: Boolean,
     currentEventType: EventType,
+    tryoutAvailable: Boolean = true,
 ): List<EventType> = EventType.entries.filterNot { eventType ->
-    (isNewEvent && rentalTimeLocked && eventType == EventType.WEEKLY_EVENT) ||
-        (eventType == EventType.TRYOUT && currentEventType != EventType.TRYOUT)
+    (isNewEvent && eventType == EventType.TRYOUT && !tryoutAvailable) ||
+        (isNewEvent && rentalTimeLocked && eventType == EventType.WEEKLY_EVENT) ||
+        (!isNewEvent && eventType == EventType.TRYOUT && currentEventType != EventType.TRYOUT)
 }
 
 internal data class EventDetailsReadOnlyActions(

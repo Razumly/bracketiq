@@ -4,6 +4,12 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.isRentalBacked
+import com.razumly.mvp.core.data.dataTypes.normalizeScheduleConstructionTimeSlots
+import com.razumly.mvp.core.data.dataTypes.withAutomatedScheduling
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.enums.isScheduleConstructionAutomationType
+import com.razumly.mvp.core.data.dataTypes.enums.normalizeAutomatedSchedulingForEventType
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.util.newId
@@ -15,6 +21,7 @@ import kotlin.time.Instant
 data class EventEditorControlLocks(
     val eventType: Boolean = false,
     val teamSignup: Boolean = false,
+    val automatedScheduling: Boolean = false,
     val eventTypeHasProtectedHistory: Boolean = false,
 )
 
@@ -30,6 +37,7 @@ internal class EventEditDraftCoordinator(
 
     private val _isEditing = MutableStateFlow(canEditInitial)
     val isEditing = _isEditing.asStateFlow()
+    private var draftHasUnsavedChanges = false
 
     private val _fieldCount = MutableStateFlow(0)
     val fieldCount = _fieldCount.asStateFlow()
@@ -47,17 +55,30 @@ internal class EventEditDraftCoordinator(
         _isEditing.value = enabled
         if (!enabled) {
             _controlLocks.value = EventEditorControlLocks()
+            draftHasUnsavedChanges = false
         }
     }
 
     fun setControlLocks(
         immutableFieldNames: Set<String>,
         eventTypeHasProtectedHistory: Boolean = false,
+        fallbackEvent: Event? = null,
     ) {
+        val persistedEvent = fallbackEvent ?: _editedEvent.value
+        val protectedHistory = eventTypeHasProtectedHistory ||
+            persistedEvent.eventTypeHasProtectedHistory
+        val normalizedImmutableFieldNames = immutableFieldNames
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .toSet()
         _controlLocks.value = EventEditorControlLocks(
-            eventType = immutableFieldNames.contains("eventType"),
-            teamSignup = immutableFieldNames.contains("teamSignup"),
-            eventTypeHasProtectedHistory = eventTypeHasProtectedHistory,
+            eventType = persistedEvent.eventTypeLocked ||
+                protectedHistory ||
+                normalizedImmutableFieldNames.contains("eventType"),
+            teamSignup = persistedEvent.registrationUnitLocked ||
+                normalizedImmutableFieldNames.contains("teamSignup"),
+            automatedScheduling = normalizedImmutableFieldNames.contains("isAutomatedScheduling"),
+            eventTypeHasProtectedHistory = protectedHistory,
         )
     }
 
@@ -65,7 +86,13 @@ internal class EventEditDraftCoordinator(
     fun forceExitEditing(event: Event) {
         _isEditing.value = false
         _controlLocks.value = EventEditorControlLocks()
-        _editedEvent.value = event
+        draftHasUnsavedChanges = false
+        val retainedSlots = normalizeScheduleConstructionTimeSlots(
+            event = event,
+            slots = _editableLeagueTimeSlots.value,
+        )
+        _editedEvent.value = event.copy(timeSlotIds = retainedSlots.map(TimeSlot::id))
+        _editableLeagueTimeSlots.value = retainedSlots
     }
 
 
@@ -108,28 +135,107 @@ internal class EventEditDraftCoordinator(
             resourceLabelSingular = resourceLabelSingular,
             preserveSourceValues = true,
         )
+        val retainedSlots = normalizeScheduleConstructionTimeSlots(
+            event = event,
+            slots = timeSlots,
+        )
         _editableLeagueScoringConfig.value = leagueScoringConfig
-        _editedEvent.value = event.copy(fieldIds = seededFields.map { field -> field.id })
+        _editedEvent.value = event.copy(
+            fieldIds = seededFields.map { field -> field.id },
+            timeSlotIds = retainedSlots.map(TimeSlot::id),
+        )
         _editableFields.value = seededFields
         _fieldCount.value = seededFields.size
-        _editableLeagueTimeSlots.value = timeSlots
+        _editableLeagueTimeSlots.value = retainedSlots
+        draftHasUnsavedChanges = false
     }
 
+    fun hasUnsavedChanges(): Boolean = draftHasUnsavedChanges
+
     fun updateEditedEvent(update: (Event) -> Event) {
+        draftHasUnsavedChanges = true
         val previous = _editedEvent.value
         val candidate = update(previous)
         val locks = _controlLocks.value
-        val updated = candidate.copy(
-            eventType = if (locks.eventType) previous.eventType else candidate.eventType,
-            teamSignup = if (locks.teamSignup) previous.teamSignup else candidate.teamSignup,
+        val eventTypeChangedWhileLocked = locks.eventType &&
+            candidate.eventType != previous.eventType
+        val eventTypeChangeConflictsWithAutomationLock = locks.automatedScheduling &&
+            candidate.eventType != previous.eventType &&
+            normalizeAutomatedSchedulingForEventType(
+                eventType = candidate.eventType,
+                value = previous.isAutomatedScheduling,
+            ) != previous.isAutomatedScheduling
+        val nextEventType = if (
+            locks.eventType ||
+                eventTypeChangeConflictsWithAutomationLock
+        ) {
+            previous.eventType
+        } else {
+            candidate.eventType
+        }
+        val nextTeamSignup = when {
+            locks.teamSignup || eventTypeChangedWhileLocked -> previous.teamSignup
+            nextEventType == EventType.LEAGUE ||
+                nextEventType == EventType.TOURNAMENT -> true
+            nextEventType == EventType.TRYOUT -> false
+            else -> candidate.teamSignup
+        }
+        val nextAutomatedScheduling = if (locks.automatedScheduling) {
+            previous.isAutomatedScheduling
+        } else {
+            normalizeAutomatedSchedulingForEventType(
+                eventType = nextEventType,
+                value = candidate.isAutomatedScheduling,
+            )
+        }
+        val automatedSchedulingChangeRejected = locks.automatedScheduling &&
+            candidate.isAutomatedScheduling != previous.isAutomatedScheduling
+        val updated = candidate
+            .copy(
+                eventType = nextEventType,
+                teamSignup = nextTeamSignup,
+            )
+            .let { next ->
+                if (automatedSchedulingChangeRejected) {
+                    next.copy(
+                        isAutomatedScheduling = previous.isAutomatedScheduling,
+                        noFixedEndDateTime = previous.noFixedEndDateTime,
+                    )
+                } else {
+                    next.withAutomatedScheduling(nextAutomatedScheduling)
+                }
+            }
+        val clearScheduleConstructionState =
+            previous.eventType == updated.eventType &&
+            previous.isAutomatedScheduling &&
+                !updated.isAutomatedScheduling &&
+                previous.eventType.isScheduleConstructionAutomationType()
+        val transitionedTimeSlots = if (clearScheduleConstructionState) {
+            _editableLeagueTimeSlots.value.filter { slot -> slot.isRentalBacked() }
+        } else if (previous.eventType != updated.eventType) {
+            _editableLeagueTimeSlots.value
+        } else {
+            syncEditableLeagueSlotBoundaries(
+                previousEvent = previous,
+                updatedEvent = updated,
+                slots = _editableLeagueTimeSlots.value,
+            )
+        }
+        val nextTimeSlots = normalizeScheduleConstructionTimeSlots(
+            event = updated,
+            slots = transitionedTimeSlots,
         )
-        _editedEvent.value = updated
-        _editableFields.value = syncEditableFieldsForEvent(previous, updated, _editableFields.value)
-        _editableLeagueTimeSlots.value = syncEditableLeagueSlotBoundaries(
-            previousEvent = previous,
-            updatedEvent = updated,
-            slots = _editableLeagueTimeSlots.value,
+        _editedEvent.value = if (nextTimeSlots != _editableLeagueTimeSlots.value) {
+            updated.copy(timeSlotIds = nextTimeSlots.map(TimeSlot::id))
+        } else {
+            updated
+        }
+        _editableFields.value = syncEditableFieldsForEvent(
+            previous, updated, _editableFields.value,
+            bookedFieldIds = _editableLeagueTimeSlots.value.filter(TimeSlot::isRentalBacked)
+                .flatMap { it.normalizedScheduledFieldIds() }.toSet(),
         )
+        _editableLeagueTimeSlots.value = nextTimeSlots
     }
 
     fun selectFieldCount(
@@ -137,13 +243,18 @@ internal class EventEditDraftCoordinator(
         resourceLabelSingular: String = "Resource",
         idFactory: () -> String = ::newId,
     ) {
-        val normalized = count.coerceAtLeast(0)
+        draftHasUnsavedChanges = true
+        val bookedIds = _editableLeagueTimeSlots.value.filter(TimeSlot::isRentalBacked)
+            .flatMap { it.normalizedScheduledFieldIds() }.toSet()
+        val bookedFields = _editableFields.value.filter { it.id in bookedIds }
+        val normalized = count.coerceAtLeast(bookedFields.size)
         _fieldCount.value = normalized
 
         val currentEvent = _editedEvent.value
-        val resized = _editableFields.value
-            .take(normalized)
+        val resized = (bookedFields + _editableFields.value.filterNot { it.id in bookedIds }
+            .take(normalized - bookedFields.size))
             .mapIndexed { index, field ->
+                if (field.id in bookedIds) return@mapIndexed field
                 field.copy(
                     id = if (field.id.isBlank()) idFactory() else field.id,
                     fieldNumber = index + 1,
@@ -189,11 +300,14 @@ internal class EventEditDraftCoordinator(
     fun updateLocalFieldName(index: Int, name: String) {
         val fields = _editableFields.value.toMutableList()
         if (index !in fields.indices) return
+        if (_editableLeagueTimeSlots.value.any { it.isRentalBacked() && fields[index].id in it.normalizedScheduledFieldIds() }) return
+        draftHasUnsavedChanges = true
         fields[index] = fields[index].copy(name = name)
         _editableFields.value = fields
     }
 
     fun updateLeagueScoringConfig(update: LeagueScoringConfigDTO.() -> LeagueScoringConfigDTO) {
+        draftHasUnsavedChanges = true
         _editableLeagueScoringConfig.value = _editableLeagueScoringConfig.value.update()
     }
 
@@ -201,6 +315,7 @@ internal class EventEditDraftCoordinator(
         now: Instant = Clock.System.now(),
         idFactory: () -> String = ::newId,
     ) {
+        draftHasUnsavedChanges = true
         _editableLeagueTimeSlots.value = _editableLeagueTimeSlots.value + createDefaultLeagueSlot(
             event = _editedEvent.value,
             now = now,
@@ -215,14 +330,20 @@ internal class EventEditDraftCoordinator(
     ) {
         val slots = _editableLeagueTimeSlots.value.toMutableList()
         if (index !in slots.indices) return
+        draftHasUnsavedChanges = true
         val validFieldIds = editableFieldIds()
-        slots[index] = normalizeSlotResourceSelection(slots[index].update(), validFieldIds)
+        val current = slots[index]
+        val changed = current.update()
+        slots[index] = if (current.isRentalBacked()) current.copy(divisions = changed.divisions)
+            else normalizeSlotResourceSelection(changed, validFieldIds)
         _editableLeagueTimeSlots.value = slots
     }
 
     fun removeLeagueTimeSlot(index: Int) {
         val slots = _editableLeagueTimeSlots.value.toMutableList()
         if (index !in slots.indices) return
+        if (slots[index].isRentalBacked()) return
+        draftHasUnsavedChanges = true
         slots.removeAt(index)
         _editableLeagueTimeSlots.value = slots
     }
@@ -232,10 +353,15 @@ internal class EventEditDraftCoordinator(
     }
 
     fun applyRentalDraft(draft: RentalResourceDraftSyncResult) {
+        draftHasUnsavedChanges = true
+        val retainedSlots = normalizeScheduleConstructionTimeSlots(
+            event = draft.event,
+            slots = draft.timeSlots,
+        )
         _editableFields.value = draft.fields
         _fieldCount.value = draft.fields.size
-        _editableLeagueTimeSlots.value = draft.timeSlots
-        _editedEvent.value = draft.event
+        _editableLeagueTimeSlots.value = retainedSlots
+        _editedEvent.value = draft.event.copy(timeSlotIds = retainedSlots.map(TimeSlot::id))
     }
 
     fun applyPreparedEditableFields(fields: List<Field>) {

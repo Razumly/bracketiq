@@ -1,10 +1,12 @@
 import jwt from 'jsonwebtoken';
 import { isEmailEnabled, sendEmail } from '@/server/email';
+import { profileClaimReturnPath } from '@/lib/profileClaimReturnPath';
 
 type InitialEmailVerificationTokenPayload = {
   type: 'initial_email_verification';
   userId: string;
   email: string;
+  returnTo?: string;
   iat?: number;
   exp?: number;
 };
@@ -38,6 +40,7 @@ export const readInitialEmailVerificationToken = (
       type,
       userId,
       email,
+      returnTo: profileClaimReturnPath(decoded.returnTo),
       iat: typeof decoded.iat === 'number' ? decoded.iat : undefined,
       exp: typeof decoded.exp === 'number' ? decoded.exp : undefined,
     };
@@ -52,10 +55,12 @@ export const sendInitialEmailVerification = async ({
   userId,
   email,
   origin,
+  returnTo,
 }: {
   userId: string;
   email: string;
   origin: string;
+  returnTo?: string;
 }): Promise<{ sent: true }> => {
   if (!isEmailEnabled()) {
     throw new Error('Email verification is unavailable because SMTP is not configured.');
@@ -66,6 +71,7 @@ export const sendInitialEmailVerification = async ({
     type: 'initial_email_verification',
     userId,
     email: normalizedEmail,
+    returnTo: profileClaimReturnPath(returnTo),
   });
 
   const confirmUrl = new URL('/api/auth/verify/confirm', origin);

@@ -254,13 +254,23 @@ describe('POST /api/events/[eventId]/teams/[teamId]/billing/bills', () => {
         ownerId: 'team_1',
         eventAmountCents: 5000,
         allowSplit: true,
-      }, '?slotId=slot_1&occurrenceDate=2026-05-19'),
+        slotId: 'slot_1',
+        occurrenceDate: '2026-05-19',
+      }),
       {
         params: Promise.resolve({ eventId: 'event_1', teamId: 'team_1' }),
       },
     );
 
     expect(response.status).toBe(201);
+    expect(txBillsCreateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          slotId: 'slot_1',
+          occurrenceDate: '2026-05-19',
+        }),
+      }),
+    );
     expect(getEventParticipantIdsForEventMock).toHaveBeenCalledWith(
       'event_1',
       prismaMock,

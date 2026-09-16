@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma';
+import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { normalizeRequiredSignerType } from '@/lib/templateSignerTypes';
 import {
   documentSatisfactionScopeFor,
@@ -16,15 +17,15 @@ const normalizeText = (value: unknown): string | undefined => {
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
 };
+type ChildConsentClient = PrismaClient | Prisma.TransactionClient;
 const updateRegistrationWithEventLock = async (
+  client: ChildConsentClient,
   eventId: string,
   registrationId: string,
   data: Record<string, unknown>,
+  useTransaction: boolean,
 ) => {
-  if (
-    typeof (prisma as any).$transaction === 'function'
-    && typeof (prisma as any).eventRegistrations?.update === 'function'
-  ) {
+  if (useTransaction && typeof prisma.$transaction === 'function') {
     return prisma.$transaction(async (tx) => {
       await acquireEventLockAndLoadStructure(tx, eventId);
       return tx.eventRegistrations.update({
@@ -33,7 +34,8 @@ const updateRegistrationWithEventLock = async (
       });
     });
   }
-  return prisma.eventRegistrations.update({
+  await acquireEventLockAndLoadStructure(client, eventId);
+  return client.eventRegistrations.update({
     where: { id: registrationId },
     data,
   });
@@ -43,14 +45,16 @@ export const syncChildRegistrationConsentStatus = async (params: {
   eventId?: string | null;
   childUserId?: string | null;
   parentUserId?: string | null;
+  client?: ChildConsentClient;
 }) => {
   const eventId = normalizeText(params.eventId);
   const childUserId = normalizeText(params.childUserId);
+  const client = params.client ?? prisma;
   if (!eventId || !childUserId) {
     return;
   }
 
-  const registration = await prisma.eventRegistrations.findFirst({
+  const registration = await client.eventRegistrations.findFirst({
     where: {
       eventId,
       registrantId: childUserId,
@@ -69,7 +73,7 @@ export const syncChildRegistrationConsentStatus = async (params: {
     return;
   }
 
-  const event = await prisma.events.findUnique({
+  const event = await client.events.findUnique({
     where: { id: eventId },
     select: {
       organizationId: true,
@@ -85,11 +89,17 @@ export const syncChildRegistrationConsentStatus = async (params: {
     : [];
 
   if (!requiredTemplateIds.length) {
-    await updateRegistrationWithEventLock(eventId, registration.id, {
-      status: 'ACTIVE',
-      consentStatus: 'completed',
-      updatedAt: new Date(),
-    });
+    await updateRegistrationWithEventLock(
+      client,
+      eventId,
+      registration.id,
+      {
+        status: 'ACTIVE',
+        consentStatus: 'completed',
+        updatedAt: new Date(),
+      },
+      !params.client,
+    );
     if (registration.status !== 'ACTIVE') {
       await sendEventRegistrationHostNotification({
         eventId,
@@ -99,7 +109,7 @@ export const syncChildRegistrationConsentStatus = async (params: {
     return;
   }
 
-  const templates = await prisma.templateDocuments.findMany({
+  const templates = await client.templateDocuments.findMany({
     where: { id: { in: requiredTemplateIds } },
     select: {
       id: true,
@@ -136,11 +146,17 @@ export const syncChildRegistrationConsentStatus = async (params: {
     ...childTemplateIds,
   ]));
   if (!relevantTemplateIds.length) {
-    await updateRegistrationWithEventLock(eventId, registration.id, {
-      status: 'ACTIVE',
-      consentStatus: 'completed',
-      updatedAt: new Date(),
-    });
+    await updateRegistrationWithEventLock(
+      client,
+      eventId,
+      registration.id,
+      {
+        status: 'ACTIVE',
+        consentStatus: 'completed',
+        updatedAt: new Date(),
+      },
+      !params.client,
+    );
     if (registration.status !== 'ACTIVE') {
       await sendEventRegistrationHostNotification({
         eventId,
@@ -190,7 +206,7 @@ export const syncChildRegistrationConsentStatus = async (params: {
 
   let childEmail: string | undefined;
   if (requiresChildSignature) {
-    const childSensitive = await prisma.sensitiveUserData.findFirst({
+    const childSensitive = await client.sensitiveUserData.findFirst({
       where: { userId: childUserId },
       select: { email: true },
     });
@@ -219,11 +235,17 @@ export const syncChildRegistrationConsentStatus = async (params: {
     }
   }
 
-  await updateRegistrationWithEventLock(eventId, registration.id, {
-    status: consentComplete ? 'ACTIVE' : 'STARTED',
-    consentStatus,
-    updatedAt: new Date(),
-  });
+  await updateRegistrationWithEventLock(
+    client,
+    eventId,
+    registration.id,
+    {
+      status: consentComplete ? 'ACTIVE' : 'STARTED',
+      consentStatus,
+      updatedAt: new Date(),
+    },
+    !params.client,
+  );
   if (consentComplete && registration.status !== 'ACTIVE') {
     await sendEventRegistrationHostNotification({
       eventId,

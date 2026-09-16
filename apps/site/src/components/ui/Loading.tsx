@@ -17,7 +17,12 @@ function LoadingSpinner({
   showLogo?: boolean;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center space-y-4">
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label={text ?? 'Loading'}
+      className="flex flex-col items-center justify-center space-y-4"
+    >
       {showLogo ? (
         <Image
           src="/BIQ_drawing.svg"
@@ -28,9 +33,12 @@ function LoadingSpinner({
           priority
         />
       ) : null}
-      <div className={`${sizeClass} animate-spin rounded-full border-2 border-gray-300 border-t-blue-600`} />
+      <div
+        aria-hidden="true"
+        className={`${sizeClass} animate-spin rounded-full border-2 border-border border-t-primary motion-reduce:animate-none`}
+      />
       {text && (
-        <p className="text-sm text-gray-600 animate-pulse">{text}</p>
+        <p className="animate-pulse text-sm text-muted-foreground motion-reduce:animate-none">{text}</p>
       )}
     </div>
   );
@@ -53,7 +61,7 @@ export default function Loading({
     const overlayZIndex = belowNavigation ? 'z-40' : 'z-50';
 
     return (
-      <div className={`fixed inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center ${overlayZIndex}`}>
+      <div className={`fixed inset-0 flex items-center justify-center bg-background/80 backdrop-blur-sm ${overlayZIndex}`}>
         <LoadingSpinner sizeClass={sizeClass} text={text} showLogo />
       </div>
     );

@@ -1,5 +1,6 @@
 import type { ComponentProps, ReactNode } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
+import { renderWithMantine } from '../../../../../../../../../test/utils/renderWithMantine';
 
 import type { EventFormValues } from '../../formTypes';
 import { EventFormSections } from '../EventFormSections';
@@ -31,7 +32,7 @@ jest.mock('../BasicInformationSection', () => ({
 jest.mock('../EventDetailsPanel', () => ({
     EventDetailsPanel: (props: EventDetailsProps) => {
         mockEventDetailsPanel(props);
-        return null;
+        return <>{props.localFieldCreationControl}</>;
     },
 }));
 
@@ -163,11 +164,19 @@ describe('EventFormSections', () => {
         expect(mockEventDetailsPanel.mock.calls[0]?.[0].showOrganizationFields).toBe(true);
     });
 
-    it('removes internal registration and organization controls for affiliate listings', () => {
-        render(<EventFormSections {...buildProps({ isAffiliateEvent: true })} />);
+    it('keeps Resource controls and hides internal registration for Affiliate Events', () => {
+        const props = buildProps({ isAffiliateEvent: true });
+        props.resourceController = {
+            ...props.resourceController,
+            showLocalFieldCreationControls: true,
+        };
+        renderWithMantine(<EventFormSections {...props} />);
 
+        fireEvent.change(screen.getByLabelText(/Count$/), { target: { value: '2' } });
+
+        expect(props.resourceController.setFieldCount).toHaveBeenLastCalledWith(2);
         expect(mockEventDetailsPanel.mock.calls[0]?.[0].registrationQuestionsEditor).toBeNull();
-        expect(mockEventDetailsPanel.mock.calls[0]?.[0].localFieldCreationControl).toBeNull();
-        expect(mockEventDetailsPanel.mock.calls[0]?.[0].showOrganizationFields).toBe(false);
+        expect(mockEventDetailsPanel.mock.calls[0]?.[0].localFieldCreationControl).not.toBeNull();
+        expect(mockEventDetailsPanel.mock.calls[0]?.[0].showOrganizationFields).toBe(true);
     });
 });

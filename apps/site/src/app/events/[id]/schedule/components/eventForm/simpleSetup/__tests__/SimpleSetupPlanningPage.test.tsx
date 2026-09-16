@@ -8,7 +8,6 @@ import { SimpleSetupPlanningPage } from "../SimpleSetupPlanningPage";
 import type { EventSetupChoices } from "../types";
 
 const choices: EventSetupChoices = {
-  scheduleStyle: "FIXED_WINDOW",
   paidRegistration: true,
   useRequiredDocuments: false,
   useRegistrationQuestions: false,
@@ -230,32 +229,26 @@ describe("SimpleSetupPlanningPage operations plan", () => {
     );
     expect(onNoFixedEndDateTimeChange).toHaveBeenCalledWith(true);
   });
-});
 
-describe("SimpleSetupPlanningPage Weekly Event schedule plan", () => {
-  it("offers only repeating and mixed schedule styles", () => {
-    const onChoicesChange = jest.fn();
-    const weeklyChoices: EventSetupChoices = {
-      ...choices,
-      scheduleStyle: "WEEKLY_SLOTS",
-    };
-    const weeklyCapabilities = resolveEventSetupCapabilities({
-      eventType: "WEEKLY_EVENT",
+  it("delegates automation-off to the fixed planned-end transition", () => {
+    const onAutomatedSchedulingChange = jest.fn();
+    const leagueCapabilities = resolveEventSetupCapabilities({
+      eventType: "LEAGUE",
       isExternalRegistration: false,
       singleDivision: true,
-      teamSignup: false,
+      teamSignup: true,
       includePlayoffs: false,
       includePoolPlay: false,
       splitLeaguePlayoffDivisions: false,
       hasImmutableRentalResources: false,
-      choices: weeklyChoices,
+      choices,
     });
-    const WeeklyScheduleHarness = () => {
+    const DisabledAutomationHarness = () => {
       const form = useForm<EventFormValues>({
         defaultValues: {
-          eventType: "WEEKLY_EVENT",
-          teamSignup: false,
-          singleDivision: true,
+          eventType: "LEAGUE",
+          noFixedEndDateTime: true,
+          isAutomatedScheduling: true,
         } as EventFormValues,
       });
       return (
@@ -264,12 +257,12 @@ describe("SimpleSetupPlanningPage Weekly Event schedule plan", () => {
           control={form.control}
           eventData={form.getValues()}
           eventTypeOptions={[]}
-          capabilities={weeklyCapabilities}
-          choices={weeklyChoices}
+          capabilities={leagueCapabilities}
+          choices={choices}
           includePlayoffs={false}
           hasStripeAccount={false}
           connectingStripe={false}
-          onChoicesChange={onChoicesChange}
+          onChoicesChange={jest.fn()}
           onEventTypeChange={jest.fn()}
           onExternalRegistrationChange={jest.fn()}
           onSingleDivisionChange={jest.fn()}
@@ -277,6 +270,7 @@ describe("SimpleSetupPlanningPage Weekly Event schedule plan", () => {
           onIncludePoolPlayChange={jest.fn()}
           onSplitLeaguePlayoffDivisionsChange={jest.fn()}
           onNoFixedEndDateTimeChange={jest.fn()}
+          onAutomatedSchedulingChange={onAutomatedSchedulingChange}
           onConnectStripe={jest.fn()}
           onRegistrationPaymentModeChange={jest.fn()}
           isImmutableField={() => false}
@@ -284,31 +278,10 @@ describe("SimpleSetupPlanningPage Weekly Event schedule plan", () => {
       );
     };
 
-    renderWithMantine(<WeeklyScheduleHarness />);
+    renderWithMantine(<DisabledAutomationHarness />);
 
-    expect(
-      screen.getByText(
-        "Weekly Events require at least one weekly repeating timeslot.",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByLabelText("Weekly repeating timeslots"),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByLabelText("Mixed repeating and fixed timeslots"),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByLabelText("Fixed event window"),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByLabelText("Fixed one-time timeslots"),
-    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Automated Scheduling"));
 
-    fireEvent.click(
-      screen.getByLabelText("Mixed repeating and fixed timeslots"),
-    );
-    expect(onChoicesChange).toHaveBeenCalledWith({
-      scheduleStyle: "MIXED_SLOTS",
-    });
+    expect(onAutomatedSchedulingChange).toHaveBeenCalledWith(false);
   });
 });

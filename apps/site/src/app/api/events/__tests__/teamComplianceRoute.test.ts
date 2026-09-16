@@ -24,6 +24,8 @@ const prismaMock = {
   signedDocuments: {
     findMany: jest.fn(),
   },
+  userProfileMerges: { findMany: jest.fn() },
+  documentSubjects: { findMany: jest.fn() },
   documentRequirementSatisfactions: {
     findMany: jest.fn(),
   },
@@ -41,6 +43,8 @@ import { GET } from '@/app/api/events/[eventId]/teams/compliance/route';
 describe('GET /api/events/[eventId]/teams/compliance', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    prismaMock.userProfileMerges.findMany.mockResolvedValue([]);
+    prismaMock.documentSubjects.findMany.mockResolvedValue([{ organizationId: 'org_1', id: "document-subject:org_1:player_1", userId: "player_1" }]);
     requireSessionMock.mockResolvedValue({ userId: 'host_1', isAdmin: false });
     canManageEventMock.mockResolvedValue(true);
     prismaMock.events.findUnique.mockResolvedValue({
@@ -179,7 +183,7 @@ describe('GET /api/events/[eventId]/teams/compliance', () => {
       paymentPending: true,
     });
   });
-  it('counts a completed Team-membership Satisfaction for an event player', async () => {
+  it('does not use Team Membership evidence for an Event requirement', async () => {
     prismaMock.events.findUnique.mockResolvedValue({
       id: 'event_1',
       name: 'Team League',
@@ -238,10 +242,12 @@ describe('GET /api/events/[eventId]/teams/compliance', () => {
       scopeType: 'TEAM_MEMBERSHIP',
       scopeId: 'team_canonical',
       sourceEvidenceId: 'team_evidence_1',
+      completedSignerRoles: ['participant'],
       updatedAt: new Date('2026-07-02T12:00:00.000Z'),
     }]);
     prismaMock.signedDocuments.findMany.mockResolvedValue([{
       id: 'team_evidence_1',
+      status: 'SIGNED',
       signedAt: new Date('2026-07-02T12:00:00.000Z'),
     }]);
 
@@ -258,21 +264,19 @@ describe('GET /api/events/[eventId]/teams/compliance', () => {
     }));
     expect(response.status).toBe(200);
     expect(payload.teams[0].users[0].documents).toEqual({
-      signedCount: 1,
+      signedCount: 0,
       requiredCount: 1,
     });
     expect(prismaMock.documentRequirementSatisfactions.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          OR: expect.arrayContaining([
-            { scopeType: 'TEAM_MEMBERSHIP', scopeId: 'team_canonical' },
-          ]),
+          OR: [{ scopeType: 'ORGANIZATION', scopeId: 'org_1' }, { scopeType: 'EVENT_PARTICIPATION', scopeId: 'event_1' }],
         }),
       }),
     );
   });
 
-  it('hides a snapshot-only team player without an individual registration', async () => {
+  it('shows missing signatures for a pending roster Player without an individual registration', async () => {
     prismaMock.events.findUnique.mockResolvedValue({
       id: 'event_1',
       name: 'Team League',
@@ -286,7 +290,8 @@ describe('GET /api/events/[eventId]/teams/compliance', () => {
     prismaMock.teams.findMany.mockResolvedValue([{
       id: 'event_team_1',
       name: 'Event Team',
-      playerIds: ['player_1'],
+      playerIds: [],
+      pending: ['player_1'],
       parentTeamId: 'team_canonical',
     }]);
     prismaMock.eventRegistrations.findMany
@@ -327,7 +332,11 @@ describe('GET /api/events/[eventId]/teams/compliance', () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(payload.teams[0].users).toEqual([]);
+    expect(payload.teams[0].users).toEqual([expect.objectContaining({
+      userId: 'player_1',
+      documents: { signedCount: 0, requiredCount: 1 },
+      requiredDocuments: [expect.objectContaining({ templateId: 'template_1', status: 'UNSIGNED' })],
+    })]);
   });
   it('hides a cancelled team player and reuses satisfaction after restore', async () => {
     prismaMock.events.findUnique.mockResolvedValue({
@@ -386,13 +395,15 @@ describe('GET /api/events/[eventId]/teams/compliance', () => {
     prismaMock.documentRequirementSatisfactions.findMany.mockResolvedValue([{
       documentSubjectId: 'document-subject:org_1:player_1',
       templateDocumentId: 'template_1',
-      scopeType: 'TEAM_MEMBERSHIP',
-      scopeId: 'team_canonical',
+      scopeType: 'EVENT_PARTICIPATION',
+      scopeId: 'event_1',
       sourceEvidenceId: 'team_evidence_1',
+      completedSignerRoles: ['participant'],
       updatedAt: new Date('2026-07-02T12:00:00.000Z'),
     }]);
     prismaMock.signedDocuments.findMany.mockResolvedValue([{
       id: 'team_evidence_1',
+      status: 'SIGNED',
       signedAt: new Date('2026-07-02T12:00:00.000Z'),
     }]);
 
@@ -405,7 +416,8 @@ describe('GET /api/events/[eventId]/teams/compliance', () => {
     expect(prismaMock.eventRegistrations.findMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
       where: expect.objectContaining({
         eventTeamId: { in: ['event_team_1'] },
-        registrantId: { in: ['player_1'] },
+        rosterRole: 'PARTICIPANT',
+        slotId: null, occurrenceDate: null,
         registrantType: { in: ['SELF', 'CHILD'] },
       }),
     }));

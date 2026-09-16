@@ -1,15 +1,13 @@
-import {
-    Alert,
-    Button,
-    Checkbox,
-    Collapse,
-    Group,
-    Loader,
-    Paper,
-    Stack,
-    Text,
-    Textarea,
-} from '@mantine/core';
+import { Alert,
+Button,
+Checkbox,
+Collapse,
+Group,
+Loader,
+Paper,
+Stack,
+Text,
+Textarea, } from '@/components/organization/organization-operation-ui';
 import type { RegistrationQuestionDraft } from '@/types';
 
 import { SECTION_ANIMATION_DURATION_MS } from '../constants';
@@ -43,7 +41,7 @@ export const RegistrationQuestionsSection = ({
                 <Text fw={600} size="sm">Registration questions</Text>
                 <Text size="xs" c="dimmed">Players answer these during event registration.</Text>
             </div>
-            <Group gap="xs" wrap="nowrap">
+            <Group gap="xs" wrap="wrap" justify="flex-end">
                 <Button
                     type="button"
                     variant="subtle"

@@ -16,6 +16,8 @@ import ProfileCompletionGate from '@/components/auth/ProfileCompletionGate';
 import PostHogIdentity from '@/components/analytics/PostHogIdentity';
 import MobileAppPrompt from '@/components/layout/MobileAppPrompt';
 import SiteFooter from '@/components/layout/SiteFooter';
+import { PageShell } from '@/components/layout/PageShell';
+import { Toaster } from '@/components/ui/sonner';
 import { MOBILE_APP_MANTINE_PRIMARY_SCALE } from './theme/mobilePalette';
 export { metadata, viewport } from './rootMetadata';
 
@@ -24,6 +26,7 @@ const GOOGLE_ANALYTICS_ID = 'G-PXFLC9SY0D';
 const robotoFlex = Roboto_Flex({
   subsets: ['latin'],
   display: 'swap',
+  variable: '--font-roboto-flex',
 });
 const landingHeading = Archivo({
   subsets: ['latin'],
@@ -57,7 +60,10 @@ export default async function RootLayout({ children }: RootLayoutProps) {
   const surface = (await headers()).get('x-bracketiq-surface');
   if (surface === 'overlay') {
     return (
-      <html lang="en" className={`${robotoFlex.className} ${landingHeading.variable} ${landingMono.variable}`}>
+      <html
+        lang="en"
+        className={`${robotoFlex.className} ${robotoFlex.variable} ${landingHeading.variable} ${landingMono.variable}`}
+      >
         <body className="broadcast-overlay-body">{children}</body>
       </html>
     );
@@ -69,7 +75,10 @@ export default async function RootLayout({ children }: RootLayoutProps) {
   );
 
   return (
-    <html lang="en" className={`${robotoFlex.className} ${landingHeading.variable} ${landingMono.variable}`}>
+    <html
+      lang="en"
+      className={`${robotoFlex.className} ${robotoFlex.variable} ${landingHeading.variable} ${landingMono.variable}`}
+    >
       <body className="min-h-screen bg-background text-foreground">
         <MantineProvider theme={theme} defaultColorScheme="light">
           <Providers>
@@ -77,25 +86,23 @@ export default async function RootLayout({ children }: RootLayoutProps) {
               <ProfileCompletionGate />
             </Suspense>
             <PostHogIdentity />
-            <div className="flex min-h-screen flex-col">
-              <div className="flex-1">
-                <AgentProvider>
-                  {disableChat ? (
-                    children
-                  ) : (
-                    <ChatProvider>
-                      <ChatUIProvider>
-                        {children}
-                        <ChatComponents />
-                      </ChatUIProvider>
-                    </ChatProvider>
-                  )}
-                  <AIAssistantDrawer enabled={!disableAgent} />
-                </AgentProvider>
-              </div>
-              <SiteFooter />
-            </div>
+            <PageShell footer={<SiteFooter />}>
+              <AgentProvider>
+                {disableChat ? (
+                  children
+                ) : (
+                  <ChatProvider>
+                    <ChatUIProvider>
+                      {children}
+                      <ChatComponents />
+                    </ChatUIProvider>
+                  </ChatProvider>
+                )}
+                <AIAssistantDrawer enabled={!disableAgent} />
+              </AgentProvider>
+            </PageShell>
             <MobileAppPrompt />
+            <Toaster />
           </Providers>
         </MantineProvider>
       </body>

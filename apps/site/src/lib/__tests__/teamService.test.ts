@@ -8,12 +8,15 @@ jest.mock('@/lib/apiClient', () => ({
 }));
 
 jest.mock('@/lib/userService', () => ({
+  normalizeInviteNames: jest.requireActual('@/lib/userService').normalizeInviteNames,
   userService: {
     getUserById: jest.fn(),
     getUsersByIds: jest.fn(),
     updateUser: jest.fn(),
     addTeamInvitation: jest.fn(),
     removeTeamInvitation: jest.fn(),
+    listInvites: jest.fn(),
+    acceptInvite: jest.fn(),
   },
 }));
 
@@ -24,6 +27,8 @@ const userServiceMock = jest.requireMock('@/lib/userService').userService as {
   updateUser: jest.Mock;
   addTeamInvitation: jest.Mock;
   removeTeamInvitation: jest.Mock;
+  listInvites: jest.Mock;
+  acceptInvite: jest.Mock;
 };
 
 const buildUser = (id: string, overrides: Partial<UserData> = {}): UserData => ({
@@ -53,6 +58,8 @@ describe('teamService', () => {
     userServiceMock.updateUser.mockReset();
     userServiceMock.addTeamInvitation.mockReset();
     userServiceMock.removeTeamInvitation.mockReset();
+    userServiceMock.listInvites.mockReset();
+    userServiceMock.acceptInvite.mockReset();
   });
 
   afterEach(() => {
@@ -97,22 +104,17 @@ describe('teamService', () => {
         captainId: 'user_1',
       });
 
-      userServiceMock.getUsersByIds
-        .mockResolvedValueOnce([buildUser('user_1', { firstName: 'Jane', lastName: 'Doe' })])
-        .mockResolvedValueOnce([buildUser('user_2', { firstName: 'John', lastName: 'Smith' })]);
+      userServiceMock.getUsersByIds.mockResolvedValueOnce([
+        buildUser('user_1', { firstName: 'Jane', lastName: 'Doe' }),
+        buildUser('user_2', { firstName: 'John', lastName: 'Smith' }),
+      ]);
       userServiceMock.getUserById.mockResolvedValue(undefined);
 
       const team = await teamService.getTeamById('team_1', true);
 
       expect(apiRequestMock).toHaveBeenCalledWith('/api/teams/team_1');
-      expect(userServiceMock.getUsersByIds).toHaveBeenNthCalledWith(
-        1,
-        ['user_1'],
-        expect.objectContaining({ teamId: 'team_1' }),
-      );
-      expect(userServiceMock.getUsersByIds).toHaveBeenNthCalledWith(
-        2,
-        ['user_2'],
+      expect(userServiceMock.getUsersByIds).toHaveBeenCalledWith(
+        ['user_1', 'user_2'],
         expect.objectContaining({ teamId: 'team_1' }),
       );
       expect(userServiceMock.getUserById).not.toHaveBeenCalled();
@@ -474,6 +476,28 @@ describe('teamService', () => {
     });
   });
 
+  it('reuses a Team ID after an unconfirmed save and creates a new ID after success', async () => {
+    apiRequestMock.mockRejectedValueOnce(new Error('Response lost.'))
+      .mockResolvedValue({ id: 'saved-team', name: 'Retry Team', playerIds: [], pending: [], teamSize: 6 });
+    await expect(teamService.createTeam('Retry Team', 'creator')).rejects.toThrow('Response lost.');
+    await teamService.createTeam('Retry Team', 'creator');
+    const first = apiRequestMock.mock.calls[0][1]?.body;
+    expect(apiRequestMock.mock.calls[1][1]?.body).toEqual(first);
+    await teamService.createTeam('Retry Team', 'creator');
+    expect(apiRequestMock.mock.calls[2][1]?.body).not.toEqual(first);
+  });
+
+  it('retries an unconfirmed managed Player invitation with the same request key', async () => {
+    apiRequestMock.mockRejectedValueOnce(new Error('Response lost.'))
+      .mockResolvedValueOnce({ invite: { id: 'attempt', type: 'TEAM', status: 'PENDING' }, delivery: { failed: true, status: 'FAILED' } });
+    const input = { firstName: 'Retry', lastName: 'Player', role: 'player' as const, shareOnly: true };
+    await expect(teamService.createTeamMemberInvite('retry-team', input)).rejects.toThrow('Response lost.');
+    const result = await teamService.createTeamMemberInvite('retry-team', input);
+    expect(apiRequestMock.mock.calls[1]).toEqual(apiRequestMock.mock.calls[0]);
+    expect(result.invite?.$id).toBe('attempt');
+    expect(result.delivery?.failed).toBe(true);
+  });
+
   describe('invitePlayerToTeam', () => {
     it('posts a player member invite request', async () => {
       userServiceMock.addTeamInvitation.mockResolvedValue(true);
@@ -496,6 +520,7 @@ describe('teamService', () => {
           body: {
             userId: 'user_2',
             role: 'player',
+            idempotencyKey: expect.any(String),
           },
         }),
       );
@@ -535,29 +560,20 @@ describe('teamService', () => {
   });
 
   describe('membership updates', () => {
-    it('accepts a player invitation without patching the user profile teamIds', async () => {
-      apiRequestMock.mockResolvedValue({});
-      userServiceMock.removeTeamInvitation.mockResolvedValue(true);
-      jest.spyOn(teamService, 'getTeamById').mockResolvedValueOnce({
-        $id: 'team_1',
-        name: 'Team One',
-        sport: 'Volleyball',
-        division: 'Open',
-        playerIds: ['captain_1'],
-        pending: ['user_2'],
-        teamSize: 6,
-        captainId: 'captain_1',
-      } as any);
+    it('accepts a player invitation through the invitation endpoint', async () => {
+      userServiceMock.listInvites.mockResolvedValue([{ $id: 'invite_1', status: 'PENDING' }]);
+      userServiceMock.acceptInvite.mockResolvedValue(true);
+      const refreshTeam = jest.spyOn(teamService, 'getTeamById').mockResolvedValueOnce(undefined);
 
       const result = await teamService.acceptTeamInvitation('team_1', 'user_2');
 
       expect(result).toBe(true);
-      expect(apiRequestMock).toHaveBeenCalledWith('/api/teams/team_1', {
-        method: 'PATCH',
-        body: { team: { playerIds: ['captain_1', 'user_2'], pending: [] } },
-      });
+      expect(userServiceMock.listInvites).toHaveBeenCalledWith({ userId: 'user_2', teamId: 'team_1' });
+      expect(userServiceMock.acceptInvite).toHaveBeenCalledWith('invite_1');
+      expect(refreshTeam).toHaveBeenCalledWith('team_1', true, { teamId: 'team_1' });
+      expect(apiRequestMock).not.toHaveBeenCalled();
       expect(userServiceMock.updateUser).not.toHaveBeenCalled();
-      expect(userServiceMock.removeTeamInvitation).toHaveBeenCalledWith('user_2', 'team_1');
+      expect(userServiceMock.removeTeamInvitation).not.toHaveBeenCalled();
     });
 
     it('removes a player without patching the removed user profile', async () => {
@@ -587,13 +603,13 @@ describe('teamService', () => {
       expect(result?.playerIds).toEqual(['captain_1']);
       expect(apiRequestMock).toHaveBeenCalledWith('/api/teams/team_1', {
         method: 'PATCH',
-        body: { team: { playerIds: ['captain_1'] } },
+        body: { team: { playerIds: ['captain_1'], pending: [] } },
       });
       expect(userServiceMock.updateUser).not.toHaveBeenCalled();
     });
 
     it('deletes a team without patching each player profile teamIds', async () => {
-      apiRequestMock.mockResolvedValue({});
+      apiRequestMock.mockResolvedValue({ deleted: true });
       userServiceMock.removeTeamInvitation.mockResolvedValue(true);
       jest.spyOn(teamService, 'getTeamById').mockResolvedValueOnce({
         $id: 'team_1',
@@ -611,7 +627,7 @@ describe('teamService', () => {
       expect(result).toBe(true);
       expect(apiRequestMock).toHaveBeenCalledWith('/api/teams/team_1', { method: 'DELETE' });
       expect(userServiceMock.updateUser).not.toHaveBeenCalled();
-      expect(userServiceMock.removeTeamInvitation).toHaveBeenCalledWith('user_3', 'team_1');
+      expect(userServiceMock.removeTeamInvitation).not.toHaveBeenCalled();
     });
   });
 });

@@ -4,11 +4,11 @@ import UIKit
 
 struct NativeDiscoverEventCard: View {
     let event: Event
+    let nextOccurrence: EventSearchOccurrence?
     let organizationLogoId: String?
     let showsPublishedBadge: Bool
     let onSelected: () -> Void
     let onMapSelected: () -> Void
-
     var body: some View {
         let cardMetadata = EventCardMetadataKt.buildNativeEventCardMetadata(event: event)
         let imageRequest = discoverEventImageRequest(
@@ -79,7 +79,10 @@ struct NativeDiscoverEventCard: View {
                     .truncationMode(.tail)
 
                     HStack {
-                        Label(discoverEventDateLabel(event), systemImage: "calendar")
+                        Label(
+                            discoverEventDateLabel(event, nextOccurrence: nextOccurrence),
+                            systemImage: "calendar"
+                        )
                         Spacer()
                         Text(event.teamSignup ? "Team registration" : "Individual registration")
                     }
@@ -701,7 +704,16 @@ func discoverTitleCase(_ value: String) -> String {
         .capitalized
 }
 
-func discoverEventDateLabel(_ event: Event) -> String {
+func discoverEventDateLabel(_ event: Event, nextOccurrence: EventSearchOccurrence? = nil) -> String {
+    if let occurrence = nextOccurrence {
+        let date = Date(timeIntervalSince1970: TimeInterval(occurrence.start.epochSeconds))
+        var formatStyle = Date.FormatStyle(date: .abbreviated, time: .shortened)
+        formatStyle.timeZone =
+            TimeZone(identifier: occurrence.timeZone)
+            ?? TimeZone(identifier: event.timeZone)
+            ?? .current
+        return date.formatted(formatStyle)
+    }
     if let display = discoverNonEmpty(event.dateDisplayText) ?? discoverNonEmpty(event.scheduleText) {
         return display
     }

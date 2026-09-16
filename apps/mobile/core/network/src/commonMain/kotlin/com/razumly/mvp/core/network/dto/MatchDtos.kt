@@ -101,9 +101,9 @@ data class MatchApiDto(
     val locked: Boolean? = null,
 ) {
     @OptIn(ExperimentalTime::class)
-    fun toMatchOrNull(): MatchMVP? {
+    fun toMatchOrNull(fallbackMatchId: Int? = null): MatchMVP? {
         val resolvedId = id
-        val resolvedMatchId = matchId
+        val resolvedMatchId = matchId ?: fallbackMatchId
         val resolvedEventId = eventId
         val resolvedFieldId = fieldId?.trim()?.takeIf(String::isNotBlank)
             ?: field?.resolvedId()?.trim()?.takeIf(String::isNotBlank)
@@ -214,6 +214,7 @@ data class MatchesResponseDto(
 @Serializable
 data class MatchResponseDto(
     val match: MatchApiDto? = null,
+    val terminalResult: TerminalMatchResultDto? = null,
 )
 
 @Serializable
@@ -353,6 +354,13 @@ data class TeamCheckInResponseDto(
 )
 
 @Serializable
+data class MatchDocumentReadinessDto(
+    val isMinorAtEvent: Boolean? = null,
+    val documents: EventComplianceDocumentCountsDto? = null,
+    val requiredDocuments: List<EventComplianceRequiredDocumentDto> = emptyList(),
+)
+
+@Serializable
 data class MatchRosterEntryDto(
     val id: String? = null,
     val source: String? = null,
@@ -363,6 +371,7 @@ data class MatchRosterEntryDto(
     val userName: String? = null,
     val email: String? = null,
     val noAccount: Boolean? = null,
+    val documentReadiness: MatchDocumentReadinessDto? = null,
     val linkedAt: String? = null,
     val removedAt: String? = null,
 )
@@ -370,6 +379,8 @@ data class MatchRosterEntryDto(
 @Serializable
 data class MatchRosterDto(
     val eventTeamId: String? = null,
+    val canEdit: Boolean? = null,
+    val teamName: String? = null,
     val entries: List<MatchRosterEntryDto> = emptyList(),
 )
 
@@ -408,6 +419,7 @@ data class MatchRosterResponseDto(
 
 @Serializable
 data class MatchUpdateDto(
+    val terminalContractVersion: Int? = null,
     val lifecycle: MatchLifecycleOperationDto? = null,
     val segmentOperations: List<MatchSegmentOperationDto>? = null,
     val incidentOperations: List<MatchIncidentOperationDto>? = null,
@@ -447,6 +459,7 @@ data class MatchUpdateDto(
 )
 
 fun MatchUpdateDto.toMatchOperationsJsonObject(): JsonObject = buildJsonObject {
+    terminalContractVersion?.let { put("terminalContractVersion", JsonPrimitive(it)) }
     lifecycle
         ?.toJsonObject()
         ?.takeIf { it.isNotEmpty() }

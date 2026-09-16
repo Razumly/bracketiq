@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import { Alert, Button, Group, Loader, Modal, Stack, Text } from '@mantine/core';
+import React, { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Alert, Button, Group, Modal, Stack, Text } from '@/components/organization/organization-operation-ui';
 import { billingAddressService } from '@/lib/billingAddressService';
 import {
   isSupportedBillingCountryCode,
@@ -10,7 +10,7 @@ import {
   normalizeUsStateCode,
 } from '@/lib/billingAddressOptions';
 import type { BillingAddress } from '@/types';
-import BillingAddressFields from './BillingAddressFields';
+import BillingAddressFields, { type BillingAddressFieldErrors } from './BillingAddressFields';
 
 const EMPTY_BILLING_ADDRESS: BillingAddress = {
   line1: '',
@@ -21,14 +21,26 @@ const EMPTY_BILLING_ADDRESS: BillingAddress = {
   countryCode: 'US',
 };
 
-const normalizeBillingAddress = (value?: BillingAddress | null): BillingAddress => ({
-  line1: value?.line1 ?? '',
-  line2: value?.line2 ?? '',
-  city: value?.city ?? '',
-  state: normalizeUsStateCode(value?.state),
-  postalCode: value?.postalCode ?? '',
-  countryCode: normalizeBillingCountryCode(value?.countryCode),
+const normalizeBillingAddress = (value: BillingAddress = EMPTY_BILLING_ADDRESS): BillingAddress => ({
+  line1: value.line1 ?? '',
+  line2: value.line2 ?? '',
+  city: value.city ?? '',
+  state: normalizeUsStateCode(value.state),
+  postalCode: value.postalCode ?? '',
+  countryCode: normalizeBillingCountryCode(value.countryCode),
 });
+
+const getBillingAddressErrors = (address: BillingAddress): BillingAddressFieldErrors => {
+  const errors: BillingAddressFieldErrors = {};
+  if (!address.line1.trim()) errors.line1 = 'Address line 1 is required.';
+  if (!address.city.trim()) errors.city = 'City is required.';
+  if (!address.state.trim()) errors.state = 'State is required.';
+  else if (!isSupportedUsStateCode(address.state)) errors.state = 'Select a supported billing state.';
+  if (!address.postalCode.trim()) errors.postalCode = 'ZIP code is required.';
+  if (!address.countryCode.trim()) errors.countryCode = 'Country is required.';
+  else if (!isSupportedBillingCountryCode(address.countryCode)) errors.countryCode = 'Only United States billing addresses are supported right now.';
+  return errors;
+};
 
 type BillingAddressModalProps = {
   opened: boolean;
@@ -36,6 +48,7 @@ type BillingAddressModalProps = {
   onSaved: (billingAddress: BillingAddress) => Promise<void> | void;
   title?: string;
   description?: string;
+  summary?: ReactNode;
 };
 
 export default function BillingAddressModal({
@@ -44,11 +57,16 @@ export default function BillingAddressModal({
   onSaved,
   title = 'Billing Address Required',
   description = 'Enter your billing address so tax and payment totals can be calculated.',
+  summary,
 }: BillingAddressModalProps) {
   const [billingAddress, setBillingAddress] = useState<BillingAddress>(EMPTY_BILLING_ADDRESS);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [fieldErrors, setFieldErrors] = useState<BillingAddressFieldErrors>({});
+  const fieldsRef = useRef<HTMLFieldSetElement>(null);
 
   useEffect(() => {
     if (!opened) {
@@ -57,18 +75,22 @@ export default function BillingAddressModal({
 
     let cancelled = false;
     setLoading(true);
+    setLoadFailed(false);
+    setBillingAddress(EMPTY_BILLING_ADDRESS);
     setError(null);
+    setFieldErrors({});
 
     billingAddressService.getBillingAddressProfile()
       .then((profile) => {
         if (!cancelled) {
-          setBillingAddress(normalizeBillingAddress(profile.billingAddress));
+          setBillingAddress(normalizeBillingAddress(profile.billingAddress ?? undefined));
         }
       })
       .catch((loadError) => {
         if (!cancelled) {
           console.error('Failed to load billing address profile', loadError);
           setBillingAddress(EMPTY_BILLING_ADDRESS);
+          setLoadFailed(true);
         }
       })
       .finally(() => {
@@ -80,25 +102,17 @@ export default function BillingAddressModal({
     return () => {
       cancelled = true;
     };
-  }, [opened]);
-
-  const validate = (): string | null => {
-    if (!billingAddress.line1.trim()) return 'Address line 1 is required.';
-    if (!billingAddress.city.trim()) return 'City is required.';
-    if (!billingAddress.state.trim()) return 'State is required.';
-    if (!isSupportedUsStateCode(billingAddress.state)) return 'Select a supported billing state.';
-    if (!billingAddress.postalCode.trim()) return 'ZIP code is required.';
-    if (!billingAddress.countryCode.trim()) return 'Country is required.';
-    if (!isSupportedBillingCountryCode(billingAddress.countryCode)) {
-      return 'Only United States billing addresses are supported right now.';
-    }
-    return null;
-  };
+  }, [opened, loadAttempt]);
 
   const handleSave = async () => {
-    const validationError = validate();
-    if (validationError) {
-      setError(validationError);
+    if (loading || saving || loadFailed) return;
+    const validationErrors = getBillingAddressErrors(billingAddress);
+    setFieldErrors(validationErrors);
+    if (Object.keys(validationErrors).length > 0) {
+      setError('Check the billing address fields below.');
+      window.requestAnimationFrame(() => {
+        fieldsRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+      });
       return;
     }
 
@@ -125,29 +139,39 @@ export default function BillingAddressModal({
     }
   };
 
+  const busy = loading || saving;
+  const fieldsDisabled = busy || loadFailed;
   return (
-    <Modal opened={opened} onClose={onClose} title={title} centered>
+    <Modal opened={opened} onClose={() => { if (!saving) onClose(); }} title={title} centered>
       <Stack gap="md">
+        {summary}
         <Text size="sm" c="dimmed">{description}</Text>
         {error ? <Alert color="red" variant="light">{error}</Alert> : null}
-        {loading ? (
-          <Group justify="center" py="md">
-            <Loader size="sm" />
-          </Group>
-        ) : (
-          <>
+        {loadFailed && <Alert color="red">
+          <p>We could not load your billing address. Try again.</p>
+          <Button variant="default" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>Retry</Button>
+        </Alert>}
+        {loading && <p role="status" className="text-sm text-muted-foreground">Loading billing address...</p>}
+        <fieldset ref={fieldsRef} disabled={fieldsDisabled} aria-busy={busy} className="m-0 min-w-0 border-0 p-0">
+          <Stack gap="md">
             <BillingAddressFields
               value={billingAddress}
-              onChange={setBillingAddress}
+              onChange={(nextAddress) => {
+                setBillingAddress(nextAddress);
+                if (Object.keys(fieldErrors).length > 0) setFieldErrors(getBillingAddressErrors(nextAddress));
+              }}
               onValidationMessage={setError}
+              disabled={fieldsDisabled}
+              errors={fieldErrors}
             />
-          </>
-        )}
+          </Stack>
+        </fieldset>
+        {loadFailed && <p className="text-sm text-muted-foreground">Reload your billing address before saving changes.</p>}
         <Group justify="flex-end">
           <Button variant="default" onClick={onClose} disabled={saving}>
             Cancel
           </Button>
-          <Button onClick={() => void handleSave()} loading={saving} disabled={loading}>
+          <Button onClick={() => void handleSave()} loading={saving} disabled={fieldsDisabled}>
             Save billing address
           </Button>
         </Group>

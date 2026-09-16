@@ -109,7 +109,8 @@ export function collectUniqueUserIds(value: unknown): string[] {
 }
 
 function isPaymentFailedRegistration(registration: EventParticipantRegistrationEntry): boolean {
-    return String(registration.status ?? '').trim().toUpperCase() === 'PAYMENT_FAILED';
+    return String(registration.status ?? '').trim().toUpperCase() === 'PAYMENT_FAILED'
+        || Boolean(normalizeRequestToken(registration.paymentResolutionReason));
 }
 
 export function collectPaymentFailedRegistrationState(

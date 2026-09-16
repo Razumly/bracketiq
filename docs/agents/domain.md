@@ -2,12 +2,15 @@
 
 How the engineering skills should consume this repo's domain documentation when exploring the codebase.
 
-## Before exploring, read these
+## Before exploring
 
-- **`CONTEXT.md`** at the repo root.
-- **`docs/adr/`** — read ADRs that touch the area you're about to work in.
+Use only domain references that govern the requested change.
 
-If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill (reached via `/grill-with-docs` and `/improve-codebase-architecture`) creates them lazily when terms or decisions actually get resolved.
+- Read the relevant entries in `CONTEXT.md` for terms used by the issue or changed code.
+- Read only named or directly governing ADRs in `docs/adr/`.
+- Expand the set when code or a cited decision exposes an unresolved term or invariant.
+
+If a selected file does not exist, proceed silently. Do not flag its absence or suggest creating it upfront. The `/domain-modeling` skill creates domain files when terms or decisions need them.
 
 ## File structure
 

@@ -60,20 +60,18 @@ import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.eventDetail.composables.LosersBracketOnPrimary
 import com.razumly.mvp.eventDetail.composables.LosersBracketPrimary
-import com.razumly.mvp.icons.Groups
 import com.razumly.mvp.icons.MVPIcons
 import com.razumly.mvp.icons.ProfileActionEvents
-import com.razumly.mvp.icons.TournamentBracket
-import com.razumly.mvp.icons.Trophy
+import com.razumly.mvp.icons.SharedIcons
 
 internal enum class DetailTab(
     val label: String,
     val icon: ImageVector,
 ) {
-    PARTICIPANTS("Participants", MVPIcons.Groups),
-    BRACKET("Bracket", MVPIcons.TournamentBracket),
+    PARTICIPANTS("Participants", SharedIcons.Groups),
+    BRACKET("Bracket", SharedIcons.TournamentBracket),
     SCHEDULE("Schedule", MVPIcons.ProfileActionEvents),
-    LEAGUES("Standings", MVPIcons.Trophy),
+    LEAGUES("Standings", SharedIcons.Trophy),
 }
 
 private data class EventDetailTabVisuals(

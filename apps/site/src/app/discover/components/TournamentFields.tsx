@@ -1,17 +1,24 @@
 import React, { useEffect } from 'react';
 import {
-  Paper,
-  Title,
-  Select,
+  Group,
   NumberInput,
-  TextInput,
+  Paper,
+  Select,
   Stack,
-  Divider,
-  Flex,
-  Box,
   Text,
-} from '@mantine/core';
+  TextInput,
+  Title,
+} from '@/components/organization/organization-operation-ui';
+import type { HTMLAttributes } from 'react';
 import type { Sport, TournamentConfig } from '@/types';
+
+type FlexDirection = 'row' | 'column' | { base?: 'row' | 'column'; md?: 'row' | 'column' };
+type FlexProps = Omit<HTMLAttributes<HTMLDivElement>, 'align'> & { gap?: string | number; align?: 'center' | 'flex-end' | 'flex-start' | 'start' | 'end' | 'stretch' | 'baseline'; wrap?: 'wrap' | 'nowrap' | 'wrap-reverse'; mt?: string | number; direction?: FlexDirection };
+const Flex = ({ direction = 'row', align, className, ...props }: FlexProps) => {
+  const directionClass = typeof direction === 'object' ? 'flex-col md:flex-row' : direction === 'column' ? 'flex-col' : 'flex-row';
+  return <Group {...props} align={align === 'start' ? 'flex-start' : align} className={[directionClass, className].filter(Boolean).join(' ')} />;
+};
+const Box = (props: HTMLAttributes<HTMLDivElement>) => <div {...props} />;
 
 interface TournamentFieldsProps {
   tournamentData: TournamentConfig;
@@ -421,8 +428,8 @@ const TournamentFields: React.FC<TournamentFieldsProps> = ({
 
           {tournamentData.doubleElimination && (
             <>
-              <Divider orientation="vertical" visibleFrom="md" />
-              <Divider hiddenFrom="md" my="md" />
+              <div className="hidden min-h-24 border-l border-border md:block" />
+              <div className="my-4 border-t border-border md:hidden" />
               <Box style={{ flex: 1, minWidth: 0, width: '100%' }}>
                 <Text size="lg" fw={700} mb="sm">
                   Loser Bracket Points to Victory

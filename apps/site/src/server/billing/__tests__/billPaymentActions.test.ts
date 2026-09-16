@@ -3,6 +3,8 @@
 const stripeRetrieveMock = jest.fn();
 const stripeCancelMock = jest.fn();
 const stripeRefundCreateMock = jest.fn();
+const transitionEventRegistrationStatusMock = jest.fn();
+const acquireEventLockAndLoadStructureMock = jest.fn();
 const StripeMock = jest.fn(() => ({
   paymentIntents: {
     retrieve: (...args: unknown[]) => stripeRetrieveMock(...args),
@@ -20,8 +22,18 @@ const prismaMock = {
     findMany: jest.fn(),
   },
   bills: {
+    findMany: jest.fn(),
     findUnique: jest.fn(),
     update: jest.fn(),
+  },
+  eventRegistrations: {
+    findUnique: jest.fn(),
+    findMany: jest.fn(),
+    update: jest.fn(),
+    updateMany: jest.fn(),
+  },
+  divisions: {
+    findMany: jest.fn(),
   },
   $transaction: jest.fn(),
 };
@@ -30,6 +42,13 @@ jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 jest.mock('stripe', () => ({
   __esModule: true,
   default: StripeMock,
+}));
+jest.mock('@/server/events/eventRegistrations', () => ({
+  ...jest.requireActual('@/server/events/eventRegistrations'),
+  acquireEventLockAndLoadStructure: acquireEventLockAndLoadStructureMock,
+  transitionEventRegistrationStatus: (...args: unknown[]) => (
+    transitionEventRegistrationStatusMock(...args)
+  ),
 }));
 
 import {
@@ -60,11 +79,21 @@ describe('bill payment actions', () => {
         dueDate: new Date('2026-05-19T00:00:00.000Z'),
       },
     ]);
+    prismaMock.bills.findMany.mockResolvedValue([]);
     prismaMock.bills.update.mockResolvedValue({
       id: 'bill_1',
       status: 'PENDING',
     });
     prismaMock.billPayments.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.eventRegistrations.updateMany.mockResolvedValue({ count: 1 });
+    acquireEventLockAndLoadStructureMock.mockResolvedValue({
+      id: 'event_1',
+      eventType: 'EVENT',
+      teamSignup: false,
+      maxParticipants: 10,
+      singleDivision: true,
+      divisionIds: [],
+    });
     prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof prismaMock) => unknown) => callback(prismaMock));
   });
 
@@ -108,6 +137,7 @@ describe('bill payment actions', () => {
     expect(prismaMock.billPayments.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ id: 'payment_1' }),
+
         data: expect.objectContaining({
           status: 'PROCESSING',
           paymentIntentId: 'pi_pending_1',
@@ -127,6 +157,133 @@ describe('bill payment actions', () => {
     );
   });
 
+  it('persists an active registration only after a split parent is fully paid', async () => {
+    const current = {
+      id: 'registration_1',
+      eventId: 'event_1',
+      registrantId: 'user_1',
+      parentId: null,
+      registrantType: 'SELF',
+      rosterRole: 'PARTICIPANT',
+      status: 'PENDING',
+      acceptedAt: null,
+      eventTeamId: null,
+      sourceTeamRegistrationId: null,
+      slotId: null,
+      occurrenceDate: null,
+      ageAtEvent: null,
+      divisionId: 'entry_open',
+      divisionTypeId: 'open',
+      divisionTypeKey: 'open',
+      jerseyNumber: null,
+      position: null,
+      isCaptain: false,
+      consentDocumentId: null,
+      consentStatus: null,
+      createdBy: 'user_1',
+      createdAt: new Date('2026-08-22T00:00:00.000Z'),
+      updatedAt: new Date('2026-08-22T00:00:00.000Z'),
+    };
+    const actualTransition = (jest.requireActual('@/server/events/eventRegistrations') as {
+      transitionEventRegistrationStatus: (params: unknown, client: unknown) => Promise<unknown>;
+    }).transitionEventRegistrationStatus;
+    transitionEventRegistrationStatusMock.mockImplementationOnce((params: unknown, client: unknown) => (
+      actualTransition(params, {
+        ...(client as Record<string, unknown>),
+        $transaction: undefined,
+      })
+    ));
+    prismaMock.bills.findUnique
+      .mockResolvedValueOnce({
+        id: 'bill_child_1',
+        totalAmountCents: 500,
+        status: 'OPEN',
+        parentBillId: 'bill_parent_1',
+      })
+      .mockResolvedValueOnce({
+        id: 'bill_parent_1',
+        totalAmountCents: 500,
+        status: 'OPEN',
+        parentBillId: null,
+      });
+    prismaMock.billPayments.findMany
+      .mockResolvedValueOnce([{
+        amountCents: 500,
+        status: 'PAID',
+        paidAmountCents: 500,
+        dueDate: new Date('2026-08-22T00:00:00.000Z'),
+      }])
+      .mockResolvedValueOnce([{
+        amountCents: 0,
+        status: 'VOID',
+        paidAmountCents: 0,
+        dueDate: null,
+      }]);
+    prismaMock.bills.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ paidAmountCents: 500 }]);
+    prismaMock.bills.update
+      .mockResolvedValueOnce({ id: 'bill_child_1', parentBillId: 'bill_parent_1', status: 'PAID' })
+      .mockResolvedValueOnce({ id: 'bill_parent_1', parentBillId: null, status: 'PAID' });
+    prismaMock.eventRegistrations.findUnique.mockResolvedValueOnce(current);
+    prismaMock.eventRegistrations.findMany.mockResolvedValue([]);
+    prismaMock.eventRegistrations.update.mockImplementationOnce(({
+      data,
+    }: {
+      data: Record<string, unknown>;
+    }) => ({ ...current, ...data }));
+    prismaMock.divisions.findMany.mockResolvedValue([{
+      id: 'entry_open',
+      key: 'open',
+      divisionTypeId: 'open',
+      kind: 'LEAGUE',
+      maxParticipants: 1,
+    }]);
+    acquireEventLockAndLoadStructureMock.mockResolvedValueOnce({
+      id: 'event_1',
+      eventType: 'EVENT',
+      teamSignup: false,
+      maxParticipants: 1,
+      singleDivision: true,
+      divisionIds: [],
+    });
+
+    await markBillPaymentProcessingForAction({
+      bill: {
+        id: 'bill_child_1',
+        ownerType: 'USER',
+        ownerId: 'user_1',
+        organizationId: null,
+        eventId: 'event_1',
+        sourceType: 'EVENT_REGISTRATION',
+        sourceId: 'registration_1',
+        totalAmountCents: 500,
+        status: 'OPEN',
+        paymentPlanEnabled: false,
+        lineItems: [],
+      },
+      payment: {
+        id: 'payment_child_1',
+        billId: 'bill_child_1',
+        amountCents: 500,
+        status: 'PENDING',
+        paymentIntentId: null,
+        payerUserId: null,
+        refundedAmountCents: 0,
+      },
+      paymentIntent: 'pi_split_final_secret',
+      userId: 'user_1',
+      now: new Date('2026-08-22T12:00:00.000Z'),
+    });
+
+    expect(prismaMock.eventRegistrations.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'registration_1' },
+      data: expect.objectContaining({
+        status: 'ACTIVE',
+        divisionId: 'entry_open',
+      }),
+    }));
+  });
   it('refuses to revive an installment that was voided by a concurrent split', async () => {
     prismaMock.billPayments.updateMany.mockResolvedValueOnce({ count: 0 });
 

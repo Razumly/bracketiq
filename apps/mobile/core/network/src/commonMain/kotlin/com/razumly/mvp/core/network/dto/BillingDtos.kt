@@ -89,6 +89,13 @@ data class RegistrationQuestionAnswerDto(
 )
 
 @Serializable
+data class BillingEventRegistrationTargetDto(
+    val registrantId: String,
+    val registrantType: String,
+    val parentId: String,
+)
+
+@Serializable
 data class PurchaseIntentRequestDto(
     val purchaseType: String? = null,
     val user: BillingUserRefDto? = null,
@@ -106,6 +113,7 @@ data class PurchaseIntentRequestDto(
     val billingAddress: BillingAddressDto? = null,
     val discountCode: String? = null,
     val answers: List<RegistrationQuestionAnswerDto> = emptyList(),
+    val eventRegistration: BillingEventRegistrationTargetDto? = null,
 )
 
 @Serializable

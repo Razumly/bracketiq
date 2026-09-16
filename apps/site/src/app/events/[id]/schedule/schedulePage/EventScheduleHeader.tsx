@@ -1,16 +1,21 @@
+import { Megaphone, QrCode } from 'lucide-react';
+
+import { EventQrCodeModal, buildEventPublicUrl } from '@/components/events/EventQrCodeModal';
 import {
   ActionIcon,
   Alert,
   Badge,
   Button,
   Group,
-  Menu,
   Select,
   Title,
-} from '@mantine/core';
-import { Megaphone, QrCode } from 'lucide-react';
-
-import { EventQrCodeModal, buildEventPublicUrl } from '@/components/events/EventQrCodeModal';
+} from '@/components/organization/organization-operation-ui';
+import {
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuTrigger,
+} from '@/components/ui/menu';
 
 import EventSchedulePendingChangesPopover from './EventSchedulePendingChangesPopover';
 import {
@@ -57,13 +62,15 @@ type EventScheduleHeaderProps = {
   hasPendingUnsavedChanges: boolean;
   hasSplitDivisionUnassignedTeams: boolean;
   showMoreActions: boolean;
-  showRescheduleAction: boolean;
-  isRescheduleActionInFlight: boolean;
-  onRescheduleMatches: () => void;
   showBuildScheduleAction: boolean;
-  buildScheduleIsRebuild: boolean;
   isBuildScheduleActionInFlight: boolean;
   onBuildSchedule: () => void;
+  showCompleteScheduleAction: boolean;
+  isCompleteScheduleActionInFlight: boolean;
+  onCompleteSchedule: () => void;
+  showRebuildScheduleAction: boolean;
+  isRebuildScheduleActionInFlight: boolean;
+  onRebuildSchedule: () => void;
   showRebuildWithoutPlaceholdersAction: boolean;
   isRebuildWithoutPlaceholdersActionInFlight: boolean;
   onRebuildWithoutPlaceholders: () => void;
@@ -133,13 +140,15 @@ export default function EventScheduleHeader({
   hasPendingUnsavedChanges,
   hasSplitDivisionUnassignedTeams,
   showMoreActions,
-  showRescheduleAction,
-  isRescheduleActionInFlight,
-  onRescheduleMatches,
   showBuildScheduleAction,
-  buildScheduleIsRebuild,
   isBuildScheduleActionInFlight,
   onBuildSchedule,
+  showCompleteScheduleAction,
+  isCompleteScheduleActionInFlight,
+  onCompleteSchedule,
+  showRebuildScheduleAction,
+  isRebuildScheduleActionInFlight,
+  onRebuildSchedule,
   showRebuildWithoutPlaceholdersAction,
   isRebuildWithoutPlaceholdersActionInFlight,
   onRebuildWithoutPlaceholders,
@@ -181,22 +190,17 @@ export default function EventScheduleHeader({
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <Title order={2} mb={0} className="min-w-0 max-w-full break-words">{eventName}</Title>
             {selectedOccurrenceLabel && (
-              <Badge
-                variant="light"
-                color="red"
-                rightSection={(
-                  <ActionIcon
-                    variant="transparent"
-                    color="red"
-                    size="xs"
-                    aria-label="Clear selected session"
-                    onClick={onClearSelectedOccurrence}
-                  >
-                    ×
-                  </ActionIcon>
-                )}
-              >
-                {selectedOccurrenceLabel}
+              <Badge variant="light" color="red" className="gap-1">
+                <span>{selectedOccurrenceLabel}</span>
+                <ActionIcon
+                  variant="subtle"
+                  color="red"
+                  size="xs"
+                  aria-label="Clear selected session"
+                  onClick={onClearSelectedOccurrence}
+                >
+                  <span aria-hidden="true">×</span>
+                </ActionIcon>
               </Badge>
             )}
           </div>
@@ -260,6 +264,8 @@ export default function EventScheduleHeader({
                     )}
                     {showLifecycleStatusSelect && (
                       <Select
+                        aria-label="Event status"
+                        readOnly
                         data={EVENT_LIFECYCLE_OPTIONS}
                         value={selectedLifecycleStatus ?? activeLifecycleStatus}
                         onChange={onLifecycleStatusChange}
@@ -286,43 +292,48 @@ export default function EventScheduleHeader({
                   </>
                 )}
                 {showMoreActions && (
-                  <Menu shadow="md" width={280} position="bottom-end">
-                    <Menu.Target>
-                      <Button variant="default">More</Button>
-                    </Menu.Target>
-                    <Menu.Dropdown>
-                      {showRescheduleAction && (
-                        <Menu.Item
-                          onClick={onRescheduleMatches}
-                          disabled={
-                            (hasNetworkActionInFlight && !isRescheduleActionInFlight)
-                            || hasSplitDivisionUnassignedTeams
-                          }
-                        >
-                          {isRescheduleActionInFlight ? 'Rescheduling...' : 'Reschedule'}
-                        </Menu.Item>
-                      )}
+                  <Menu>
+                    <MenuTrigger render={<Button variant="default">More</Button>} />
+                    <MenuContent align="end" className="w-[17.5rem]">
                       {showBuildScheduleAction && (
-                        <Menu.Item
-                          color="orange"
+                        <MenuItem
+                          className="text-amber-700 focus:text-amber-800 dark:text-amber-300 dark:focus:text-amber-200"
                           onClick={onBuildSchedule}
                           disabled={
                             (hasNetworkActionInFlight && !isBuildScheduleActionInFlight)
                             || hasSplitDivisionUnassignedTeams
                           }
                         >
-                          {isBuildScheduleActionInFlight
-                            ? buildScheduleIsRebuild
-                              ? 'Rebuilding schedule...'
-                              : 'Building schedule...'
-                            : buildScheduleIsRebuild
-                              ? 'Rebuild schedule'
-                              : 'Build schedule'}
-                        </Menu.Item>
+                          {isBuildScheduleActionInFlight ? 'Building...' : 'Build'}
+                        </MenuItem>
+                      )}
+                      {showCompleteScheduleAction && (
+                        <MenuItem
+                          className="text-amber-700 focus:text-amber-800 dark:text-amber-300 dark:focus:text-amber-200"
+                          onClick={onCompleteSchedule}
+                          disabled={
+                            (hasNetworkActionInFlight && !isCompleteScheduleActionInFlight)
+                            || hasSplitDivisionUnassignedTeams
+                          }
+                        >
+                          {isCompleteScheduleActionInFlight ? 'Completing...' : 'Complete'}
+                        </MenuItem>
+                      )}
+                      {showRebuildScheduleAction && (
+                        <MenuItem
+                          className="text-amber-700 focus:text-amber-800 dark:text-amber-300 dark:focus:text-amber-200"
+                          onClick={onRebuildSchedule}
+                          disabled={
+                            (hasNetworkActionInFlight && !isRebuildScheduleActionInFlight)
+                            || hasSplitDivisionUnassignedTeams
+                          }
+                        >
+                          {isRebuildScheduleActionInFlight ? 'Rebuilding...' : 'Rebuild'}
+                        </MenuItem>
                       )}
                       {showRebuildWithoutPlaceholdersAction && (
-                        <Menu.Item
-                          color="orange"
+                        <MenuItem
+                          className="text-amber-700 focus:text-amber-800 dark:text-amber-300 dark:focus:text-amber-200"
                           onClick={onRebuildWithoutPlaceholders}
                           disabled={
                             (hasNetworkActionInFlight && !isRebuildWithoutPlaceholdersActionInFlight)
@@ -331,45 +342,45 @@ export default function EventScheduleHeader({
                         >
                           {isRebuildWithoutPlaceholdersActionInFlight
                             ? 'Rebuilding without placeholders...'
-                            : 'Rebuild Without Placeholders'}
-                        </Menu.Item>
+                            : 'Rebuild without placeholders'}
+                        </MenuItem>
                       )}
                       {showCancelAction && (
-                        <Menu.Item
-                          color="red"
+                        <MenuItem
+                          variant="destructive"
                           onClick={onCancel}
                           disabled={hasNetworkActionInFlight && !cancelling}
                         >
                           {cancelling ? 'Cancelling...' : cancelButtonLabel}
-                        </Menu.Item>
+                        </MenuItem>
                       )}
                       {showDeleteTemplateAction && (
-                        <Menu.Item
-                          color="red"
+                        <MenuItem
+                          variant="destructive"
                           onClick={onDeleteTemplate}
                           disabled={hasNetworkActionInFlight && !cancelling}
                         >
                           {cancelling ? 'Deleting...' : 'Delete'}
-                        </Menu.Item>
+                        </MenuItem>
                       )}
                       {showDeleteEventAction && (
-                        <Menu.Item
-                          color="red"
+                        <MenuItem
+                          variant="destructive"
                           onClick={onDeleteEvent}
                           disabled={hasNetworkActionInFlight && !cancelling}
                         >
                           {cancelling ? 'Deleting...' : 'Delete Event'}
-                        </Menu.Item>
+                        </MenuItem>
                       )}
                       {showCreateTemplateAction && (
-                        <Menu.Item
+                        <MenuItem
                           onClick={onCreateTemplate}
                           disabled={hasNetworkActionInFlight && !creatingTemplate}
                         >
                           {creatingTemplate ? 'Creating Template...' : 'Create Template'}
-                        </Menu.Item>
+                        </MenuItem>
                       )}
-                    </Menu.Dropdown>
+                    </MenuContent>
                   </Menu>
                 )}
               </Group>

@@ -1,15 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { getGlobalAgeDivisionTypeOptions } from "@/lib/divisionTypes";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Alert,
+  Button,
   Group,
   Loader,
   MultiSelect,
   NumberInput,
   Stack,
   Text,
-} from "@mantine/core";
+} from "@/components/organization/organization-operation-ui";
 
-type DivisionOption = { id: string; name: string };
+export type DivisionOption = { id: string; name: string };
 type DivisionTypePayload = {
   genders?: DivisionOption[];
   ages?: DivisionOption[];
@@ -34,27 +36,47 @@ type Props = {
   value: DivisionDiscoveryFilterValue;
   onChange: (value: DivisionDiscoveryFilterValue) => void;
   selectedSports?: string[];
+  options?: DivisionDiscoveryFilterOptions;
 };
 type DivisionTypeLoadState =
   | { status: "loading"; types: DivisionTypePayload }
   | { status: "ready"; types: DivisionTypePayload }
   | { status: "error"; types: DivisionTypePayload; message: string };
 
+export type DivisionDiscoveryFilterOptions = {
+  loading: boolean;
+  error: string | null;
+  genders: DivisionOption[];
+  ages: DivisionOption[];
+  skillOptions: Array<{ value: string; label: string }>;
+  retry?: () => void;
+};
+
 const normalize = (value: string): string => value.trim().toLowerCase();
+const CANONICAL_AGE_OPTIONS: DivisionOption[] = getGlobalAgeDivisionTypeOptions();
+
+export const getSingleSelectedSportKey = (
+  selectedSports: string[],
+): string | null => {
+  const selectedSportKeys = new Set(
+    selectedSports.map(normalize).filter(Boolean),
+  );
+  return selectedSportKeys.size === 1
+    ? (selectedSportKeys.values().next().value ?? null)
+    : null;
+};
 
 export const buildSportSkillFilterOptions = (
   groups: SportSkillGroup[],
   selectedSports: string[],
 ): Array<{ value: string; label: string }> => {
-  const selectedSportKeys = new Set(
-    selectedSports.map(normalize).filter(Boolean),
-  );
+  const selectedSportKey = getSingleSelectedSportKey(selectedSports);
+  if (!selectedSportKey) return [];
   const eligibleGroups = groups
     .filter(
       (group) =>
-        selectedSportKeys.size === 0 ||
-        selectedSportKeys.has(normalize(group.sportId)) ||
-        selectedSportKeys.has(normalize(group.sportName ?? "")),
+        normalize(group.sportId) === selectedSportKey ||
+        normalize(group.sportName ?? "") === selectedSportKey,
     )
     .map((group) => ({
       ...group,
@@ -96,17 +118,22 @@ export const buildSportSkillFilterOptions = (
     .map(({ value, label }) => ({ value, label }));
 };
 
-export default function DivisionDiscoveryFilters({
-  value,
-  onChange,
-  selectedSports = [],
-}: Props) {
+export function useDivisionDiscoveryOptions(
+  selectedSports: string[] = [],
+  enabled = true,
+): DivisionDiscoveryFilterOptions {
   const [loadState, setLoadState] = useState<DivisionTypeLoadState>({
     status: "loading",
-    types: {},
+    types: { ages: CANONICAL_AGE_OPTIONS },
   });
+  const [requestVersion, setRequestVersion] = useState(0);
+  const retry = useCallback(() => {
+    setLoadState({ status: "loading", types: { ages: CANONICAL_AGE_OPTIONS } });
+    setRequestVersion((current) => current + 1);
+  }, []);
 
   useEffect(() => {
+    if (!enabled) return;
     const controller = new AbortController();
     fetch("/api/division-types", { signal: controller.signal })
       .then((response) =>
@@ -118,7 +145,10 @@ export default function DivisionDiscoveryFilters({
         if (controller.signal.aborted) {
           return;
         }
-        setLoadState({ status: "ready", types: body ?? {} });
+        setLoadState({
+          status: "ready",
+          types: { ...(body ?? {}), ages: CANONICAL_AGE_OPTIONS },
+        });
       })
       .catch((loadError) => {
         if (controller.signal.aborted || loadError.name === "AbortError") {
@@ -126,26 +156,74 @@ export default function DivisionDiscoveryFilters({
         }
         setLoadState({
           status: "error",
-          types: {},
+          types: { ages: CANONICAL_AGE_OPTIONS },
           message: "Unable to load division filters.",
         });
       });
     return () => controller.abort();
-  }, []);
+  }, [enabled, requestVersion]);
 
   const { types } = loadState;
   const loading = loadState.status === "loading";
   const error = loadState.status === "error" ? loadState.message : null;
-
   const skillOptions = useMemo(
     () => buildSportSkillFilterOptions(types.sportSkills ?? [], selectedSports),
     [selectedSports, types.sportSkills],
   );
 
+  return {
+    loading,
+    error,
+    genders: types.genders ?? [],
+    ages: CANONICAL_AGE_OPTIONS,
+    skillOptions,
+    retry,
+  };
+}
+
+export function DivisionDiscoveryFilterContent({
+  options,
+  children,
+}: {
+  options: DivisionDiscoveryFilterOptions;
+  children?: ReactNode;
+}) {
+  if (options.loading)
+    return <Loader size="sm" aria-label="Loading division filters" />;
+  if (options.error) {
+    return (
+      <Alert color="red">
+        <Stack gap="sm">
+          <Text size="sm">{options.error}</Text>
+          {options.retry ? (
+            <Button variant="outline" size="sm" onClick={options.retry}>
+              Retry division filters
+            </Button>
+          ) : (
+            <Text size="sm">Reload this page to try again.</Text>
+          )}
+        </Stack>
+      </Alert>
+    );
+  }
+  return <>{children}</>;
+}
+
+export default function DivisionDiscoveryFilters({
+  value,
+  onChange,
+  selectedSports = [],
+  options,
+}: Props) {
+  const loadedOptions = useDivisionDiscoveryOptions(selectedSports, !options);
+  const resolvedOptions = options ?? loadedOptions;
+  const { loading, error, genders, ages, skillOptions } = resolvedOptions;
+  const hasSingleSport = getSingleSelectedSportKey(selectedSports) !== null;
+
   useEffect(() => {
-    if (loading || error) return;
+    if (hasSingleSport && (loading || error)) return;
     const availableSkillIds = new Set(
-      skillOptions.map((option) => option.value),
+      hasSingleSport ? skillOptions.map((option) => normalize(option.value)) : [],
     );
     const nextSkillIds = value.skillDivisionTypeIds.filter((id) =>
       availableSkillIds.has(normalize(id)),
@@ -156,11 +234,10 @@ export default function DivisionDiscoveryFilters({
     ) {
       onChange({ ...value, skillDivisionTypeIds: nextSkillIds });
     }
-  }, [error, loading, onChange, skillOptions, value]);
+  }, [error, hasSingleSport, loading, onChange, skillOptions, value]);
 
-  if (loading)
-    return <Loader size="sm" aria-label="Loading division filters" />;
-  if (error) return <Alert color="red">{error}</Alert>;
+  if (loading || error)
+    return <DivisionDiscoveryFilterContent options={resolvedOptions} />;
 
   return (
     <Stack gap="sm">
@@ -170,7 +247,7 @@ export default function DivisionDiscoveryFilters({
       <MultiSelect
         label="Gender"
         placeholder="Any gender"
-        data={(types.genders ?? []).map((option) => ({
+        data={genders.map((option) => ({
           value: option.id,
           label: option.name,
         }))}
@@ -181,7 +258,7 @@ export default function DivisionDiscoveryFilters({
       <MultiSelect
         label="Age group"
         placeholder="Any age group"
-        data={(types.ages ?? []).map((option) => ({
+        data={ages.map((option) => ({
           value: option.id,
           label: option.name,
         }))}
@@ -192,7 +269,7 @@ export default function DivisionDiscoveryFilters({
           onChange({ ...value, ageDivisionTypeIds })
         }
       />
-      <MultiSelect
+      {hasSingleSport && <MultiSelect
         label="Skill level"
         placeholder="Any skill level"
         data={skillOptions}
@@ -202,7 +279,7 @@ export default function DivisionDiscoveryFilters({
         onChange={(skillDivisionTypeIds) =>
           onChange({ ...value, skillDivisionTypeIds })
         }
-      />
+      />}
       <Group grow align="flex-start">
         <NumberInput
           label="Minimum price"
@@ -239,3 +316,4 @@ export default function DivisionDiscoveryFilters({
     </Stack>
   );
 }
+

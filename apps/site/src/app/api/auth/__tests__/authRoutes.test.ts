@@ -811,7 +811,7 @@ describe('auth routes', () => {
       expect(authServerMock.setAuthCookie).not.toHaveBeenCalled();
     });
 
-    it('rejects login for unverified users after requesting verification email', async () => {
+    it('rejects login for unverified users and retains the signed claim in verification email', async () => {
       prismaMock.authUser.findUnique.mockResolvedValue({
         id: 'user_1',
         email: 'test@example.com',
@@ -824,6 +824,7 @@ describe('auth routes', () => {
       const req = buildJsonRequest('http://localhost/api/auth/login', {
         email: 'test@example.com',
         password: 'password123',
+        returnTo: '/claim/player/child?v=1&e=123&s=proof',
       });
 
       const res = await LOGIN_POST(req);
@@ -840,6 +841,7 @@ describe('auth routes', () => {
         userId: 'user_1',
         email: 'test@example.com',
         origin: 'http://localhost',
+        returnTo: '/claim/player/child?v=1&e=123&s=proof',
       });
       expect(authTotpMfaMock.createWebLoginMfaChallenge).not.toHaveBeenCalled();
       expect(prismaMock.authUser.update).not.toHaveBeenCalled();

@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/permissions';
 import { prisma } from '@/lib/prisma';
+import { findGuardianAuthority } from '@/server/guardianAuthority';
 import { IMPORTED_DOCUMENT_VIEW_PERMISSIONS } from '@/lib/organizationPermissions';
 import { hasAnyOrgPermission } from '@/server/accessControl';
 import { canManageBillPayment, loadBillForAction } from '@/server/billing/billPaymentActions';
@@ -56,14 +57,7 @@ export const assertFileReadAccess = async (req: NextRequest, fileId: string): Pr
   if (subjectUserId === session.userId) return;
 
   if (subjectUserId) {
-    const parentChildLink = await prisma.parentChildLinks.findFirst({
-      where: {
-        parentId: session.userId,
-        childId: subjectUserId,
-        status: 'ACTIVE',
-      },
-      select: { id: true },
-    });
+    const parentChildLink = await findGuardianAuthority(prisma, session.userId, subjectUserId);
     if (parentChildLink) return;
   }
 

@@ -1,11 +1,9 @@
 import type { ComponentProps, ReactNode } from 'react';
 import { Controller, type Control } from 'react-hook-form';
-import {
-    Alert,
-    MultiSelect as MantineMultiSelect,
-    NumberInput,
-    Text,
-} from '@mantine/core';
+import { Alert,
+MultiSelect as MantineMultiSelect,
+NumberInput,
+Text, } from '@/components/organization/organization-operation-ui';
 
 import LocationSelector, { type LocationSelectionMeta } from '@/components/location/LocationSelector';
 import { minimumParticipantCountForEventType } from '@/lib/divisionTypes';
@@ -33,6 +31,7 @@ type EventDetailsLocationControlsProps = {
     minAge?: unknown;
     maxAge?: unknown;
     showLocationMap?: boolean;
+    locationMapColumnClassName?: string;
     showAffiliateListingControls?: boolean;
     showRequiredDocumentControls?: boolean;
     showAgeControls?: boolean;
@@ -64,6 +63,7 @@ export const EventDetailsLocationControls = ({
     minAge,
     maxAge,
     showLocationMap = true,
+    locationMapColumnClassName = 'md:col-span-6',
     showAffiliateListingControls = false,
     showRequiredDocumentControls = true,
     showAgeControls = true,
@@ -77,7 +77,7 @@ export const EventDetailsLocationControls = ({
 }: EventDetailsLocationControlsProps) => (
     <div className="space-y-6 mb-4">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-4 md:items-start">
-            {showLocationMap ? <div className="md:col-span-6" data-testid="event-details-location-map">
+            {showLocationMap ? <div className={locationMapColumnClassName} data-testid="event-details-location-map">
                 <Controller
                     name="location"
                     control={control}

@@ -139,6 +139,7 @@ internal class BillingPaymentCoordinator(
     suspend fun getEventTeamBillingSnapshot(
         eventId: String,
         teamId: String,
+        occurrence: EventOccurrenceSelection?,
     ): Result<EventTeamBillingSnapshot> = runCatching {
         val normalizedEventId = eventId.trim()
         val normalizedTeamId = teamId.trim()
@@ -147,8 +148,16 @@ internal class BillingPaymentCoordinator(
 
         val encodedEventId = normalizedEventId.encodeURLQueryComponent()
         val encodedTeamId = normalizedTeamId.encodeURLQueryComponent()
+        val occurrenceQuery = occurrence?.let {
+            val normalizedSlotId = it.slotId.trim()
+            val normalizedOccurrenceDate = it.occurrenceDate.trim()
+            require(normalizedSlotId.isNotBlank()) { "Occurrence slot id is required." }
+            require(normalizedOccurrenceDate.isNotBlank()) { "Occurrence date is required." }
+            "?slotId=${normalizedSlotId.encodeURLQueryComponent()}" +
+                "&occurrenceDate=${normalizedOccurrenceDate.encodeURLQueryComponent()}"
+        }.orEmpty()
         val response = api.get<EventTeamBillingSnapshotResponseDto>(
-            path = "api/events/$encodedEventId/teams/$encodedTeamId/billing",
+            path = "api/events/$encodedEventId/teams/$encodedTeamId/billing$occurrenceQuery",
         )
         response.error?.takeIf(String::isNotBlank)?.let { throw Exception(it) }
         response.toSnapshotOrNull() ?: error("Billing snapshot response missing required fields")
@@ -191,6 +200,8 @@ internal class BillingPaymentCoordinator(
                 taxAmountCents = request.taxAmountCents,
                 allowSplit = request.allowSplit,
                 label = request.label?.trim()?.takeIf(String::isNotBlank),
+                slotId = request.slotId?.trim()?.takeIf(String::isNotBlank),
+                occurrenceDate = request.occurrenceDate?.trim()?.takeIf(String::isNotBlank),
             ),
         )
 
@@ -235,6 +246,8 @@ internal class BillingPaymentCoordinator(
                 taxAmountCents = request.taxAmountCents,
                 divisionId = request.divisionId?.trim()?.takeIf(String::isNotBlank),
                 label = request.label?.trim()?.takeIf(String::isNotBlank),
+                slotId = request.slotId?.trim()?.takeIf(String::isNotBlank),
+                occurrenceDate = request.occurrenceDate?.trim()?.takeIf(String::isNotBlank),
             ),
         )
 
@@ -247,6 +260,7 @@ internal class BillingPaymentCoordinator(
         teamId: String,
         billPaymentId: String,
         amountCents: Int,
+        occurrence: EventOccurrenceSelection?,
     ): Result<Unit> = runCatching {
         val normalizedEventId = eventId.trim()
         val normalizedTeamId = teamId.trim()
@@ -258,8 +272,16 @@ internal class BillingPaymentCoordinator(
 
         val encodedEventId = normalizedEventId.encodeURLQueryComponent()
         val encodedTeamId = normalizedTeamId.encodeURLQueryComponent()
+        val occurrenceQuery = occurrence?.let {
+            val normalizedSlotId = it.slotId.trim()
+            val normalizedOccurrenceDate = it.occurrenceDate.trim()
+            require(normalizedSlotId.isNotBlank()) { "Occurrence slot id is required." }
+            require(normalizedOccurrenceDate.isNotBlank()) { "Occurrence date is required." }
+            "?slotId=${normalizedSlotId.encodeURLQueryComponent()}" +
+                "&occurrenceDate=${normalizedOccurrenceDate.encodeURLQueryComponent()}"
+        }.orEmpty()
         val response = api.post<EventTeamBillRefundRequestDto, EventTeamBillRefundResponseDto>(
-            path = "api/events/$encodedEventId/teams/$encodedTeamId/billing/refunds",
+            path = "api/events/$encodedEventId/teams/$encodedTeamId/billing/refunds$occurrenceQuery",
             body = EventTeamBillRefundRequestDto(
                 billPaymentId = normalizedBillPaymentId,
                 amountCents = amountCents,

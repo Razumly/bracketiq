@@ -13,6 +13,7 @@ import {
   type OrganizationFinanceSummary,
   type TeamFinanceSummary,
 } from '@/server/finance/financeAnalysis';
+import { dedupeRegistrationCapacityRows } from '@/server/events/eventRegistrations';
 
 type PrismaLike = any;
 
@@ -1005,22 +1006,34 @@ export const loadEventFinanceSummary = async (
       start: true,
       price: true,
       maxParticipants: true,
+      teamSignup: true,
     },
   });
   if (!event?.organizationId) {
     return null;
   }
 
-  const [billRows, participantCount, staffLabor, customRows] = await Promise.all([
+  const [billRows, participantRows, staffLabor, customRows] = await Promise.all([
     client.bills.findMany({
       where: { eventId },
       select: billSelect,
     }),
-    client.eventRegistrations.count({
+    client.eventRegistrations.findMany({
       where: {
         eventId,
         rosterRole: 'PARTICIPANT',
         status: { in: [...ACTIVE_PARTICIPANT_STATUSES] },
+      },
+      select: {
+        id: true,
+        registrantId: true,
+        parentId: true,
+        registrantType: true,
+        rosterRole: true,
+        status: true,
+        acceptedAt: true,
+        eventTeamId: true,
+        sourceTeamRegistrationId: true,
       },
     }),
     loadEventStaffLabor(client, {
@@ -1037,6 +1050,8 @@ export const loadEventFinanceSummary = async (
       select: customLineItemSelect,
     }),
   ]);
+
+  const participantCount = dedupeRegistrationCapacityRows(event, participantRows).length;
 
   const bills = await attachPayments(client, billRows);
   return buildEventFinanceSummary({

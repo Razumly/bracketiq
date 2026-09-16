@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Stack } from '@mantine/core';
+import { Stack } from '@/components/organization/organization-operation-ui';
 import { CollapsibleEventFormSection } from '../components/CollapsibleEventFormSection';
 
 type ManualPaymentsSectionProps = {

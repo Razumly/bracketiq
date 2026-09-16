@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { ChatList } from '../ChatList';
@@ -216,6 +216,7 @@ describe('ChatList', () => {
 
     expect(screen.getByText('Latest hello')).toBeInTheDocument();
     expect(screen.getByText('4')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open Weekend League, 4 unread messages' })).toBeInTheDocument();
   });
 
   it('marks chat as viewed when selecting a chat', async () => {
@@ -276,5 +277,73 @@ describe('ChatList', () => {
     });
 
     confirmSpy.mockRestore();
+  });
+
+  it('keeps the named dialog and local Escape active during a non-silent refresh', () => {
+    const closeChatListMock = jest.fn();
+    useChatMock.mockReturnValue({
+      chatGroups: [baseGroup],
+      loading: true,
+      loadChatGroups: jest.fn(),
+      markChatViewed: markChatViewedMock,
+      hideChatGroups: hideChatGroupsMock,
+    });
+    useChatUIMock.mockReturnValue({
+      ...baseChatUIState,
+      closeChatList: closeChatListMock,
+    });
+
+    renderWithMantine(<ChatList />);
+
+    const dialog = screen.getByRole('dialog', { name: 'Messages' });
+    expect(dialog).toHaveAttribute('aria-busy', 'true');
+    const closeButton = screen.getByRole('button', { name: 'Close chat list' });
+    expect(closeButton).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Loading messages' })).toBeInTheDocument();
+    closeButton.focus();
+
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    expect(closeChatListMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('names the modeless list, focuses its first action, and supports row and Escape keys', async () => {
+    const user = userEvent.setup();
+    const closeChatListMock = jest.fn();
+    const openChatWindowMock = jest.fn();
+    useChatMock.mockReturnValue({
+      chatGroups: [baseGroup],
+      loading: false,
+      loadChatGroups: jest.fn(),
+      markChatViewed: markChatViewedMock,
+      hideChatGroups: hideChatGroupsMock,
+    });
+    useChatUIMock.mockReturnValue({
+      ...baseChatUIState,
+      openChatWindow: openChatWindowMock,
+      closeChatList: closeChatListMock,
+      closeChatWindow: jest.fn(),
+    });
+
+    renderWithMantine(<ChatList />);
+
+    const dialog = screen.getByRole('dialog', { name: 'Messages' });
+    const inviteButton = screen.getByRole('button', { name: 'Start a new chat' });
+    await waitFor(() => expect(inviteButton).toHaveFocus());
+    expect(dialog).not.toHaveAttribute('aria-modal');
+    const actionButton = screen.getByRole('button', { name: 'Chat actions for Weekend League' });
+    await user.click(actionButton);
+    expect(screen.getByRole('button', { name: 'Rename chat' })).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(closeChatListMock).not.toHaveBeenCalled();
+    expect(actionButton).toHaveFocus();
+
+
+    const row = screen.getByRole('button', { name: 'Open Weekend League, 0 unread messages' });
+    row.focus();
+    await user.keyboard('{Enter}');
+    expect(openChatWindowMock).toHaveBeenCalledWith('chat_1');
+
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    expect(closeChatListMock).toHaveBeenCalledTimes(1);
   });
 });

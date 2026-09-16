@@ -15,10 +15,14 @@ jest.mock('@/server/realtime/broadcastOverlayRealtime', () => ({
   publishBroadcastOverlayState: jest.fn(),
 }));
 
+jest.mock('@/server/repositories/locks', () => ({
+  acquireEventLock: jest.fn(),
+}));
 import {
   applyBroadcastOverlayCommand,
   BroadcastOverlayRevisionConflictError,
 } from '../commands';
+import { acquireEventLock } from '@/server/repositories/locks';
 import { createEmptyMatchPresentationState } from '../presentation';
 import { DEFAULT_BROADCAST_OVERLAY_CONFIG } from '../schemas';
 
@@ -71,6 +75,7 @@ describe('broadcast overlay commands', () => {
       eventId: 'event_1', overlayId: 'overlay_1', actorUserId: 'admin_1',
       command: { type: 'ENTER_MANUAL_OVERRIDE', reason: 'Correct the on-air display', expectedRevision: 4, requestId: '5a109dc8-a0ab-45c2-b077-5815cf3bd01c' },
     });
+    expect(acquireEventLock).toHaveBeenCalledWith(tx, 'event_1');
 
     expect(result.state.scoringMode).toBe('MANUAL_OVERRIDE');
     expect(tx.broadcastOverlayStates.updateMany).toHaveBeenCalledWith(expect.objectContaining({

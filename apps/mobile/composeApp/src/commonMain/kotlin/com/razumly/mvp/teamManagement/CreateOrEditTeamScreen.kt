@@ -43,6 +43,7 @@ import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import com.razumly.mvp.core.data.dataTypes.Invite
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -68,8 +69,8 @@ import com.razumly.mvp.core.data.dataTypes.TeamStaffAssignment
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.activeStaffAssignments
+import com.razumly.mvp.core.data.dataTypes.countsTowardTeamCapacity
 import com.razumly.mvp.core.data.dataTypes.isActive
-import com.razumly.mvp.core.data.dataTypes.isStarted
 import com.razumly.mvp.core.data.dataTypes.normalizedRole
 import com.razumly.mvp.core.data.dataTypes.skillsForSport
 import com.razumly.mvp.core.data.dataTypes.toDropdownOptions
@@ -299,6 +300,8 @@ private fun String.isProbablyEmail(): Boolean {
 @Composable
 fun CreateOrEditTeamScreen(
     team: TeamWithPlayers,
+    invitations: List<Invite> = emptyList(),
+    onInvitationAction: ((Invite, String, String, (Result<String>) -> Unit) -> Unit)? = null,
     sports: List<Sport>,
     divisionTypeParameters: DivisionTypeParameters = DivisionTypeParameters(),
     friends: List<UserData>,
@@ -338,6 +341,7 @@ fun CreateOrEditTeamScreen(
         Result.failure(UnsupportedOperationException("Inclusive price quotes are unavailable."))
     },
 ) {
+    var invitationActionError by remember { mutableStateOf<String?>(null) }
     val navBottomPadding = LocalNavBarPadding.current.calculateBottomPadding()
     val syncedTeam = remember(team.team) { team.team.withSynchronizedMembership() }
     var teamName by remember { mutableStateOf(team.team.name) }
@@ -413,7 +417,7 @@ fun CreateOrEditTeamScreen(
             playersInTeam.map(UserData::id).filter(String::isNotBlank).forEach(::add)
             invitedPlayers.map(UserData::id).filter(String::isNotBlank).forEach(::add)
             syncedTeam.playerRegistrations
-                .filter(TeamPlayerRegistration::isStarted)
+                .filter(TeamPlayerRegistration::countsTowardTeamCapacity)
                 .map(TeamPlayerRegistration::userId)
                 .filter(String::isNotBlank)
                 .forEach(::add)
@@ -1144,6 +1148,7 @@ fun CreateOrEditTeamScreen(
                     TeamPlayerRosterRow(
                         player = player,
                         isPending = true,
+                        pendingLabel = invitations.firstOrNull { it.userId == player.id && it.isCurrentAttempt }?.invitationLabel ?: "Pending acceptance",
                         jerseyNumber = jerseyNumber,
                         showEditDetails = showEditDetails,
                         canEditFields = canEditFields,
@@ -1160,7 +1165,13 @@ fun CreateOrEditTeamScreen(
                             }
                         },
                         onJerseyNumberChange = { updateJerseyNumber(player.id, it) },
-                        onRemove = { invitedPlayers = invitedPlayers - player },
+                        onRemove = {
+                            val invite = invitations.firstOrNull { it.userId == player.id && it.isCurrentAttempt && it.status == "PENDING" }
+                            if (invite != null && onInvitationAction != null) onInvitationAction(invite, "cancel", invite.id) { result ->
+                                result.onSuccess { invitedPlayers = invitedPlayers - player; invitationActionError = null }
+                                    .onFailure { invitationActionError = it.userMessage("The invitation was not cancelled.") }
+                            }
+                        },
                     )
                 }
                 if (canEditFields && canInvitePlayer) {
@@ -1233,6 +1244,11 @@ fun CreateOrEditTeamScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+
+            if (!isNewTeam && isCaptain && onInvitationAction != null) {
+                invitationActionError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                TeamInvitationHistory(invitations, onInvitationAction)
             }
 
             if (!showEditDetails) {
@@ -1519,6 +1535,9 @@ internal fun TeamInviteDialog(
     var lastName by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
+    var isMinor by remember { mutableStateOf(false) }
+    var dateOfBirth by remember { mutableStateOf("") }
+    var guardianEmail by remember { mutableStateOf("") }
     var showContactsDialog by remember { mutableStateOf(false) }
     var isMatchingContact by remember { mutableStateOf(false) }
     var contactMatchError by remember { mutableStateOf<String?>(null) }
@@ -1550,7 +1569,9 @@ internal fun TeamInviteDialog(
     }
     val normalizedEmail = email.trim().lowercase()
     val emailValid = normalizedEmail.isBlank() || normalizedEmail.isProbablyEmail()
+    val guardianEmailValid = guardianEmail.trim().isBlank() || guardianEmail.trim().lowercase().isProbablyEmail()
     val newPersonValid = firstName.isNotBlank() && lastName.isNotBlank() && emailValid
+        && (!isMinor || (dateOfBirth.isNotBlank() && guardianEmail.trim().isProbablyEmail()))
     val playerInviteBlocked = inviteTarget == TeamInviteTarget.PLAYER && !canInvitePlayer
 
     fun chooseUser(user: UserData) {
@@ -1621,6 +1642,9 @@ internal fun TeamInviteDialog(
                                 lastName = ""
                                 email = ""
                                 phone = ""
+                                isMinor = false
+                                dateOfBirth = ""
+                                guardianEmail = ""
                             },
                             enabled = tab != TeamInviteDialogMode.FreeAgents || inviteTarget == TeamInviteTarget.PLAYER,
                             text = {
@@ -1700,6 +1724,29 @@ internal fun TeamInviteDialog(
                             inputFilter = ::sanitizePhoneInput,
                             inputVisualTransformation = PhoneInputVisualTransformation,
                         )
+                        if (inviteTarget == TeamInviteTarget.PLAYER) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = isMinor, onCheckedChange = { isMinor = it })
+                                Text("This player is a minor")
+                            }
+                            if (isMinor) {
+                                ManagedPlayerDateField(
+                                    value = dateOfBirth,
+                                    onValueChange = { dateOfBirth = it },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    label = "Date of birth",
+                                )
+                                StandardTextField(
+                                    value = guardianEmail,
+                                    onValueChange = { guardianEmail = it },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    label = "Guardian email",
+                                    keyboardType = "email",
+                                    supportingText = if (guardianEmail.isNotBlank() && !guardianEmailValid) "Enter a valid guardian email address." else "",
+                                )
+                                Text("The invitation will go to the guardian.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
                         Text(
                             text = "Add an email to send automatically, or save and share the private registration link.",
                             style = MaterialTheme.typography.bodySmall,
@@ -1788,6 +1835,9 @@ internal fun TeamInviteDialog(
                                 email = normalizedEmail.takeIf(String::isNotBlank),
                                 phone = formatPhoneInput(phone).takeIf(String::isNotBlank),
                                 shareOnly = normalizedEmail.isBlank(),
+                                isMinor = isMinor,
+                                dateOfBirth = dateOfBirth.trim().takeIf(String::isNotBlank),
+                                guardianEmail = guardianEmail.trim().lowercase().takeIf(String::isNotBlank),
                             )
                         )
                         else -> selectedUser?.let { user ->
@@ -1864,6 +1914,7 @@ private fun UserInviteRow(
 @Composable
 private fun TeamPlayerRosterRow(
     player: UserData,
+    pendingLabel: String = "Pending acceptance",
     isPending: Boolean = false,
     jerseyNumber: String,
     showEditDetails: Boolean,
@@ -1885,6 +1936,7 @@ private fun TeamPlayerRosterRow(
                 PlayerCard(
                     player = player,
                     isPending = isPending,
+                    pendingLabel = pendingLabel,
                     modifier = Modifier.fillMaxWidth(),
                     jerseyNumber = jerseyNumber,
                     trailingContent = {
@@ -1900,6 +1952,7 @@ private fun TeamPlayerRosterRow(
                     PlayerCard(
                         player = player,
                         isPending = isPending,
+                        pendingLabel = pendingLabel,
                         modifier = Modifier.fillMaxWidth(),
                         jerseyNumber = jerseyNumber,
                         showDivider = false,
@@ -1926,6 +1979,7 @@ private fun TeamPlayerRosterRow(
                     PlayerCard(
                         player = player,
                         isPending = isPending,
+                        pendingLabel = pendingLabel,
                         modifier = Modifier.weight(1f),
                         jerseyNumber = jerseyNumber,
                         showDivider = false,

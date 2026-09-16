@@ -9,6 +9,10 @@ import { isManualRegistrationPaymentMode } from '@/lib/manualRegistrationPayment
 import { canManageBillPayment } from '@/server/billing/billPaymentActions';
 import { acquireBillSplitLock } from '@/server/billing/billSplitLock';
 import { getConfiguredStripeSecretKey, STRIPE_UNAVAILABLE_ERROR } from '@/server/stripeConfiguration';
+import {
+  acquireEventMutationTarget,
+  WEEKLY_EVENT_ARCHIVED_ERROR,
+} from '@/server/events/weeklyOccurrences';
 
 export const dynamic = 'force-dynamic';
 
@@ -178,6 +182,17 @@ export async function POST(req: NextRequest) {
       );
     }
   }
+  if (bill.eventId) {
+    const eventTarget = await prisma.$transaction((tx) => (
+      acquireEventMutationTarget(tx, bill.eventId as string)
+    ));
+    if (!eventTarget) {
+      return NextResponse.json({ error: 'Event not found' }, { status: 404 });
+    }
+    if (eventTarget.event.archivedAt || eventTarget.parentEvent?.archivedAt) {
+      return NextResponse.json({ error: WEEKLY_EVENT_ARCHIVED_ERROR }, { status: 409 });
+    }
+  }
   const isAssignedPayer = payment.payerUserId === session.userId;
   const canClaimTeamPayment = !payment.payerUserId
     && bill.ownerType === 'TEAM'
@@ -252,8 +267,13 @@ export async function POST(req: NextRequest) {
     freshIntentId = intent.id;
 
     didBindIntent = await prisma.$transaction(async (tx) => {
+      if (bill.eventId) {
+        const eventTarget = await acquireEventMutationTarget(tx, bill.eventId);
+        if (!eventTarget || eventTarget.event.archivedAt || eventTarget.parentEvent?.archivedAt) {
+          return false;
+        }
+      }
       await acquireBillSplitLock(tx, bill.id);
-
       const [currentBill, currentPayment] = await Promise.all([
         tx.bills.findUnique({
           where: { id: bill.id },

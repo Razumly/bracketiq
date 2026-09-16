@@ -1,5 +1,5 @@
 import Image from 'next/image';
-import { Button, Collapse, Group, Paper, Progress, Text } from '@mantine/core';
+import { Button, Collapse, Group, Paper, Progress, Text } from '@/components/organization/organization-operation-ui';
 
 import ParticipantsDropdown from '@/components/ui/ParticipantsDropdown';
 import ParticipantsPreview from '@/components/ui/ParticipantsPreview';

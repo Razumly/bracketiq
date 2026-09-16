@@ -19,6 +19,13 @@ import { getEventTagsForEventIds, slugifyEventTagName } from '@/server/eventTags
 import { buildDivisionDiscoveryWhere } from '@/server/divisionDiscovery';
 import { resolveRelationalEventDivisionIds } from '@/lib/eventApiDivisionIds';
 import { protectAffiliateRow } from '@/server/affiliateOutbound';
+import { resolveNextWeeklyOccurrence } from '@/server/events/weeklyOccurrences';
+import {
+  enumerateRepeatingTimeSlotOccurrences,
+  RepeatingTimeSlotValidationError,
+  type RepeatingTimeSlotIntervalInput,
+  type ResolvedRepeatingTimeSlot,
+} from '@/lib/repeatingTimeSlotAvailability';
 import {
   EVENT_SEARCH_SORT_VALUES,
   rankEventSearchCandidates,
@@ -65,6 +72,8 @@ const searchSchema = z.object({
   limit: z.number().int().optional(),
   offset: z.number().int().optional(),
 }).partial();
+// The mobile date picker exposes a two-year search horizon.
+const MAX_EVENT_SEARCH_RANGE_MS = 2 * 365 * 24 * 60 * 60 * 1000;
 
 const emptyEventsResponse = (offset: number) => NextResponse.json(
   { events: [], pagination: { hasMore: false, nextOffset: offset, totalCount: 0 } },
@@ -351,6 +360,152 @@ const fallbackAttendeeCount = (event: { teamSignup?: boolean | null; userIds?: u
   }
   return normalizeIds(event.userIds).length;
 };
+const resolveBoundedWeeklySearchOccurrence = (
+  options: {
+    slots: readonly RepeatingTimeSlotIntervalInput[];
+    eventStart: Date;
+    eventEnd: Date | null;
+    dateFrom: Date;
+    dateTo: Date;
+  },
+): ResolvedRepeatingTimeSlot | null => {
+  if (
+    options.dateTo.getTime() < options.dateFrom.getTime()
+    || options.dateTo.getTime() < options.eventStart.getTime()
+    || (options.eventEnd && options.eventEnd.getTime() <= options.dateFrom.getTime())
+  ) {
+    return null;
+  }
+
+  const windowStart = new Date(Math.max(options.eventStart.getTime(), options.dateFrom.getTime()));
+  const windowEnd = new Date(options.dateTo.getTime() + 1);
+  if (windowEnd.getTime() <= windowStart.getTime()) {
+    return null;
+  }
+
+  let firstOccurrence: ResolvedRepeatingTimeSlot | null = null;
+  for (const slot of options.slots) {
+    if (!slot || slot.repeating === false) {
+      continue;
+    }
+    try {
+      const occurrences = enumerateRepeatingTimeSlotOccurrences({
+        slot,
+        windowStart,
+        windowEnd,
+      });
+      occurrences.forEach((occurrence) => {
+        if (occurrence.start.getTime() < options.eventStart.getTime()) {
+          return;
+        }
+        if (
+          occurrence.end.getTime() <= options.dateFrom.getTime()
+          || occurrence.start.getTime() > options.dateTo.getTime()
+          || (options.eventEnd && occurrence.end.getTime() > options.eventEnd.getTime())
+        ) {
+          return;
+        }
+        if (!firstOccurrence || occurrence.start.getTime() < firstOccurrence.start.getTime()) {
+          firstOccurrence = occurrence;
+        }
+      });
+    } catch (error) {
+      if (!(error instanceof RepeatingTimeSlotValidationError)) {
+        throw error;
+      }
+    }
+  }
+  return firstOccurrence;
+};
+
+const attachWeeklySearchOccurrences = async <T extends Record<string, unknown>>(
+  events: T[],
+  dateFrom: Date,
+  dateTo: Date | null,
+): Promise<T[]> => {
+  const weeklyParents = events.filter((event) => {
+    const eventType = typeof event.eventType === 'string' ? event.eventType.trim().toUpperCase() : '';
+    const parentEvent = typeof event.parentEvent === 'string' ? event.parentEvent.trim() : '';
+    return eventType === 'WEEKLY_EVENT' && parentEvent.length === 0;
+  });
+  const slotIds = uniqueStrings(
+    weeklyParents.flatMap((event) => (
+      Array.isArray(event.timeSlotIds)
+        ? event.timeSlotIds.filter((value): value is string => typeof value === 'string')
+        : []
+    )),
+  );
+  const slotsById = new Map<string, RepeatingTimeSlotIntervalInput>();
+  if (slotIds.length) {
+    const slots = await prisma.timeSlots.findMany({
+      where: {
+        id: { in: slotIds },
+        archivedAt: null,
+      },
+    });
+    slots.forEach((slot) => {
+      const slotId = typeof slot.id === 'string' ? slot.id.trim() : '';
+      if (slotId) {
+        slotsById.set(slotId, slot);
+      }
+    });
+  }
+
+  return events
+    .map((event) => {
+      const eventType = typeof event.eventType === 'string' ? event.eventType.trim().toUpperCase() : '';
+      const parentEvent = typeof event.parentEvent === 'string' ? event.parentEvent.trim() : '';
+      if (eventType !== 'WEEKLY_EVENT' || parentEvent.length > 0) {
+        return event;
+      }
+
+      const eventStart = event.start instanceof Date
+        ? event.start
+        : typeof event.start === 'string' || typeof event.start === 'number'
+          ? new Date(event.start)
+          : new Date(Number.NaN);
+      const eventEnd = event.end instanceof Date
+        ? event.end
+        : typeof event.end === 'string' || typeof event.end === 'number'
+          ? new Date(event.end)
+          : null;
+      const eventSlotIds = Array.isArray(event.timeSlotIds)
+        ? event.timeSlotIds.filter((value): value is string => typeof value === 'string')
+        : [];
+      const eventSlots = uniqueStrings(eventSlotIds)
+        .map((slotId) => slotsById.get(slotId))
+        .filter((slot): slot is RepeatingTimeSlotIntervalInput => Boolean(slot));
+      const occurrence = dateTo
+        ? resolveBoundedWeeklySearchOccurrence({
+          slots: eventSlots,
+          eventStart,
+          eventEnd,
+          dateFrom,
+          dateTo,
+        })
+        : resolveNextWeeklyOccurrence({
+          slots: eventSlots,
+          eventStart,
+          eventEnd,
+          anchor: dateFrom,
+        });
+      if (!occurrence) {
+        return null;
+      }
+      return {
+        ...event,
+        nextOccurrence: {
+          slotId: occurrence.slotId,
+          occurrenceDate: occurrence.occurrenceDate,
+          start: occurrence.start,
+          end: occurrence.end,
+          timeZone: occurrence.timeZone,
+        },
+      };
+    })
+    .filter((event): event is T => Boolean(event));
+};
+
 
 const resolveSessionContext = async (
   req: NextRequest,
@@ -563,16 +718,53 @@ export async function POST(req: NextRequest) {
   const effectiveDateFrom = hasExplicitDateFrom
     ? (parsedDateFrom as Date)
     : startOfToday;
-  where.AND.push({ start: { gte: effectiveDateFrom } });
+  if (
+    hasExplicitDateTo &&
+    parsedDateTo &&
+    parsedDateTo.getTime() - effectiveDateFrom.getTime() > MAX_EVENT_SEARCH_RANGE_MS
+  ) {
+    return NextResponse.json(
+      { error: 'Event search date ranges cannot exceed two years.' },
+      { status: 400 },
+    );
+  }
+  where.AND.push({
+    OR: [
+      {
+        eventType: 'WEEKLY_EVENT',
+        parentEvent: null,
+        OR: [
+          { end: null },
+          { end: { gte: effectiveDateFrom } },
+        ],
+      },
+      {
+        eventType: 'WEEKLY_EVENT',
+        parentEvent: { not: null },
+        start: { gte: effectiveDateFrom },
+      },
+      {
+        eventType: { not: 'WEEKLY_EVENT' },
+        start: { gte: effectiveDateFrom },
+      },
+      {
+        eventType: null,
+        start: { gte: effectiveDateFrom },
+      },
+    ],
+  });
   if (hasExplicitDateTo) {
     where.AND.push({
       OR: [
         {
           eventType: 'WEEKLY_EVENT',
-          OR: [
-            { end: null },
-            { end: { lte: parsedDateTo } },
-          ],
+          parentEvent: null,
+          start: { lte: parsedDateTo },
+        },
+        {
+          eventType: 'WEEKLY_EVENT',
+          parentEvent: { not: null },
+          end: { lte: parsedDateTo },
         },
         {
           eventType: { not: 'WEEKLY_EVENT' },
@@ -614,13 +806,17 @@ export async function POST(req: NextRequest) {
       isUsableUserLocation(userLocation.lat, userLongitude),
   );
   const hasDistanceFilter = hasUserLocation && typeof filters.maxDistance === 'number';
-  const candidateTake = sort === 'RECOMMENDED'
+  const mayIncludeWeeklyParents = !filters.eventTypes?.length
+    || filters.eventTypes.some((eventType) => eventType.trim().toUpperCase() === 'WEEKLY_EVENT');
+  const candidateTake = mayIncludeWeeklyParents
     ? undefined
-    : hasDistanceFilter
-    ? undefined
-    : hasQuery
-      ? Math.min(Math.max((offset + limit + 1) * 5, 50), 500)
-      : Math.min(Math.max((offset + limit + 1) * 5, 100), 500);
+    : sort === 'RECOMMENDED'
+      ? undefined
+      : hasDistanceFilter
+        ? undefined
+        : hasQuery
+          ? Math.min(Math.max((offset + limit + 1) * 5, 50), 500)
+          : Math.min(Math.max((offset + limit + 1) * 5, 100), 500);
   let totalCount = 0;
   let events: any[] = [];
   if (hasUserLocation) {
@@ -640,6 +836,19 @@ export async function POST(req: NextRequest) {
     ]);
     events = eventRows;
     totalCount = count;
+  }
+  const hasWeeklyParents = events.some((event) => {
+    const eventType = typeof event.eventType === 'string' ? event.eventType.trim().toUpperCase() : '';
+    const parentEvent = typeof event.parentEvent === 'string' ? event.parentEvent.trim() : '';
+    return eventType === 'WEEKLY_EVENT' && parentEvent.length === 0;
+  });
+  events = await attachWeeklySearchOccurrences(
+    events,
+    hasExplicitDateFrom ? effectiveDateFrom : now,
+    hasExplicitDateTo ? (parsedDateTo as Date) : null,
+  );
+  if (!hasUserLocation && hasWeeklyParents) {
+    totalCount = events.length;
   }
 
   if (userLocation && typeof filters.maxDistance === 'number') {

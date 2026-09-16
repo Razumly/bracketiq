@@ -40,6 +40,7 @@ const prismaMock = {
     findUnique: jest.fn(),
     update: jest.fn(),
   },
+  $executeRaw: jest.fn(),
   $transaction: jest.fn(),
 };
 
@@ -104,6 +105,7 @@ describe('refund request routes', () => {
     prismaMock.billPayments.findUnique.mockReset();
     prismaMock.billPayments.update.mockReset();
     prismaMock.$transaction.mockReset();
+    prismaMock.$executeRaw.mockReset();
 
     process.env.STRIPE_SECRET_KEY = 'sk_test_123';
 
@@ -401,6 +403,59 @@ describe('refund request routes', () => {
           refundedPaymentIds: ['payment_1'],
         }),
       );
+    });
+
+    it('approves a historical refund request after the event is archived', async () => {
+      const individualRequest = {
+        ...existingTeamRequest,
+        teamId: null,
+        userId: 'player_1',
+        requestedByUserId: 'player_1',
+        reason: 'requested_by_customer',
+      };
+      const individualPayment = {
+        id: 'payment_archived', billId: 'bill_archived', amountCents: 5000, refundedAmountCents: 0,
+        refundableAmountCents: 5000, paymentIntentId: 'pi_archived', payerUserId: 'player_1',
+      };
+      const scopedRequest = {
+        ...individualRequest,
+        ...buildRefundScopeSnapshot(individualRequest as any, [individualPayment], 'HOST_REVIEW_REQUIRED'),
+      };
+      prismaMock.refundRequests.findUnique.mockResolvedValueOnce(scopedRequest);
+      prismaMock.events.findUnique.mockResolvedValue({
+        id: 'event_1',
+        hostId: 'host_1',
+        assistantHostIds: [],
+        organizationId: 'org_1',
+        parentEvent: null,
+        archivedAt: new Date('2026-06-01T00:00:00.000Z'),
+      });
+      prismaMock.billPayments.findMany.mockResolvedValueOnce([individualPayment]);
+      mockStripeRefundCreate.mockResolvedValueOnce({ id: 're_archived' });
+      prismaMock.billPayments.findUnique.mockResolvedValueOnce({
+        id: 'payment_archived',
+        amountCents: 5000,
+        refundedAmountCents: 0,
+      });
+      prismaMock.billPayments.update.mockResolvedValueOnce({
+        id: 'payment_archived',
+        refundedAmountCents: 5000,
+      });
+
+      const response = await PATCH(
+        jsonPatch('http://localhost/api/refund-requests/refund_1', approvalPayload(scopedRequest)),
+        { params: Promise.resolve({ id: 'refund_1' }) },
+      );
+      const payload = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(payload).toEqual(expect.objectContaining({
+        status: 'APPROVED',
+        refundedAmountCents: 5000,
+        stripeRefundIds: ['re_archived'],
+        refundedPaymentIds: ['payment_archived'],
+      }));
+      expect(mockStripeRefundCreate).toHaveBeenCalledTimes(1);
     });
 
     it('rejects payment-level drift even when the aggregate refund amount is unchanged', async () => {

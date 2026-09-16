@@ -1,10 +1,8 @@
 import type { Control } from 'react-hook-form';
 import { Controller } from 'react-hook-form';
-import {
-    Alert,
-    Stack,
-    Textarea,
-} from '@mantine/core';
+import { Alert,
+Stack,
+Textarea, } from '@/components/organization/organization-operation-ui';
 
 import type { EventFormValues } from '../formTypes';
 import { ManualPaymentDestinationEditor } from './ManualPaymentDestinationEditor';

@@ -1,16 +1,14 @@
 import type { ComponentProps, UIEvent } from 'react';
-import {
-    Badge,
-    Button,
-    Group,
-    Paper,
-    Select as MantineSelect,
-    SimpleGrid,
-    Stack,
-    Text,
-    TextInput,
-    Title,
-} from '@mantine/core';
+import { Badge,
+Button,
+Group,
+Paper,
+Select as MantineSelect,
+SimpleGrid,
+Stack,
+Text,
+TextInput,
+Title, } from '@/components/organization/organization-operation-ui';
 
 import UserCard from '@/components/ui/UserCard';
 import type { StaffMemberType, UserData } from '@/types';

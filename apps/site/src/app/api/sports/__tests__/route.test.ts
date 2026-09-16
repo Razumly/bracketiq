@@ -9,6 +9,10 @@ const prismaMock = {
     update: jest.fn(),
     deleteMany: jest.fn(),
   },
+  sportCategories: {
+    findMany: jest.fn(),
+    createMany: jest.fn(),
+  },
   events: {
     findMany: jest.fn(),
     update: jest.fn(),
@@ -65,11 +69,15 @@ describe('GET /api/sports', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     prismaMock.sports.findMany.mockReset();
+    prismaMock.sportCategories.findMany.mockReset();
+    prismaMock.sportCategories.createMany.mockReset();
     prismaMock.events.findMany.mockReset();
     prismaMock.events.update.mockReset();
     prismaMock.$transaction.mockResolvedValue([]);
     prismaMock.sports.createMany.mockResolvedValue({ count: 0 });
     prismaMock.sports.deleteMany.mockResolvedValue({ count: 0 });
+    prismaMock.sportCategories.findMany.mockResolvedValue([]);
+    prismaMock.sportCategories.createMany.mockResolvedValue({ count: 0 });
     prismaMock.events.updateMany.mockResolvedValue({ count: 0 });
     prismaMock.events.update.mockResolvedValue({});
     prismaMock.divisions.updateMany.mockResolvedValue({ count: 0 });
@@ -233,6 +241,59 @@ describe('GET /api/sports', () => {
     expect(payload.sports.map((sport: any) => sport.name)).toEqual(
       expect.arrayContaining(['Indoor Soccer', 'Indoor Volleyball']),
     );
+  });
+
+  it('seeds and returns categories with existing sport IDs', async () => {
+    const sports = [
+      { id: 'Indoor Soccer', name: 'Indoor Soccer' },
+      { id: 'Grass Soccer', name: 'Grass Soccer' },
+      { id: 'Beach Soccer', name: 'Beach Soccer' },
+      { id: 'Futsal', name: 'Futsal' },
+      { id: 'Indoor Volleyball', name: 'Indoor Volleyball' },
+      { id: 'Beach Volleyball', name: 'Beach Volleyball' },
+      { id: 'Grass Volleyball', name: 'Grass Volleyball' },
+      { id: 'Football', name: 'Football' },
+      { id: 'Flag Football', name: 'Flag Football' },
+      { id: 'Australian Football', name: 'Australian Football' },
+      { id: 'Hockey', name: 'Hockey' },
+      { id: 'Field Hockey', name: 'Field Hockey' },
+      { id: 'Ball Hockey', name: 'Ball Hockey' },
+      { id: 'Baseball', name: 'Baseball' },
+      { id: 'Softball', name: 'Softball' },
+    ].map((sport) => ({
+      ...sport,
+      resourceLabelSingular: 'Resource',
+      resourceLabelPlural: 'Resources',
+    }));
+    prismaMock.sports.findMany.mockResolvedValueOnce(sports).mockResolvedValueOnce(sports);
+    prismaMock.sportCategories.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: 'soccer',
+          name: 'Soccer',
+          sportIds: ['Indoor Soccer', 'Grass Soccer', 'Beach Soccer', 'Futsal'],
+          displayOrder: 10,
+        },
+      ]);
+
+    const response = await GET(new NextRequest('http://localhost/api/sports'));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(prismaMock.sportCategories.createMany).toHaveBeenCalledTimes(1);
+    const categoryData = prismaMock.sportCategories.createMany.mock.calls[0][0].data;
+    expect(categoryData.find((category: any) => category.id === 'soccer')).toEqual(expect.objectContaining({
+      name: 'Soccer',
+      sportIds: ['Indoor Soccer', 'Grass Soccer', 'Beach Soccer', 'Futsal'],
+    }));
+    expect(payload.categories).toEqual([
+      expect.objectContaining({
+        id: 'soccer',
+        name: 'Soccer',
+        sportIds: ['Indoor Soccer', 'Grass Soccer', 'Beach Soccer', 'Futsal'],
+      }),
+    ]);
   });
 
   it('serializes one canonical row for case and whitespace duplicate sport names', async () => {

@@ -1,4 +1,7 @@
 import {
+  assertRepeatingTimeSlotsResolvable,
+} from '@/lib/repeatingTimeSlotAvailability';
+import {
   assertValidOneTimeTimeSlots,
   resolveOneTimeTimeSlot,
   TimeSlotValidationError,
@@ -34,6 +37,11 @@ export const assertCanonicalSchedulerTimeSlots = (
     eventEnd: event.noFixedEndDateTime ? null : (event.scheduleEndConstraint ?? event.end),
     eligibleResourceIds: resourceIds,
     eligibleDivisionIds: divisionIds,
+  });
+  assertRepeatingTimeSlotsResolvable({
+    slots: event.timeSlots,
+    eventStart: event.start,
+    eventEnd: event.noFixedEndDateTime ? null : (event.scheduleEndConstraint ?? event.end),
   });
   const resourceIdSet = new Set(resourceIds.map((id) => id.toLowerCase()));
   const divisionIdSet = new Set(divisionIds.map((id) => id.toLowerCase()));

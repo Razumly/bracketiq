@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Button, Group, Modal, NumberInput, Stack, Text } from "@mantine/core";
+import { Button, Group, Modal, NumberInput, Stack, Text } from '@/components/organization/organization-operation-ui';
 
 import { calculateTimedMatchDurationMinutes } from "@/lib/divisionPhaseSettings";
 import type {
@@ -172,7 +172,7 @@ export const DivisionPhaseConfigurationControls = ({
 
   return (
     <div className="mt-4 border-t border-gray-200 pt-4">
-      <Group align="flex-end" gap="md" wrap="wrap">
+      <Group align="flex-start" gap="md" wrap="wrap">
         {!usesSets ? (
           <>
             <NumberInput

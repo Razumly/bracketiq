@@ -42,6 +42,18 @@ class EventOccurrenceRulesTest {
     }
 
     @Test
+    fun archived_weekly_shape_stays_weekly_for_historical_reads() {
+        val archivedWeeklyEvent = Event(
+            eventType = EventType.WEEKLY_EVENT,
+            timeSlotIds = listOf("slot-1"),
+            archivedAt = "2026-06-23T10:00:00Z",
+        )
+
+        assertTrue(isWeeklyEventShape(archivedWeeklyEvent))
+        assertFalse(isWeeklyParentEvent(archivedWeeklyEvent))
+    }
+
+    @Test
     fun started_state_uses_event_start_for_non_weekly_and_selected_occurrence_for_weekly_parent() {
         val startedEvent = Event(start = Instant.parse("2026-06-23T11:00:00Z"))
         val futureEvent = Event(start = Instant.parse("2026-06-23T13:00:00Z"))
@@ -123,6 +135,21 @@ class EventOccurrenceRulesTest {
     }
 
     @Test
+    fun archived_weekly_event_blocks_registration_even_before_canonical_start() {
+        assertTrue(
+            isJoinBlockedByStart(
+                event = Event(
+                    eventType = EventType.WEEKLY_EVENT,
+                    start = Instant.parse("2099-06-23T11:00:00Z"),
+                    archivedAt = "2026-06-23T10:00:00Z",
+                ),
+                selectedWeeklyOccurrenceStarted = false,
+                now = now,
+            ),
+        )
+    }
+
+    @Test
     fun participant_management_room_target_requires_event_id_and_weekly_occurrence_selection() {
         assertNull(
             participantManagementRoomTarget(
@@ -170,6 +197,27 @@ class EventOccurrenceRulesTest {
                 occurrence = EventOccurrenceSelection(
                     slotId = " slot-1 ",
                     occurrenceDate = " 2026-06-23 ",
+                    label = "Tuesday",
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun archived_weekly_parent_does_not_expose_occurrence_selection() {
+        val archived = Event(
+            eventType = EventType.WEEKLY_EVENT,
+            state = "ARCHIVED",
+            timeSlotIds = listOf("slot-1"),
+        )
+
+        assertFalse(isWeeklyParentEvent(archived))
+        assertNull(
+            participantManagementRoomTarget(
+                event = archived,
+                occurrence = EventOccurrenceSelection(
+                    slotId = "slot-1",
+                    occurrenceDate = "2026-06-23",
                     label = "Tuesday",
                 ),
             ),

@@ -210,7 +210,7 @@ const createTeamDutyReflowFixture = (existingTeamOfficialId?: string): TeamDutyR
     },
     officials: [],
     doTeamsOfficiate: true,
-    officialSchedulingMode: 'TEAM_STAFFING',
+    staffingPriority: 'TEAM_COVERAGE_REQUIRED',
     includePlayoffs: true,
     playoffDivisions: [playoffDivision],
     doubleElimination: false,
@@ -770,14 +770,14 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       playerIds: [],
     });
 
-    const eventStart = new Date(2026, 2, 2, 9, 0, 0);
-    const eventEnd = new Date(2026, 2, 4, 18, 0, 0);
+    const eventStart = new Date('2026-03-02T09:00:00.000Z');
+    const eventEnd = new Date('2026-03-04T18:00:00.000Z');
 
     const lockedMatch = createMatch({
       id: 'match_locked_multi_day',
       matchId: 1,
-      start: new Date(2026, 2, 3, 10, 0, 0),
-      end: new Date(2026, 2, 3, 11, 0, 0),
+      start: new Date('2026-03-03T10:00:00.000Z'),
+      end: new Date('2026-03-03T11:00:00.000Z'),
       locked: true,
       field,
       division,
@@ -788,8 +788,8 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
     const unlockedMatch = createMatch({
       id: 'match_unlocked_multi_day',
       matchId: 2,
-      start: new Date(2026, 2, 2, 10, 0, 0),
-      end: new Date(2026, 2, 2, 11, 0, 0),
+      start: new Date('2026-03-02T10:00:00.000Z'),
+      end: new Date('2026-03-02T11:00:00.000Z'),
       field,
       division,
       team1: team3,
@@ -849,6 +849,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
           repeating: true,
           startTimeMinutes: 9 * 60,
           endTimeMinutes: 18 * 60,
+          timeZone: 'UTC',
           field: field.id,
           divisions: [division],
         }),
@@ -910,14 +911,14 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       playerIds: [],
     });
 
-    const eventStart = new Date(2026, 2, 2, 9, 0, 0);
-    const eventEnd = new Date(2026, 2, 2, 18, 0, 0);
+    const eventStart = new Date('2026-03-02T09:00:00.000Z');
+    const eventEnd = new Date('2026-03-02T18:00:00.000Z');
 
     const lockedMatch = createMatch({
       id: 'match_locked_multi_field',
       matchId: 1,
-      start: new Date(2026, 2, 2, 10, 0, 0),
-      end: new Date(2026, 2, 2, 11, 0, 0),
+      start: new Date('2026-03-02T10:00:00.000Z'),
+      end: new Date('2026-03-02T11:00:00.000Z'),
       locked: true,
       field: fieldTwo,
       division,
@@ -928,8 +929,8 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
     const unlockedMatch = createMatch({
       id: 'match_unlocked_multi_field',
       matchId: 2,
-      start: new Date(2026, 2, 2, 11, 5, 0),
-      end: new Date(2026, 2, 2, 12, 5, 0),
+      start: new Date('2026-03-02T11:05:00.000Z'),
+      end: new Date('2026-03-02T12:05:00.000Z'),
       field: fieldOne,
       division,
       team1: team3,
@@ -991,6 +992,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
           repeating: true,
           startTimeMinutes: 9 * 60,
           endTimeMinutes: 18 * 60,
+          timeZone: 'UTC',
           fieldIds: [fieldOne.id, fieldTwo.id],
           divisions: [division],
         }),
@@ -2460,7 +2462,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
     }))).toEqual(originalPlacements);
   });
 
-  it('legacy SCHEDULE clears stale conflicts and preserves the unbound named-position slot', () => {
+  it('BEST_AVAILABLE_COVERAGE clears stale conflicts and preserves the unbound named-position slot', () => {
     const division = new Division('open', 'Open');
     const field1 = new PlayingField({
       id: 'field_schedule_mode_1',
@@ -2582,7 +2584,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       usesSets: false,
       setDurationMinutes: 0,
       doTeamsOfficiate: false,
-      officialSchedulingMode: 'SCHEDULE',
+      staffingPriority: 'BEST_AVAILABLE_COVERAGE',
       officialPositions: [{ id: 'r1', name: 'R1', count: 1, order: 0 }],
       eventOfficials: [{
         id: 'event_official_schedule_mode',
@@ -2624,7 +2626,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
     expect(result.matches.some((match) => match.officialAssignments.some((assignment) => assignment.hasConflict))).toBe(false);
   });
 
-  it('OFF mode reassigns overlaps and marks conflicts during lock-preserving reschedule', () => {
+  it('FULL_COVERAGE_WITH_CONFLICTS_ALLOWED reassigns overlaps and marks conflicts during lock-preserving reschedule', () => {
     const division = new Division('open', 'Open');
     const field1 = new PlayingField({
       id: 'field_off_mode_1',
@@ -2725,7 +2727,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       usesSets: false,
       setDurationMinutes: 0,
       doTeamsOfficiate: false,
-      officialSchedulingMode: 'OFF',
+      staffingPriority: 'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED',
       officialPositions: [{ id: 'r1', name: 'R1', count: 1, order: 0 }],
       eventOfficials: [{
         id: 'event_official_off_mode',
@@ -2764,7 +2766,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
     expect(result.matches.some((match) => match.officialAssignments.some((assignment) => assignment.hasConflict))).toBe(true);
   });
 
-  it('STAFFING mode fills all required official positions when rescheduling existing matches', () => {
+  it('OFFICIAL_COVERAGE_REQUIRED fills all required official positions when rescheduling existing matches', () => {
     const division = new Division('open', 'Open');
     const field = new PlayingField({
       id: 'field_staffing_reschedule',
@@ -2891,7 +2893,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       usesSets: false,
       setDurationMinutes: 0,
       doTeamsOfficiate: false,
-      officialSchedulingMode: 'STAFFING',
+      staffingPriority: 'OFFICIAL_COVERAGE_REQUIRED',
       officialPositions: [
         { id: 'r1', name: 'R1', count: 1, order: 0 },
         { id: 'r2', name: 'R2', count: 1, order: 1 },
@@ -3008,6 +3010,39 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       start: uncheckedTarget?.start.getTime(),
       end: uncheckedTarget?.end.getTime(),
     });
+  });
+  it('does not mutate a protected placed Match with missing Team duty when protected IDs are supplied', () => {
+    const fixture = createTeamDutyReflowFixture();
+
+    const protectedState = {
+      fieldId: fixture.target.field?.id ?? null,
+      start: fixture.target.start.getTime(),
+      end: fixture.target.end.getTime(),
+      teamOfficialId: fixture.target.teamOfficial?.id ?? null,
+      requiresTeamOfficial: fixture.target.requiresTeamOfficial,
+      reservesTeamOfficial: fixture.target.reservesTeamOfficial,
+    };
+    const result = rescheduleEventMatchesPreservingLocks(
+      fixture.tournament,
+      {
+        eventCheckedInTeamIds: new Set(['eligible_mapped']),
+        checkedInTeamIdsByMatch: new Map([
+          [fixture.target.id, new Set(['eligible_mapped'])],
+        ]),
+      },
+      undefined,
+      new Set([fixture.target.id]),
+    );
+
+    const protectedMatch = result.matches.find((match) => match.id === fixture.target.id);
+    expect({
+      fieldId: protectedMatch?.field?.id ?? null,
+      start: protectedMatch?.start.getTime(),
+      end: protectedMatch?.end.getTime(),
+      teamOfficialId: protectedMatch?.teamOfficial?.id ?? null,
+      requiresTeamOfficial: protectedMatch?.requiresTeamOfficial,
+      reservesTeamOfficial: protectedMatch?.reservesTeamOfficial,
+    }).toEqual(protectedState);
   });
 
   it('replaces a missing Team duty only with a checked-in mapped-source Team that has no play, duty, rest, or imminent-Match conflict', () => {
@@ -3538,5 +3573,147 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       expect(original.match.official).toBe(original.official);
       expect(original.match.officialAssignments).toBe(original.officialAssignments);
     }
+  });
+  it('returns placement failures without throwing when partial placement is enabled', () => {
+    const division = new Division('open_partial', 'Open Partial');
+    const field = new PlayingField({
+      id: 'field_partial',
+      divisions: [division],
+      matches: [],
+      events: [],
+      rentalSlots: [],
+      name: 'Partial Court',
+    });
+    const team1 = new Team({
+      id: 'partial_team_1',
+      captainId: 'partial_captain_1',
+      division,
+      name: 'Partial Team 1',
+      matches: [],
+      playerIds: [],
+    });
+    const team2 = new Team({
+      id: 'partial_team_2',
+      captainId: 'partial_captain_2',
+      division,
+      name: 'Partial Team 2',
+      matches: [],
+      playerIds: [],
+    });
+    const team3 = new Team({
+      id: 'partial_team_3',
+      captainId: 'partial_captain_3',
+      division,
+      name: 'Partial Team 3',
+      matches: [],
+      playerIds: [],
+    });
+    const team4 = new Team({
+      id: 'partial_team_4',
+      captainId: 'partial_captain_4',
+      division,
+      name: 'Partial Team 4',
+      matches: [],
+      playerIds: [],
+    });
+    const start = new Date('2026-03-02T10:00:00.000Z');
+    const end = new Date('2026-03-02T12:00:00.000Z');
+    const locked = createMatch({
+      id: 'partial_locked',
+      matchId: 1,
+      start,
+      end: new Date(start.getTime() + 60 * MINUTE_MS),
+      locked: true,
+      field,
+      division,
+      team1,
+      team2,
+      eventId: 'partial_event',
+    });
+    const unlocked = createMatch({
+      id: 'partial_unlocked',
+      matchId: 2,
+      start,
+      end: new Date(start.getTime() + 60 * MINUTE_MS),
+      field,
+      division,
+      team1: team3,
+      team2: team4,
+      eventId: 'partial_event',
+    });
+    const event = new League({
+      id: 'partial_event',
+      name: 'Partial Reschedule',
+      description: '',
+      start,
+      end,
+      location: '',
+      organizationId: null,
+      teams: {
+        [team1.id]: team1,
+        [team2.id]: team2,
+        [team3.id]: team3,
+        [team4.id]: team4,
+      },
+      players: [],
+      waitListIds: [],
+      freeAgentIds: [],
+      maxParticipants: 4,
+      teamSignup: true,
+      divisions: [division],
+      fields: { [field.id]: field },
+      matches: {
+        [locked.id]: locked,
+        [unlocked.id]: unlocked,
+      },
+      officials: [],
+      eventType: 'LEAGUE',
+      doubleElimination: false,
+      winnerSetCount: null,
+      loserSetCount: null,
+      matchDurationMinutes: 60,
+      usesSets: false,
+      setDurationMinutes: 0,
+      setsPerMatch: 3,
+      pointsToVictory: [],
+      gamesPerOpponent: 1,
+      includePlayoffs: false,
+      playoffTeamCount: 0,
+      doTeamsOfficiate: false,
+      staffingPriority: 'OFFICIAL_COVERAGE_REQUIRED',
+      noFixedEndDateTime: false,
+      restTimeMinutes: 0,
+      timeSlots: [
+        new TimeSlot({
+          id: 'partial_slot',
+          dayOfWeek: 1,
+          startDate: start,
+          endDate: new Date(start.getTime() + 60 * MINUTE_MS),
+          repeating: false,
+          startTimeMinutes: 10 * 60,
+          endTimeMinutes: 11 * 60,
+          field: field.id,
+          divisions: [division],
+        }),
+      ],
+    });
+
+    const result = rescheduleEventMatchesPreservingLocks(
+      event,
+      undefined,
+      undefined,
+      new Set([locked.id]),
+      true,
+    );
+
+    expect(result.placementFailures).toEqual([
+      expect.objectContaining({
+        matchId: unlocked.id,
+        restrictingFactor: 'RESOURCE',
+      }),
+    ]);
+    expect(result.matches.find((match) => match.id === locked.id)).toBe(locked);
+    expect(unlocked.placementState).toBe('UNPLACED');
+    expect(unlocked.field).toBeNull();
   });
 });

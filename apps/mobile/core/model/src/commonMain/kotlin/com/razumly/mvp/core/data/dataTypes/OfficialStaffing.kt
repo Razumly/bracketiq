@@ -3,14 +3,6 @@ package com.razumly.mvp.core.data.dataTypes
 import kotlinx.serialization.Serializable
 
 @Serializable
-enum class OfficialSchedulingMode {
-    STAFFING,
-    TEAM_STAFFING,
-    SCHEDULE,
-    OFF,
-}
-
-@Serializable
 enum class StaffingPriority {
     FULL_COVERAGE_REQUIRED,
     TEAM_COVERAGE_REQUIRED,
@@ -59,13 +51,6 @@ data class MatchOfficialAssignment(
     val hasConflict: Boolean = false,
 )
 
-fun OfficialSchedulingMode.label(): String = when (this) {
-    OfficialSchedulingMode.STAFFING -> "Staffing first"
-    OfficialSchedulingMode.TEAM_STAFFING -> "Team staffing"
-    OfficialSchedulingMode.SCHEDULE -> "Schedule first"
-    OfficialSchedulingMode.OFF -> "Ignore staffing conflicts"
-}
-
 fun StaffingPriority.label(): String = when (this) {
     StaffingPriority.FULL_COVERAGE_REQUIRED -> "Full Coverage Required"
     StaffingPriority.TEAM_COVERAGE_REQUIRED -> "Team Coverage Required"
@@ -73,42 +58,6 @@ fun StaffingPriority.label(): String = when (this) {
     StaffingPriority.BEST_AVAILABLE_COVERAGE -> "Best Available Coverage"
     StaffingPriority.FULL_COVERAGE_WITH_CONFLICTS_ALLOWED -> "Full Coverage with Conflicts Allowed"
 }
-
-fun OfficialSchedulingMode.toStaffingPriority(): StaffingPriority = when (this) {
-    OfficialSchedulingMode.STAFFING -> StaffingPriority.OFFICIAL_COVERAGE_REQUIRED
-    OfficialSchedulingMode.TEAM_STAFFING -> StaffingPriority.TEAM_COVERAGE_REQUIRED
-    OfficialSchedulingMode.SCHEDULE -> StaffingPriority.BEST_AVAILABLE_COVERAGE
-    OfficialSchedulingMode.OFF -> StaffingPriority.FULL_COVERAGE_WITH_CONFLICTS_ALLOWED
-}
-fun StaffingPriority.toLegacyOfficialSchedulingMode(): OfficialSchedulingMode = when (this) {
-    StaffingPriority.FULL_COVERAGE_REQUIRED -> OfficialSchedulingMode.STAFFING
-    StaffingPriority.TEAM_COVERAGE_REQUIRED -> OfficialSchedulingMode.TEAM_STAFFING
-    StaffingPriority.OFFICIAL_COVERAGE_REQUIRED -> OfficialSchedulingMode.STAFFING
-    StaffingPriority.BEST_AVAILABLE_COVERAGE -> OfficialSchedulingMode.SCHEDULE
-    StaffingPriority.FULL_COVERAGE_WITH_CONFLICTS_ALLOWED -> OfficialSchedulingMode.OFF
-}
-fun resolveStaffingPriority(
-    staffingPriority: String?,
-    legacyOfficialSchedulingMode: String?,
-): StaffingPriority {
-    staffingPriority
-        ?.trim()
-        ?.uppercase()
-        ?.let { normalized ->
-            runCatching { StaffingPriority.valueOf(normalized) }.getOrNull()
-        }
-        ?.let { return it }
-
-    val legacyMode = legacyOfficialSchedulingMode
-        ?.trim()
-        ?.uppercase()
-        ?.let { normalized ->
-            runCatching { OfficialSchedulingMode.valueOf(normalized) }.getOrNull()
-        }
-    return legacyMode?.toStaffingPriority() ?: StaffingPriority.BEST_AVAILABLE_COVERAGE
-}
-
-fun OfficialSchedulingMode.requiresTeamOfficials(): Boolean = this == OfficialSchedulingMode.TEAM_STAFFING
 
 fun Event.usesTeamOfficialScheduling(): Boolean = doTeamsOfficiate == true
 
@@ -119,7 +68,6 @@ fun Event.withDoTeamsOfficiate(doTeamsOfficiate: Boolean): Event = copy(
 
 fun Event.withStaffingPriority(priority: StaffingPriority): Event = copy(
     staffingPriority = priority,
-    officialSchedulingMode = priority.toLegacyOfficialSchedulingMode(),
 )
 
 fun buildEventOfficialPositionId(

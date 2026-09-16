@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { normalizeTeamInviteRole } from '@/lib/staff';
 import { verifyTeamInviteShareLink } from '@/server/teamInviteLinks';
+import { requiresPlayerProfileClaim } from '@/server/teams/playerInvitationClaim';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,10 +21,16 @@ const inviteRole = (role: unknown, staffTypes: unknown): 'PLAYER' | 'MANAGER' | 
 
 const unavailable = () => NextResponse.json({ available: false }, { status: 404 });
 
+const isCurrentInviteStatus = (value: unknown): boolean => {
+  const status = String(value ?? '').trim().toUpperCase();
+  // Null and SENT are legacy representations of a current pending attempt.
+  return status === '' || status === 'PENDING' || status === 'SENT' || status === 'FAILED';
+};
+
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const invite = await prisma.invites.findUnique({ where: { id } });
-  if (!invite || invite.type !== 'TEAM' || !invite.teamId || !['PENDING', 'FAILED'].includes(invite.status ?? '')) {
+  if (!invite || invite.type !== 'TEAM' || !invite.teamId || !isCurrentInviteStatus(invite.status)) {
     return unavailable();
   }
   if (!verifyTeamInviteShareLink(invite, {
@@ -47,6 +54,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       firstName: invite.firstName,
       expiresAt: invite.linkExpiresAt,
       isAssigned: invite.isAssigned,
+      profileClaimRequired: await requiresPlayerProfileClaim(prisma, invite),
       role: inviteRole(invite.role, invite.staffTypes),
     },
     team,

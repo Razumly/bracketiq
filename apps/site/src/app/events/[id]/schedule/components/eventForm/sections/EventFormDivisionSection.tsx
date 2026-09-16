@@ -224,7 +224,7 @@ export const EventFormDivisionSection = ({
                     control={control}
                     supportsEditableTeamSignup={supportsEditableTeamSignup}
                     showsFixedTeamEventToggle={showsFixedTeamEventToggle}
-                    singleDivisionOnly={isAffiliateEvent}
+                    singleDivisionOnly={false}
                     eventType={eventData.eventType}
                     singleDivision={eventData.singleDivision}
                     leagueIncludesPlayoffs={Boolean(eventData.leagueData.includePlayoffs)}
@@ -232,8 +232,10 @@ export const EventFormDivisionSection = ({
                     hasExternalRentalField={hasExternalRentalField}
                     isImmutableField={isImmutableField}
                 />
-                {!isAffiliateEvent && eventData.singleDivision ? (
+                {eventData.singleDivision ? (
                     <SingleDivisionDefaultsPanel
+                        showPricingControls={!isAffiliateEvent}
+                        showPaymentPlanControls={!isAffiliateEvent && !manualPaymentsEnabled}
                         control={control}
                         eventData={eventData}
                         leagueData={eventData.leagueData}
@@ -253,7 +255,6 @@ export const EventFormDivisionSection = ({
                         organizationDefaultEventTaxHandling={organizationDefaultEventTaxHandling}
                         connectingStripe={connectingStripe}
                         simplifiedPricing={manualPaymentsEnabled}
-                        showPaymentPlanControls={!manualPaymentsEnabled}
                         isImmutableField={isImmutableField}
                         playoffTeamCountError={singleDivisionPlayoffTeamCountError}
                         setLeagueData={setLeagueData}
@@ -286,7 +287,7 @@ export const EventFormDivisionSection = ({
                 ) : null}
                 <DivisionEditorHeader
                     editing={Boolean(divisionEditor.editingId)}
-                    splitDivisionEditorEnabled={!isAffiliateEvent && splitDivisionEditorEnabled}
+                    splitDivisionEditorEnabled={splitDivisionEditorEnabled}
                     divisionKind={divisionEditor.divisionKind}
                     disabled={isImmutableField('divisions')}
                     comboboxProps={comboboxProps}
@@ -296,24 +297,23 @@ export const EventFormDivisionSection = ({
                     divisionEditor={divisionEditor}
                     eventData={isAffiliateEvent ? {
                         ...eventData,
-                        teamSignup: false,
                         allowPaymentPlans: false,
                     } : eventData}
                     leagueData={eventData.leagueData}
                     eventTaxableForPreview={eventTaxableForPreview}
-                    splitDivisionEditorEnabled={!isAffiliateEvent && splitDivisionEditorEnabled}
+                    splitDivisionEditorEnabled={splitDivisionEditorEnabled}
                     divisionEditorReady={divisionEditorReady}
-                    divisionMaxParticipantsWarning={isAffiliateEvent ? null : divisionMaxParticipantsWarning}
+                    divisionMaxParticipantsWarning={divisionMaxParticipantsWarning}
                     hasStripeAccount={hasStripeAccount}
                     maxStandardNumber={maxStandardNumber}
                     maxPriceCents={maxPriceCents}
                     maxMediumTextLength={maxMediumTextLength}
                     numberInputStyles={numberInputStyles}
                     simplePriceInput={isAffiliateEvent || manualPaymentsEnabled}
-                    showCapacityForSingleDivision={isAffiliateEvent}
+                    showCapacityForSingleDivision={false}
                     showPriceForSingleDivision={isAffiliateEvent}
                     showPaymentPlanControls={!isAffiliateEvent && !manualPaymentsEnabled}
-                    showOperationalControls={!isAffiliateEvent}
+                    showOperationalControls
                     showSingleDivisionNotice={!isAffiliateEvent}
                     playoffTeamCountError={divisionEditorPlayoffTeamCountError}
                     genderOptions={DIVISION_GENDER_OPTIONS.map((option) => ({ ...option }))}
@@ -332,7 +332,7 @@ export const EventFormDivisionSection = ({
                     onInstallmentAmountChange={setDivisionInstallmentAmount}
                     onRemoveInstallment={removeDivisionInstallment}
                 />
-                {!isAffiliateEvent ? (
+
                     <>
                         <DivisionEditorPlayoffDivisionControls
                             visible={splitDivisionEditorEnabled && divisionEditor.divisionKind === 'PLAYOFF'}
@@ -385,6 +385,8 @@ export const EventFormDivisionSection = ({
                             onCancelEdit={resetDivisionEditor}
                         />
                         <DivisionSummaryList
+                            useDivisionPriceForSingleDivision={isAffiliateEvent}
+                            hidePaymentPlanDetails={isAffiliateEvent}
                             divisionDetails={eventData.divisionDetails || []}
                             playoffDivisionDetails={eventData.playoffDivisionDetails || []}
                             singleDivision={eventData.singleDivision}
@@ -408,46 +410,7 @@ export const EventFormDivisionSection = ({
                             onRemovePlayoffDivision={handleRemovePlayoffDivision}
                         />
                     </>
-                ) : (
-                    <>
-                        <DivisionEditorActionsAndErrors
-                            isEditing={Boolean(divisionEditor.editingId)}
-                            disabled={isImmutableField('divisions')}
-                            editorError={divisionEditor.error}
-                            divisionsError={errors.divisions?.message as string | undefined}
-                            divisionDetailsError={errors.divisionDetails?.message as string | undefined}
-                            showMissingPlayoffDivisionWarning={false}
-                            onSave={onSaveDivision}
-                            onCancelEdit={resetDivisionEditor}
-                        />
-                        <DivisionSummaryList
-                            divisionDetails={eventData.divisionDetails || []}
-                            playoffDivisionDetails={[]}
-                            singleDivision={eventData.singleDivision}
-                            teamSignup={false}
-                            eventType={eventData.eventType}
-                            includePlayoffs={false}
-                            splitDivisionEditorEnabled={false}
-                            eventPrice={eventData.price}
-                            eventMaxParticipants={eventData.maxParticipants}
-                            eventAllowPaymentPlans={false}
-                            eventInstallmentCount={0}
-                            eventInstallmentAmounts={[]}
-                            disabled={isImmutableField('divisions')}
-                            playoffDivisionCapacityWarnings={[]}
-                            useDivisionPriceForSingleDivision
-                            useDivisionCapacityForSingleDivision
-                            hidePaymentPlanDetails
-                            hideOperationalDetails
-                            derivePoolTeamCount={derivePoolTeamCount}
-                            buildTournamentConfig={buildTournamentConfig}
-                            onEditDivision={handleEditDivisionDetail}
-                            onRemoveDivision={handleRemoveDivisionDetail}
-                            onEditPlayoffDivision={handleEditPlayoffDivisionDetail}
-                            onRemovePlayoffDivision={handleRemovePlayoffDivision}
-                        />
-                    </>
-                )}
+
                     </>
                 )}
             </div>

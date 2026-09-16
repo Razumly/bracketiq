@@ -17,6 +17,7 @@ import {
 } from '@/server/refunds/refundExecution';
 import { getEventParticipantIdsForEvent } from '@/server/events/eventRegistrations';
 import {
+  acquireEventMutationTarget,
   isWeeklyParentEvent,
   resolveWeeklyOccurrence,
   resolveWeeklyOccurrenceStartAt,
@@ -64,8 +65,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid input', details: parsed.error.flatten() }, { status: 400 });
   }
 
-  const eventId = parsed.data.payloadEvent?.$id ?? parsed.data.payloadEvent?.id ?? parsed.data.payloadEvent?.eventId;
-  if (!eventId) {
+  const requestedEventId = normalizeId(
+    parsed.data.payloadEvent?.$id
+      ?? parsed.data.payloadEvent?.id
+      ?? parsed.data.payloadEvent?.eventId,
+  );
+  if (!requestedEventId) {
     return NextResponse.json({ error: 'Event is required' }, { status: 400 });
   }
 
@@ -83,41 +88,34 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
   }
-
-  const event = await prisma.events.findUnique({
-    where: { id: eventId },
-    select: {
-      id: true,
-      start: true,
-      cancellationRefundHours: true,
-      hostId: true,
-      organizationId: true,
-      eventType: true,
-      parentEvent: true,
-      timeSlotIds: true,
-    },
-  });
-  if (!event) {
+  const eventTarget = await prisma.$transaction((tx) => (
+    acquireEventMutationTarget(tx, requestedEventId)
+  ));
+  if (!eventTarget) {
     return NextResponse.json({ error: 'Event not found' }, { status: 404 });
   }
+  const event = eventTarget.parentEvent ?? eventTarget.event;
+  let eventId = event.id;
 
   const hasOccurrenceInput = Boolean(parsed.data.slotId || parsed.data.occurrenceDate);
-  const weeklyOccurrence = isWeeklyParentEvent(event)
+  const isWeeklyParent = isWeeklyParentEvent(event);
+  const weeklyOccurrence = isWeeklyParent
     ? await resolveWeeklyOccurrence({
       event,
       occurrence: parsed.data,
+      allowArchivedEvent: Boolean(event.archivedAt),
     })
     : null;
   if (weeklyOccurrence && !weeklyOccurrence.ok) {
     return NextResponse.json({ error: weeklyOccurrence.error }, { status: 400 });
   }
-  if (isWeeklyParentEvent(event) && (!parsed.data.slotId || !parsed.data.occurrenceDate)) {
+  if (isWeeklyParent && (!parsed.data.slotId || !parsed.data.occurrenceDate)) {
     return NextResponse.json(
       { error: 'Weekly event refunds require slotId and occurrenceDate.' },
       { status: 400 },
     );
   }
-  if (!isWeeklyParentEvent(event) && hasOccurrenceInput) {
+  if (!isWeeklyParent && hasOccurrenceInput) {
     return NextResponse.json(
       { error: 'Weekly occurrence selection is only valid for weekly events.' },
       { status: 400 },
@@ -210,61 +208,140 @@ export async function POST(req: NextRequest) {
   });
 
   if (canAutoRefund) {
-    const existingAutoRefund = await prisma.refundRequests.findFirst({
-      where: {
-        eventId,
-        userId: targetUserId,
-        teamId: refundTeamId,
-        slotId: resolvedOccurrence?.slotId ?? null,
-        occurrenceDate: resolvedOccurrence?.occurrenceDate ?? null,
-        status: { in: ['WAITING', 'APPROVED'] },
-      },
-      orderBy: {
-        updatedAt: 'desc',
-      },
-      select: requestSelect,
-    });
+    const newRefundRequest = buildRefundRequestRow(crypto.randomUUID(), 'WAITING');
+    const intent = await prisma.$transaction(async (tx) => {
+      const target = await acquireEventMutationTarget(tx, eventId);
+      if (!target) {
+        return { kind: 'missing' as const };
+      }
 
-    const baseRefundRequest = existingAutoRefund
-      ? { ...existingAutoRefund, reason } as RefundRequestRow
-      : buildRefundRequestRow(crypto.randomUUID(), 'APPROVED');
-    if (existingAutoRefund && !isRefundScopeSnapshotValid(baseRefundRequest)) {
+      const existingAutoRefund = await tx.refundRequests.findFirst({
+        where: {
+          eventId,
+          userId: targetUserId,
+          teamId: refundTeamId,
+          slotId: resolvedOccurrence?.slotId ?? null,
+          occurrenceDate: resolvedOccurrence?.occurrenceDate ?? null,
+          status: { in: ['WAITING', 'APPROVED'] },
+        },
+        orderBy: {
+          updatedAt: 'desc',
+        },
+        select: requestSelect,
+      }) as RefundRequestRow | null;
+
+      if (existingAutoRefund && !isRefundScopeSnapshotValid(existingAutoRefund)) {
+        return { kind: 'invalid_scope' as const };
+      }
+
+      const targetArchived = Boolean(
+        target.event.archivedAt || target.parentEvent?.archivedAt,
+      );
+      if (targetArchived && !existingAutoRefund) {
+        return { kind: 'archived' as const };
+      }
+
+      const requestForIntent: RefundRequestRow = existingAutoRefund
+        ? {
+          ...existingAutoRefund,
+          reason,
+          slotId: resolvedOccurrence?.slotId ?? null,
+          occurrenceDate: resolvedOccurrence?.occurrenceDate ?? null,
+        }
+        : newRefundRequest;
+      const refundablePayments = await resolveRefundablePaymentsForRequest(
+        tx,
+        requestForIntent,
+        { scopeMode: 'INDIVIDUAL' },
+      );
+      if (
+        existingAutoRefund
+        && hasRefundScopeDrift(existingAutoRefund, refundablePayments)
+      ) {
+        return { kind: 'scope_drift' as const };
+      }
+      if (!existingAutoRefund && !refundablePayments.length) {
+        return { kind: 'no_payments' as const };
+      }
+
+      const persistedRequest = existingAutoRefund
+        ? requestForIntent
+        : {
+          ...requestForIntent,
+          status: 'WAITING' as const,
+          ...buildRefundScopeSnapshot(
+            requestForIntent,
+            refundablePayments,
+            'AUTO_APPROVED',
+          ),
+        };
+      if (!existingAutoRefund) {
+        await tx.refundRequests.create({
+          data: {
+            id: persistedRequest.id,
+            eventId: persistedRequest.eventId,
+            userId: persistedRequest.userId,
+            requestedByUserId: persistedRequest.requestedByUserId,
+            hostId: persistedRequest.hostId,
+            teamId: persistedRequest.teamId,
+            organizationId: persistedRequest.organizationId,
+            slotId: persistedRequest.slotId ?? null,
+            occurrenceDate: persistedRequest.occurrenceDate ?? null,
+            billIds: persistedRequest.billIds ?? [],
+            paymentIds: persistedRequest.paymentIds ?? [],
+            paymentScope: persistedRequest.paymentScope ?? [],
+            requestedAmountCents: persistedRequest.requestedAmountCents ?? 0,
+            currency: persistedRequest.currency ?? 'usd',
+            policyDecision: persistedRequest.policyDecision,
+            scopeVersion: persistedRequest.scopeVersion ?? REFUND_SCOPE_VERSION,
+            scopeHash: persistedRequest.scopeHash,
+            reason: persistedRequest.reason,
+            status: 'WAITING',
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+      }
+
+      return {
+        kind: 'ready' as const,
+        request: persistedRequest,
+        refundablePayments,
+      };
+    });
+    if (intent.kind === 'missing') {
+      return NextResponse.json({ error: 'Event not found' }, { status: 404 });
+    }
+    if (intent.kind === 'invalid_scope') {
       return NextResponse.json(
         { error: 'This legacy refund request has no verified payment scope. Submit a new request.' },
         { status: 409 },
       );
     }
+    if (intent.kind === 'archived') {
+      return NextResponse.json(
+        { error: 'This event is archived and no longer accepts automatic refunds.' },
+        { status: 409 },
+      );
+    }
+    if (intent.kind === 'scope_drift') {
+      return NextResponse.json(
+        { error: 'The payment scope changed after this automatic refund was created. Submit a new refund request.' },
+        { status: 409 },
+      );
+    }
+    if (intent.kind === 'no_payments') {
+      return NextResponse.json(
+        { error: 'No refundable payment found for automatic refund.' },
+        { status: 400 },
+      );
+    }
 
     let stripeRefundAttempts: StripeRefundAttempt[] = [];
-    let refundRequest: RefundRequestRow;
     try {
-      const refundablePayments = await resolveRefundablePaymentsForRequest(
-        prisma,
-        baseRefundRequest,
-        { scopeMode: 'INDIVIDUAL' },
-      );
-      if (existingAutoRefund && hasRefundScopeDrift(baseRefundRequest, refundablePayments)) {
-        return NextResponse.json(
-          { error: 'The payment scope changed after this automatic refund was created. Submit a new refund request.' },
-          { status: 409 },
-        );
-      }
-      const scopeSnapshot = existingAutoRefund
-        ? {
-          billIds: existingAutoRefund.billIds,
-          paymentIds: existingAutoRefund.paymentIds,
-          paymentScope: existingAutoRefund.paymentScope,
-          requestedAmountCents: existingAutoRefund.requestedAmountCents,
-          currency: existingAutoRefund.currency,
-          policyDecision: existingAutoRefund.policyDecision,
-          scopeVersion: existingAutoRefund.scopeVersion,
-          scopeHash: existingAutoRefund.scopeHash,
-        }
-        : buildRefundScopeSnapshot(baseRefundRequest, refundablePayments, 'AUTO_APPROVED');
-      refundRequest = { ...baseRefundRequest, ...scopeSnapshot };
       stripeRefundAttempts = await createStripeRefundAttempts({
-        request: refundRequest,
-        payments: refundablePayments,
+        request: intent.request,
+        payments: intent.refundablePayments,
         approvedByUserId: session.userId,
       });
     } catch (error) {
@@ -275,7 +352,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!stripeRefundAttempts.length && existingAutoRefund?.status !== 'APPROVED') {
+    if (!stripeRefundAttempts.length) {
       return NextResponse.json(
         { error: 'No refundable payment found for automatic refund.' },
         { status: 400 },
@@ -283,6 +360,10 @@ export async function POST(req: NextRequest) {
     }
 
     const result = await prisma.$transaction(async (tx) => {
+      const target = await acquireEventMutationTarget(tx, eventId);
+      if (!target) {
+        return { missing: true as const };
+      }
       await tx.eventRegistrations.updateMany({
         where: {
           eventId,
@@ -298,42 +379,14 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      const persistedRequest = existingAutoRefund
-        ? await tx.refundRequests.update({
-          where: { id: existingAutoRefund.id },
-          data: {
-            status: 'APPROVED',
-            updatedAt: now,
-          },
-          select: { id: true, status: true },
-        })
-        : await tx.refundRequests.create({
-          data: {
-            id: refundRequest.id,
-            eventId: refundRequest.eventId,
-            userId: refundRequest.userId,
-            requestedByUserId: refundRequest.requestedByUserId,
-            hostId: refundRequest.hostId,
-            teamId: refundRequest.teamId,
-            organizationId: refundRequest.organizationId,
-            slotId: refundRequest.slotId,
-            occurrenceDate: refundRequest.occurrenceDate,
-            billIds: refundRequest.billIds ?? [],
-            paymentIds: refundRequest.paymentIds ?? [],
-            paymentScope: refundRequest.paymentScope ?? [],
-            requestedAmountCents: refundRequest.requestedAmountCents ?? 0,
-            currency: refundRequest.currency ?? 'usd',
-            policyDecision: refundRequest.policyDecision,
-            scopeVersion: refundRequest.scopeVersion ?? REFUND_SCOPE_VERSION,
-            scopeHash: refundRequest.scopeHash,
-            reason: refundRequest.reason,
-            status: 'APPROVED',
-            createdAt: now,
-            updatedAt: now,
-          },
-          select: { id: true, status: true },
-        });
-
+      const persistedRequest = await tx.refundRequests.update({
+        where: { id: intent.request.id },
+        data: {
+          status: 'APPROVED',
+          updatedAt: now,
+        },
+        select: { id: true, status: true },
+      });
       const updatedPayments = await applyRefundAttempts(tx, stripeRefundAttempts, now);
 
       return {
@@ -341,6 +394,9 @@ export async function POST(req: NextRequest) {
         updatedPayments,
       };
     });
+    if ('missing' in result) {
+      return NextResponse.json({ error: 'Event not found' }, { status: 404 });
+    }
 
     const refundSummary = summarizeRefundAttempts(stripeRefundAttempts);
 
@@ -369,6 +425,10 @@ export async function POST(req: NextRequest) {
   const waitingScope = buildRefundScopeSnapshot(waitingRequest, waitingPayments, 'HOST_REVIEW_REQUIRED');
 
   const result = await prisma.$transaction(async (tx) => {
+    const target = await acquireEventMutationTarget(tx, eventId);
+    if (!target) {
+      return { missing: true as const };
+    }
     const existingWaitingRequest = await tx.refundRequests.findFirst({
       where: {
         eventId,
@@ -438,6 +498,9 @@ export async function POST(req: NextRequest) {
       refundId: createdRefund.id,
     };
   });
+  if ('missing' in result) {
+    return NextResponse.json({ error: 'Event not found' }, { status: 404 });
+  }
 
   return NextResponse.json(
     {

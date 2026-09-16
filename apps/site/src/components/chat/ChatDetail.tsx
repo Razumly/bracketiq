@@ -1,15 +1,208 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useInsertionEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from '@/context/ChatContext';
 import { useChatUI } from '@/context/ChatUIContext';
 import { useApp } from '@/app/providers';
 import { formatDisplayTime } from '@/lib/dateUtils';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { LoaderCircleIcon, SendIcon, XIcon } from 'lucide-react';
+import { type Message } from '@/lib/chatService';
 import { resolveChatGroupInitial, resolveChatGroupTitle } from './chatGroupDisplay';
+
 
 interface ChatDetailProps {
     chatId: string;
 }
+function restoreChatFocus(chatId: string, opener: HTMLElement | null) {
+    if (typeof document === 'undefined') {
+        return;
+    }
+    if (opener?.isConnected) {
+        opener.focus();
+        return;
+    }
+
+    const chatEntry = Array.from(
+        document.querySelectorAll<HTMLElement>('[data-chat-entry-id]'),
+    ).find((element) => element.dataset.chatEntryId === chatId);
+    if (chatEntry?.isConnected) {
+        chatEntry.focus();
+        return;
+    }
+
+    const nextWindow = Array.from(
+        document.querySelectorAll<HTMLElement>('[data-chat-window-close]'),
+    ).find((element) => element.dataset.chatWindowClose !== chatId);
+    if (nextWindow?.isConnected) {
+        nextWindow.focus();
+        return;
+    }
+
+    document.querySelector<HTMLElement>('[data-chat-entry]')?.focus();
+}
+type ChatDetailHeaderProps = {
+    chatId: string;
+    chatInitial: string;
+    chatMemberCount: number;
+    chatTitle: string;
+    closeButtonRef: React.RefObject<HTMLButtonElement | null>;
+    onClose: () => void;
+};
+
+function ChatDetailHeader({
+    chatId,
+    chatInitial,
+    chatMemberCount,
+    chatTitle,
+    closeButtonRef,
+    onClose,
+}: ChatDetailHeaderProps) {
+    return (
+        <div className="flex flex-shrink-0 items-center justify-between border-b border-border bg-muted/50 p-3">
+            <div className="flex min-w-0 items-center gap-3">
+                <div
+                    className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-medium text-primary-foreground"
+                    aria-hidden="true"
+                >
+                    {chatInitial}
+                </div>
+                <div className="min-w-0">
+                    <h2 id={`chat-window-title-${chatId}`} className="truncate text-sm font-medium text-foreground">
+                        {chatTitle}
+                    </h2>
+                    <div className="text-xs text-muted-foreground">
+                        {chatMemberCount} members
+                    </div>
+                </div>
+            </div>
+            <Button
+                ref={closeButtonRef}
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                onClick={onClose}
+                data-chat-window-close={chatId}
+                aria-label="Close chat"
+            >
+                <XIcon aria-hidden="true" />
+            </Button>
+        </div>
+    );
+}
+
+type ChatMessagesProps = {
+    chatMessages: Message[];
+    loadingMore: boolean;
+    messageListRef: React.RefObject<HTMLDivElement | null>;
+    onScroll: () => void;
+    userId?: string;
+};
+
+function ChatMessage({ message, isCurrentUser, index }: {
+    message: Message;
+    isCurrentUser: boolean;
+    index: number;
+}) {
+    return (
+        <div
+            key={`${message.$id || 'message'}-${message.sentTime || ''}-${index}`}
+            className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}
+        >
+            <div
+                className={`max-w-xs rounded-lg px-3 py-2 text-sm ${
+                    isCurrentUser
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-muted text-foreground'
+                }`}
+            >
+                <div>{message.body}</div>
+                <div className={`mt-1 text-xs ${
+                    isCurrentUser ? 'text-primary-foreground/80' : 'text-muted-foreground'
+                }`}>
+                    {formatDisplayTime(message.sentTime)}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function ChatMessages({
+    chatMessages,
+    loadingMore,
+    messageListRef,
+    onScroll,
+    userId,
+}: ChatMessagesProps) {
+    return (
+        <div
+            ref={messageListRef}
+            onScroll={onScroll}
+            className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3"
+        >
+            {loadingMore ? (
+                <div className="text-center text-xs text-muted-foreground" role="status">
+                    Loading more messages...
+                </div>
+            ) : null}
+            {chatMessages.length === 0 ? (
+                <div className="flex h-full flex-col items-center justify-center text-center text-muted-foreground">
+                    <div className="text-sm">No messages yet</div>
+                    <div className="text-xs">Start the conversation!</div>
+                </div>
+            ) : (
+                chatMessages.map((message, index) => (
+                    <ChatMessage
+                        key={`${message.$id || 'message'}-${message.sentTime || ''}-${index}`}
+                        message={message}
+                        isCurrentUser={message.userId === userId}
+                        index={index}
+                    />
+                ))
+            )}
+        </div>
+    );
+}
+
+type ChatComposerProps = {
+    messageInput: string;
+    onChange: React.ChangeEventHandler<HTMLInputElement>;
+    onSubmit: React.FormEventHandler<HTMLFormElement>;
+    sending: boolean;
+};
+
+function ChatComposer({ messageInput, onChange, onSubmit, sending }: ChatComposerProps) {
+    return (
+        <div className="flex-shrink-0 border-t border-border p-3">
+            <form onSubmit={onSubmit} className="flex gap-2">
+                <Input
+                    type="text"
+                    value={messageInput}
+                    onChange={onChange}
+                    placeholder="Type a message..."
+                    aria-label="Message"
+                    className="min-w-0 flex-1"
+                    disabled={sending}
+                />
+                <Button
+                    type="submit"
+                    size="icon-sm"
+                    disabled={!messageInput.trim() || sending}
+                    aria-label="Send message"
+                >
+                    {sending ? (
+                        <LoaderCircleIcon className="motion-safe:animate-spin" aria-hidden="true" />
+                    ) : (
+                        <SendIcon aria-hidden="true" />
+                    )}
+                </Button>
+            </form>
+        </div>
+    );
+}
+
+
 
 export function ChatDetail({ chatId }: ChatDetailProps) {
     const { messages, messagePagination, sendMessage, loadMoreMessages, chatGroups } = useChat();
@@ -21,6 +214,24 @@ export function ChatDetail({ chatId }: ChatDetailProps) {
     const pendingLoadMoreRestoreRef = useRef<{ previousTop: number; previousHeight: number } | null>(null);
     const previousMessageCountRef = useRef(0);
     const previousLastMessageKeyRef = useRef('');
+    const closeButtonRef = useRef<HTMLButtonElement>(null);
+    const openerRef = useRef<HTMLElement | null>(null);
+
+    useInsertionEffect(() => {
+        if (typeof document === 'undefined') {
+            return;
+        }
+
+        const activeElement = document.activeElement;
+        openerRef.current = activeElement instanceof HTMLElement && activeElement !== document.body
+            ? activeElement
+            : null;
+    }, [chatId]);
+
+    useEffect(() => {
+        closeButtonRef.current?.focus();
+    }, [chatId]);
+
 
     const chatMessages = useMemo(() => messages[chatId] || [], [messages, chatId]);
     const pagination = messagePagination[chatId];
@@ -101,108 +312,56 @@ export function ChatDetail({ chatId }: ChatDetailProps) {
     };
 
     const handleClose = () => {
+        const opener = openerRef.current;
+        restoreChatFocus(chatId, opener);
         closeChatWindow(chatId);
     };
 
-    const formatMessageTime = (timestamp: string) => {
-        return formatDisplayTime(timestamp);
+    const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+        const activeElement = typeof document !== 'undefined' ? document.activeElement : null;
+        if (
+            event.key !== 'Escape'
+            || !(event.target instanceof Node)
+            || !(activeElement instanceof Node)
+            || !event.currentTarget.contains(event.target)
+            || !event.currentTarget.contains(activeElement)
+        ) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        handleClose();
     };
 
     return (
-        <div className="flex flex-col h-full">
-            {/* Header with Close Button - Fixed height */}
-            <div className="flex items-center justify-between p-3 border-b border-gray-200 bg-gray-50 flex-shrink-0">
-                <div className="flex items-center space-x-3">
-                    <div className="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center text-sm font-medium">
-                        {chatInitial}
-                    </div>
-                    <div>
-                        <div className="font-medium text-sm text-gray-900">
-                            {chatTitle}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                            {chatMemberCount} members
-                        </div>
-                    </div>
-                </div>
-                <button
-                    onClick={handleClose}
-                    className="p-1 hover:bg-gray-200 rounded-full transition-colors"
-                >
-                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                </button>
-            </div>
-
-            {/* Messages - Scrollable area that takes remaining height */}
-            <div
-                ref={messageListRef}
+        <div
+            role="dialog"
+            aria-labelledby={`chat-window-title-${chatId}`}
+            onKeyDown={handleKeyDown}
+            className="flex h-full flex-col bg-background text-foreground"
+        >
+            <ChatDetailHeader
+                chatId={chatId}
+                chatInitial={chatInitial}
+                chatMemberCount={chatMemberCount}
+                chatTitle={chatTitle}
+                closeButtonRef={closeButtonRef}
+                onClose={handleClose}
+            />
+            <ChatMessages
+                chatMessages={chatMessages}
+                loadingMore={loadingMore}
+                messageListRef={messageListRef}
                 onScroll={handleMessagesScroll}
-                className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0"
-            >
-                {loadingMore ? (
-                    <div className="text-center text-xs text-gray-500">Loading more messages...</div>
-                ) : null}
-                {chatMessages.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-full text-center text-gray-500">
-                        <div className="text-sm">No messages yet</div>
-                        <div className="text-xs">Start the conversation!</div>
-                    </div>
-                ) : (
-                    chatMessages.map((message, index) => {
-                        const isCurrentUser = message.userId === user?.$id;
-                        return (
-                            <div
-                                key={`${message.$id || 'message'}-${message.sentTime || ''}-${index}`}
-                                className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}
-                            >
-                                <div
-                                    className={`max-w-xs px-3 py-2 rounded-lg text-sm ${isCurrentUser
-                                            ? 'bg-blue-500 text-white'
-                                            : 'bg-gray-200 text-gray-900'
-                                        }`}
-                                >
-                                    <div>{message.body}</div>
-                                    <div className={`text-xs mt-1 ${isCurrentUser ? 'text-blue-100' : 'text-gray-500'}`}>
-                                        {formatMessageTime(message.sentTime)}
-                                    </div>
-                                </div>
-                            </div>
-                        );
-                    })
-                )}
-            </div>
-
-            {/* Message Input - Fixed height at bottom */}
-            <div className="border-t border-gray-200 p-3 flex-shrink-0">
-                <form onSubmit={handleSendMessage} className="flex space-x-2">
-                    <input
-                        type="text"
-                        value={messageInput}
-                        onChange={(e) => setMessageInput(e.target.value)}
-                        placeholder="Type a message..."
-                        className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        disabled={sending}
-                    />
-                    <button
-                        type="submit"
-                        disabled={!messageInput.trim() || sending}
-                        className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-                    >
-                        {sending ? (
-                            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                            </svg>
-                        ) : (
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                            </svg>
-                        )}
-                    </button>
-                </form>
-            </div>
+                userId={user?.$id}
+            />
+            <ChatComposer
+                messageInput={messageInput}
+                onChange={(event) => setMessageInput(event.target.value)}
+                onSubmit={handleSendMessage}
+                sending={sending}
+            />
         </div>
     );
 }

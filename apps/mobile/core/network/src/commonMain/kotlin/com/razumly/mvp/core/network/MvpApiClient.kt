@@ -1,5 +1,7 @@
 package com.razumly.mvp.core.network
 
+import com.razumly.mvp.core.network.dto.AppVersionIsolationProbeResponseDto
+
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
@@ -17,6 +19,9 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
+
+private const val APP_VERSION_ISOLATION_PROBE_PATH =
+    "api/app-version?platform=ANDROID&versionName=0.0.0&buildNumber=0&mvpTestIsolation=1"
 
 class MvpApiClient(
     val http: HttpClient,
@@ -67,6 +72,9 @@ class MvpApiClient(
             if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
         }.body()
     }
+
+    suspend fun getAppVersionIsolationProbe(): AppVersionIsolationProbeResponseDto =
+        get(APP_VERSION_ISOLATION_PROBE_PATH)
 
     suspend fun getBytes(path: String): ByteArray {
         val token = tokenStore.get()

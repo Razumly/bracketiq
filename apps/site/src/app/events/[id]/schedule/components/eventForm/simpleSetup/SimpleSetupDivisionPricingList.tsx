@@ -1,14 +1,12 @@
-import {
-    Alert,
-    Button,
-    Group,
-    NumberInput,
-    Paper,
-    Stack,
-    Switch,
-    Text,
-} from '@mantine/core';
-import { DateTimePicker } from '@mantine/dates';
+import { Alert,
+Button,
+Group,
+NumberInput,
+Paper,
+Stack,
+Switch,
+Text, } from '@/components/organization/organization-operation-ui';
+import { DateTimePicker } from '@/components/organization/organization-operation-ui';
 
 import CentsInput from '@/components/ui/CentsInput';
 import HostPriceInput from '@/components/ui/HostPriceInput';
@@ -225,7 +223,7 @@ export const SimpleSetupDivisionPricingList = ({
                                         onChange={(value) => syncInstallments(index, Number(value) || 1)}
                                     />
                                     {installmentAmounts.map((amount, installmentIndex) => (
-                                        <Group key={installmentIndex} align="flex-end" wrap="wrap">
+                                        <Group key={installmentIndex} align="flex-start" wrap="wrap">
                                             {useRelativeDueDates ? (
                                                 <NumberInput
                                                     label={`Installment ${installmentIndex + 1} due date offset`}

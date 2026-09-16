@@ -6,6 +6,7 @@ import {
   organizationTabFromPathSegment,
   pushOrganizationHistoryState,
   resolveOrganizationRouteTab,
+  resolveOrganizationTabSelection,
 } from '../organizationTabs';
 
 describe('buildOrganizationTabs', () => {
@@ -88,6 +89,23 @@ describe('buildOrganizationTabs', () => {
     ]);
   });
 
+  it('keeps teams and facilities stable for members with an explicit feature contract', () => {
+    expect(buildOrganizationTabs({
+      enabledFeatures: ['EVENT_MANAGEMENT'],
+      isOrganizationRoleMember: true,
+      hasTeams: false,
+      hasRentals: false,
+      hasResources: false,
+    })).toEqual([
+      { label: 'Overview', value: 'overview' },
+      { label: 'Reviews', value: 'reviews' },
+      { label: 'Events', value: 'events' },
+      { label: 'Teams', value: 'teams' },
+      { label: 'Facilities', value: 'fields' },
+      { label: 'Store', value: 'store' },
+    ]);
+  });
+
   it('shows only permission-backed management tabs for custom staff roles', () => {
     expect(buildOrganizationTabs({
       isOrganizationRoleMember: true,
@@ -139,6 +157,24 @@ describe('buildOrganizationTabs', () => {
     expect(organizationTabFromPathSegment('facilities')).toBe('fields');
     expect(organizationTabFromPathSegment('fields')).toBe('fields');
     expect(organizationTabFromPathSegment('unknown')).toBeNull();
+  });
+
+  it('keeps a requested tab while the organization is still loading', () => {
+    const initialTabs = [
+      { label: 'Overview', value: 'overview' as const },
+      { label: 'Reviews', value: 'reviews' as const },
+    ];
+
+    expect(resolveOrganizationTabSelection({
+      activeTab: 'teams',
+      availableTabs: initialTabs,
+      organizationLoaded: false,
+    })).toBe('teams');
+    expect(resolveOrganizationTabSelection({
+      activeTab: 'teams',
+      availableTabs: initialTabs,
+      organizationLoaded: true,
+    })).toBe('overview');
   });
 
   it('builds selected customer paths under the customers tab', () => {

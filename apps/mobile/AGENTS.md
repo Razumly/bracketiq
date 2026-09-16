@@ -60,6 +60,8 @@ For shared Compose logo resources, keep explicit imports for `mvp.composeapp.gen
 ## Testing Guidelines
 Name tests with `given_when_then` phrasing and keep them beside the feature they cover (e.g., `EventSearchPresenterTest`). Shared logic lives in `commonTest`, Android helpers in `androidUnitTest`, and Swift interop checks in `iosTest`. Mock platform APIs through MockMP utilities already defined in `composeApp/build.gradle.kts`. When Room entities are modified in any way, increment `MVP_DATABASE_VERSION` in `composeApp/src/commonMain/kotlin/com/razumly/mvp/core/db/MVPDatabaseService.kt`, then run `.\gradlew :composeApp:roomGenerateSchema` and review diffs under `composeApp/schemas/`. Add screenshots or snapshots for UI-heavy work so both platforms can verify behavior.
 
+For every HTTP contract change, read the current `apps/site` schema before editing mobile DTOs. Update the DTO, JSON encoder, mapper, and API caller together. Do not add, remove, rename, narrow, or reinterpret a required request or response field under an unchanged contract version unless the site parser remains compatible with every supported released mobile client. Add a focused wire-shape test and run a real mobile-to-site API integration test locally. A `MockEngine` test alone is not sufficient.
+
 ## Form & Scheduling Standards
 Use date-only calendar pickers for all birthday/date-of-birth input. Do not use datetime pickers for DOB fields, and persist DOB in `YYYY-MM-DD` semantics.
 Use 12-hour time presentation (`AM/PM`) for user-facing time pickers and time labels.
@@ -78,4 +80,4 @@ Store secrets in `secrets.properties` with fallbacks in `local.defaults.properti
 
 ## Shared agent rules
 
-Read the root `../../AGENTS.md` for the issue tracker, triage labels, domain documents, backend compatibility rules, and operational boundaries.
+The root `../../AGENTS.md` is the parent policy. If it is not already in context, read it once before this file. Do not reread it after this file.

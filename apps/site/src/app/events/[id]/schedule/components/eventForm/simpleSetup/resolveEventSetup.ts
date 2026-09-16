@@ -37,33 +37,30 @@ export const resolveEventSetupCapabilities = (
     const isLeague = input.eventType === 'LEAGUE';
     const isTournament = input.eventType === 'TOURNAMENT';
     const isWeekly = input.eventType === 'WEEKLY_EVENT';
-    const isManaged = !isExternal;
-    const isTeamRegistration = isManaged && (isLeague || isTournament || input.teamSignup) && !isTryout;
-    const usesOperationsPlanning = isManaged && !isTryout;
+    const isTeamRegistration = (isLeague || isTournament || input.teamSignup) && !isTryout;
+    const usesOperationsPlanning = !isTryout;
 
     return {
         isExternal,
-        isManaged,
         isTryout,
         isLeague,
         isTournament,
         isWeekly,
         isTeamRegistration,
         divisionMode: isTryout || !input.singleDivision ? 'SPLIT' : 'SHARED',
-        canChooseTeamRegistration: isManaged && !isTryout && !isLeague && !isTournament,
+        canChooseTeamRegistration: !isTryout && !isLeague && !isTournament,
         canChooseDivisionMode: !isTryout,
-        canUseRegistrationByDivisionType: isManaged && !isTryout && !input.singleDivision,
-        canUseLeaguePlayoffs: isManaged && isLeague,
-        canSplitLeaguePlayoffDivisions: isManaged
-            && isLeague
+        canUseRegistrationByDivisionType: !isTryout && !input.singleDivision,
+        canUseLeaguePlayoffs: isLeague,
+        canSplitLeaguePlayoffDivisions: isLeague
             && input.includePlayoffs
             && !input.singleDivision
             && !input.hasImmutableRentalResources,
-        canUsePoolPlay: isManaged && isTournament,
-        usesInternalSchedule: isManaged,
-        usesCompetition: isManaged && (isLeague || isTournament),
-        usesInternalRegistration: isManaged,
-        usesDocumentsAndQuestions: isManaged
+        canUsePoolPlay: isTournament,
+        usesInternalSchedule: true,
+        usesCompetition: isLeague || isTournament,
+        usesInternalRegistration: !isExternal,
+        usesDocumentsAndQuestions: !isExternal
             && (input.choices.useRequiredDocuments || input.choices.useRegistrationQuestions),
         usesOperationsPlanning,
         usesStaffAndOperations: usesOperationsPlanning && (
@@ -164,10 +161,9 @@ export const describeEventSetupTransition = (
         categories.add('competition configuration');
     }
     if (!previous.isExternalRegistration && next.isExternalRegistration) {
-        ['divisions', 'pricing-registration', 'documents-questions', 'staff-operations']
+        ['pricing-registration', 'documents-questions']
             .forEach((pageId) => pageIds.add(pageId as EventSetupPageId));
         categories.add('BracketIQ payments and registration requirements');
-        categories.add('match, scoring, staff, and official settings');
     }
     if (previous.singleDivision !== next.singleDivision) {
         ['divisions', 'schedule-location', 'pricing-registration']

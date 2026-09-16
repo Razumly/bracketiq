@@ -76,10 +76,20 @@ export const createLeagueSlotForm = (
     });
     const isRepeating = slot?.repeating ?? true;
     const normalizedStartDate = isRepeating
-        ? normalizeSlotBoundaryOverrideForForm(slot?.startDate ?? null, fallbackEventStart ?? null, slotTimeZone)
+        ? normalizeSlotBoundaryOverrideForForm(
+            slot?.startDate ?? null,
+            fallbackEventStart ?? null,
+            slotTimeZone,
+            true,
+        )
         : formatEventDateTimeForForm(slot?.startDate ?? null, slotTimeZone) || undefined;
     const normalizedEndDate = isRepeating
-        ? normalizeSlotBoundaryOverrideForForm(slot?.endDate ?? null, fallbackEventEnd ?? null, slotTimeZone)
+        ? normalizeSlotBoundaryOverrideForForm(
+            slot?.endDate ?? null,
+            fallbackEventEnd ?? null,
+            slotTimeZone,
+            true,
+        )
         : formatEventDateTimeForForm(slot?.endDate ?? null, slotTimeZone) || undefined;
     return {
         key: slot?.$id ?? createClientId(),
@@ -161,6 +171,10 @@ export const normalizeLeagueSlotUpdate = ({
 
     const repeating = updated.repeating !== false;
     if (repeating) {
+        if (slot.repeating === false && updates.repeating === true) {
+            updated.startDate = undefined;
+            updated.endDate = undefined;
+        }
         const parsedStart = parseLocalDateTime(updated.startDate ?? null);
         const parsedEnd = parseLocalDateTime(updated.endDate ?? null);
         const nextDays = normalizedDays.length

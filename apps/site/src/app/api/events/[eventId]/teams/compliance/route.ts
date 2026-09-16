@@ -2,22 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
 import { canManageEvent } from '@/server/accessControl';
-import { calculateAgeOnDate } from '@/lib/age';
+import { readByIdChunks } from '@/server/documentEvidence';
+import { readRosterDocumentReadiness } from '@/server/events/rosterDocumentReadiness';
 import {
-  buildRequiredSignatureTasks,
-  buildSignatureCompletionKey,
   normalizeRegistrationAnswersSnapshot,
   pickPrimaryBill,
   type ComplianceTemplate,
   type EventTeamComplianceResponse,
   type TeamCompliancePaymentSummary,
-  type TeamComplianceRequiredDocument,
   type TeamComplianceUserSummary,
 } from '@/lib/eventTeamCompliance';
-import {
-  documentSubjectIdFor,
-  findCompletedDocumentSatisfactions,
-} from '@/server/documentEvidence';
 import { loadBillDiscountSummaries, withBillDiscountAmounts } from '@/server/billing/billDiscountSummaries';
 
 export const dynamic = 'force-dynamic';
@@ -256,6 +250,7 @@ export async function GET(
         id: true,
         name: true,
         playerIds: true,
+        pending: true,
         parentTeamId: true,
       },
     }),
@@ -276,6 +271,12 @@ export async function GET(
       });
     })(),
   ]);
+  if (teamIds.some((id) => !teams.some((team) => team.id === id))) {
+    return NextResponse.json({ error: 'A registered Team roster is unavailable.' }, { status: 409 });
+  }
+  if (normalizeIdList(event.requiredTemplateIds).some((id) => !templates.some((template) => template.id === id))) {
+    return NextResponse.json({ error: 'A required Document Template Version is unavailable.' }, { status: 409 });
+  }
   const answerResponses: Array<{ subjectId: string; answersSnapshot: unknown }> = registrationByTeamId.size && typeof (prisma as any).registrationQuestionResponses?.findMany === 'function'
     ? await (prisma as any).registrationQuestionResponses.findMany({
       where: {
@@ -323,32 +324,13 @@ export async function GET(
     })
     : [];
 
-  const playerIds = Array.from(
-    new Set(
-      teams.flatMap((team) => normalizeIdList(team.playerIds)),
-    ),
-  );
-
-  const [users, registrations, userBills] = await Promise.all([
-    playerIds.length
-      ? prisma.userData.findMany({
-        where: { id: { in: playerIds } },
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          userName: true,
-          dateOfBirth: true,
-        },
-      })
-      : Promise.resolve([]),
-    playerIds.length
-      ? prisma.eventRegistrations.findMany({
+  const registrations = await prisma.eventRegistrations.findMany({
         where: {
           eventId,
           eventTeamId: { in: teamIds },
-          registrantId: { in: playerIds },
           registrantType: { in: ['SELF', 'CHILD'] },
+          rosterRole: 'PARTICIPANT',
+          ...occurrenceWhere,
         },
         select: {
           eventTeamId: true,
@@ -359,7 +341,26 @@ export async function GET(
           updatedAt: true,
           createdAt: true,
         },
-      })
+      });
+  const playerIds = Array.from(
+    new Set(
+      teams.flatMap((team) => normalizeIdList([...team.playerIds, ...(team.pending ?? []),
+        ...registrations.filter((row) => row.eventTeamId === team.id).map((row) => row.registrantId)])),
+    ),
+  );
+
+  const [users, userBills] = await Promise.all([
+    playerIds.length
+      ? readByIdChunks(playerIds, (ids) => prisma.userData.findMany({
+        where: { id: { in: ids } },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          userName: true,
+          dateOfBirth: true,
+        },
+      }))
       : Promise.resolve([]),
     (() => {
       const parentBillIds = teamBills
@@ -456,88 +457,10 @@ export async function GET(
     Object.assign(bill as any, withBillDiscountAmounts(bill, discountAmountsByBillId));
   });
 
-  const teamMembershipScopeIdsByUserId = new Map<string, Set<string>>();
-  teams.forEach((team) => {
-    const scopeId = normalizeId(team.parentTeamId) ?? normalizeId(team.id);
-    if (!scopeId) {
-      return;
-    }
-    normalizeIdList(team.playerIds).forEach((playerId) => {
-      const scopeIds = teamMembershipScopeIdsByUserId.get(playerId) ?? new Set<string>();
-      scopeIds.add(scopeId);
-      teamMembershipScopeIdsByUserId.set(playerId, scopeIds);
-    });
-  });
-  const teamMembershipScopeIds = Array.from(new Set(
-    Array.from(teamMembershipScopeIdsByUserId.values()).flatMap((scopeIds) => Array.from(scopeIds)),
-  ));
-  const documentSubjectIdByUserId = new Map(
-    playerIds
-      .map((playerId) => [
-        playerId,
-        documentSubjectIdFor(event.organizationId, playerId),
-      ] as const)
-      .filter((entry): entry is readonly [string, string] => Boolean(entry[1])),
-  );
-  const satisfactionRows = await findCompletedDocumentSatisfactions({
-    documentSubjectIds: Array.from(documentSubjectIdByUserId.values()),
-    templateDocumentIds: templates.map((template) => template.id),
-    scopes: [
-      ...(event.organizationId
-        ? [{ scopeType: 'ORGANIZATION' as const, scopeId: event.organizationId }]
-        : []),
-      ...teamMembershipScopeIds.map((scopeId) => ({
-        scopeType: 'TEAM_MEMBERSHIP' as const,
-        scopeId,
-      })),
-      { scopeType: 'EVENT_PARTICIPATION' as const, scopeId: eventId },
-    ],
-  });
-  const completeDocumentSatisfactionByKey = new Map<string, { id: string; signedAt?: string }>();
-  satisfactionRows.forEach((row) => {
-    const signedAt = row.signedAt ?? undefined;
-    completeDocumentSatisfactionByKey.set(
-      `${row.documentSubjectId}::${row.templateDocumentId}::${row.scopeType}::${row.scopeId}`,
-      { id: row.sourceEvidenceId, signedAt },
-    );
-  });
-  const getSatisfiedDocument = (task: {
-    templateId: string;
-    signOnce: boolean;
-    signerUserId?: string | null;
-    hostUserId?: string | null;
-  }) => {
-    const subjectUserId = normalizeId(task.hostUserId) ?? normalizeId(task.signerUserId);
-    const subjectId = subjectUserId ? documentSubjectIdByUserId.get(subjectUserId) : undefined;
-    if (!subjectId) {
-      return undefined;
-    }
-    const teamScopeIds = subjectUserId
-      ? teamMembershipScopeIdsByUserId.get(subjectUserId)
-      : undefined;
-    const scopeCandidates = task.signOnce
-      ? (event.organizationId
-        ? [{ scopeType: 'ORGANIZATION' as const, scopeId: event.organizationId }]
-        : [])
-      : [
-        ...(teamScopeIds
-          ? Array.from(teamScopeIds).map((scopeId) => ({
-            scopeType: 'TEAM_MEMBERSHIP' as const,
-            scopeId,
-          }))
-          : []),
-        { scopeType: 'EVENT_PARTICIPATION' as const, scopeId: eventId },
-      ];
-    for (const scope of scopeCandidates) {
-      const completion = completeDocumentSatisfactionByKey.get(
-        `${subjectId}::${task.templateId}::${scope.scopeType}::${scope.scopeId}`,
-      );
-      if (completion) {
-        return completion;
-      }
-    }
-    return undefined;
-  };
+  if (playerIds.some((id) => !users.some((user) => user.id === id))) {
+    return NextResponse.json({ error: 'A roster Player profile is unavailable.' }, { status: 409 });
+  }
+  const readinessByUserId = await readRosterDocumentReadiness(prisma, event, users, templates);
 
   const usersById = new Map(users.map((user) => [user.id, user]));
 
@@ -586,13 +509,14 @@ export async function GET(
         Boolean(teamBill && parentTeamId && parentTeamBills.length > 0),
         teamPaymentPending,
       );
-      const orderedPlayerIds = normalizeIdList(team.playerIds);
+      const orderedPlayerIds = normalizeIdList([...team.playerIds, ...(team.pending ?? []),
+        ...registrations.filter((row) => row.eventTeamId === team.id).map((row) => row.registrantId)]);
 
       const usersForTeam: TeamComplianceUserSummary[] = orderedPlayerIds
         .filter((playerId) => {
           const registration = latestRegistrationByEventTeamAndUserId.get(`${team.id}::${playerId}`);
           if (!registration) {
-            return false;
+            return true;
           }
           return isEligibleEventPersonRegistration(registration.status);
         })
@@ -601,45 +525,10 @@ export async function GET(
           if (!user) {
             return null;
           }
-          const registration = latestRegistrationByEventTeamAndUserId.get(`${team.id}::${playerId}`);
-          const ageAtEvent = calculateAgeOnDate(user.dateOfBirth, event.start);
-          const isMinorAtEvent = Number.isFinite(ageAtEvent) && ageAtEvent < 18;
-          const isChildRegistration = registration?.registrantType === 'CHILD' || isMinorAtEvent;
-          const parentUserId = normalizeId(registration?.parentId);
-
-          const signatureTasks = buildRequiredSignatureTasks({
-            templates,
-            context: {
-              userId: playerId,
-              isChildRegistration,
-              parentUserId,
-            },
-          });
-
-          const requiredDocuments: TeamComplianceRequiredDocument[] = signatureTasks.map((task) => {
-            const completionKey = buildSignatureCompletionKey({
-              scopeKey: task.signOnce ? 'once' : `event:${eventId}`,
-              templateId: task.templateId,
-              signerContext: task.signerContext,
-              hostUserId: task.hostUserId,
-            });
-            const completion = getSatisfiedDocument(task);
-            return {
-              key: completionKey,
-              templateId: task.templateId,
-              title: task.templateTitle,
-              type: task.templateType,
-              signerContext: task.signerContext,
-              signerLabel: task.signerLabel,
-              signOnce: task.signOnce,
-              status: completion ? 'SIGNED' : 'UNSIGNED',
-              signedDocumentRecordId: completion?.id,
-              signedAt: completion?.signedAt,
-            };
-          });
-
-          const signedCount = requiredDocuments.filter((document) => document.status === 'SIGNED').length;
-          const requiredCount = requiredDocuments.length;
+          const readiness = readinessByUserId.get(playerId)!;
+          const { isMinorAtEvent, requiredDocuments } = readiness;
+          const isChildRegistration = isMinorAtEvent;
+          const { signedCount, requiredCount } = readiness.documents;
 
           const userBillCandidates = userBillsByOwnerId.get(playerId) ?? [];
           const userBillForTeam = teamBill

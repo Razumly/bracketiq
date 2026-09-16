@@ -785,7 +785,7 @@ internal fun ComposeEventSearchScreen(
     mapComponent: MapComponent,
     openExternalUrl: suspend (String) -> Result<String>,
 ) {
-    val events by component.events.collectAsState()
+    val eventCards by component.eventCards.collectAsState()
     val organizations by component.organizations.collectAsState()
     val allOrganizations by component.allOrganizations.collectAsState()
     val organizationSuggestions by component.suggestedOrganizations.collectAsState()
@@ -857,7 +857,7 @@ internal fun ComposeEventSearchScreen(
     val hasSubmittedSearch = normalizedSubmittedSearchQuery.isNotEmpty()
     val submittedSearchResults = remember(
         normalizedSubmittedSearchQuery,
-        events,
+        eventCards,
         organizations,
         teams,
         rentals,
@@ -871,7 +871,8 @@ internal fun ComposeEventSearchScreen(
     ) {
         val organizationsById = allOrganizations.associateBy(Organization::id)
         submittedSearchResults.events
-            .filter { event ->
+            .filter { result ->
+                val event = result.event
                 event.canShowPublishedBadgeForViewer(
                     viewerUserId = currentUserId,
                     organization = event.organizationId
@@ -880,7 +881,7 @@ internal fun ComposeEventSearchScreen(
                         ?.let(organizationsById::get),
                 )
             }
-            .mapTo(mutableSetOf()) { event -> event.id }
+            .mapTo(mutableSetOf()) { result -> result.event.id }
     }
     val guideController = LocalGuideController.current
     val discoverGuide = remember {
@@ -1344,8 +1345,8 @@ internal fun ComposeEventSearchScreen(
                             when (selectedTab) {
                                 DiscoverTab.EVENTS -> {
                                     EventsTabContent(
-                                        events = submittedSearchResults.events,
-                                        organizationLogoIdsById = organizationLogoIdsById,
+                                        events = submittedSearchResults.events.map { result -> result.event },
+                                        eventCards = submittedSearchResults.events,
                                         publishedBadgeEventIds = publishedBadgeEventIds,
                                         firstElementPadding = firstElementPadding,
                                         lastElementPadding = offsetNavPadding,

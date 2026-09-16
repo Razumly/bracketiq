@@ -4,12 +4,7 @@ import {
 } from '@/lib/divisionTypes';
 import { isGeneratedTournamentPoolRecord } from '@/server/events/tournamentPools';
 
-import {
-  LEGACY_OFFICIAL_SCHEDULING_MODE_BY_PRIORITY,
-  normalizeOfficialSchedulingMode,
-  normalizeStaffingPriority,
-  type StaffingPriority,
-} from '@/server/officials/config';
+import { normalizeStaffingPriority } from '@/server/officials/config';
 
 
 type EventResponseRecord = Record<string, unknown>;
@@ -70,15 +65,63 @@ export const normalizeEventStaffingResponse = <T extends EventResponseRecord>(
 ): T => {
   normalizeEventBracketCountsResponse(response);
   const record = response as EventResponseRecord;
-  const legacyMode = normalizeOfficialSchedulingMode(record.officialSchedulingMode);
-  const staffingPriority: StaffingPriority = normalizeStaffingPriority(
-    record.staffingPriority,
-    legacyMode,
-  );
+  if (
+    typeof record.isAutomatedScheduling !== 'boolean'
+    && typeof record.automatedScheduling === 'boolean'
+  ) {
+    record.isAutomatedScheduling = record.automatedScheduling;
+  }
+  delete record.automatedScheduling;
+  const eventType = String(record.eventType ?? '').trim().toUpperCase();
+  const staffingPriority = eventType === 'TRYOUT'
+    ? 'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED'
+    : normalizeStaffingPriority(record.staffingPriority);
   record.staffingPriority = staffingPriority;
-  record.officialSchedulingMode = LEGACY_OFFICIAL_SCHEDULING_MODE_BY_PRIORITY[staffingPriority];
-  if (typeof record.doTeamsOfficiate !== 'boolean') {
-    record.doTeamsOfficiate = legacyMode === 'TEAM_STAFFING';
+  if (eventType === 'TRYOUT') {
+    const sanitizeStaffInvites = (value: unknown): unknown => {
+      if (!Array.isArray(value)) {
+        return value;
+      }
+      return value.flatMap((entry) => {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+          return [];
+        }
+        const invite = entry as EventResponseRecord;
+        const normalized = { ...invite };
+        let hasKnownRole = false;
+        if (Array.isArray(invite.roles)) {
+          const roles = invite.roles
+            .map((role: unknown) => String(role).trim().toUpperCase())
+            .filter((role) => role === 'ASSISTANT_HOST');
+          normalized.roles = roles;
+          hasKnownRole = roles.length > 0;
+        }
+        if (Array.isArray(invite.staffTypes)) {
+          const staffTypes = invite.staffTypes
+            .map((staffType: unknown) => String(staffType).trim().toUpperCase())
+            .filter((staffType) => staffType === 'HOST');
+          normalized.staffTypes = staffTypes;
+          hasKnownRole = hasKnownRole || staffTypes.length > 0;
+        }
+        return hasKnownRole || 'roles' in invite || 'staffTypes' in invite
+          ? [normalized]
+          : [];
+      });
+    };
+    record.officialPositions = [];
+    record.officialIds = [];
+    record.eventOfficials = [];
+    record.staffInvites = sanitizeStaffInvites(record.staffInvites);
+    record.pendingStaffInvites = sanitizeStaffInvites(record.pendingStaffInvites);
+    record.doTeamsOfficiate = false;
+    record.teamOfficialsMaySwap = false;
+    record.teamCheckInMode = 'OFF';
+    record.teamCheckInOpenMinutesBefore = 60;
+    record.allowMatchRosterEdits = false;
+    record.allowTemporaryMatchPlayers = false;
+    record.autoCreatePointMatchIncidents = false;
+  } else if (typeof record.doTeamsOfficiate !== 'boolean') {
+    record.doTeamsOfficiate = false;
   }
   return response;
 };

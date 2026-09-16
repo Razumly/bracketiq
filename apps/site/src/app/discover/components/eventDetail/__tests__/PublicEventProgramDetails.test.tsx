@@ -90,6 +90,24 @@ describe('PublicEventProgramDetails', () => {
         );
         expect(screen.getByText('No schedule preview is available yet.')).toBeInTheDocument();
     });
+    it('renders affected competition phase names and exact IDs separately', () => {
+        renderWithMantine(
+            <PublicEventProgramDetails
+                {...baseProps}
+                isScheduleIncomplete
+                unscheduledMatchCount={2}
+                unscheduledMatchIds={['match-2', 'match-3']}
+                affectedCompetitionPhaseLabels={['Pool Play', 'Final']}
+                affectedCompetitionPhaseIds={['phase-final', 'phase-pool']}
+            />,
+        );
+
+        expect(screen.getByText('Schedule incomplete')).toBeInTheDocument();
+        expect(screen.getByText(/2 unscheduled matches: match-2, match-3/)).toBeInTheDocument();
+        expect(screen.getByText(/Affected Competition Phases: Pool Play, Final/)).toBeInTheDocument();
+        expect(screen.getByText(/Competition Phase IDs: phase-final, phase-pool/)).toBeInTheDocument();
+        expect(screen.queryByText('phase-final')).not.toBeInTheDocument();
+    });
 
     it('renders league scoring and staff summaries', () => {
         renderWithMantine(

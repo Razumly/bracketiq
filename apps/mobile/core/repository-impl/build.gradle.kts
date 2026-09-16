@@ -32,7 +32,6 @@ kotlin {
                 implementation(libs.androidx.datastore)
                 implementation(libs.datastore.preferences)
                 implementation(libs.geo)
-                implementation(libs.kmpnotifier)
                 implementation(libs.napier)
                 implementation(libs.kotlinx.datetime)
                 implementation(libs.kotlinx.datetime.ext)
@@ -52,12 +51,20 @@ kotlin {
             }
         }
         commonTest {
+            kotlin.srcDir(files(project(":core:network").layout.buildDirectory.dir("generated/eventEditorFixtures"))
+                .builtBy(":core:network:generateEventEditorFixtures"))
             dependencies {
                 implementation(libs.kotlin.test)
                 implementation(libs.kotlinx.coroutines.test)
                 implementation(libs.ktor.client.mock)
                 implementation(libs.ktor.client.content.negotiation)
                 implementation(libs.ktor.serialization.kotlinx.json)
+            }
+        }
+        androidUnitTest {
+            dependencies {
+                implementation(libs.mockk)
+                implementation(libs.robolectric)
             }
         }
     }

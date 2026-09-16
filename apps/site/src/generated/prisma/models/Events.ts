@@ -120,6 +120,7 @@ export type EventsMinAggregateOutputType = {
   maxAge: number | null
   hostId: string | null
   noFixedEndDateTime: boolean | null
+  automatedScheduling: boolean | null
   price: number | null
   registrationPaymentMode: $Enums.RegistrationPaymentModeEnum | null
   manualPaymentInstructions: string | null
@@ -148,7 +149,6 @@ export type EventsMinAggregateOutputType = {
   parentEvent: string | null
   autoCancellation: boolean | null
   eventType: $Enums.EventsEventTypeEnum | null
-  officialSchedulingMode: $Enums.EventsOfficialSchedulingModeEnum | null
   staffingPriority: $Enums.StaffingPriorityEnum | null
   doTeamsOfficiate: boolean | null
   teamOfficialsMaySwap: boolean | null
@@ -199,6 +199,7 @@ export type EventsMaxAggregateOutputType = {
   maxAge: number | null
   hostId: string | null
   noFixedEndDateTime: boolean | null
+  automatedScheduling: boolean | null
   price: number | null
   registrationPaymentMode: $Enums.RegistrationPaymentModeEnum | null
   manualPaymentInstructions: string | null
@@ -227,7 +228,6 @@ export type EventsMaxAggregateOutputType = {
   parentEvent: string | null
   autoCancellation: boolean | null
   eventType: $Enums.EventsEventTypeEnum | null
-  officialSchedulingMode: $Enums.EventsOfficialSchedulingModeEnum | null
   staffingPriority: $Enums.StaffingPriorityEnum | null
   doTeamsOfficiate: boolean | null
   teamOfficialsMaySwap: boolean | null
@@ -279,6 +279,7 @@ export type EventsCountAggregateOutputType = {
   hostId: number
   assistantHostIds: number
   noFixedEndDateTime: number
+  automatedScheduling: number
   price: number
   registrationPaymentMode: number
   manualPaymentLinks: number
@@ -315,7 +316,6 @@ export type EventsCountAggregateOutputType = {
   parentEvent: number
   autoCancellation: number
   eventType: number
-  officialSchedulingMode: number
   staffingPriority: number
   doTeamsOfficiate: number
   teamOfficialsMaySwap: number
@@ -432,6 +432,7 @@ export type EventsMinAggregateInputType = {
   maxAge?: true
   hostId?: true
   noFixedEndDateTime?: true
+  automatedScheduling?: true
   price?: true
   registrationPaymentMode?: true
   manualPaymentInstructions?: true
@@ -460,7 +461,6 @@ export type EventsMinAggregateInputType = {
   parentEvent?: true
   autoCancellation?: true
   eventType?: true
-  officialSchedulingMode?: true
   staffingPriority?: true
   doTeamsOfficiate?: true
   teamOfficialsMaySwap?: true
@@ -511,6 +511,7 @@ export type EventsMaxAggregateInputType = {
   maxAge?: true
   hostId?: true
   noFixedEndDateTime?: true
+  automatedScheduling?: true
   price?: true
   registrationPaymentMode?: true
   manualPaymentInstructions?: true
@@ -539,7 +540,6 @@ export type EventsMaxAggregateInputType = {
   parentEvent?: true
   autoCancellation?: true
   eventType?: true
-  officialSchedulingMode?: true
   staffingPriority?: true
   doTeamsOfficiate?: true
   teamOfficialsMaySwap?: true
@@ -591,6 +591,7 @@ export type EventsCountAggregateInputType = {
   hostId?: true
   assistantHostIds?: true
   noFixedEndDateTime?: true
+  automatedScheduling?: true
   price?: true
   registrationPaymentMode?: true
   manualPaymentLinks?: true
@@ -627,7 +628,6 @@ export type EventsCountAggregateInputType = {
   parentEvent?: true
   autoCancellation?: true
   eventType?: true
-  officialSchedulingMode?: true
   staffingPriority?: true
   doTeamsOfficiate?: true
   teamOfficialsMaySwap?: true
@@ -772,6 +772,7 @@ export type EventsGroupByOutputType = {
   hostId: string | null
   assistantHostIds: string[]
   noFixedEndDateTime: boolean
+  automatedScheduling: boolean
   price: number
   registrationPaymentMode: $Enums.RegistrationPaymentModeEnum
   manualPaymentLinks: runtime.JsonValue
@@ -808,7 +809,6 @@ export type EventsGroupByOutputType = {
   parentEvent: string | null
   autoCancellation: boolean | null
   eventType: $Enums.EventsEventTypeEnum | null
-  officialSchedulingMode: $Enums.EventsOfficialSchedulingModeEnum
   staffingPriority: $Enums.StaffingPriorityEnum
   doTeamsOfficiate: boolean | null
   teamOfficialsMaySwap: boolean | null
@@ -889,6 +889,7 @@ export type EventsWhereInput = {
   hostId?: Prisma.StringNullableFilter<"Events"> | string | null
   assistantHostIds?: Prisma.StringNullableListFilter<"Events">
   noFixedEndDateTime?: Prisma.BoolFilter<"Events"> | boolean
+  automatedScheduling?: Prisma.BoolFilter<"Events"> | boolean
   price?: Prisma.IntFilter<"Events"> | number
   registrationPaymentMode?: Prisma.EnumRegistrationPaymentModeEnumFilter<"Events"> | $Enums.RegistrationPaymentModeEnum
   manualPaymentLinks?: Prisma.JsonFilter<"Events">
@@ -925,7 +926,6 @@ export type EventsWhereInput = {
   parentEvent?: Prisma.StringNullableFilter<"Events"> | string | null
   autoCancellation?: Prisma.BoolNullableFilter<"Events"> | boolean | null
   eventType?: Prisma.EnumEventsEventTypeEnumNullableFilter<"Events"> | $Enums.EventsEventTypeEnum | null
-  officialSchedulingMode?: Prisma.EnumEventsOfficialSchedulingModeEnumFilter<"Events"> | $Enums.EventsOfficialSchedulingModeEnum
   staffingPriority?: Prisma.EnumStaffingPriorityEnumFilter<"Events"> | $Enums.StaffingPriorityEnum
   doTeamsOfficiate?: Prisma.BoolNullableFilter<"Events"> | boolean | null
   teamOfficialsMaySwap?: Prisma.BoolNullableFilter<"Events"> | boolean | null
@@ -983,6 +983,7 @@ export type EventsOrderByWithRelationInput = {
   hostId?: Prisma.SortOrderInput | Prisma.SortOrder
   assistantHostIds?: Prisma.SortOrder
   noFixedEndDateTime?: Prisma.SortOrder
+  automatedScheduling?: Prisma.SortOrder
   price?: Prisma.SortOrder
   registrationPaymentMode?: Prisma.SortOrder
   manualPaymentLinks?: Prisma.SortOrder
@@ -1019,7 +1020,6 @@ export type EventsOrderByWithRelationInput = {
   parentEvent?: Prisma.SortOrderInput | Prisma.SortOrder
   autoCancellation?: Prisma.SortOrderInput | Prisma.SortOrder
   eventType?: Prisma.SortOrderInput | Prisma.SortOrder
-  officialSchedulingMode?: Prisma.SortOrder
   staffingPriority?: Prisma.SortOrder
   doTeamsOfficiate?: Prisma.SortOrderInput | Prisma.SortOrder
   teamOfficialsMaySwap?: Prisma.SortOrderInput | Prisma.SortOrder
@@ -1080,6 +1080,7 @@ export type EventsWhereUniqueInput = Prisma.AtLeast<{
   hostId?: Prisma.StringNullableFilter<"Events"> | string | null
   assistantHostIds?: Prisma.StringNullableListFilter<"Events">
   noFixedEndDateTime?: Prisma.BoolFilter<"Events"> | boolean
+  automatedScheduling?: Prisma.BoolFilter<"Events"> | boolean
   price?: Prisma.IntFilter<"Events"> | number
   registrationPaymentMode?: Prisma.EnumRegistrationPaymentModeEnumFilter<"Events"> | $Enums.RegistrationPaymentModeEnum
   manualPaymentLinks?: Prisma.JsonFilter<"Events">
@@ -1116,7 +1117,6 @@ export type EventsWhereUniqueInput = Prisma.AtLeast<{
   parentEvent?: Prisma.StringNullableFilter<"Events"> | string | null
   autoCancellation?: Prisma.BoolNullableFilter<"Events"> | boolean | null
   eventType?: Prisma.EnumEventsEventTypeEnumNullableFilter<"Events"> | $Enums.EventsEventTypeEnum | null
-  officialSchedulingMode?: Prisma.EnumEventsOfficialSchedulingModeEnumFilter<"Events"> | $Enums.EventsOfficialSchedulingModeEnum
   staffingPriority?: Prisma.EnumStaffingPriorityEnumFilter<"Events"> | $Enums.StaffingPriorityEnum
   doTeamsOfficiate?: Prisma.BoolNullableFilter<"Events"> | boolean | null
   teamOfficialsMaySwap?: Prisma.BoolNullableFilter<"Events"> | boolean | null
@@ -1174,6 +1174,7 @@ export type EventsOrderByWithAggregationInput = {
   hostId?: Prisma.SortOrderInput | Prisma.SortOrder
   assistantHostIds?: Prisma.SortOrder
   noFixedEndDateTime?: Prisma.SortOrder
+  automatedScheduling?: Prisma.SortOrder
   price?: Prisma.SortOrder
   registrationPaymentMode?: Prisma.SortOrder
   manualPaymentLinks?: Prisma.SortOrder
@@ -1210,7 +1211,6 @@ export type EventsOrderByWithAggregationInput = {
   parentEvent?: Prisma.SortOrderInput | Prisma.SortOrder
   autoCancellation?: Prisma.SortOrderInput | Prisma.SortOrder
   eventType?: Prisma.SortOrderInput | Prisma.SortOrder
-  officialSchedulingMode?: Prisma.SortOrder
   staffingPriority?: Prisma.SortOrder
   doTeamsOfficiate?: Prisma.SortOrderInput | Prisma.SortOrder
   teamOfficialsMaySwap?: Prisma.SortOrderInput | Prisma.SortOrder
@@ -1276,6 +1276,7 @@ export type EventsScalarWhereWithAggregatesInput = {
   hostId?: Prisma.StringNullableWithAggregatesFilter<"Events"> | string | null
   assistantHostIds?: Prisma.StringNullableListFilter<"Events">
   noFixedEndDateTime?: Prisma.BoolWithAggregatesFilter<"Events"> | boolean
+  automatedScheduling?: Prisma.BoolWithAggregatesFilter<"Events"> | boolean
   price?: Prisma.IntWithAggregatesFilter<"Events"> | number
   registrationPaymentMode?: Prisma.EnumRegistrationPaymentModeEnumWithAggregatesFilter<"Events"> | $Enums.RegistrationPaymentModeEnum
   manualPaymentLinks?: Prisma.JsonWithAggregatesFilter<"Events">
@@ -1312,7 +1313,6 @@ export type EventsScalarWhereWithAggregatesInput = {
   parentEvent?: Prisma.StringNullableWithAggregatesFilter<"Events"> | string | null
   autoCancellation?: Prisma.BoolNullableWithAggregatesFilter<"Events"> | boolean | null
   eventType?: Prisma.EnumEventsEventTypeEnumNullableWithAggregatesFilter<"Events"> | $Enums.EventsEventTypeEnum | null
-  officialSchedulingMode?: Prisma.EnumEventsOfficialSchedulingModeEnumWithAggregatesFilter<"Events"> | $Enums.EventsOfficialSchedulingModeEnum
   staffingPriority?: Prisma.EnumStaffingPriorityEnumWithAggregatesFilter<"Events"> | $Enums.StaffingPriorityEnum
   doTeamsOfficiate?: Prisma.BoolNullableWithAggregatesFilter<"Events"> | boolean | null
   teamOfficialsMaySwap?: Prisma.BoolNullableWithAggregatesFilter<"Events"> | boolean | null
@@ -1370,6 +1370,7 @@ export type EventsCreateInput = {
   hostId?: string | null
   assistantHostIds?: Prisma.EventsCreateassistantHostIdsInput | string[]
   noFixedEndDateTime?: boolean
+  automatedScheduling?: boolean
   price: number
   registrationPaymentMode?: $Enums.RegistrationPaymentModeEnum
   manualPaymentLinks?: Prisma.JsonNullValueInput | runtime.InputJsonValue
@@ -1406,7 +1407,6 @@ export type EventsCreateInput = {
   parentEvent?: string | null
   autoCancellation?: boolean | null
   eventType?: $Enums.EventsEventTypeEnum | null
-  officialSchedulingMode?: $Enums.EventsOfficialSchedulingModeEnum
   staffingPriority?: $Enums.StaffingPriorityEnum
   doTeamsOfficiate?: boolean | null
   teamOfficialsMaySwap?: boolean | null
@@ -1464,6 +1464,7 @@ export type EventsUncheckedCreateInput = {
   hostId?: string | null
   assistantHostIds?: Prisma.EventsCreateassistantHostIdsInput | string[]
   noFixedEndDateTime?: boolean
+  automatedScheduling?: boolean
   price: number
   registrationPaymentMode?: $Enums.RegistrationPaymentModeEnum
   manualPaymentLinks?: Prisma.JsonNullValueInput | runtime.InputJsonValue
@@ -1500,7 +1501,6 @@ export type EventsUncheckedCreateInput = {
   parentEvent?: string | null
   autoCancellation?: boolean | null
   eventType?: $Enums.EventsEventTypeEnum | null
-  officialSchedulingMode?: $Enums.EventsOfficialSchedulingModeEnum
   staffingPriority?: $Enums.StaffingPriorityEnum
   doTeamsOfficiate?: boolean | null
   teamOfficialsMaySwap?: boolean | null
@@ -1558,6 +1558,7 @@ export type EventsUpdateInput = {
   hostId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   assistantHostIds?: Prisma.EventsUpdateassistantHostIdsInput | string[]
   noFixedEndDateTime?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  automatedScheduling?: Prisma.BoolFieldUpdateOperationsInput | boolean
   price?: Prisma.IntFieldUpdateOperationsInput | number
   registrationPaymentMode?: Prisma.EnumRegistrationPaymentModeEnumFieldUpdateOperationsInput | $Enums.RegistrationPaymentModeEnum
   manualPaymentLinks?: Prisma.JsonNullValueInput | runtime.InputJsonValue
@@ -1594,7 +1595,6 @@ export type EventsUpdateInput = {
   parentEvent?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   autoCancellation?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   eventType?: Prisma.NullableEnumEventsEventTypeEnumFieldUpdateOperationsInput | $Enums.EventsEventTypeEnum | null
-  officialSchedulingMode?: Prisma.EnumEventsOfficialSchedulingModeEnumFieldUpdateOperationsInput | $Enums.EventsOfficialSchedulingModeEnum
   staffingPriority?: Prisma.EnumStaffingPriorityEnumFieldUpdateOperationsInput | $Enums.StaffingPriorityEnum
   doTeamsOfficiate?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   teamOfficialsMaySwap?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
@@ -1652,6 +1652,7 @@ export type EventsUncheckedUpdateInput = {
   hostId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   assistantHostIds?: Prisma.EventsUpdateassistantHostIdsInput | string[]
   noFixedEndDateTime?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  automatedScheduling?: Prisma.BoolFieldUpdateOperationsInput | boolean
   price?: Prisma.IntFieldUpdateOperationsInput | number
   registrationPaymentMode?: Prisma.EnumRegistrationPaymentModeEnumFieldUpdateOperationsInput | $Enums.RegistrationPaymentModeEnum
   manualPaymentLinks?: Prisma.JsonNullValueInput | runtime.InputJsonValue
@@ -1688,7 +1689,6 @@ export type EventsUncheckedUpdateInput = {
   parentEvent?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   autoCancellation?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   eventType?: Prisma.NullableEnumEventsEventTypeEnumFieldUpdateOperationsInput | $Enums.EventsEventTypeEnum | null
-  officialSchedulingMode?: Prisma.EnumEventsOfficialSchedulingModeEnumFieldUpdateOperationsInput | $Enums.EventsOfficialSchedulingModeEnum
   staffingPriority?: Prisma.EnumStaffingPriorityEnumFieldUpdateOperationsInput | $Enums.StaffingPriorityEnum
   doTeamsOfficiate?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   teamOfficialsMaySwap?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
@@ -1746,6 +1746,7 @@ export type EventsCreateManyInput = {
   hostId?: string | null
   assistantHostIds?: Prisma.EventsCreateassistantHostIdsInput | string[]
   noFixedEndDateTime?: boolean
+  automatedScheduling?: boolean
   price: number
   registrationPaymentMode?: $Enums.RegistrationPaymentModeEnum
   manualPaymentLinks?: Prisma.JsonNullValueInput | runtime.InputJsonValue
@@ -1782,7 +1783,6 @@ export type EventsCreateManyInput = {
   parentEvent?: string | null
   autoCancellation?: boolean | null
   eventType?: $Enums.EventsEventTypeEnum | null
-  officialSchedulingMode?: $Enums.EventsOfficialSchedulingModeEnum
   staffingPriority?: $Enums.StaffingPriorityEnum
   doTeamsOfficiate?: boolean | null
   teamOfficialsMaySwap?: boolean | null
@@ -1840,6 +1840,7 @@ export type EventsUpdateManyMutationInput = {
   hostId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   assistantHostIds?: Prisma.EventsUpdateassistantHostIdsInput | string[]
   noFixedEndDateTime?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  automatedScheduling?: Prisma.BoolFieldUpdateOperationsInput | boolean
   price?: Prisma.IntFieldUpdateOperationsInput | number
   registrationPaymentMode?: Prisma.EnumRegistrationPaymentModeEnumFieldUpdateOperationsInput | $Enums.RegistrationPaymentModeEnum
   manualPaymentLinks?: Prisma.JsonNullValueInput | runtime.InputJsonValue
@@ -1876,7 +1877,6 @@ export type EventsUpdateManyMutationInput = {
   parentEvent?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   autoCancellation?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   eventType?: Prisma.NullableEnumEventsEventTypeEnumFieldUpdateOperationsInput | $Enums.EventsEventTypeEnum | null
-  officialSchedulingMode?: Prisma.EnumEventsOfficialSchedulingModeEnumFieldUpdateOperationsInput | $Enums.EventsOfficialSchedulingModeEnum
   staffingPriority?: Prisma.EnumStaffingPriorityEnumFieldUpdateOperationsInput | $Enums.StaffingPriorityEnum
   doTeamsOfficiate?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   teamOfficialsMaySwap?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
@@ -1934,6 +1934,7 @@ export type EventsUncheckedUpdateManyInput = {
   hostId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   assistantHostIds?: Prisma.EventsUpdateassistantHostIdsInput | string[]
   noFixedEndDateTime?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  automatedScheduling?: Prisma.BoolFieldUpdateOperationsInput | boolean
   price?: Prisma.IntFieldUpdateOperationsInput | number
   registrationPaymentMode?: Prisma.EnumRegistrationPaymentModeEnumFieldUpdateOperationsInput | $Enums.RegistrationPaymentModeEnum
   manualPaymentLinks?: Prisma.JsonNullValueInput | runtime.InputJsonValue
@@ -1970,7 +1971,6 @@ export type EventsUncheckedUpdateManyInput = {
   parentEvent?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   autoCancellation?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   eventType?: Prisma.NullableEnumEventsEventTypeEnumFieldUpdateOperationsInput | $Enums.EventsEventTypeEnum | null
-  officialSchedulingMode?: Prisma.EnumEventsOfficialSchedulingModeEnumFieldUpdateOperationsInput | $Enums.EventsOfficialSchedulingModeEnum
   staffingPriority?: Prisma.EnumStaffingPriorityEnumFieldUpdateOperationsInput | $Enums.StaffingPriorityEnum
   doTeamsOfficiate?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   teamOfficialsMaySwap?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
@@ -2028,6 +2028,7 @@ export type EventsCountOrderByAggregateInput = {
   hostId?: Prisma.SortOrder
   assistantHostIds?: Prisma.SortOrder
   noFixedEndDateTime?: Prisma.SortOrder
+  automatedScheduling?: Prisma.SortOrder
   price?: Prisma.SortOrder
   registrationPaymentMode?: Prisma.SortOrder
   manualPaymentLinks?: Prisma.SortOrder
@@ -2064,7 +2065,6 @@ export type EventsCountOrderByAggregateInput = {
   parentEvent?: Prisma.SortOrder
   autoCancellation?: Prisma.SortOrder
   eventType?: Prisma.SortOrder
-  officialSchedulingMode?: Prisma.SortOrder
   staffingPriority?: Prisma.SortOrder
   doTeamsOfficiate?: Prisma.SortOrder
   teamOfficialsMaySwap?: Prisma.SortOrder
@@ -2150,6 +2150,7 @@ export type EventsMaxOrderByAggregateInput = {
   maxAge?: Prisma.SortOrder
   hostId?: Prisma.SortOrder
   noFixedEndDateTime?: Prisma.SortOrder
+  automatedScheduling?: Prisma.SortOrder
   price?: Prisma.SortOrder
   registrationPaymentMode?: Prisma.SortOrder
   manualPaymentInstructions?: Prisma.SortOrder
@@ -2178,7 +2179,6 @@ export type EventsMaxOrderByAggregateInput = {
   parentEvent?: Prisma.SortOrder
   autoCancellation?: Prisma.SortOrder
   eventType?: Prisma.SortOrder
-  officialSchedulingMode?: Prisma.SortOrder
   staffingPriority?: Prisma.SortOrder
   doTeamsOfficiate?: Prisma.SortOrder
   teamOfficialsMaySwap?: Prisma.SortOrder
@@ -2229,6 +2229,7 @@ export type EventsMinOrderByAggregateInput = {
   maxAge?: Prisma.SortOrder
   hostId?: Prisma.SortOrder
   noFixedEndDateTime?: Prisma.SortOrder
+  automatedScheduling?: Prisma.SortOrder
   price?: Prisma.SortOrder
   registrationPaymentMode?: Prisma.SortOrder
   manualPaymentInstructions?: Prisma.SortOrder
@@ -2257,7 +2258,6 @@ export type EventsMinOrderByAggregateInput = {
   parentEvent?: Prisma.SortOrder
   autoCancellation?: Prisma.SortOrder
   eventType?: Prisma.SortOrder
-  officialSchedulingMode?: Prisma.SortOrder
   staffingPriority?: Prisma.SortOrder
   doTeamsOfficiate?: Prisma.SortOrder
   teamOfficialsMaySwap?: Prisma.SortOrder
@@ -2392,10 +2392,6 @@ export type NullableEnumEventsEventTypeEnumFieldUpdateOperationsInput = {
   set?: $Enums.EventsEventTypeEnum | null
 }
 
-export type EnumEventsOfficialSchedulingModeEnumFieldUpdateOperationsInput = {
-  set?: $Enums.EventsOfficialSchedulingModeEnum
-}
-
 export type EnumStaffingPriorityEnumFieldUpdateOperationsInput = {
   set?: $Enums.StaffingPriorityEnum
 }
@@ -2459,6 +2455,7 @@ export type EventsSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs =
   hostId?: boolean
   assistantHostIds?: boolean
   noFixedEndDateTime?: boolean
+  automatedScheduling?: boolean
   price?: boolean
   registrationPaymentMode?: boolean
   manualPaymentLinks?: boolean
@@ -2495,7 +2492,6 @@ export type EventsSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs =
   parentEvent?: boolean
   autoCancellation?: boolean
   eventType?: boolean
-  officialSchedulingMode?: boolean
   staffingPriority?: boolean
   doTeamsOfficiate?: boolean
   teamOfficialsMaySwap?: boolean
@@ -2553,6 +2549,7 @@ export type EventsSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extens
   hostId?: boolean
   assistantHostIds?: boolean
   noFixedEndDateTime?: boolean
+  automatedScheduling?: boolean
   price?: boolean
   registrationPaymentMode?: boolean
   manualPaymentLinks?: boolean
@@ -2589,7 +2586,6 @@ export type EventsSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extens
   parentEvent?: boolean
   autoCancellation?: boolean
   eventType?: boolean
-  officialSchedulingMode?: boolean
   staffingPriority?: boolean
   doTeamsOfficiate?: boolean
   teamOfficialsMaySwap?: boolean
@@ -2647,6 +2643,7 @@ export type EventsSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extens
   hostId?: boolean
   assistantHostIds?: boolean
   noFixedEndDateTime?: boolean
+  automatedScheduling?: boolean
   price?: boolean
   registrationPaymentMode?: boolean
   manualPaymentLinks?: boolean
@@ -2683,7 +2680,6 @@ export type EventsSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extens
   parentEvent?: boolean
   autoCancellation?: boolean
   eventType?: boolean
-  officialSchedulingMode?: boolean
   staffingPriority?: boolean
   doTeamsOfficiate?: boolean
   teamOfficialsMaySwap?: boolean
@@ -2741,6 +2737,7 @@ export type EventsSelectScalar = {
   hostId?: boolean
   assistantHostIds?: boolean
   noFixedEndDateTime?: boolean
+  automatedScheduling?: boolean
   price?: boolean
   registrationPaymentMode?: boolean
   manualPaymentLinks?: boolean
@@ -2777,7 +2774,6 @@ export type EventsSelectScalar = {
   parentEvent?: boolean
   autoCancellation?: boolean
   eventType?: boolean
-  officialSchedulingMode?: boolean
   staffingPriority?: boolean
   doTeamsOfficiate?: boolean
   teamOfficialsMaySwap?: boolean
@@ -2798,7 +2794,7 @@ export type EventsSelectScalar = {
   requiredTemplateIds?: boolean
 }
 
-export type EventsOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "archivedAt" | "archivedByUserId" | "archiveReason" | "name" | "start" | "end" | "scheduleEndConstraint" | "generatedScheduleEnd" | "timeZone" | "description" | "affiliateUrl" | "sourceType" | "sourceId" | "sourceUrl" | "organizerName" | "scheduleText" | "dateDisplayMode" | "dateDisplayText" | "priceText" | "statusText" | "winnerSetCount" | "loserSetCount" | "doubleElimination" | "location" | "address" | "rating" | "teamSizeLimit" | "maxParticipants" | "minAge" | "maxAge" | "hostId" | "assistantHostIds" | "noFixedEndDateTime" | "price" | "registrationPaymentMode" | "manualPaymentLinks" | "manualPaymentInstructions" | "taxHandling" | "organizerManualTaxRateBps" | "singleDivision" | "registrationByDivisionType" | "cancellationRefundHours" | "teamSignup" | "prize" | "registrationCutoffHours" | "seedColor" | "imageId" | "fieldCount" | "winnerBracketPointsToVictory" | "loserBracketPointsToVictory" | "coordinates" | "gamesPerOpponent" | "includePlayoffs" | "playoffTeamCount" | "usesSets" | "matchDurationMinutes" | "setDurationMinutes" | "setsPerMatch" | "restTimeMinutes" | "state" | "pointsToVictory" | "sportIds" | "timeSlotIds" | "fieldIds" | "leagueScoringConfigId" | "organizationId" | "parentEvent" | "autoCancellation" | "eventType" | "officialSchedulingMode" | "staffingPriority" | "doTeamsOfficiate" | "teamOfficialsMaySwap" | "teamCheckInMode" | "teamCheckInOpenMinutesBefore" | "allowMatchRosterEdits" | "allowTemporaryMatchPlayers" | "officialPositions" | "matchRulesOverride" | "autoCreatePointMatchIncidents" | "allowPaymentPlans" | "installmentCount" | "installmentDueDates" | "installmentDueRelativeDays" | "installmentAmounts" | "allowTeamSplitDefault" | "splitLeaguePlayoffDivisions" | "requiredTemplateIds", ExtArgs["result"]["events"]>
+export type EventsOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "archivedAt" | "archivedByUserId" | "archiveReason" | "name" | "start" | "end" | "scheduleEndConstraint" | "generatedScheduleEnd" | "timeZone" | "description" | "affiliateUrl" | "sourceType" | "sourceId" | "sourceUrl" | "organizerName" | "scheduleText" | "dateDisplayMode" | "dateDisplayText" | "priceText" | "statusText" | "winnerSetCount" | "loserSetCount" | "doubleElimination" | "location" | "address" | "rating" | "teamSizeLimit" | "maxParticipants" | "minAge" | "maxAge" | "hostId" | "assistantHostIds" | "noFixedEndDateTime" | "automatedScheduling" | "price" | "registrationPaymentMode" | "manualPaymentLinks" | "manualPaymentInstructions" | "taxHandling" | "organizerManualTaxRateBps" | "singleDivision" | "registrationByDivisionType" | "cancellationRefundHours" | "teamSignup" | "prize" | "registrationCutoffHours" | "seedColor" | "imageId" | "fieldCount" | "winnerBracketPointsToVictory" | "loserBracketPointsToVictory" | "coordinates" | "gamesPerOpponent" | "includePlayoffs" | "playoffTeamCount" | "usesSets" | "matchDurationMinutes" | "setDurationMinutes" | "setsPerMatch" | "restTimeMinutes" | "state" | "pointsToVictory" | "sportIds" | "timeSlotIds" | "fieldIds" | "leagueScoringConfigId" | "organizationId" | "parentEvent" | "autoCancellation" | "eventType" | "staffingPriority" | "doTeamsOfficiate" | "teamOfficialsMaySwap" | "teamCheckInMode" | "teamCheckInOpenMinutesBefore" | "allowMatchRosterEdits" | "allowTemporaryMatchPlayers" | "officialPositions" | "matchRulesOverride" | "autoCreatePointMatchIncidents" | "allowPaymentPlans" | "installmentCount" | "installmentDueDates" | "installmentDueRelativeDays" | "installmentAmounts" | "allowTeamSplitDefault" | "splitLeaguePlayoffDivisions" | "requiredTemplateIds", ExtArgs["result"]["events"]>
 
 export type $EventsPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "Events"
@@ -2840,6 +2836,7 @@ export type $EventsPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs
     hostId: string | null
     assistantHostIds: string[]
     noFixedEndDateTime: boolean
+    automatedScheduling: boolean
     price: number
     registrationPaymentMode: $Enums.RegistrationPaymentModeEnum
     manualPaymentLinks: runtime.JsonValue
@@ -2876,7 +2873,6 @@ export type $EventsPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs
     parentEvent: string | null
     autoCancellation: boolean | null
     eventType: $Enums.EventsEventTypeEnum | null
-    officialSchedulingMode: $Enums.EventsOfficialSchedulingModeEnum
     staffingPriority: $Enums.StaffingPriorityEnum
     doTeamsOfficiate: boolean | null
     teamOfficialsMaySwap: boolean | null
@@ -3354,6 +3350,7 @@ export interface EventsFieldRefs {
   readonly hostId: Prisma.FieldRef<"Events", 'String'>
   readonly assistantHostIds: Prisma.FieldRef<"Events", 'String[]'>
   readonly noFixedEndDateTime: Prisma.FieldRef<"Events", 'Boolean'>
+  readonly automatedScheduling: Prisma.FieldRef<"Events", 'Boolean'>
   readonly price: Prisma.FieldRef<"Events", 'Int'>
   readonly registrationPaymentMode: Prisma.FieldRef<"Events", 'RegistrationPaymentModeEnum'>
   readonly manualPaymentLinks: Prisma.FieldRef<"Events", 'Json'>
@@ -3390,7 +3387,6 @@ export interface EventsFieldRefs {
   readonly parentEvent: Prisma.FieldRef<"Events", 'String'>
   readonly autoCancellation: Prisma.FieldRef<"Events", 'Boolean'>
   readonly eventType: Prisma.FieldRef<"Events", 'EventsEventTypeEnum'>
-  readonly officialSchedulingMode: Prisma.FieldRef<"Events", 'EventsOfficialSchedulingModeEnum'>
   readonly staffingPriority: Prisma.FieldRef<"Events", 'StaffingPriorityEnum'>
   readonly doTeamsOfficiate: Prisma.FieldRef<"Events", 'Boolean'>
   readonly teamOfficialsMaySwap: Prisma.FieldRef<"Events", 'Boolean'>

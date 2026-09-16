@@ -1,10 +1,8 @@
 import type { ComponentProps } from 'react';
-import {
-    NumberInput,
-    Select as MantineSelect,
-    Text,
-    TextInput,
-} from '@mantine/core';
+import { NumberInput,
+Select as MantineSelect,
+Text,
+TextInput, } from '@/components/organization/organization-operation-ui';
 
 import CentsInput from '@/components/ui/CentsInput';
 import HostPriceInput from '@/components/ui/HostPriceInput';

@@ -361,4 +361,36 @@ describe('RefundSection', () => {
     expect(paymentServiceMock.requestRefund).not.toHaveBeenCalled();
     await waitFor(() => expect(onRefundSuccess).toHaveBeenCalled());
   });
+
+  it('keeps the refund reason after failure and locks the draft until the request settles', async () => {
+    const user = { $id: 'user_1' };
+    useAppMock.mockReturnValue({ user });
+    const event = buildEvent({
+      $id: 'event_1',
+      hostId: 'host_2',
+      price: 20,
+      cancellationRefundHours: null,
+      start: formatLocalDateTime(new Date(Date.now() + 2 * 60 * 60 * 1000)),
+    });
+    let rejectRequest!: (error: Error) => void;
+    paymentServiceMock.requestRefund
+      .mockReturnValueOnce(new Promise((_resolve, reject) => { rejectRequest = reject; }))
+      .mockResolvedValueOnce({ success: true });
+    const onRefundSuccess = jest.fn();
+    renderWithMantine(<RefundSection event={event} userRegistered onRefundSuccess={onRefundSuccess} />);
+    fireEvent.click(screen.getByRole('button', { name: /Withdraw and Request Refund/i }));
+    const reason = screen.getByRole('textbox', { name: /Reason for refund request/ });
+    fireEvent.change(reason, { target: { value: 'Schedule conflict' } });
+    fireEvent.click(screen.getByRole('button', { name: /Send Request/i }));
+    expect(reason).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Cancel', exact: true })).toBeDisabled();
+    rejectRequest(new Error('Refund request unavailable'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Refund request unavailable');
+    expect(reason).toHaveValue('Schedule conflict');
+    expect(reason).toBeEnabled();
+    expect(onRefundSuccess).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: /Send Request/i }));
+    await waitFor(() => expect(onRefundSuccess).toHaveBeenCalledTimes(1));
+    expect(paymentServiceMock.requestRefund).toHaveBeenLastCalledWith(event, user, 'Schedule conflict', user.$id);
+  });
 });

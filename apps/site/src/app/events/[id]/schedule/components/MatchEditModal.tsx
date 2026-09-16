@@ -616,6 +616,7 @@ export default function MatchEditModal({
       return;
     }
 
+
     setStartValue(coerceDate(match.start));
     setEndValue(coerceDate(match.end));
     setActualStartValue(coerceInstantDate(match.actualStart));

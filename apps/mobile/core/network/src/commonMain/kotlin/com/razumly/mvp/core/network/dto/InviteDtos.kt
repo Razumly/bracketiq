@@ -18,6 +18,7 @@ data class InviteResponseDto(
 data class InviteCreateDto(
     val type: String,
     val email: String? = null,
+    val playerEmail: String? = null,
     val status: String? = null,
     val staffTypes: List<String> = emptyList(),
     val replaceStaffTypes: Boolean? = null,
@@ -58,3 +59,42 @@ data class UserEmailMembershipMatchDto(
 data class EmailMembershipLookupResponseDto(
     val matches: List<UserEmailMembershipMatchDto> = emptyList(),
 )
+
+@Serializable
+data class DeclineTeamInvitationRequestDto(
+    val blockScope: String? = null,
+    val leaveSharedChats: Boolean = false,
+)
+
+@Serializable
+data class InvitationRequestKeyDto(val idempotencyKey: String)
+
+@Serializable
+data class InvitationDeliveryResponseDto(
+    val failed: Boolean = false,
+    val status: String? = null,
+    val error: String? = null,
+)
+
+@Serializable
+data class InvitationBlockResponseDto(
+    val scope: String,
+    val active: Boolean,
+    val playerId: String? = null,
+    val teamId: String? = null,
+    val targetUserId: String? = null,
+)
+
+@Serializable
+data class InvitationActionResponseDto(
+    val ok: Boolean = false,
+    val invite: Invite? = null,
+    val block: InvitationBlockResponseDto? = null,
+    val teamBlock: com.razumly.mvp.core.data.dataTypes.TeamBlock? = null,
+    val user: UserProfileDto? = null,
+    val removedChatIds: List<String> = emptyList(),
+    val delivery: InvitationDeliveryResponseDto? = null,
+)
+
+@Serializable
+data class TeamBlocksResponseDto(val blocks: List<com.razumly.mvp.core.data.dataTypes.TeamBlock> = emptyList())

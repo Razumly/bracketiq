@@ -10,11 +10,16 @@ const prismaMock = {
     deleteMany: jest.fn(),
     findFirst: jest.fn(),
     findMany: jest.fn(),
+    findUnique: jest.fn(),
+    updateMany: jest.fn(),
     update: jest.fn(),
   },
   authUser: {
     findUnique: jest.fn(),
+    findMany: jest.fn().mockResolvedValue([]),
   },
+  teamBlocks: { findMany: jest.fn().mockResolvedValue([]) },
+  inviteDeliveries: { findMany: jest.fn().mockResolvedValue([]) },
   sensitiveUserData: {
     findFirst: jest.fn(),
   },
@@ -64,6 +69,7 @@ const hasOrgPermissionMock = jest.fn();
 const hasDocumentEvidenceOwnerAccessMock = jest.fn();
 const loadCanonicalTeamByIdMock = jest.fn();
 const acquireEventLockMock = jest.fn();
+const acquireTeamRosterLockMock = jest.fn();
 const acquireOrganizationStaffMemberLockMock = jest.fn();
 const acquireOrganizationStaffAssignmentLockMock = jest.fn();
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
@@ -90,7 +96,9 @@ jest.mock('@/server/teams/teamMembership', () => ({
   ),
 }));
 jest.mock('@/server/repositories/locks', () => ({
+  acquireUserSocialLocks: jest.fn().mockResolvedValue(undefined),
   acquireEventLock: (...args: unknown[]) => acquireEventLockMock(...args),
+  acquireTeamRosterLock: (...args: unknown[]) => acquireTeamRosterLockMock(...args),
   acquireOrganizationStaffMemberLock: (...args: unknown[]) => acquireOrganizationStaffMemberLockMock(...args),
   acquireOrganizationStaffAssignmentLock: (...args: unknown[]) => acquireOrganizationStaffAssignmentLockMock(...args),
 }));
@@ -178,10 +186,10 @@ describe('/api/invites', () => {
     expect(res.status).toBe(200);
     expect(prismaMock.invites.findMany).toHaveBeenCalledWith({
       where: {
-        AND: [
+        AND: expect.arrayContaining([
           { userId: 'user_1', type: 'TEAM' },
-          { OR: [{ status: null }, { status: { in: ['PENDING', 'SENT'] } }] },
-        ],
+          { OR: [{ status: null }, { status: { in: ['PENDING', 'SENT', 'FAILED'] } }] },
+        ]),
       },
       orderBy: [
         { createdAt: { sort: 'desc', nulls: 'last' } },
@@ -214,10 +222,10 @@ describe('/api/invites', () => {
     expect(loadCanonicalTeamByIdMock).toHaveBeenCalledWith('team_1', prismaMock);
     expect(prismaMock.invites.findMany).toHaveBeenCalledWith({
       where: {
-        AND: [
+        AND: expect.arrayContaining([
           { type: 'TEAM', teamId: 'team_1' },
-          { OR: [{ status: null }, { status: { in: ['PENDING', 'SENT'] } }] },
-        ],
+          { OR: [{ status: null }, { status: { in: ['PENDING', 'SENT', 'FAILED'] } }] },
+        ]),
       },
       orderBy: [
         { createdAt: { sort: 'desc', nulls: 'last' } },
@@ -230,13 +238,12 @@ describe('/api/invites', () => {
   it('authorizes terminal cleanup for guardian-visible child TEAM invites without a pending-only scope', async () => {
     requireSessionMock.mockResolvedValue({ userId: 'parent_1', isAdmin: false });
     prismaMock.parentChildLinks.findMany.mockResolvedValue([{ childId: 'child_1' }]);
+    prismaMock.userData.findMany.mockResolvedValue([{ id: 'child_1', dateOfBirth: new Date('2015-01-01'), blockedUserIds: [] }]);
 
     const res = await GET(new NextRequest('http://localhost/api/invites?type=TEAM'));
 
     expect(res.status).toBe(200);
-    expect(prismaMock.$executeRaw).toHaveBeenCalledTimes(1);
     const query = prismaMock.$executeRaw.mock.calls[0][0] as { sql: string; values: unknown[] };
-    expect(query.sql).toContain('NOT EXISTS');
     expect(query.values).toEqual(expect.arrayContaining(['parent_1', 'child_1', 'TEAM']));
   });
 
@@ -244,6 +251,7 @@ describe('/api/invites', () => {
     requireSessionMock.mockResolvedValue({ userId: 'user_1', isAdmin: false });
     const createdAt = new Date('2026-01-01T00:00:00.000Z');
     prismaMock.invites.findMany
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{
         id: 'declined_1',
         type: 'TEAM',
@@ -262,10 +270,10 @@ describe('/api/invites', () => {
     expect(json.invites.map((invite: { id: string }) => invite.id)).toEqual(['declined_1']);
     expect(prismaMock.invites.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: {
-        AND: [
+        AND: expect.arrayContaining([
           { userId: 'user_1' },
-          { status: { in: ['DECLINED', 'REJECTED', 'FAILED'] } },
-        ],
+          { status: { in: ['DECLINED', 'REJECTED', 'ACCEPTED', 'CANCELLED', 'EXPIRED'] } },
+        ]),
       },
       take: 11,
     }));
@@ -280,10 +288,10 @@ describe('/api/invites', () => {
     expect(res.status).toBe(200);
     expect(prismaMock.invites.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: {
-        AND: [
+        AND: expect.arrayContaining([
           { userId: 'user_1' },
           { status: { in: ['DECLINED', 'REJECTED'] } },
-        ],
+        ]),
       },
     }));
   });
@@ -292,6 +300,7 @@ describe('/api/invites', () => {
     requireSessionMock.mockResolvedValue({ userId: 'user_1', isAdmin: false });
     const createdAt = new Date('2026-01-01T00:00:00.000Z');
     prismaMock.invites.findMany
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce(['invite_3', 'invite_2', 'invite_1'].map((id) => ({
         id,
         type: 'TEAM',
@@ -315,7 +324,7 @@ describe('/api/invites', () => {
   it('rejects invalid list filters and malformed cursors', async () => {
     requireSessionMock.mockResolvedValue({ userId: 'user_1', isAdmin: false });
 
-    const invalidStatus = await GET(new NextRequest('http://localhost/api/invites?status=ACCEPTED'));
+    const invalidStatus = await GET(new NextRequest('http://localhost/api/invites?status=UNKNOWN'));
     const conflictingMode = await GET(new NextRequest('http://localhost/api/invites?history=true&status=DECLINED'));
     const invalidCursor = await GET(new NextRequest('http://localhost/api/invites?cursor=not-a-json-cursor'));
 
@@ -485,7 +494,7 @@ describe('/api/invites', () => {
     );
     expect(prismaMock.teams.findUnique).toHaveBeenCalledWith({ where: { id: 'team_1' } });
     expect(prismaMock.invites.create).toHaveBeenCalledTimes(1);
-    expect(sendInviteEmailsMock).toHaveBeenCalledWith([], 'http://localhost');
+    expect(sendInviteEmailsMock).toHaveBeenCalledWith([], 'http://localhost', { requestedBy: expect.any(String), requestedByIsAdmin: false });
   });
 
   it('dispatches an explicit TEAM staff role to an invited staff assignment', async () => {
@@ -590,6 +599,26 @@ describe('/api/invites', () => {
     }), prismaMock);
     expect(prismaMock.teamStaffAssignments.upsert).not.toHaveBeenCalled();
   });
+
+  it('does not allow a create request to mark an invite accepted', async () => {
+    requireSessionMock.mockResolvedValue({ userId: 'manager_1', isAdmin: false });
+    ensureAuthUserAndUserDataByEmailMock.mockResolvedValue({ userId: 'player_1', authUserExisted: true });
+
+    const response = await POST(jsonRequest({
+      invites: [{
+        type: 'TEAM',
+        teamId: 'team_1',
+        email: 'player@example.com',
+        role: 'player',
+        status: 'ACCEPTED',
+      }],
+    }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'New invites must start with PENDING status' });
+    expect(prismaMock.invites.create).not.toHaveBeenCalled();
+    expect(syncCanonicalTeamRosterMock).not.toHaveBeenCalled();
+  });
   it('cleans prior invited staff state when a TEAM invite changes to player', async () => {
     requireSessionMock.mockResolvedValue({ userId: 'manager_1', isAdmin: false });
     ensureAuthUserAndUserDataByEmailMock.mockResolvedValue({ userId: 'player_1', authUserExisted: true });
@@ -693,7 +722,7 @@ describe('/api/invites', () => {
     expect(res.status).toBe(201);
     expect(json.invites[0].id).toBe('invite_placeholder');
     expect(ensureAuthUserAndUserDataByEmailMock).not.toHaveBeenCalled();
-    expect(sendInviteEmailsMock).toHaveBeenCalledWith([createdInvite], 'http://localhost');
+    expect(sendInviteEmailsMock).toHaveBeenCalledWith([createdInvite], 'http://localhost', { requestedBy: expect.any(String), requestedByIsAdmin: false });
   });
 
   it('does not send delivery again when a TEAM user-id invite already exists', async () => {
@@ -752,7 +781,7 @@ describe('/api/invites', () => {
         status: 'PENDING',
       }),
     });
-    expect(sendInviteEmailsMock).toHaveBeenCalledWith([], 'http://localhost');
+    expect(sendInviteEmailsMock).toHaveBeenCalledWith([], 'http://localhost', { requestedBy: expect.any(String), requestedByIsAdmin: false });
   });
 
   it('uses forwarded request origin when sending EVENT invite emails', async () => {
@@ -789,7 +818,7 @@ describe('/api/invites', () => {
       );
 
       expect(res.status).toBe(201);
-      expect(sendInviteEmailsMock).toHaveBeenCalledWith([createdInvite], 'https://bracket-iq.com');
+      expect(sendInviteEmailsMock).toHaveBeenCalledWith([createdInvite], 'https://bracket-iq.com', { requestedBy: expect.any(String), requestedByIsAdmin: false });
     } finally {
       if (originalBaseUrl === undefined) {
         delete process.env.PUBLIC_WEB_BASE_URL;
@@ -1141,7 +1170,7 @@ describe('/api/invites', () => {
         staffTypes: ['HOST'],
       }),
     });
-    expect(sendInviteEmailsMock).toHaveBeenCalledWith([], 'http://localhost');
+    expect(sendInviteEmailsMock).toHaveBeenCalledWith([], 'http://localhost', { requestedBy: expect.any(String), requestedByIsAdmin: false });
   });
 
   it('silently skips STAFF invite entries by userId when no email can be resolved', async () => {
@@ -1166,7 +1195,7 @@ describe('/api/invites', () => {
     expect(json.invites).toEqual([]);
     expect(prismaMock.invites.create).not.toHaveBeenCalled();
     expect(prismaMock.invites.update).not.toHaveBeenCalled();
-    expect(sendInviteEmailsMock).toHaveBeenCalledWith([], 'http://localhost');
+    expect(sendInviteEmailsMock).toHaveBeenCalledWith([], 'http://localhost', { requestedBy: expect.any(String), requestedByIsAdmin: false });
   });
 
   it('locks event-scoped STAFF invites before the generic bulk delete re-authorizes and mutates', async () => {

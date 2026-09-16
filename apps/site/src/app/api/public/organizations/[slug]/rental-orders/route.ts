@@ -3,6 +3,7 @@ import Stripe from 'stripe';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
+import { canManageOrganization } from '@/server/accessControl';
 import {
   EventFieldConflictError,
   assertNoEventFieldSchedulingConflicts,
@@ -16,7 +17,7 @@ import {
   validateRentalSelections,
 } from '@/server/rentals/selectionValidation';
 import { attachFacilitiesToFieldRows } from '@/server/fieldFacilityPayload';
-import { canManageOrganization } from '@/server/accessControl';
+import { acquireFieldLocks } from '@/server/repositories/locks';
 
 export const dynamic = 'force-dynamic';
 
@@ -459,6 +460,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ slu
         };
       }
 
+      await acquireFieldLocks(
+        tx,
+        Array.from(new Set(validation.selections.flatMap((selection) => selection.fieldIds))),
+      );
       for (const selection of validation.selections) {
         await assertNoEventFieldSchedulingConflicts({
           client: tx,

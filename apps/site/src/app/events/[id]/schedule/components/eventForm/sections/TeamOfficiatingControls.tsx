@@ -1,4 +1,4 @@
-import { Switch } from '@mantine/core';
+import { Switch } from '@/components/organization/organization-operation-ui';
 import {
     Controller,
     type Control,

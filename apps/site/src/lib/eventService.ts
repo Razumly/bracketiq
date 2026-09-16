@@ -3,6 +3,7 @@ import {
   Event,
   EventOfficial,
   EventType,
+  EventOccurrencePreview,
   Field,
   LocationCoordinates,
   Team,
@@ -21,13 +22,26 @@ import {
   normalizePayloadIdentifiers,
 } from "@/types";
 import type { RegistrationQuestionAnswerInput, TeamPlayerRegistration } from "@/types";
+import type { EventRegistrationPaymentResolutionReason } from "@/contracts/eventParticipants";
+
 import { ensureLocalDateTimeString } from "@/lib/dateUtils";
+import type {
+  FieldSchedulingConflictBatchRequest,
+  FieldSchedulingConflictBatchResponse,
+} from "@/contracts/fieldSchedulingConflicts";
 import { sportsService } from "@/lib/sportsService";
 import { userService } from "@/lib/userService";
 import { buildPayload } from "./utils";
 import { normalizeEnumValue } from "@/lib/enumUtils";
 import { createId } from "@/lib/id";
-import { LeagueScheduleResponse } from "./leagueService";
+import type {
+  EventEditorAcceptMaintenanceProposal,
+  EventEditorMaintenanceAcceptedResult,
+  EventEditorMaintenanceRequest,
+  EventEditorMaintenanceResponse,
+  EventEditorRejectMaintenanceProposal,
+  EventEditorMaintenanceRejectedResult,
+} from "@/contracts/eventEditor";
 import {
   normalizeApiEvent,
   normalizeApiMatch,
@@ -60,10 +74,7 @@ import {
   normalizeOrganizationOwnershipStatus,
 } from "@/lib/organizationOwnership";
 import type { EventAuthorityCapabilities } from "@/server/accessControl";
-import {
-  normalizeOfficialSchedulingMode,
-  normalizeStaffingPriority,
-} from "@/server/officials/config";
+import { normalizeStaffingPriority } from "@/server/officials/config";
 
 const readApiEntityId = (value: unknown): string | undefined => {
   if (!value || typeof value !== "object") {
@@ -93,7 +104,8 @@ export type EventParticipantRegistrationEntry = {
   registrantId: string;
   registrantType: "SELF" | "CHILD" | "TEAM";
   rosterRole: "PARTICIPANT" | "WAITLIST" | "FREE_AGENT";
-  status: "STARTED" | "PENDING" | "PAYMENT_FAILED" | "ACTIVE" | "BLOCKED" | "CANCELLED" | "CONSENTFAILED";
+  status: "STARTED" | "PENDING" | "PAYMENT_FAILED" | "ACTIVE" | "BLOCKED" | "CONSENTFAILED" | "CANCELLED";
+  paymentResolutionReason: EventRegistrationPaymentResolutionReason | null;
   parentId: string | null;
   divisionId: string | null;
   divisionTypeId: string | null;
@@ -697,85 +709,92 @@ class EventService {
   }
 
 
-  async reconcileEventSchedule(
-    eventId: string,
-    options: {
-      expectedScheduleRevision?: string;
-      participantCount?: number;
-      includePlaceholderTeams?: boolean;
-      replaceExistingMatches?: boolean;
-    } = {},
-  ): Promise<LeagueScheduleResponse> {
-    const payload: Record<string, any> = {};
-
-    if (typeof options.expectedScheduleRevision === "string") {
-      payload.expectedScheduleRevision = options.expectedScheduleRevision;
-    }
-    if (typeof options.participantCount === "number") {
-      payload.participantCount = options.participantCount;
-    }
-    if (typeof options.includePlaceholderTeams === "boolean") {
-      payload.includePlaceholderTeams = options.includePlaceholderTeams;
-    }
-    if (typeof options.replaceExistingMatches === "boolean") {
-      payload.replaceExistingMatches = options.replaceExistingMatches;
-    }
-
-    const path = `/api/events/${eventId}/schedule`;
-    const result = await apiRequest<{
-      preview?: boolean;
-      event?: Event;
-      matches?: Match[];
-      warnings?: Array<{
-        code?: string;
-        message?: string;
-        matchIds?: string[];
-      }>;
-    }>(path, {
-      method: "POST",
-      body: payload,
-      timeoutMs: SCHEDULE_REQUEST_TIMEOUT_MS,
-    });
-
-    const normalizedMatches = Array.isArray(result?.matches)
-      ? result.matches.map((match) => normalizeApiMatch(match))
-      : undefined;
-    const normalizedEvent = result?.event
-      ? (normalizeApiEvent(result.event) ?? undefined)
-      : undefined;
-
-    if (normalizedEvent && normalizedMatches) {
-      normalizedEvent.matches = normalizedMatches;
-    }
-
-    return {
-      preview: typeof result?.preview === "boolean" ? result.preview : false,
-      event: normalizedEvent,
-      warnings: Array.isArray(result?.warnings)
-        ? result.warnings
-            .filter(
-              (
-                warning,
-              ): warning is {
-                code: string;
-                message: string;
-                matchIds?: string[];
-              } =>
-                Boolean(
-                  warning &&
-                    typeof warning.code === "string" &&
-                    typeof warning.message === "string",
-                ),
-            )
-            .map((warning) => ({
-              code: warning.code,
-              message: warning.message,
-              matchIds: Array.isArray(warning.matchIds)
-                ? warning.matchIds
-                : undefined,
-            }))
-        : [],
+  async proposeEventScheduleMaintenance(
+    request: EventEditorMaintenanceRequest,
+  ): Promise<EventEditorMaintenanceResponse> {
+    const {
+      contractVersion,
+      eventId,
+      operation,
+      operationId,
+      expectedRevisions,
+      participantCount,
+      includePlaceholderTeams,
+    } = request;
+    const body: EventEditorMaintenanceRequest = {
+      contractVersion,
+      eventId,
+      operation,
+      operationId,
+      ...(expectedRevisions ? { expectedRevisions } : {}),
+      ...(participantCount === undefined ? {} : { participantCount }),
+      ...(includePlaceholderTeams === undefined
+        ? {}
+        : { includePlaceholderTeams }),
     };
+
+    return apiRequest<EventEditorMaintenanceResponse>(
+      `/api/events/${encodeURIComponent(eventId)}/schedule`,
+      {
+        method: "POST",
+        body,
+        timeoutMs: SCHEDULE_REQUEST_TIMEOUT_MS,
+      },
+    );
+  }
+
+  async acceptEventScheduleMaintenanceProposal(
+    request: EventEditorAcceptMaintenanceProposal,
+  ): Promise<EventEditorMaintenanceAcceptedResult> {
+    const {
+      contractVersion,
+      eventId,
+      operation,
+      operationId,
+      proposalRevision,
+      acceptanceOperationId,
+    } = request;
+    return apiRequest<EventEditorMaintenanceAcceptedResult>(
+      `/api/events/${encodeURIComponent(eventId)}/schedule`,
+      {
+        method: "PUT",
+        body: {
+          contractVersion,
+          eventId,
+          operation,
+          operationId,
+          proposalRevision,
+          acceptanceOperationId,
+        },
+        timeoutMs: SCHEDULE_REQUEST_TIMEOUT_MS,
+      },
+    );
+  }
+
+  async rejectEventScheduleMaintenanceProposal(
+    request: EventEditorRejectMaintenanceProposal,
+  ): Promise<EventEditorMaintenanceRejectedResult> {
+    const {
+      contractVersion,
+      eventId,
+      operation,
+      operationId,
+      proposalRevision,
+    } = request;
+    return apiRequest<EventEditorMaintenanceRejectedResult>(
+      `/api/events/${encodeURIComponent(eventId)}/schedule`,
+      {
+        method: "DELETE",
+        body: {
+          contractVersion,
+          eventId,
+          operation,
+          operationId,
+          proposalRevision,
+        },
+        timeoutMs: SCHEDULE_REQUEST_TIMEOUT_MS,
+      },
+    );
   }
 
 
@@ -1050,17 +1069,41 @@ class EventService {
     const normalizedResolvedMatchRules = normalizeObjectValue(
       row.resolvedMatchRules,
     ) as Event["resolvedMatchRules"];
-    const legacyOfficialSchedulingMode = normalizeOfficialSchedulingMode(
-      row.officialSchedulingMode,
-    );
-    const staffingPriority = normalizeStaffingPriority(
-      row.staffingPriority,
-      legacyOfficialSchedulingMode,
-    );
+    const staffingPriority = normalizeStaffingPriority(row.staffingPriority);
     const doTeamsOfficiate =
       typeof row.doTeamsOfficiate === "boolean"
         ? row.doTeamsOfficiate
-        : legacyOfficialSchedulingMode === "TEAM_STAFFING";
+        : false;
+    const nextOccurrence = (() => {
+      if (!row.nextOccurrence || typeof row.nextOccurrence !== "object" || Array.isArray(row.nextOccurrence)) {
+        return null;
+      }
+      const occurrence = row.nextOccurrence as Record<string, unknown>;
+      const slotId = typeof occurrence.slotId === "string" ? occurrence.slotId.trim() : "";
+      const occurrenceDate = typeof occurrence.occurrenceDate === "string"
+        ? occurrence.occurrenceDate.trim()
+        : "";
+      const timeZone = typeof occurrence.timeZone === "string"
+        ? occurrence.timeZone.trim()
+        : "";
+      const start = this.normalizeDateInput(
+        occurrence.start as Date | string | null | undefined,
+      );
+      const end = this.normalizeDateInput(
+        occurrence.end as Date | string | null | undefined,
+      );
+      if (!slotId || !occurrenceDate || !start || !end) {
+        return null;
+      }
+      return {
+        slotId,
+        occurrenceDate,
+        start,
+        end,
+        ...(timeZone ? { timeZone } : {}),
+      } satisfies EventOccurrencePreview;
+    })();
+
 
     return {
       $id: row.id ?? row.$id,
@@ -1104,6 +1147,7 @@ class EventService {
             .filter((tag: any) => tag.name.length > 0)
         : [],
       start: row.start,
+      nextOccurrence,
       end: row.end,
       scheduleEndConstraint: row.scheduleEndConstraint ?? null,
       generatedScheduleEnd: row.generatedScheduleEnd ?? null,
@@ -1529,7 +1573,22 @@ class EventService {
       status: row.status as EventStatus | undefined,
       state,
       leagueConfig: this.buildLeagueConfig(row),
+
       leagueScoringConfig: row.leagueScoringConfig,
+    };
+  }
+  async getFieldSchedulingConflicts(
+    payload: FieldSchedulingConflictBatchRequest,
+  ): Promise<FieldSchedulingConflictBatchResponse> {
+    const response = await apiRequest<Partial<FieldSchedulingConflictBatchResponse>>(
+      "/api/events/field-conflicts",
+      {
+        method: "POST",
+        body: payload,
+      },
+    );
+    return {
+      conflicts: Array.isArray(response?.conflicts) ? response.conflicts : [],
     };
   }
 
@@ -1819,9 +1878,7 @@ class EventService {
     event.officialIds = officialIds;
     event.staffingPriority = normalizeStaffingPriority(
       data.staffingPriority ?? event.staffingPriority,
-      data.officialSchedulingMode ?? event.officialSchedulingMode,
     );
-    delete event.officialSchedulingMode;
     event.officialPositions = officialPositions;
     event.eventOfficials = eventOfficials;
     event.officials = officials;
@@ -2517,6 +2574,7 @@ class EventService {
       start: input.start,
       end: input.end,
       locked: Boolean(input.locked),
+      placementState: input.placementState ?? null,
       team1Seed: normalizeBracketSeed(input.team1Seed),
       team2Seed: normalizeBracketSeed(input.team2Seed),
       teamOfficialSeed:

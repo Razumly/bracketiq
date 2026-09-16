@@ -51,7 +51,6 @@ type UseEventFormConfigurationActionsParams = {
     clearLeagueSlotErrors: () => void;
     eventData: EventFormValues;
     getValues: EventFormGetValues;
-    isAffiliateEvent: boolean;
     leagueData: LeagueConfig;
     selectedSport: Sport | null | undefined;
     setEventData: EventDataSetter;
@@ -61,11 +60,50 @@ type UseEventFormConfigurationActionsParams = {
     tournamentData: TournamentConfig;
 };
 
+const countUpDuration = (
+    template: MatchRulesConfig | null,
+    override: MatchRulesConfig | null,
+    fallbackCount: number | undefined,
+): number | null => {
+    const timekeeping = (config: MatchRulesConfig | null) => config?.timekeeping ?? {};
+    const templateTimekeeping = timekeeping(template);
+    const overrideTimekeeping = timekeeping(override);
+    const timerMode = overrideTimekeeping.timerMode ?? templateTimekeeping.timerMode;
+    const segmentDuration = normalizeNumber(
+        overrideTimekeeping.segmentDurationMinutes ?? templateTimekeeping.segmentDurationMinutes,
+    );
+    const segmentCount = normalizeNumber(template?.segmentCount) ?? fallbackCount ?? 1;
+    if (timerMode !== 'COUNT_UP' || !segmentDuration || segmentCount <= 0) return null;
+    return Math.max(1, Math.trunc(segmentDuration * segmentCount));
+};
+
+const getRepairedEndValue = (
+    startValue: EventFormValues['start'],
+    endValue: EventFormValues['end'],
+    minimumDurationMinutes?: number,
+): string | null => {
+    const parsedStart = parseLocalDateTime(startValue);
+    const parsedEnd = parseLocalDateTime(endValue);
+    if (!parsedStart) {
+        return null;
+    }
+    const startTime = parsedStart.getTime();
+    const minimumEndTime = minimumDurationMinutes === undefined
+        ? null
+        : startTime + minimumDurationMinutes * 60 * 1000;
+    const endIsInvalid = !parsedEnd || parsedEnd.getTime() <= startTime;
+    const endIsTooShort = minimumEndTime !== null
+        && parsedEnd !== null
+        && parsedEnd.getTime() < minimumEndTime;
+    if (!endIsInvalid && !endIsTooShort) {
+        return null;
+    }
+    return formatLocalDateTime(new Date(minimumEndTime ?? startTime + 60 * 60 * 1000));
+};
 export const useEventFormConfigurationActions = ({
     clearLeagueSlotErrors,
     eventData,
     getValues,
-    isAffiliateEvent,
     leagueData,
     selectedSport,
     setEventData,
@@ -74,6 +112,12 @@ export const useEventFormConfigurationActions = ({
     setValue,
     tournamentData,
 }: UseEventFormConfigurationActionsParams) => {
+    const handleAutomatedSchedulingChange = useCallback((checked: boolean) => {
+        setValue('isAutomatedScheduling', checked, { shouldDirty: true, shouldValidate: true });
+        if (!checked) {
+            setValue('noFixedEndDateTime', false, { shouldDirty: true, shouldValidate: true });
+        }
+    }, [setValue]);
     const handleLeagueScoringConfigChange = useCallback((
         key: keyof LeagueScoringConfig,
         value: LeagueScoringConfig[keyof LeagueScoringConfig],
@@ -98,22 +142,10 @@ export const useEventFormConfigurationActions = ({
         const sanitized = sanitizeMatchRulesOverrideForEditor(nextValue);
         setValue('matchRulesOverride', sanitized, { shouldDirty: true, shouldValidate: false });
         const template = (selectedSport?.matchRulesTemplate ?? null) as MatchRulesConfig | null;
-        const templateTimekeeping = template?.timekeeping ?? null;
-        const overrideTimekeeping = sanitized?.timekeeping ?? null;
-        const timerMode = overrideTimekeeping?.timerMode ?? templateTimekeeping?.timerMode;
-        const segmentDuration = normalizeNumber(
-            overrideTimekeeping?.segmentDurationMinutes
-            ?? templateTimekeeping?.segmentDurationMinutes,
-        );
-        const segmentCount = normalizeNumber(template?.segmentCount)
-            ?? (eventData.eventType === 'TOURNAMENT'
-                ? normalizeNumber(tournamentData.winnerSetCount)
-                : normalizeNumber(leagueData.setsPerMatch))
-            ?? 1;
-        if (timerMode !== 'COUNT_UP' || !segmentDuration || segmentCount <= 0) {
-            return;
-        }
-        const totalMatchDuration = Math.max(1, Math.trunc(segmentDuration * segmentCount));
+        const fallbackCount = eventData.eventType === 'TOURNAMENT'
+            ? normalizeNumber(tournamentData.winnerSetCount) : normalizeNumber(leagueData.setsPerMatch);
+        const totalMatchDuration = countUpDuration(template, sanitized, fallbackCount);
+        if (totalMatchDuration === null) return;
         if (eventData.eventType === 'LEAGUE') {
             setLeagueData((previous) => ({
                 ...previous,
@@ -162,10 +194,26 @@ export const useEventFormConfigurationActions = ({
         applyValue: (eventType: Event['eventType']) => void,
     ) => {
         clearLeagueSlotErrors();
-        const enforcingTeamSettings = !isAffiliateEvent
-            && (nextType === 'LEAGUE' || nextType === 'TOURNAMENT');
-        const enforcingTryoutSettings = !isAffiliateEvent && nextType === 'TRYOUT';
+        const enforcingTeamSettings = nextType === 'LEAGUE' || nextType === 'TOURNAMENT';
+        const enforcingTryoutSettings = nextType === 'TRYOUT';
+        const ensureFiniteEndAfterStart = (minimumDurationMinutes?: number) => {
+            const repairedEnd = getRepairedEndValue(
+                getValues('start'),
+                getValues('end'),
+                minimumDurationMinutes,
+            );
+            if (repairedEnd) {
+                setValue('end', repairedEnd, { shouldDirty: true, shouldValidate: true });
+            }
+        };
+        const nextIsAutomatedScheduling =
+            nextType === 'LEAGUE' || nextType === 'TOURNAMENT' || nextType === 'WEEKLY_EVENT';
         applyValue(nextType);
+        setValue(
+            'isAutomatedScheduling',
+            nextIsAutomatedScheduling,
+            { shouldDirty: true, shouldValidate: true },
+        );
         setValue(
             'tags',
             syncEventTypeTagsForEventType(getValues('tags'), nextType),
@@ -175,25 +223,22 @@ export const useEventFormConfigurationActions = ({
             setValue('teamSignup', true, { shouldDirty: true });
             setValue('singleDivision', true, { shouldDirty: true, shouldValidate: true });
             setValue('noFixedEndDateTime', true, { shouldDirty: true, shouldValidate: true });
+            ensureFiniteEndAfterStart(nextType === 'LEAGUE' ? 360 : 180);
             return;
         }
         if (enforcingTryoutSettings) {
             setValue('teamSignup', false, { shouldDirty: true });
             setValue('singleDivision', false, { shouldDirty: true, shouldValidate: true });
-            setValue('noFixedEndDateTime', true, { shouldDirty: true, shouldValidate: true });
+            setValue('noFixedEndDateTime', false, { shouldDirty: true, shouldValidate: true });
             setValue('divisionDetails', [], { shouldDirty: true, shouldValidate: true });
             setValue('divisions', [], { shouldDirty: true, shouldValidate: true });
+            ensureFiniteEndAfterStart();
             return;
         }
 
         setValue('noFixedEndDateTime', false, { shouldDirty: true, shouldValidate: true });
-        const parsedStart = parseLocalDateTime(getValues('start'));
-        const parsedEnd = parseLocalDateTime(getValues('end'));
-        if (parsedStart && (!parsedEnd || parsedEnd.getTime() <= parsedStart.getTime())) {
-            const minimumEnd = new Date(parsedStart.getTime() + 60 * 60 * 1000);
-            setValue('end', formatLocalDateTime(minimumEnd), { shouldDirty: true, shouldValidate: true });
-        }
-    }, [clearLeagueSlotErrors, getValues, isAffiliateEvent, setValue]);
+        ensureFiniteEndAfterStart();
+    }, [clearLeagueSlotErrors, getValues, setValue]);
 
     const handleAffiliateEventChange = useCallback((
         checked: boolean,
@@ -206,9 +251,6 @@ export const useEventFormConfigurationActions = ({
             return;
         }
         const resetValues: Array<[string, unknown]> = [
-            ['teamSignup', false],
-            ['registrationByDivisionType', false],
-            ['splitLeaguePlayoffDivisions', false],
             ['allowPaymentPlans', false],
             ['installmentCount', 0],
             ['installmentAmounts', []],
@@ -216,18 +258,6 @@ export const useEventFormConfigurationActions = ({
             ['installmentDueRelativeDays', []],
             ['allowTeamSplitDefault', false],
             ['requiredTemplateIds', []],
-            ['playoffDivisionDetails', []],
-            ['assistantHostIds', []],
-            ['officialIds', []],
-            ['eventOfficials', []],
-            ['pendingStaffInvites', []],
-            ['doTeamsOfficiate', false],
-            ['teamOfficialsMaySwap', false],
-            ['staffingPriority', 'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED'],
-            ['officialPositions', []],
-            ['matchRulesOverride', null],
-            ['autoCreatePointMatchIncidents', false],
-            ['noFixedEndDateTime', false],
         ];
         resetValues.forEach(([name, value]) => {
             setValue(name, value, { shouldDirty: true, shouldValidate: true });
@@ -267,15 +297,10 @@ export const useEventFormConfigurationActions = ({
     }, [setValue]);
 
     const handleNoFixedEndDateTimeChange = useCallback((checked: boolean) => {
+        const hasGeneratedEnd = getValues('noFixedEndDateTime');
         setValue('noFixedEndDateTime', checked, { shouldDirty: true, shouldValidate: true });
-        if (checked) {
-            return;
-        }
-        const parsedStart = parseLocalDateTime(getValues('start'));
-        const parsedEnd = parseLocalDateTime(getValues('end'));
-        if (parsedStart && (!parsedEnd || parsedEnd.getTime() <= parsedStart.getTime())) {
-            const minimumEnd = new Date(parsedStart.getTime() + 60 * 60 * 1000);
-            setValue('end', formatLocalDateTime(minimumEnd), { shouldDirty: true, shouldValidate: true });
+        if (hasGeneratedEnd && !checked) {
+            setValue('end', '', { shouldDirty: true, shouldValidate: true });
         }
     }, [getValues, setValue]);
 
@@ -289,6 +314,7 @@ export const useEventFormConfigurationActions = ({
 
     return {
         handleAffiliateEventChange,
+        handleAutomatedSchedulingChange,
         handleEndChange,
         handleEventTypeChange,
         handleIncludePlayoffsToggle,

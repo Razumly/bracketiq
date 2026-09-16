@@ -2,6 +2,7 @@
 
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import {
   buildAffiliateMappingJobContextFromExport,
@@ -15,7 +16,7 @@ import { buildAffiliateSportsCatalogSnapshot } from '../affiliateSportsCatalog';
   );
 describe('affiliate mapping job context builder', () => {
   it('verifies the export and retrieves bounded Markdown, HTML, policy, and repository context', async () => {
-    const temporaryDirectory = await fs.mkdtemp('/tmp/affiliate-agent-context-');
+    const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'affiliate-agent-context-'));
     const evidenceDirectory = path.join(temporaryDirectory, 'evidence');
     const repositoryRoot = path.join(temporaryDirectory, 'repo');
     try {
@@ -119,7 +120,7 @@ describe('affiliate mapping job context builder', () => {
   });
 
   it('rejects one tampered artifact even when it is not selected for prompt text', async () => {
-    const temporaryDirectory = await fs.mkdtemp('/tmp/affiliate-agent-context-');
+    const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'affiliate-agent-context-'));
     const evidenceDirectory = path.join(temporaryDirectory, 'evidence');
     const repositoryRoot = path.join(temporaryDirectory, 'repo');
     try {
@@ -153,7 +154,7 @@ describe('affiliate mapping job context builder', () => {
   });
 
   it('combines bounded evidence from multiple capture runs with exact provenance', async () => {
-    const temporaryDirectory = await fs.mkdtemp('/tmp/affiliate-agent-context-');
+    const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'affiliate-agent-context-'));
     const repositoryRoot = path.join(temporaryDirectory, 'repo');
     const firstEvidenceDirectory = path.join(temporaryDirectory, 'evidence-1');
     const secondEvidenceDirectory = path.join(temporaryDirectory, 'evidence-2');

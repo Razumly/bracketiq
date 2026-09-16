@@ -1,3 +1,6 @@
+import { apiRequest } from '@/lib/apiClient';
+import type { DeclineTeamInvitationInput } from '@/contracts/teamInvitations';
+export type TeamBlock = { id: string; teamId: string; playerId: string; playerName?: string; teamName?: string; createdBy: string; createdAt: string };
 import { Invite, InviteStatus, StaffMemberType, UserData, Subscription } from '@/types';
 import { normalizeAccountVisibility, type AccountVisibility } from '@/lib/accountVisibility';
 import { normalizeOptionalName } from '@/lib/nameCase';
@@ -41,7 +44,7 @@ const normalizeUserDataNames = (user: UserData & CanonicalApiEntity): UserData =
 
 const normalizeUserDataList = (users: UserData[]): UserData[] => users.map(normalizeUserDataNames);
 
-const normalizeInviteNames = (invite: Invite & CanonicalApiEntity): Invite => {
+export const normalizeInviteNames = (invite: Invite & CanonicalApiEntity): Invite => {
   const role = invite.type === 'TEAM' ? normalizeTeamInviteRole(invite.role) : undefined;
   return {
     ...invite,
@@ -423,12 +426,34 @@ class UserService {
     return true;
   }
 
-  async removeTeamInvitation(userId: string, teamId: string, _inviteType: string = 'TEAM'): Promise<boolean> {
-    await apiFetch('/api/invites', {
-      method: 'DELETE',
-      body: JSON.stringify({ userId, teamId, type: 'TEAM' }),
+  async removeTeamInvitation(inviteId: string): Promise<boolean> {
+    return this.deleteInviteById(inviteId);
+  }
+
+  async remindTeamInvitation(inviteId: string, idempotencyKey: string): Promise<{ invite: Invite; delivery: { status: string; failed: boolean; error?: string } }> {
+    return apiFetch(`/api/invites/${encodeURIComponent(inviteId)}/remind`, {
+      method: 'POST', body: JSON.stringify({ idempotencyKey }),
     });
-    return true;
+  }
+
+  async reinviteTeamInvitation(inviteId: string, idempotencyKey: string): Promise<{ invite: Invite; delivery: { status: string; failed: boolean; error?: string } }> {
+    return apiFetch(`/api/invites/${encodeURIComponent(inviteId)}/reinvite`, {
+      method: 'POST', body: JSON.stringify({ idempotencyKey }),
+    });
+  }
+
+  async listTeamBlocks(): Promise<TeamBlock[]> {
+    const result = await apiFetch<{ blocks: TeamBlock[] }>('/api/users/team-blocks');
+    return result.blocks;
+  }
+
+  async removeTeamBlock(teamId: string, playerId: string): Promise<void> {
+    await apiFetch(`/api/users/team-blocks/${encodeURIComponent(teamId)}?playerId=${encodeURIComponent(playerId)}`, { method: 'DELETE' });
+  }
+
+  async getInviteById(inviteId: string): Promise<Invite> {
+    const response = await apiRequest<{ invite: Invite & CanonicalApiEntity }>(`/api/invites/${encodeURIComponent(inviteId)}`);
+    return normalizeInviteNames(response.invite);
   }
 
   async deleteInviteById(inviteId: string): Promise<boolean> {
@@ -446,11 +471,12 @@ class UserService {
     return true;
   }
 
-  async declineInvite(inviteId: string): Promise<boolean> {
-    await apiFetch(`/api/invites/${encodeURIComponent(inviteId)}/decline`, {
+  async declineInvite(inviteId: string, input: DeclineTeamInvitationInput = {}): Promise<boolean> {
+    const response = await apiFetch<{ block?: { active: boolean } }>(`/api/invites/${encodeURIComponent(inviteId)}/decline`, {
       method: 'POST',
-      body: JSON.stringify({}),
+      body: JSON.stringify(input),
     });
+    if (input.blockScope && response.block?.active !== true) throw new Error('The invitation is already declined. The block is no longer active.');
     return true;
   }
 

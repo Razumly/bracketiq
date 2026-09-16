@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
@@ -53,7 +54,7 @@ class TeamDetailsDialogUiTest {
         var dismissAttempts = 0
 
         composeRule.setContent {
-            var isDialogVisible by mutableStateOf(true)
+            var isDialogVisible by remember { mutableStateOf(true) }
 
             MaterialTheme {
                 if (isDialogVisible) {
@@ -157,6 +158,39 @@ class TeamDetailsDialogUiTest {
         composeRule.onNodeWithText("Hide").assertIsDisplayed()
         composeRule.onNodeWithText("No required documents for this user.").assertIsDisplayed()
         composeRule.onNodeWithText("Message").assertIsDisplayed()
+    }
+
+    @Test
+    fun given_pending_player_when_team_details_opens_then_pending_acceptance_label_is_visible() {
+        val currentUser = user(id = "manager", firstName = "Casey", lastName = "Manager")
+        val pendingPlayer = user(id = "pending", firstName = "Jordan", lastName = "Awaiting")
+
+        composeRule.setContent {
+            MaterialTheme {
+                TeamDetailsDialog(
+                    team = TeamWithPlayers(
+                        team = Team(
+                            division = "Open",
+                            name = "Pending roster team",
+                            captainId = currentUser.id,
+                            playerIds = emptyList(),
+                            pending = listOf(pendingPlayer.id),
+                            teamSize = 2,
+                            sport = "Volleyball",
+                            id = "pending-roster-team",
+                        ),
+                        captain = currentUser,
+                        players = emptyList(),
+                        pendingPlayers = listOf(pendingPlayer),
+                    ),
+                    currentUser = currentUser,
+                    onDismiss = {},
+                    onPlayerMessage = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Pending acceptance").assertIsDisplayed()
     }
 
     private fun user(

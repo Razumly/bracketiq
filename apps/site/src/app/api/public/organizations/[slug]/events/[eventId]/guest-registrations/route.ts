@@ -26,7 +26,7 @@ import {
 } from '@/server/events/eventRegistrations';
 import {
   isWeeklyOccurrenceJoinClosed,
-  isWeeklyParentEvent,
+  isActiveWeeklyParentEvent,
   resolveWeeklyOccurrence,
   WEEKLY_OCCURRENCE_JOIN_CLOSED_ERROR,
   type ResolvedWeeklyOccurrence,
@@ -317,7 +317,7 @@ const resolveOccurrenceForPayload = async (
   event: Record<string, any>,
   payload: z.infer<typeof payloadSchema>,
 ): Promise<{ ok: true; occurrence: ResolvedWeeklyOccurrence | null } | { ok: false; error: string; status?: number }> => {
-  if (!isWeeklyParentEvent(event as any)) {
+  if (!isActiveWeeklyParentEvent(event)) {
     return { ok: true, occurrence: null };
   }
 
@@ -328,7 +328,7 @@ const resolveOccurrenceForPayload = async (
   }
 
   const occurrenceResult = await resolveWeeklyOccurrence({
-    event: event as any,
+    event: event as Parameters<typeof resolveWeeklyOccurrence>[0]['event'],
     occurrence: { slotId, occurrenceDate },
   }, prisma);
   if (!occurrenceResult.ok) {
@@ -1189,10 +1189,33 @@ export async function POST(req: NextRequest, context: RouteContext) {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Guest registration failed.';
     const errorCode = (error as { code?: unknown })?.code;
+    if (errorCode === 'EVENT_REGISTRATION_EVENT_ARCHIVED') {
+      return NextResponse.json(
+        { error: message, code: errorCode },
+        { status: 409 },
+      );
+    }
     if (errorCode === 'EVENT_CONFIGURATION_CHANGED') {
       return NextResponse.json(
         { error: message, code: errorCode },
         { status: 409 },
+      );
+    }
+    if (errorCode === 'EVENT_REGISTRATION_CAPACITY_EXCEEDED') {
+      return NextResponse.json(
+        {
+          error: message,
+          code: errorCode,
+          capacity: (error as { capacity?: number })?.capacity,
+          participantCount: (error as { participantCount?: number })?.participantCount,
+        },
+        { status: 409 },
+      );
+    }
+    if (errorCode === 'INVALID_EVENT_REGISTRATION_UNIT') {
+      return NextResponse.json(
+        { error: message, code: errorCode },
+        { status: 400 },
       );
     }
     const status = typeof (error as { status?: unknown })?.status === 'number'

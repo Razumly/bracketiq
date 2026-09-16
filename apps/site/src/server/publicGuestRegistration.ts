@@ -7,12 +7,17 @@ import { normalizeOptionalName } from '@/lib/nameCase';
 import { prisma } from '@/lib/prisma';
 import { ensureAuthUserAndUserDataByEmail } from '@/server/inviteUsers';
 import { getPublicOrganizationBySlug, type PublicOrganizationSummary } from '@/server/publicOrganizationCatalog';
+import { isWeeklyParentEvent } from '@/server/events/weeklyOccurrences';
 
 type PrismaLike = Prisma.TransactionClient | typeof prisma | any;
 
 export type PublicGuestEventContext = {
   organization: PublicOrganizationSummary;
-  event: Record<string, any>;
+  event: Record<string, any> & {
+    id: string;
+    start: Date;
+    end: Date | null;
+  };
 };
 
 export type GuestRegistrationTokenPayload = JwtPayload & {
@@ -209,6 +214,10 @@ export const assertPublicWidgetEvent = async (
 
   const state = String(event.state ?? '').trim().toUpperCase();
   if (state && state !== 'PUBLISHED') {
+    return null;
+  }
+
+  if (isWeeklyParentEvent(event) && event.archivedAt) {
     return null;
   }
 

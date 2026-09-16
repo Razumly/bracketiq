@@ -1,4 +1,4 @@
-import { Card, NumberInput, SimpleGrid, Stack, Text } from '@mantine/core';
+import { NumberInput, Paper, SimpleGrid, Stack, Text } from '@/components/organization/organization-operation-ui';
 import type { LeagueScoringConfig, Sport } from '@/types';
 
 type LeagueScoringConfigKey = keyof LeagueScoringConfig;
@@ -70,10 +70,10 @@ const LeagueScoringConfigPanel: React.FC<LeagueScoringConfigPanelProps> = ({ val
               maw={170}
             />
           ) : (
-            <Card key={key} padding="sm" radius="md" withBorder>
+            <Paper key={key} p="sm" radius="md" withBorder>
               <Text size="sm" c="dimmed">{label}</Text>
               <Text fw={600}>{value[key]}</Text>
-            </Card>
+            </Paper>
           )
         )
       ))}

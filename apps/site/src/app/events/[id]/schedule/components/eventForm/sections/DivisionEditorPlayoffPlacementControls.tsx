@@ -1,8 +1,6 @@
 import type { ComponentProps } from 'react';
-import {
-    Select as MantineSelect,
-    Text,
-} from '@mantine/core';
+import { Select as MantineSelect,
+Text, } from '@/components/organization/organization-operation-ui';
 
 import { AnimatedLayoutSection } from '../components/AnimatedSection';
 import { DIVISION_FULL_WIDTH_CLASS } from '../divisionLayout';
@@ -26,7 +24,11 @@ export const DivisionEditorPlayoffPlacementControls = ({
     disabled,
     onPlacementDivisionChange,
 }: DivisionEditorPlayoffPlacementControlsProps) => (
-    <AnimatedLayoutSection in={visible} className={DIVISION_FULL_WIDTH_CLASS}>
+    <AnimatedLayoutSection
+        in={visible}
+        className={DIVISION_FULL_WIDTH_CLASS}
+        allowOverflow
+    >
         <div className="space-y-2">
             <Text size="sm" fw={600}>Playoff Placement Mapping</Text>
             {playoffDivisionOptions.length === 0 ? (

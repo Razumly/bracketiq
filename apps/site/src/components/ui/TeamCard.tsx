@@ -1,7 +1,7 @@
 import { extractDivisionTokenFromId, inferDivisionDetails, parseDivisionToken } from '@/lib/divisionTypes';
 import { Team, getUserAvatarUrl, getTeamAvatarUrl } from '@/types';
 import type { TeamPlayerRegistration } from '@/types';
-import { Box, Paper, Group, Avatar, Text, Badge } from '@mantine/core';
+import { Paper, Group, Avatar, Text, Badge } from '@/components/organization/organization-operation-ui';
 
 interface TeamCardProps {
   team: Team;
@@ -117,7 +117,7 @@ export default function TeamCard({
     ?? divisionLabelFromString
     ?? 'Division';
   const renderedActions = actions ? (
-    <Box
+    <div
       style={{
         flex: actionsPlacement === 'header' ? '0 1 auto' : undefined,
         marginLeft: actionsPlacement === 'header' ? 'auto' : undefined,
@@ -135,7 +135,7 @@ export default function TeamCard({
       }}
     >
       {actions}
-    </Box>
+    </div>
   ) : null;
   const hasBelowActions = actionsPlacement === 'below' && Boolean(renderedActions);
   const hasBodyContent = hasBelowActions || visibleMembers.length > 0 || hasPendingInvites || showRegistrationCapacity || isAffiliateTeam;
@@ -145,9 +145,9 @@ export default function TeamCard({
     <Paper withBorder radius="md" p="md" className={className} onClick={onClick} style={{ cursor: onClick ? 'pointer' : 'default' }}>
       <Group align="flex-start" justify="space-between" mb={headerMarginBottom} wrap="wrap">
         <Group gap="sm" align={showTeamMetadata ? 'flex-start' : 'center'} wrap="nowrap" style={{ flex: '1 1 220px', minWidth: 0 }}>
-          <Avatar src={getTeamAvatarUrl(team, 56)} alt={team.name || 'Team'} size={56} radius="xl" />
+          <Avatar src={getTeamAvatarUrl(team, 56)} alt={team.name || 'Team'} name={team.name || 'Team'} size="lg" />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <Text fw={600} size="lg" truncate>{team.name || 'Unnamed Team'}</Text>
+            <Text fw={600} size="lg" className="truncate">{team.name || 'Unnamed Team'}</Text>
             {showTeamMetadata ? (
               <Group gap={6} mt={4}>
                 <Text size="sm" c="dimmed">{divisionLabel}</Text>
@@ -160,27 +160,27 @@ export default function TeamCard({
       </Group>
 
       {hasBelowActions ? (
-        <Box mb="sm">
+        <div className="mb-3">
           {renderedActions}
-        </Box>
+        </div>
       ) : null}
 
       {visibleMembers.length > 0 && (
         <Group justify="space-between" mb="xs">
           <Group gap={6}>
             <Text size="sm" c="dimmed">Roster:</Text>
-            <Group gap={-8}>
+            <Group gap={0} className="-space-x-2">
               {visibleMembersPreview.map((player) => (
                 <Avatar
                   key={player.$id}
                   src={getUserAvatarUrl(player, 32, jerseyNumberByUserId.get(player.$id))}
                   alt={player.fullName}
-                  size={32}
-                  radius="xl"
+                  size="sm"
+                  name={player.fullName}
                 />
               ))}
               {hiddenVisibleMemberCount > 0 && (
-                <Avatar size={32} radius="xl" color="gray">+{hiddenVisibleMemberCount}</Avatar>
+                <span className="inline-flex size-8 items-center justify-center rounded-full bg-muted text-xs">+{hiddenVisibleMemberCount}</span>
               )}
             </Group>
           </Group>
@@ -188,7 +188,7 @@ export default function TeamCard({
       )}
 
       {(hasPendingInvites || showRegistrationCapacity || isAffiliateTeam) && (
-        <Group justify="space-between" pt="sm" style={{ borderTop: '1px solid var(--mantine-color-default-border)' }}>
+        <Group justify="space-between" className="border-t border-border pt-3">
           <Group gap={8}>
             {hasPendingInvites && (
               <Text size="xs" c="orange" fw={600}>{team.pending.length} pending</Text>

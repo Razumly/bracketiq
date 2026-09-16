@@ -56,7 +56,7 @@ import com.razumly.mvp.icons.ProfileActionPaymentPlans
 import com.razumly.mvp.icons.ProfileActionPayments
 import com.razumly.mvp.icons.ProfileActionRefunds
 import com.razumly.mvp.icons.ProfileActionTeams
-import com.razumly.mvp.icons.Groups
+import com.razumly.mvp.icons.SharedIcons
 import mvp.composeapp.generated.resources.Res
 import mvp.composeapp.generated.resources.mvp_logo
 import mvp.composeapp.generated.resources.mvp_logo_white_bg
@@ -192,7 +192,7 @@ fun ProfileHomeScreen(component: ProfileComponent) {
                 ProfileAction(
                     title = "Connections",
                     description = "Friends and following",
-                    icon = MVPIcons.Groups,
+                    icon = SharedIcons.Groups,
                     onClick = component::navigateToConnections,
                 ),
             )

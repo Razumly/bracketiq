@@ -8,6 +8,13 @@ type EventTypeOption = {
 
 export const supportsScheduleSlots = (eventType: EventType): boolean =>
     eventType === 'LEAGUE' || eventType === 'TOURNAMENT' || eventType === 'WEEKLY_EVENT' || eventType === 'TRYOUT';
+export const isUnscheduledCompetition = (
+    eventType: EventType,
+    isAutomatedScheduling: boolean | undefined,
+): boolean => (
+    (eventType === 'LEAGUE' || eventType === 'TOURNAMENT')
+    && isAutomatedScheduling === false
+);
 
 export const hasParentEventRef = (value?: string | null): boolean =>
     typeof value === 'string' && value.trim().length > 0;

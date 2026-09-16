@@ -119,6 +119,7 @@ const txMock = {
   eventOfficials: eventOfficialsMock,
   eventTagAssignments: eventTagAssignmentsMock,
   leagueScoringConfigs: leagueScoringConfigsMock,
+  $executeRaw: jest.fn().mockResolvedValue(0),
 };
 
 const prismaMock = {

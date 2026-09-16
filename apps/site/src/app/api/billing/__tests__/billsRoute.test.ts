@@ -11,6 +11,16 @@ const txMock = {
   billPayments: {
     create: jest.fn(),
   },
+  events: {
+    findUnique: jest.fn(),
+  },
+  timeSlots: {
+    findFirst: jest.fn(),
+    findUnique: jest.fn(),
+  },
+  divisions: {
+    findMany: jest.fn(),
+  },
 };
 
 const prismaMock = {
@@ -28,6 +38,9 @@ const prismaMock = {
     findUnique: jest.fn(),
   },
   events: {
+    findUnique: jest.fn(),
+  },
+  eventRegistrations: {
     findUnique: jest.fn(),
   },
   timeSlots: {
@@ -94,9 +107,71 @@ describe('POST /api/billing/bills', () => {
       divisions: [],
       timeSlotIds: [],
     });
+    txMock.events.findUnique.mockImplementation((args: unknown) => prismaMock.events.findUnique(args));
     prismaMock.timeSlots.findUnique.mockResolvedValue(null);
+    txMock.timeSlots.findFirst.mockImplementation((args: unknown) => prismaMock.timeSlots.findUnique(args));
+    txMock.timeSlots.findUnique.mockImplementation((args: unknown) => prismaMock.timeSlots.findUnique(args));
+    txMock.divisions.findMany.mockImplementation((args: unknown) => prismaMock.divisions.findMany(args));
     prismaMock.divisions.findMany.mockResolvedValue([]);
     prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof txMock) => unknown) => callback(txMock));
+  });
+
+  it('rejects an event registration source owned by a different team', async () => {
+    prismaMock.eventRegistrations.findUnique.mockResolvedValueOnce({
+      eventId: 'event_1',
+      registrantId: 'event_team_other',
+      parentId: 'team_other',
+      registrantType: 'TEAM',
+      eventTeamId: 'event_team_other',
+      slotId: null,
+      occurrenceDate: null,
+    });
+
+    const response = await POST(
+      jsonPost('http://localhost/api/billing/bills', {
+        ownerType: 'TEAM',
+        ownerId: 'team_1',
+        totalAmountCents: 5000,
+        eventId: 'event_1',
+        sourceType: 'event_registration',
+        sourceId: 'registration_other',
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(txMock.bills.create).not.toHaveBeenCalled();
+    expect(txMock.billPayments.create).not.toHaveBeenCalled();
+  });
+
+  it('stores an event registration source owned by the bill team', async () => {
+    prismaMock.eventRegistrations.findUnique.mockResolvedValueOnce({
+      eventId: 'event_1',
+      registrantId: 'event_team_1',
+      parentId: 'team_1',
+      registrantType: 'TEAM',
+      eventTeamId: 'event_team_1',
+      slotId: null,
+      occurrenceDate: null,
+    });
+
+    const response = await POST(
+      jsonPost('http://localhost/api/billing/bills', {
+        ownerType: 'TEAM',
+        ownerId: 'team_1',
+        totalAmountCents: 5000,
+        eventId: 'event_1',
+        sourceType: 'EVENT_REGISTRATION',
+        sourceId: 'registration_1',
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(txMock.bills.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        sourceType: 'EVENT_REGISTRATION',
+        sourceId: 'registration_1',
+      }),
+    }));
   });
 
   it('creates a payment-plan bill and installments', async () => {
@@ -193,6 +268,8 @@ describe('POST /api/billing/bills', () => {
   it('creates weekly payment-plan installments from occurrence-relative due days', async () => {
     prismaMock.events.findUnique.mockResolvedValueOnce({
       id: 'event_1',
+      start: new Date('2026-07-01T00:00:00.000Z'),
+      end: null,
       eventType: 'WEEKLY_EVENT',
       parentEvent: null,
       divisions: ['open'],
@@ -204,6 +281,8 @@ describe('POST /api/billing/bills', () => {
       startDate: new Date('2026-07-01T00:00:00.000Z'),
       endDate: null,
       startTimeMinutes: 600,
+      endTimeMinutes: 660,
+      timeZone: 'UTC',
       divisions: ['open'],
     });
 
@@ -278,6 +357,8 @@ describe('POST /api/billing/bills', () => {
     txMock.bills.findFirst.mockResolvedValueOnce({ id: 'bill_existing' });
     prismaMock.events.findUnique.mockResolvedValueOnce({
       id: 'event_1',
+      start: new Date('2026-07-01T00:00:00.000Z'),
+      end: null,
       eventType: 'WEEKLY_EVENT',
       parentEvent: null,
       divisions: ['open'],
@@ -289,6 +370,8 @@ describe('POST /api/billing/bills', () => {
       startDate: new Date('2026-07-01T00:00:00.000Z'),
       endDate: null,
       startTimeMinutes: 600,
+      endTimeMinutes: 660,
+      timeZone: 'UTC',
       divisions: ['open'],
     });
 
@@ -324,6 +407,8 @@ describe('POST /api/billing/bills', () => {
   it('rejects weekly payment plans without occurrence-relative due days', async () => {
     prismaMock.events.findUnique.mockResolvedValueOnce({
       id: 'event_1',
+      start: new Date('2026-07-01T00:00:00.000Z'),
+      end: null,
       eventType: 'WEEKLY_EVENT',
       parentEvent: null,
       divisions: ['open'],
@@ -335,6 +420,8 @@ describe('POST /api/billing/bills', () => {
       startDate: new Date('2026-07-01T00:00:00.000Z'),
       endDate: null,
       startTimeMinutes: 600,
+      endTimeMinutes: 660,
+      timeZone: 'UTC',
       divisions: ['open'],
     });
 

@@ -375,7 +375,7 @@ const segmentScoreTotal = (match: Match, teamId: string): number => (
 );
 
 
-const resolveMatchWinner = (match: Match): Team | null => {
+export const resolveMatchWinner = (match: Match): Team | null => {
   const teamOne = match.team1;
   const teamTwo = match.team2;
   if (!teamOne || !teamTwo) return null;

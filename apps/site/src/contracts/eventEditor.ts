@@ -1,11 +1,25 @@
 import { z } from "zod";
 import {
-  normalizeOfficialSchedulingMode,
-  normalizeStaffingPriority,
-  STAFFING_PRIORITIES,
-} from "@/server/officials/config";
+  normalizeAutomatedSchedulingForEventType,
+} from "@/lib/automatedScheduling";
+import { STAFFING_PRIORITIES } from "@/server/officials/config";
+export const EVENT_EDITOR_CONTRACT_VERSION = 5 as const;
+export const EVENT_EDITOR_PREVIOUS_CONTRACT_VERSION = 4 as const;
+export const EVENT_EDITOR_LEGACY_CONTRACT_VERSION = 3 as const;
 
-export const EVENT_EDITOR_CONTRACT_VERSION = 3 as const;
+const eventEditorContractVersionSchema = z.union([
+  z.literal(EVENT_EDITOR_CONTRACT_VERSION),
+  z.literal(EVENT_EDITOR_PREVIOUS_CONTRACT_VERSION),
+  z.literal(EVENT_EDITOR_LEGACY_CONTRACT_VERSION),
+]);
+
+export const isSupportedEventEditorContractVersion = (
+  value: unknown,
+): value is typeof EVENT_EDITOR_CONTRACT_VERSION | typeof EVENT_EDITOR_PREVIOUS_CONTRACT_VERSION | typeof EVENT_EDITOR_LEGACY_CONTRACT_VERSION => (
+  value === EVENT_EDITOR_CONTRACT_VERSION
+  || value === EVENT_EDITOR_PREVIOUS_CONTRACT_VERSION
+  || value === EVENT_EDITOR_LEGACY_CONTRACT_VERSION
+);
 
 const id = z.string().trim().min(1);
 const nullableId = id.nullable();
@@ -481,6 +495,7 @@ const scheduleFixedSchema = z
   .object({
     mode: z.literal("FIXED_END"),
     endConstraint: isoDateTime,
+    isAutomatedScheduling: z.boolean().default(true),
   })
   .strict();
 
@@ -489,13 +504,16 @@ const scheduleGeneratedSchema = z
     mode: z.literal("GENERATED_END"),
     endConstraint: z.null(),
     generatedScheduleEnd: optionalDateLike,
+    isAutomatedScheduling: z.boolean().default(true),
   })
   .strict();
 
-export const editorScheduleSchema = z.discriminatedUnion("mode", [
+const editorScheduleShapeSchema = z.discriminatedUnion("mode", [
   scheduleFixedSchema,
   scheduleGeneratedSchema,
 ]);
+
+export const editorScheduleSchema = editorScheduleShapeSchema;
 
 export const editorPaymentSchema = z
   .object({
@@ -585,50 +603,29 @@ export const editorResourcesSchema = z
     timeSlots: z.array(editorTimeSlotSchema),
     requiredTemplateIds: z.array(id),
     immutableFieldIds: z.array(id),
+    sourceTemplateId: nullableId.optional(),
     rentalBookingId: nullableId,
     rentalBookingItemId: nullableId,
   })
   .strict();
 
-const editorStaffSchema = z.preprocess(
-  (input) => {
-    if (!input || typeof input !== "object" || Array.isArray(input)) {
-      return input;
-    }
-    const record = input as Record<string, unknown>;
-    if (!Object.prototype.hasOwnProperty.call(record, "officialSchedulingMode")) {
-      return input;
-    }
-    const legacyMode = normalizeOfficialSchedulingMode(record.officialSchedulingMode);
-    const normalized = { ...record };
-    delete normalized.officialSchedulingMode;
-    normalized.staffingPriority = normalizeStaffingPriority(
-      record.staffingPriority,
-      legacyMode,
-    );
-    if (typeof record.doTeamsOfficiate !== "boolean") {
-      normalized.doTeamsOfficiate = legacyMode === "TEAM_STAFFING";
-    }
-    return normalized;
-  },
-  z
-    .object({
-      staffingPriority: z.enum(STAFFING_PRIORITIES),
-      doTeamsOfficiate: z.boolean(),
-      teamOfficialsMaySwap: z.boolean(),
-      teamCheckInMode: z.enum(["OFF", "EVENT", "MATCH"]),
-      teamCheckInOpenMinutesBefore: z.number().int().nonnegative(),
-      allowMatchRosterEdits: z.boolean(),
-      allowTemporaryMatchPlayers: z.boolean(),
-      autoCreatePointMatchIncidents: z.boolean(),
-      officialIds: z.array(id),
-      officialPositions: z.array(officialPositionSchema),
-      eventOfficials: z.array(eventOfficialSchema),
-      assistantHostIds: z.array(id),
-      pendingInvites: z.array(staffInviteSchema),
-    })
-    .strict(),
-);
+const editorStaffSchema = z
+  .object({
+    staffingPriority: z.enum(STAFFING_PRIORITIES),
+    doTeamsOfficiate: z.boolean(),
+    teamOfficialsMaySwap: z.boolean(),
+    teamCheckInMode: z.enum(["OFF", "EVENT", "MATCH"]),
+    teamCheckInOpenMinutesBefore: z.number().int().nonnegative(),
+    allowMatchRosterEdits: z.boolean(),
+    allowTemporaryMatchPlayers: z.boolean(),
+    autoCreatePointMatchIncidents: z.boolean(),
+    officialIds: z.array(id),
+    officialPositions: z.array(officialPositionSchema),
+    eventOfficials: z.array(eventOfficialSchema),
+    assistantHostIds: z.array(id),
+    pendingInvites: z.array(staffInviteSchema),
+  })
+  .strict();
 
 export const eventEditorDraftSchema = z
   .object({
@@ -657,6 +654,8 @@ export const eventEditorBootstrapDraftSchema = eventEditorDraftSchema
 
 export const editorCapabilitiesSchema = z
   .object({
+    viewerUserId: nullableId.optional(),
+    organizationOwnershipStatus: z.string().nullable().optional(),
     canUseOnlinePayments: z.boolean(),
     canManageStaff: z.boolean(),
     canEdit: z.boolean(),
@@ -702,11 +701,104 @@ const eventEditorMatchDemandSchema = z
   })
   .strict();
 
+const eventEditorScheduleDiagnosticEvidenceSchema = z
+  .object({
+    kind: z.enum(["CAPACITY_BOUND", "PLACEMENT_SEARCH", "OFFICIAL_MATCHING"]),
+    message: z.string().trim().min(1),
+    matchIds: z.array(id).optional(),
+    resourceIds: z.array(id).optional(),
+    divisionIds: z.array(id).optional(),
+    teamIds: z.array(id).optional(),
+    dependencyIds: z.array(id).optional(),
+    officialIds: z.array(id).optional(),
+    timeSlotIds: z.array(id).optional(),
+    intervals: z.array(
+      z
+        .object({
+          start: isoDateTime,
+          end: isoDateTime,
+        })
+        .strict(),
+    ).optional(),
+    demand: z.number().int().nonnegative().optional(),
+    capacity: z.number().int().nonnegative().optional(),
+    deficit: z.number().int().nonnegative().optional(),
+    candidateCount: z.number().int().nonnegative().optional(),
+  })
+  .strict();
+
+export type EventEditorScheduleDiagnosticEvidence = z.infer<
+  typeof eventEditorScheduleDiagnosticEvidenceSchema
+>;
+
+const scheduleDiagnosticFactorSchema = z.enum([
+  "RESOURCE",
+  "PLAYING_TEAM",
+  "TEAM_DUTY",
+  "NAMED_OFFICIAL_POSITION",
+  "DIVISION_ORDER",
+  "ELIGIBILITY",
+  "FRAGMENTED_WINDOWS",
+  "DEPENDENCY",
+  "UNKNOWN",
+]);
+
+const eventEditorScheduleDiagnosticSchema = z
+  .object({
+    factor: scheduleDiagnosticFactorSchema,
+    confidence: z.enum(["PROVEN_GLOBAL_BOUND", "PROVEN_FOR_ATTEMPT", "OBSERVED"]),
+    message: z.string().trim().min(1),
+    evidence: z.array(eventEditorScheduleDiagnosticEvidenceSchema),
+  })
+  .strict();
+
+const eventEditorScheduleRemedySchema = z
+  .object({
+    code: z.enum([
+      "ADD_OR_EXTEND_TIME_SLOTS",
+      "ADD_ELIGIBLE_OFFICIALS",
+      "REVIEW_RESOURCE_ELIGIBILITY",
+    ]),
+    factor: scheduleDiagnosticFactorSchema,
+    message: z.string().trim().min(1),
+    evidence: z.array(eventEditorScheduleDiagnosticEvidenceSchema),
+  })
+  .strict();
+
+export const eventEditorScheduleDiagnosticsSchema = z
+  .object({
+    message: z.string().trim().min(1),
+    matchDemand: eventEditorMatchDemandSchema,
+    estimatedCapacity: z.number().int().nonnegative(),
+    estimatedCapacityIsUpperBound: z.literal(true),
+    minimumDeficitMatches: z.number().int().nonnegative(),
+    searchComplete: z.boolean(),
+    restrictingFactors: z.array(eventEditorScheduleDiagnosticSchema),
+    remedies: z.array(eventEditorScheduleRemedySchema),
+  })
+  .strict();
+
+export type EventEditorScheduleDiagnostics = z.infer<
+  typeof eventEditorScheduleDiagnosticsSchema
+>;
+
+/**
+ * Existing-Event schedule maintenance is deliberately separate from the
+ * create-event proposal protocol.  The operation identity belongs to one
+ * user action; retries carry that same identity and proposal revision.
+ */
+export const eventEditorMaintenanceOperationSchema = z.enum([
+  "BUILD",
+  "COMPLETE",
+  "REBUILD",
+]);
+
 export const eventEditorScheduleStateSchema = z
   .object({
     sourceType: z.string().nullable(),
     matchCount: z.number().int().nonnegative(),
     matchDemand: eventEditorMatchDemandSchema.optional(),
+    availableMaintenanceOperations: z.array(eventEditorMaintenanceOperationSchema),
     revision: id,
     hasProtectedHistory: z.boolean(),
   })
@@ -761,8 +853,208 @@ export const eventEditorScheduleWarningSchema = z
     code: id,
     message: z.string().trim().min(1),
     matchIds: z.array(id).optional(),
+    restrictingFactor: z.enum([
+      "RESOURCE",
+      "PLAYING_TEAM",
+      "TEAM_DUTY",
+      "NAMED_OFFICIAL_POSITION",
+      "DIVISION_ORDER",
+      "ELIGIBILITY",
+      "FRAGMENTED_WINDOWS",
+      "DEPENDENCY",
+      "UNKNOWN",
+    ]).optional(),
   })
   .strict();
+
+export const eventEditorUnscheduledMatchSchema = z
+  .object({
+    id,
+    matchId: z.number().int().nullable(),
+    phaseDivisionId: id,
+    phase: z.string().trim().min(1),
+    sourceDivisionId: nullableId,
+  })
+  .strict();
+
+export const eventEditorAffectedCompetitionPhaseSchema = z
+  .object({
+    id,
+    name: z.string().trim().min(1),
+    phase: z.string().trim().min(1),
+    sourceDivisionId: nullableId,
+  })
+  .strict();
+
+type PartialScheduleOutcomeForValidation = {
+  matchCount: number;
+  placedMatchCount: number;
+  unplacedMatchCount: number;
+  matches: z.infer<typeof editorMatchProjectionSchema>[];
+  unscheduledMatches: z.infer<typeof eventEditorUnscheduledMatchSchema>[];
+  affectedCompetitionPhases: z.infer<
+    typeof eventEditorAffectedCompetitionPhaseSchema
+  >[];
+};
+
+const validatePartialScheduleCounts = (
+  outcome: PartialScheduleOutcomeForValidation,
+  context: z.RefinementCtx,
+): z.infer<typeof editorMatchProjectionSchema>[] => {
+  if (outcome.matchCount !== outcome.matches.length) {
+    context.addIssue({
+      code: "custom",
+      path: ["matchCount"],
+      message: "matchCount must describe the complete Match Graph.",
+    });
+  }
+
+  const placedMatches = outcome.matches.filter(
+    (match) => match.placementState === "PLACED",
+  );
+  const unplacedMatches = outcome.matches.filter(
+    (match) => match.placementState === "UNPLACED",
+  );
+  if (outcome.placedMatchCount !== placedMatches.length) {
+    context.addIssue({
+      code: "custom",
+      path: ["placedMatchCount"],
+      message: "placedMatchCount must describe the complete Match Graph.",
+    });
+  }
+  if (outcome.unplacedMatchCount !== unplacedMatches.length) {
+    context.addIssue({
+      code: "custom",
+      path: ["unplacedMatchCount"],
+      message: "unplacedMatchCount must describe the complete Match Graph.",
+    });
+  }
+  if (
+    outcome.placedMatchCount + outcome.unplacedMatchCount
+    !== outcome.matchCount
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["unplacedMatchCount"],
+      message: "placed and unplaced counts must equal matchCount.",
+    });
+  }
+
+  return unplacedMatches;
+};
+
+const validatePartialUnscheduledMatches = (
+  outcome: PartialScheduleOutcomeForValidation,
+  unplacedMatches: z.infer<typeof editorMatchProjectionSchema>[],
+  context: z.RefinementCtx,
+): void => {
+  const unscheduledIds = outcome.unscheduledMatches.map((match) => match.id);
+  if (new Set(unscheduledIds).size !== unscheduledIds.length) {
+    context.addIssue({
+      code: "custom",
+      path: ["unscheduledMatches"],
+      message: "unscheduledMatches must not contain duplicate Match IDs.",
+    });
+  }
+  if (
+    unscheduledIds.length !== unplacedMatches.length
+    || unscheduledIds.some((matchId, index) => matchId !== unplacedMatches[index]?.id)
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["unscheduledMatches"],
+      message: "unscheduledMatches must contain exactly the UNPLACED nodes in graph order.",
+    });
+  }
+
+  const matchesById = new Map(
+    outcome.matches.map((match) => [match.id, match]),
+  );
+  outcome.unscheduledMatches.forEach((unscheduledMatch, index) => {
+    const graphMatch = matchesById.get(unscheduledMatch.id);
+    if (!graphMatch) {
+      context.addIssue({
+        code: "custom",
+        path: ["unscheduledMatches", index, "id"],
+        message: "unscheduledMatches contains an unknown Match ID.",
+      });
+      return;
+    }
+    if (graphMatch.placementState !== "UNPLACED") {
+      context.addIssue({
+        code: "custom",
+        path: ["unscheduledMatches", index, "id"],
+        message: "unscheduledMatches may contain only UNPLACED nodes.",
+      });
+    }
+    if (
+      unscheduledMatch.matchId !== graphMatch.matchId
+      || unscheduledMatch.phaseDivisionId !== graphMatch.phaseDivisionId
+      || unscheduledMatch.phase !== graphMatch.phase
+      || unscheduledMatch.sourceDivisionId !== graphMatch.sourceDivisionId
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["unscheduledMatches", index],
+        message: "unscheduledMatches identity must match its graph node.",
+      });
+    }
+  });
+};
+
+const validatePartialAffectedCompetitionPhases = (
+  outcome: PartialScheduleOutcomeForValidation,
+  unplacedMatches: z.infer<typeof editorMatchProjectionSchema>[],
+  context: z.RefinementCtx,
+): void => {
+  const expectedPhaseIds = Array.from(
+    new Set(
+      unplacedMatches
+        .map((match) => match.phaseDivisionId)
+        .filter((phaseId): phaseId is string => Boolean(phaseId)),
+    ),
+  ).sort((left, right) => left.localeCompare(right));
+  const phaseIds = outcome.affectedCompetitionPhases.map((phase) => phase.id);
+  if (new Set(phaseIds).size !== phaseIds.length) {
+    context.addIssue({
+      code: "custom",
+      path: ["affectedCompetitionPhases"],
+      message: "affectedCompetitionPhases must not contain duplicate phase IDs.",
+    });
+  }
+  if (
+    phaseIds.length !== expectedPhaseIds.length
+    || phaseIds.some((phaseId, index) => phaseId !== expectedPhaseIds[index])
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["affectedCompetitionPhases"],
+      message: "affectedCompetitionPhases must describe exactly the phases containing UNPLACED nodes.",
+    });
+  }
+};
+
+export const eventEditorPartialScheduleOutcomeSchema = z
+  .object({
+    status: z.literal("PARTIAL"),
+    isComplete: z.literal(false),
+    matchCount: z.number().int().positive(),
+    placedMatchCount: z.number().int().nonnegative(),
+    unplacedMatchCount: z.number().int().positive(),
+    matches: z.array(editorMatchProjectionSchema),
+    unscheduledMatches: z.array(eventEditorUnscheduledMatchSchema),
+    affectedCompetitionPhases: z.array(
+      eventEditorAffectedCompetitionPhaseSchema,
+    ),
+    diagnostics: eventEditorScheduleDiagnosticsSchema.optional(),
+    warnings: z.array(eventEditorScheduleWarningSchema),
+  })
+  .strict()
+  .superRefine((outcome, context) => {
+    const unplacedMatches = validatePartialScheduleCounts(outcome, context);
+    validatePartialUnscheduledMatches(outcome, unplacedMatches, context);
+    validatePartialAffectedCompetitionPhases(outcome, unplacedMatches, context);
+  });
 
 export const eventEditorCreateCompletionSchema = z
   .object({
@@ -793,6 +1085,7 @@ export const eventEditorScheduleOutcomeSchema = z.discriminatedUnion("status", [
       status: z.literal("NOT_REQUESTED"),
       matchCount: z.number().int().nonnegative(),
       matches: z.array(editorMatchProjectionSchema).optional(),
+      diagnostics: eventEditorScheduleDiagnosticsSchema.optional(),
       warnings: z.array(z.never()),
     })
     .strict(),
@@ -801,6 +1094,7 @@ export const eventEditorScheduleOutcomeSchema = z.discriminatedUnion("status", [
       status: z.enum(["BUILT", "REBUILT"]),
       matchCount: z.number().int().positive(),
       matches: z.array(editorMatchProjectionSchema),
+      diagnostics: eventEditorScheduleDiagnosticsSchema.optional(),
       warnings: z.array(eventEditorScheduleWarningSchema),
     })
     .strict(),
@@ -809,20 +1103,45 @@ export const eventEditorScheduleOutcomeSchema = z.discriminatedUnion("status", [
       status: z.literal("DELETED"),
       matchCount: z.literal(0),
       matches: z.array(z.never()),
+      diagnostics: z.never().optional(),
       warnings: z.array(z.never()),
     })
     .strict(),
+  eventEditorPartialScheduleOutcomeSchema,
 ]);
+export const eventEditorRevisionBindingSchema = z
+  .object({
+    editorRevision: id,
+    staffRevision: z.string().nullable(),
+    scheduleRevision: id,
+    fieldRevisions: z.record(z.string(), id),
+    timeSlotRevisions: z.record(z.string(), id),
+    rentalBookingRevision: id.nullable(),
+    rentalBookingRevisions: z.record(z.string(), id),
+    rentalBookingItemRevisions: z.record(z.string(), id),
+    availabilityRevision: id,
+  })
+  .strict();
+
+export type EventEditorRevisionBinding = z.infer<
+  typeof eventEditorRevisionBindingSchema
+>;
+
 
 export const eventEditorSnapshotSchema = z
   .object({
-    contractVersion: z.literal(EVENT_EDITOR_CONTRACT_VERSION),
+    contractVersion: eventEditorContractVersionSchema,
     draft: eventEditorBootstrapDraftSchema,
     mode: z.enum(["CREATE", "EDIT"]),
     eventId: nullableId,
     editorRevision: id,
     staffRevision: z.string().nullable(),
     capabilities: editorCapabilitiesSchema,
+    provenance: z.object({
+      sourceType: z.string().nullable(),
+      sourceId: z.string().nullable(),
+      sourceUrl: z.string().nullable(),
+    }).strict().optional(),
     catalogs: editorCatalogsSchema,
     immutable: z
       .object({
@@ -832,11 +1151,12 @@ export const eventEditorSnapshotSchema = z
       })
       .strict(),
     scheduleState: eventEditorScheduleStateSchema,
+    revisionBinding: eventEditorRevisionBindingSchema.nullish(),
   })
   .strict();
 export const eventEditorCreateBootstrapSchema = z
   .object({
-    contractVersion: z.literal(EVENT_EDITOR_CONTRACT_VERSION),
+    contractVersion: eventEditorContractVersionSchema,
     createOperationId: id,
     snapshot: eventEditorSnapshotSchema,
   })
@@ -877,7 +1197,7 @@ export const eventEditorBootstrapQuerySchema = z
 
 export const saveEventEditorCommandSchema = z
   .object({
-    contractVersion: z.literal(EVENT_EDITOR_CONTRACT_VERSION),
+    contractVersion: eventEditorContractVersionSchema,
     editorRevision: id,
     staffRevision: z.string().nullable(),
     draft: eventEditorDraftSchema,
@@ -903,13 +1223,508 @@ export const eventEditorExpectedCreateRevisionsSchema = z
 
 export const createEventEditorCommandSchema = z
   .object({
-    contractVersion: z.literal(EVENT_EDITOR_CONTRACT_VERSION),
+    contractVersion: eventEditorContractVersionSchema,
     createOperationId: id,
     expectedRevisions: eventEditorExpectedCreateRevisionsSchema,
     draft: eventEditorDraftSchema,
     completion: eventEditorCreateCompletionSchema,
+    hasScheduleProposalSupport: z.boolean().optional(),
   })
   .strict();
+
+const proposalGraphUserSchema = z
+  .object({
+    id,
+    firstName: z.string(),
+    lastName: z.string(),
+    userName: z.string(),
+  })
+  .strict();
+
+const proposalGraphPlayerRegistrationSchema = z
+  .object({
+    id,
+    teamId: nullableId,
+    userId: id,
+    status: z.string(),
+    jerseyNumber: z.string().nullable(),
+    position: z.string().nullable(),
+    isCaptain: z.boolean(),
+  })
+  .strict();
+
+const proposalGraphTeamSchema = z
+  .object({
+    id,
+    captainId: z.string().nullable(),
+    division: nullableId,
+    kind: z.string().nullable(),
+    name: z.string(),
+    playerIds: z.array(id),
+    players: z.array(proposalGraphUserSchema),
+    playerRegistrations: z.array(proposalGraphPlayerRegistrationSchema),
+  })
+  .strict();
+
+const proposalGraphFieldSchema = z
+  .object({
+    id,
+    organizationId: nullableId,
+    divisions: z.array(id),
+    name: z.string(),
+  })
+  .strict();
+
+const proposalGraphTimeSlotSchema = z
+  .object({
+    id,
+    dayOfWeek: integer.nonnegative().max(6),
+    daysOfWeek: z.array(integer.nonnegative().max(6)),
+    startDate: isoDateTime.optional(),
+    endDate: isoDateTime.nullable(),
+    repeating: z.boolean(),
+    startTimeMinutes: integer.nonnegative(),
+    endTimeMinutes: integer.nonnegative(),
+    price: z.number().nullable(),
+    scheduledFieldId: nullableId,
+    scheduledFieldIds: z.array(id),
+    divisions: z.array(id),
+  })
+  .strict();
+
+const proposalGraphOfficialPositionSchema = z
+  .object({
+    id,
+    name: z.string(),
+    count: integer.nonnegative(),
+    order: integer.nonnegative(),
+  })
+  .strict();
+
+const proposalGraphEventOfficialSchema = z
+  .object({
+    id,
+    userId: id,
+    positionIds: z.array(id),
+    fieldIds: z.array(id),
+    isActive: z.boolean(),
+  })
+  .strict();
+
+const proposalGraphDivisionPhaseSettingsSchema = z
+  .object({
+    matchRulesOverride: z.unknown().nullable().optional(),
+    autoCreatePointMatchIncidents: z.boolean().optional(),
+    segmentLengthMinutes: integer.nonnegative().nullable().optional(),
+    segmentBreakMinutes: integer.nonnegative().nullable().optional(),
+    doTeamsOfficiate: z.boolean().optional(),
+    officialPositions: z.array(proposalGraphOfficialPositionSchema).optional(),
+  })
+  .strict();
+
+const proposalGraphPlayoffConfigSchema = z
+  .object({
+    doubleElimination: z.boolean(),
+    winnerSetCount: integer.nonnegative(),
+    loserSetCount: integer.nonnegative(),
+    winnerBracketPointsToVictory: z.array(z.number()),
+    loserBracketPointsToVictory: z.array(z.number()),
+    prize: z.string(),
+    fieldCount: integer.nonnegative(),
+    restTimeMinutes: integer.nonnegative(),
+    matchDurationMinutes: integer.nonnegative().nullable().optional(),
+    setDurationMinutes: integer.nonnegative().nullable().optional(),
+  })
+  .strict();
+
+const proposalGraphLeagueConfigSchema = z
+  .object({
+    gamesPerOpponent: integer.nonnegative().optional(),
+    includePlayoffs: z.boolean().optional(),
+    playoffTeamCount: integer.nonnegative().optional(),
+    usesSets: z.boolean().optional(),
+    matchDurationMinutes: integer.nonnegative().nullable().optional(),
+    setDurationMinutes: integer.nonnegative().nullable().optional(),
+    setsPerMatch: integer.nonnegative().optional(),
+    pointsToVictory: z.array(z.number()).optional(),
+    restTimeMinutes: integer.nonnegative().optional(),
+  })
+  .strict();
+
+const proposalGraphDivisionSchema = z
+  .object({
+    id,
+    name: z.string(),
+    kind: z.string(),
+    role: z.string(),
+    phase: z.string().nullable(),
+    sourceDivisionId: nullableId,
+    isSystemGenerated: z.boolean(),
+    phaseSettings: z.record(
+      z.string(),
+      proposalGraphDivisionPhaseSettingsSchema,
+    ),
+    teamIds: z.array(id),
+    playoffTeamCount: integer.nonnegative().nullable(),
+    playoffPlacementDivisionIds: z.array(id),
+    standingsOverrides: z.record(z.string(), z.number()).nullable(),
+    standingsConfirmedAt: isoDateTime.nullable(),
+    standingsConfirmedBy: nullableId,
+    playoffConfig: proposalGraphPlayoffConfigSchema.nullable(),
+    leagueConfig: proposalGraphLeagueConfigSchema.nullable(),
+  })
+  .strict();
+
+const proposalGraphSegmentSchema = z
+  .object({
+    id,
+    eventId: nullableId.optional(),
+    matchId: id,
+    sequence: integer.nonnegative(),
+    status: z.string(),
+    scores: z.record(z.string(), z.number()),
+    winnerEventTeamId: nullableId.optional(),
+    startedAt: isoDateTime.nullable().optional(),
+    endedAt: isoDateTime.nullable().optional(),
+    resultType: z.string().nullable().optional(),
+    statusReason: z.string().nullable().optional(),
+    metadata: z.record(z.string(), z.unknown()).nullable().optional(),
+    createdAt: isoDateTime.nullable().optional(),
+    updatedAt: isoDateTime.nullable().optional(),
+  })
+  .strict();
+
+const proposalGraphIncidentSchema = z
+  .object({
+    id,
+    eventId: nullableId.optional(),
+    matchId: id,
+    segmentId: nullableId.optional(),
+    eventTeamId: nullableId.optional(),
+    eventRegistrationId: nullableId.optional(),
+    participantUserId: nullableId.optional(),
+    officialUserId: nullableId.optional(),
+    incidentType: z.string(),
+    sequence: integer.nonnegative(),
+    minute: integer.nonnegative().nullable().optional(),
+    clock: z.string().nullable().optional(),
+    clockSeconds: integer.nonnegative().nullable().optional(),
+    linkedPointDelta: z.number().nullable().optional(),
+    note: z.string().nullable().optional(),
+    metadata: z.record(z.string(), z.unknown()).nullable().optional(),
+    createdAt: isoDateTime.nullable().optional(),
+    updatedAt: isoDateTime.nullable().optional(),
+  })
+  .strict();
+
+const proposalGraphOfficialAssignmentSchema = z
+  .object({
+    positionId: id,
+    slotIndex: integer.nonnegative(),
+    holderType: z.string(),
+    userId: nullableId,
+    eventOfficialId: nullableId,
+    checkedIn: z.boolean(),
+    hasConflict: z.boolean(),
+  })
+  .strict();
+
+const eventEditorProposalGraphMatchSchema = z
+  .object({
+    id,
+    matchId: z.number().int().nullable(),
+    eventId: id,
+    start: isoDateTime.nullable(),
+    end: isoDateTime.nullable(),
+    locked: z.boolean(),
+    placementState: z.enum(["PLACED", "UNPLACED"]),
+    phase: z.string().nullable(),
+    sourceDivisionId: nullableId,
+    phaseDivisionId: nullableId,
+    division: nullableId,
+    fieldId: nullableId,
+    team1Id: nullableId,
+    team2Id: nullableId,
+    team1Seed: z.number().int().nullable(),
+    team2Seed: z.number().int().nullable(),
+    status: z.string().nullable(),
+    resultStatus: z.string().nullable(),
+    resultType: z.string().nullable(),
+    actualStart: isoDateTime.nullable(),
+    actualEnd: isoDateTime.nullable(),
+    statusReason: z.string().nullable(),
+    winnerEventTeamId: nullableId,
+    segments: z.array(proposalGraphSegmentSchema),
+    incidents: z.array(proposalGraphIncidentSchema),
+    officialIds: z.array(proposalGraphOfficialAssignmentSchema),
+    officialAssignments: z.array(proposalGraphOfficialAssignmentSchema),
+    teamOfficialId: nullableId,
+    teamOfficialSeed: z.null(),
+    matchRulesSnapshot: z.unknown().nullable(),
+    resolvedMatchRules: z.unknown().nullable(),
+    team1Points: z.array(z.number()),
+    team2Points: z.array(z.number()),
+    losersBracket: z.boolean(),
+    winnerNextMatchId: nullableId,
+    loserNextMatchId: nullableId,
+    previousLeftId: nullableId,
+    previousRightId: nullableId,
+    side: z.string().nullable(),
+    officialCheckedIn: z.boolean(),
+    team1: proposalGraphTeamSchema.nullable(),
+    team2: proposalGraphTeamSchema.nullable(),
+    teamOfficial: proposalGraphTeamSchema.nullable(),
+    official: proposalGraphUserSchema.nullable(),
+    field: proposalGraphFieldSchema.nullable(),
+  })
+  .strict();
+
+const eventEditorProposalGraphEventSchema = z
+  .object({
+    id,
+    name: z.string(),
+    description: z.string(),
+    start: isoDateTime,
+    end: isoDateTime,
+    location: z.string(),
+    coordinates: z.array(z.number()).nullable(),
+    price: z.number().nullable(),
+    minAge: z.number().int().nullable(),
+    maxAge: z.number().int().nullable(),
+    rating: z.number().nullable(),
+    imageId: z.string().nullable(),
+    hostId: z.string().nullable(),
+    noFixedEndDateTime: z.boolean(),
+    scheduleEndConstraint: isoDateTime.nullable(),
+    generatedScheduleEnd: isoDateTime.nullable(),
+    state: z.string(),
+    maxParticipants: z.number().int(),
+    teamSizeLimit: z.number().int().nullable(),
+    restTimeMinutes: z.number().int().nullable(),
+    teamSignup: z.boolean(),
+    singleDivision: z.boolean(),
+    waitListIds: z.array(id),
+    freeAgentIds: z.array(id),
+    teamIds: z.array(id),
+    userIds: z.array(id),
+    fieldIds: z.array(id),
+    timeSlotIds: z.array(id),
+    officialIds: z.array(id),
+    staffingPriority: z.string(),
+    officialPositions: z.array(proposalGraphOfficialPositionSchema),
+    eventOfficials: z.array(proposalGraphEventOfficialSchema),
+    matchRulesOverride: z.unknown().nullable(),
+    autoCreatePointMatchIncidents: z.boolean(),
+    resolvedMatchRules: z.unknown().nullable(),
+    cancellationRefundHours: z.number().int().nullable(),
+    registrationCutoffHours: z.number().int().nullable(),
+    seedColor: z.number().int().nullable(),
+    eventType: z.string(),
+    sportIds: z.array(id),
+    leagueScoringConfigId: nullableId,
+    organizationId: nullableId,
+    requiredTemplateIds: z.array(id),
+    allowPaymentPlans: z.boolean(),
+    installmentCount: z.number().int(),
+    installmentDueDates: z.array(isoDateTime),
+    installmentDueRelativeDays: z.array(z.number().int()),
+    installmentAmounts: z.array(z.number()),
+    allowTeamSplitDefault: z.boolean(),
+    splitLeaguePlayoffDivisions: z.boolean(),
+    divisions: z.array(id),
+    divisionDetails: z.array(proposalGraphDivisionSchema),
+    playoffDivisionDetails: z.array(proposalGraphDivisionSchema),
+    fields: z.array(proposalGraphFieldSchema),
+    teams: z.array(proposalGraphTeamSchema),
+    timeSlots: z.array(proposalGraphTimeSlotSchema),
+    officials: z.array(proposalGraphUserSchema),
+    doubleElimination: z.boolean().optional(),
+    winnerSetCount: z.number().int().nullable().optional(),
+    loserSetCount: z.number().int().nullable().optional(),
+    winnerBracketPointsToVictory: z.array(z.number()).optional(),
+    loserBracketPointsToVictory: z.array(z.number()).optional(),
+    prize: z.string().nullable().optional(),
+    fieldCount: z.number().int().nullable().optional(),
+    matches: z.array(eventEditorProposalGraphMatchSchema).optional(),
+    usesSets: z.boolean().optional(),
+    matchDurationMinutes: z.number().int().nullable().optional(),
+    setDurationMinutes: z.number().int().nullable().optional(),
+    setsPerMatch: z.number().int().nullable().optional(),
+    doTeamsOfficiate: z.boolean().optional(),
+    teamOfficialsMaySwap: z.boolean().optional(),
+    teamCheckInMode: z.string().optional(),
+    teamCheckInOpenMinutesBefore: z.number().int().optional(),
+    allowMatchRosterEdits: z.boolean().optional(),
+    allowTemporaryMatchPlayers: z.boolean().optional(),
+    gamesPerOpponent: z.number().int().optional(),
+    includePlayoffs: z.boolean().optional(),
+    playoffTeamCount: z.number().int().optional(),
+    pointsToVictory: z.array(z.number()).optional(),
+  })
+  .strict();
+
+export const eventEditorCreateProposalGraphSchema = z
+  .object({
+    event: eventEditorProposalGraphEventSchema,
+    matches: z.array(eventEditorProposalGraphMatchSchema),
+  })
+  .strict();
+
+export const eventEditorMaintenanceRequestSchema = z
+  .object({
+    contractVersion: eventEditorContractVersionSchema,
+    eventId: id,
+    operation: eventEditorMaintenanceOperationSchema,
+    operationId: id,
+    expectedRevisions: eventEditorRevisionBindingSchema.optional(),
+    participantCount: z.number().int().positive().optional(),
+    includePlaceholderTeams: z.boolean().optional(),
+  })
+  .strict();
+
+const maintenanceUnscheduledMatchSchema = z
+  .object({
+    id,
+    matchId: z.number().int().nullable(),
+    phaseDivisionId: id,
+    phase: z.string(),
+    sourceDivisionId: nullableId,
+  })
+  .strict();
+
+const maintenanceAffectedPhaseSchema = z
+  .object({
+    id,
+    name: z.string(),
+    phase: z.string(),
+    sourceDivisionId: nullableId,
+  })
+  .strict();
+
+export const eventEditorMaintenanceScheduleOutcomeSchema =
+  z.discriminatedUnion("status", [
+    z
+      .object({
+        status: z.literal("COMPLETE"),
+        isComplete: z.literal(true),
+        matchCount: z.number().int().positive(),
+        placedMatchCount: z.number().int().nonnegative(),
+        unplacedMatchCount: z.literal(0),
+        matches: z.array(editorMatchProjectionSchema),
+        unscheduledMatches: z.array(z.never()),
+        affectedCompetitionPhases: z.array(z.never()),
+        diagnostics: eventEditorScheduleDiagnosticsSchema.optional(),
+        warnings: z.array(eventEditorScheduleWarningSchema),
+      })
+      .strict(),
+    z
+      .object({
+        status: z.literal("INCOMPLETE"),
+        isComplete: z.literal(false),
+        matchCount: z.number().int().positive(),
+        placedMatchCount: z.number().int().nonnegative(),
+        unplacedMatchCount: z.number().int().positive(),
+        matches: z.array(editorMatchProjectionSchema),
+        unscheduledMatches: z.array(maintenanceUnscheduledMatchSchema),
+        affectedCompetitionPhases: z.array(maintenanceAffectedPhaseSchema),
+        diagnostics: eventEditorScheduleDiagnosticsSchema.optional(),
+        warnings: z.array(eventEditorScheduleWarningSchema),
+      })
+      .strict(),
+  ]);
+
+export const eventEditorMaintenanceProposalSchema = z
+  .object({
+    status: z.literal("PROPOSED"),
+    contractVersion: eventEditorContractVersionSchema,
+    eventId: id,
+    operation: eventEditorMaintenanceOperationSchema,
+    operationId: id,
+    proposalRevision: id,
+    revisionBinding: eventEditorRevisionBindingSchema,
+    graph: eventEditorCreateProposalGraphSchema,
+    protectedMatchIds: z.array(id),
+    scheduleOutcome: eventEditorMaintenanceScheduleOutcomeSchema,
+  })
+  .strict();
+
+export const eventEditorAcceptMaintenanceProposalSchema = z
+  .object({
+    contractVersion: eventEditorContractVersionSchema,
+    eventId: id,
+    operation: eventEditorMaintenanceOperationSchema,
+    operationId: id,
+    proposalRevision: id,
+    acceptanceOperationId: id,
+  })
+  .strict();
+
+export const eventEditorRejectMaintenanceProposalSchema = z
+  .object({
+    contractVersion: eventEditorContractVersionSchema,
+    eventId: id,
+    operation: eventEditorMaintenanceOperationSchema,
+    operationId: id,
+    proposalRevision: id,
+  })
+  .strict();
+
+export const eventEditorMaintenanceAcceptedResultSchema =
+  eventEditorMaintenanceProposalSchema
+    .omit({ status: true })
+    .extend({
+      status: z.literal("ACCEPTED"),
+      acceptanceOperationId: id,
+    })
+    .strict();
+
+export const eventEditorMaintenanceRejectedResultSchema = z
+  .object({
+    status: z.literal("REJECTED"),
+    contractVersion: eventEditorContractVersionSchema,
+    eventId: id,
+    operation: eventEditorMaintenanceOperationSchema,
+    operationId: id,
+    proposalRevision: id,
+  })
+  .strict();
+
+export const eventEditorMaintenanceResponseSchema = z.discriminatedUnion(
+  "status",
+  [
+    eventEditorMaintenanceProposalSchema,
+    eventEditorMaintenanceAcceptedResultSchema,
+    eventEditorMaintenanceRejectedResultSchema,
+  ],
+);
+
+export type EventEditorMaintenanceOperation = z.infer<
+  typeof eventEditorMaintenanceOperationSchema
+>;
+export type EventEditorMaintenanceRequest = z.infer<
+  typeof eventEditorMaintenanceRequestSchema
+>;
+export type EventEditorMaintenanceScheduleOutcome = z.infer<
+  typeof eventEditorMaintenanceScheduleOutcomeSchema
+>;
+export type EventEditorMaintenanceProposal = z.infer<
+  typeof eventEditorMaintenanceProposalSchema
+>;
+export type EventEditorAcceptMaintenanceProposal = z.infer<
+  typeof eventEditorAcceptMaintenanceProposalSchema
+>;
+export type EventEditorRejectMaintenanceProposal = z.infer<
+  typeof eventEditorRejectMaintenanceProposalSchema
+>;
+export type EventEditorMaintenanceAcceptedResult = z.infer<
+  typeof eventEditorMaintenanceAcceptedResultSchema
+>;
+export type EventEditorMaintenanceRejectedResult = z.infer<
+  typeof eventEditorMaintenanceRejectedResultSchema
+>;
+export type EventEditorMaintenanceResponse = z.infer<
+  typeof eventEditorMaintenanceResponseSchema
+>;
 
 export const eventEditorSaveResultSchema = z
   .object({
@@ -918,6 +1733,8 @@ export const eventEditorSaveResultSchema = z
     questionIdMap: z.record(z.string(), id),
     staffEmailDelivery: z.enum(["QUEUED", "FAILED", "NOT_REQUESTED"]),
     scheduleOutcome: eventEditorScheduleOutcomeSchema,
+    graph: eventEditorCreateProposalGraphSchema.optional(),
+    acceptanceOperationId: id.optional(),
   })
   .strict();
 
@@ -929,6 +1746,109 @@ export const eventEditorCreateResultSchema = eventEditorSaveResultSchema
     scheduleRevision: id,
   })
   .strict();
+export const eventEditorCreateProposalScheduleOutcomeSchema =
+  z.discriminatedUnion("status", [
+    z
+      .object({
+        status: z.literal("BUILT"),
+        matchCount: z.number().int().positive(),
+        matches: z.array(editorMatchProjectionSchema),
+        diagnostics: eventEditorScheduleDiagnosticsSchema.optional(),
+        warnings: z.array(eventEditorScheduleWarningSchema),
+      })
+      .strict(),
+    eventEditorPartialScheduleOutcomeSchema,
+  ]);
+
+export const eventEditorCreateProposalSchema = z
+  .object({
+    status: z.literal("PROPOSED"),
+    createOperationId: id,
+    eventId: id,
+    proposalRevision: id,
+    expectedRevisions: eventEditorExpectedCreateRevisionsSchema,
+    completion: eventEditorCreateCompletionSchema,
+    snapshot: eventEditorSnapshotSchema,
+    revisionBinding: eventEditorRevisionBindingSchema,
+    scheduleOutcome: eventEditorCreateProposalScheduleOutcomeSchema,
+    graph: eventEditorCreateProposalGraphSchema,
+  })
+  .strict();
+export const eventEditorProposalReferenceSchema = z
+  .object({
+    contractVersion: eventEditorContractVersionSchema,
+    createOperationId: id,
+    proposalRevision: id,
+  })
+  .strict();
+
+export const eventEditorAcceptProposalCommandSchema =
+  eventEditorProposalReferenceSchema.extend({
+    draft: eventEditorDraftSchema,
+  });
+
+export const eventEditorAcceptPartialProposalCommandSchema =
+  eventEditorProposalReferenceSchema.extend({
+    acceptanceMode: z.literal("PARTIAL"),
+    acceptanceOperationId: id,
+    draft: eventEditorDraftSchema,
+  });
+
+export const eventEditorAcceptProposalResultSchema =
+  eventEditorCreateResultSchema;
+
+export const eventEditorAcceptPartialProposalResultSchema =
+  eventEditorCreateResultSchema
+    .extend({
+      acceptanceOperationId: id,
+      scheduleOutcome: eventEditorPartialScheduleOutcomeSchema,
+    })
+    .strict();
+
+export const eventEditorRejectProposalCommandSchema =
+  eventEditorProposalReferenceSchema;
+export const eventEditorCreateResponseSchema = z.discriminatedUnion("status", [
+  eventEditorCreateResultSchema,
+  eventEditorCreateProposalSchema,
+]);
+export type EventEditorUnscheduledMatch = z.infer<
+  typeof eventEditorUnscheduledMatchSchema
+>;
+export type EventEditorAffectedCompetitionPhase = z.infer<
+  typeof eventEditorAffectedCompetitionPhaseSchema
+>;
+
+export type EventEditorCreateProposalScheduleOutcome = z.infer<
+  typeof eventEditorCreateProposalScheduleOutcomeSchema
+>;
+export type EventEditorCreateProposalGraph = z.infer<
+  typeof eventEditorCreateProposalGraphSchema
+>;
+export type EventEditorCreateProposal = z.infer<
+  typeof eventEditorCreateProposalSchema
+>;
+export type EventEditorProposalReference = z.infer<
+  typeof eventEditorProposalReferenceSchema
+>;
+export type EventEditorAcceptProposalCommand = z.infer<
+  typeof eventEditorAcceptProposalCommandSchema
+>;
+export type EventEditorAcceptPartialProposalCommand = z.infer<
+  typeof eventEditorAcceptPartialProposalCommandSchema
+>;
+export type EventEditorAcceptProposalResult = z.infer<
+  typeof eventEditorAcceptProposalResultSchema
+>;
+export type EventEditorAcceptPartialProposalResult = z.infer<
+  typeof eventEditorAcceptPartialProposalResultSchema
+>;
+export type EventEditorRejectProposalCommand = z.infer<
+  typeof eventEditorRejectProposalCommandSchema
+>;
+export type EventEditorCreateResponse = z.infer<
+  typeof eventEditorCreateResponseSchema
+>;
+
 
 export const eventEditorErrorSchema = z
   .object({
@@ -938,10 +1858,14 @@ export const eventEditorErrorSchema = z
       "EDITOR_REVISION_CONFLICT",
       "STAFF_REVISION_CONFLICT",
       "INVALID_EDITOR_INPUT",
+      "INVALID_EVENT_REGISTRATION_UNIT",
+      "INVALID_EVENT_REGISTRATION_DIVISION",
+      "EVENT_REGISTRATION_CAPACITY_EXCEEDED",
+      "EVENT_REGISTRATION_STRUCTURE_LOCKED",
       "EDITOR_PERMISSION_DENIED",
       "EDITOR_IMMUTABLE_FIELD",
-      "EDITOR_CAPABILITY_REQUIRED",
       "EDITOR_NOT_FOUND",
+      "EDITOR_CAPABILITY_REQUIRED",
       "EDITOR_SAVE_FAILED",
       "CREATE_OPERATION_PAYLOAD_MISMATCH",
       "CREATE_OPERATION_CONFLICT",
@@ -951,6 +1875,15 @@ export const eventEditorErrorSchema = z
       "EDITOR_SCHEDULE_UNSUPPORTED",
       "EDITOR_SCHEDULE_INPUT_INVALID",
       "EDITOR_SCHEDULE_FAILED",
+      "EDITOR_PROPOSAL_INVALID",
+      "EDITOR_PROPOSAL_STALE",
+      "EDITOR_PROPOSAL_NOT_FOUND",
+      "EDITOR_MAINTENANCE_INVALID",
+      "EDITOR_MAINTENANCE_NOT_FOUND",
+      "EDITOR_MAINTENANCE_REJECTED",
+      "EDITOR_MAINTENANCE_STALE",
+      "EDITOR_MAINTENANCE_ACCEPTANCE_CONFLICT",
+      "EDITOR_MAINTENANCE_UNAUTHORIZED",
       "INVALID_TIME_SLOT",
     ]),
     field: z.string().nullable().optional(),
@@ -958,7 +1891,12 @@ export const eventEditorErrorSchema = z
     staffRevision: z.string().nullable().optional(),
     scheduleRevision: z.string().nullable().optional(),
     slotIds: z.array(id).optional(),
+    occurrenceDate: z.string().nullable().optional(),
     createOperationId: id.optional(),
+    divisionId: z.string().nullable().optional(),
+    matchCount: z.number().optional(),
+    capacity: z.number().optional(),
+    participantCount: z.number().optional(),
     requestId: id.optional(),
     details: z.unknown().optional(),
   })
@@ -990,8 +1928,30 @@ export type RegistrationQuestionInput = z.infer<
   typeof registrationQuestionInputSchema
 >;
 
-export const parseEventEditorSnapshot = (input: unknown): EventEditorSnapshot =>
-  eventEditorSnapshotSchema.parse(input);
+const normalizeEditorDraftScheduling = (
+  draft: EventEditorDraft,
+): EventEditorDraft => ({
+  ...draft,
+  schedule: {
+    ...draft.schedule,
+    isAutomatedScheduling: normalizeAutomatedSchedulingForEventType(
+      draft.basics.eventType,
+      draft.schedule.isAutomatedScheduling,
+    ),
+  },
+});
+
+const normalizeEditorSnapshotScheduling = (
+  snapshot: EventEditorSnapshot,
+): EventEditorSnapshot => ({
+  ...snapshot,
+  draft: normalizeEditorDraftScheduling(snapshot.draft),
+});
+
+export const parseEventEditorSnapshot = (
+  input: unknown,
+): EventEditorSnapshot =>
+  normalizeEditorSnapshotScheduling(eventEditorSnapshotSchema.parse(input));
 export const parseSaveEventEditorCommand = (
   input: unknown,
 ): SaveEventEditorCommand => {
@@ -1000,21 +1960,86 @@ export const parseSaveEventEditorCommand = (
     : null;
   if (
     isUnknownRecord(input)
-    && input.contractVersion === EVENT_EDITOR_CONTRACT_VERSION
+    && isSupportedEventEditorContractVersion(input.contractVersion)
     && isUnknownRecord(transition)
     && transition.mode === "BUILD_IF_MISSING"
   ) {
     const legacyCommand = legacySaveEventEditorCommandSchema.parse(input);
     return saveEventEditorCommandSchema.parse({
       ...legacyCommand,
+      draft: normalizeEditorDraftScheduling(legacyCommand.draft),
       scheduleTransition: { mode: "PRESERVE" },
     });
   }
-  return saveEventEditorCommandSchema.parse(input);
+  const command = saveEventEditorCommandSchema.parse(input);
+  return {
+    ...command,
+    draft: normalizeEditorDraftScheduling(command.draft),
+  };
 };
 export const parseCreateEventEditorCommand = (
   input: unknown,
-): CreateEventEditorCommand => createEventEditorCommandSchema.parse(input);
+): CreateEventEditorCommand => {
+  const command = createEventEditorCommandSchema.parse(input);
+  return {
+    ...command,
+    draft: normalizeEditorDraftScheduling(command.draft),
+  };
+};
 export const parseEventEditorCreateResult = (
   input: unknown,
-): EventEditorCreateResult => eventEditorCreateResultSchema.parse(input);
+): EventEditorCreateResult => {
+  const result = eventEditorCreateResultSchema.parse(input);
+  return {
+    ...result,
+    snapshot: normalizeEditorSnapshotScheduling(result.snapshot),
+  };
+};
+export const parseEventEditorCreateProposal = (
+  input: unknown,
+): EventEditorCreateProposal => {
+  const proposal = eventEditorCreateProposalSchema.parse(input);
+  return {
+    ...proposal,
+    snapshot: normalizeEditorSnapshotScheduling(proposal.snapshot),
+  };
+};
+export const parseEventEditorCreateResponse = (
+  input: unknown,
+): EventEditorCreateResponse => {
+  const response = eventEditorCreateResponseSchema.parse(input);
+  return response.status === "PROPOSED"
+    ? parseEventEditorCreateProposal(response)
+    : {
+        ...response,
+        snapshot: normalizeEditorSnapshotScheduling(response.snapshot),
+      };
+};
+export const parseEventEditorAcceptProposalCommand = (
+  input: unknown,
+): EventEditorAcceptProposalCommand =>
+  eventEditorAcceptProposalCommandSchema.parse(input);
+export const parseEventEditorAcceptPartialProposalCommand = (
+  input: unknown,
+): EventEditorAcceptPartialProposalCommand =>
+  eventEditorAcceptPartialProposalCommandSchema.parse(input);
+export const parseEventEditorRejectProposalCommand = (
+  input: unknown,
+): EventEditorRejectProposalCommand =>
+  eventEditorRejectProposalCommandSchema.parse(input);
+export const parseEventEditorMaintenanceRequest = (
+  input: unknown,
+): EventEditorMaintenanceRequest =>
+  eventEditorMaintenanceRequestSchema.parse(input);
+export const parseEventEditorAcceptMaintenanceProposal = (
+  input: unknown,
+): EventEditorAcceptMaintenanceProposal =>
+  eventEditorAcceptMaintenanceProposalSchema.parse(input);
+export const parseEventEditorRejectMaintenanceProposal = (
+  input: unknown,
+): EventEditorRejectMaintenanceProposal =>
+  eventEditorRejectMaintenanceProposalSchema.parse(input);
+export const parseEventEditorMaintenanceResponse = (
+  input: unknown,
+): EventEditorMaintenanceResponse =>
+  eventEditorMaintenanceResponseSchema.parse(input);

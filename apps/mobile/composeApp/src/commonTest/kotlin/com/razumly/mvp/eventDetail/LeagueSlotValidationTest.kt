@@ -3,6 +3,7 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 import kotlin.time.Instant
 
 class LeagueSlotValidationTest {
@@ -57,8 +58,8 @@ class LeagueSlotValidationTest {
         val repeatingSlot = buildSlot(
             id = "slot-repeating",
             repeating = true,
-            dayOfWeek = 1,
-            daysOfWeek = listOf(1),
+            dayOfWeek = 0,
+            daysOfWeek = listOf(0),
             startTimeMinutes = 600,
             endTimeMinutes = 660,
             startDate = instant(1_700_000_000_000),
@@ -184,6 +185,156 @@ class LeagueSlotValidationTest {
         )
 
         assertEquals(listOf("division_a", "division_b"), divisions)
+    }
+
+    @Test
+    fun given_repeating_overnight_slots_when_adjacent_weekday_windows_overlap_then_reports_conflict() {
+        val first = buildSlot(
+            id = "slot-overnight",
+            repeating = true,
+            dayOfWeek = 0,
+            daysOfWeek = listOf(0),
+            startTimeMinutes = 23 * 60,
+            endTimeMinutes = 60,
+            startDate = Instant.parse("2026-08-17T00:00:00Z"),
+            endDate = Instant.parse("2026-08-25T00:00:00Z"),
+        )
+        val second = buildSlot(
+            id = "slot-next-day",
+            repeating = true,
+            dayOfWeek = 1,
+            daysOfWeek = listOf(1),
+            startTimeMinutes = 30,
+            endTimeMinutes = 120,
+            startDate = Instant.parse("2026-08-17T00:00:00Z"),
+            endDate = Instant.parse("2026-08-25T00:00:00Z"),
+        )
+
+        val errors = computeLeagueSlotErrors(
+            slots = listOf(first, second),
+            singleDivision = false,
+            selectedDivisionIds = emptyList(),
+        )
+
+        assertEquals(
+            "Overlaps with another timeslot for one or more selected resources.",
+            errors[0],
+        )
+        assertEquals(
+            "Overlaps with another timeslot for one or more selected resources.",
+            errors[1],
+        )
+    }
+
+    @Test
+    fun given_repeating_slot_on_its_final_date_when_mixed_slot_overlaps_then_reports_conflict() {
+        val finalDate = Instant.parse("2026-08-17T12:00:00Z")
+        val repeatingSlot = buildSlot(
+            id = "slot-final-day",
+            repeating = true,
+            dayOfWeek = 0,
+            daysOfWeek = listOf(0),
+            startTimeMinutes = 9 * 60,
+            endTimeMinutes = 11 * 60,
+            startDate = finalDate,
+            endDate = finalDate,
+        )
+        val oneTimeSlot = buildSlot(
+            id = "slot-once-final-day",
+            repeating = false,
+            startTimeMinutes = 10 * 60,
+            endTimeMinutes = 10 * 60 + 30,
+            startDate = Instant.parse("2026-08-17T10:00:00Z"),
+            endDate = Instant.parse("2026-08-17T10:30:00Z"),
+        )
+
+        val errors = computeLeagueSlotErrors(
+            slots = listOf(repeatingSlot, oneTimeSlot),
+            singleDivision = false,
+            selectedDivisionIds = emptyList(),
+        )
+
+        assertEquals(
+            "Overlaps with another timeslot for one or more selected resources.",
+            errors[0],
+        )
+        assertEquals(
+            "Overlaps with another timeslot for one or more selected resources.",
+            errors[1],
+        )
+    }
+
+    @Test
+    fun given_repeating_slot_in_dst_gap_when_conflict_checked_then_preserves_resolver_error() {
+        val validSlot = buildSlot(
+            id = "slot-valid",
+            repeating = true,
+            dayOfWeek = 6,
+            daysOfWeek = listOf(6),
+            startTimeMinutes = 5 * 60,
+            endTimeMinutes = 6 * 60,
+            startDate = Instant.parse("2026-03-08T05:00:00Z"),
+            endDate = Instant.parse("2026-03-09T04:00:00Z"),
+        ).copy(timeZone = "America/New_York")
+        val invalidSlot = buildSlot(
+            id = "slot-dst-gap",
+            repeating = true,
+            dayOfWeek = 6,
+            daysOfWeek = listOf(6),
+            startTimeMinutes = 2 * 60 + 30,
+            endTimeMinutes = 4 * 60,
+            startDate = Instant.parse("2026-03-08T05:00:00Z"),
+            endDate = Instant.parse("2026-03-09T04:00:00Z"),
+        ).copy(timeZone = "America/New_York")
+
+        val errors = computeLeagueSlotErrors(
+            slots = listOf(validSlot, invalidSlot),
+            singleDivision = false,
+            selectedDivisionIds = emptyList(),
+        )
+
+        assertTrue(errors[0]?.contains("2026-03-08") == true)
+        assertTrue(errors[1]?.contains("2026-03-08") == true)
+        assertTrue(errors[1]?.contains("does not exist") == true)
+    }
+
+    @Test
+    fun given_open_ended_repeating_slots_starting_far_apart_when_weekday_windows_match_then_reports_conflict() {
+        val first = buildSlot(
+            id = "slot-open-ended-first",
+            repeating = true,
+            dayOfWeek = 6,
+            daysOfWeek = listOf(6),
+            startTimeMinutes = 10 * 60,
+            endTimeMinutes = 11 * 60,
+            startDate = Instant.parse("2026-01-04T00:00:00Z"),
+            endDate = null,
+        )
+        val second = buildSlot(
+            id = "slot-open-ended-second",
+            repeating = true,
+            dayOfWeek = 6,
+            daysOfWeek = listOf(6),
+            startTimeMinutes = 10 * 60,
+            endTimeMinutes = 11 * 60,
+            startDate = Instant.parse("2029-01-07T00:00:00Z"),
+            endDate = null,
+        )
+
+        val errors = computeLeagueSlotErrors(
+            slots = listOf(first, second),
+            singleDivision = false,
+            selectedDivisionIds = emptyList(),
+        )
+
+        assertEquals(
+            "Overlaps with another timeslot for one or more selected resources.",
+            errors[0],
+        )
+        assertEquals(
+            "Overlaps with another timeslot for one or more selected resources.",
+            errors[1],
+        )
     }
 
     private fun buildSlot(

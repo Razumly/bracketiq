@@ -46,11 +46,19 @@ type EventDetailsPanelProps = {
     onToggle: () => void;
     onEventTypeChange: ComponentProps<typeof EventDetailsTypeControls>['onEventTypeChange'];
     onAffiliateEventChange: ComponentProps<typeof EventDetailsTypeControls>['onAffiliateEventChange'];
+    onAffiliateUrlChange: ComponentProps<typeof EventDetailsTypeControls>['onAffiliateUrlChange'];
     onIncludePlayoffsChange: (checked: boolean) => void;
     onIncludePoolPlayChange: (checked: boolean) => void;
     onStartChange: (value: Date) => void;
     onEndChange: (value: Date) => void;
     onNoFixedEndDateTimeChange: (checked: boolean) => void;
+    startTimingSource?: ComponentProps<typeof EventDetailsTimingControls>['startTimingSource'];
+    endTimingSource?: ComponentProps<typeof EventDetailsTimingControls>['endTimingSource'];
+    onResetStartToCalendar?: ComponentProps<typeof EventDetailsTimingControls>['onResetStartToCalendar'];
+    onResetEndToCalendar?: ComponentProps<typeof EventDetailsTimingControls>['onResetEndToCalendar'];
+    scheduleBoundaryError?: ComponentProps<typeof EventDetailsTimingControls>['scheduleBoundaryError'];
+    scheduleBoundaryWarning?: ComponentProps<typeof EventDetailsTimingControls>['scheduleBoundaryWarning'];
+    onAutomatedSchedulingChange?: (checked: boolean) => void;
     coordinatesSelected: boolean;
     defaultCoordinates?: [number, number];
     onSelectedAddressChange: (coordinates: [number, number], address: string) => void;
@@ -112,11 +120,19 @@ export const EventDetailsPanel = ({
     onToggle,
     onEventTypeChange,
     onAffiliateEventChange,
+    onAffiliateUrlChange,
     onIncludePlayoffsChange,
     onIncludePoolPlayChange,
     onStartChange,
     onEndChange,
     onNoFixedEndDateTimeChange,
+    startTimingSource,
+    endTimingSource,
+    onResetStartToCalendar,
+    onResetEndToCalendar,
+    scheduleBoundaryError,
+    scheduleBoundaryWarning,
+    onAutomatedSchedulingChange,
     coordinatesSelected,
     defaultCoordinates,
     onSelectedAddressChange,
@@ -174,6 +190,7 @@ export const EventDetailsPanel = ({
                 isImmutableField={isImmutableField}
                 onEventTypeChange={onEventTypeChange}
                 onAffiliateEventChange={onAffiliateEventChange}
+                onAffiliateUrlChange={onAffiliateUrlChange}
                 onIncludePlayoffsChange={onIncludePlayoffsChange}
                 onIncludePoolPlayChange={onIncludePoolPlayChange}
             /> : null}
@@ -181,6 +198,7 @@ export const EventDetailsPanel = ({
                 control={control}
                 eventType={eventData.eventType}
                 startValue={eventData.start}
+                eventTimeZone={eventData.timeZone}
                 noFixedEndDateTime={Boolean(eventData.noFixedEndDateTime)}
                 supportsNoFixedEndDateTime={supportsNoFixedEndDateTime}
                 automaticRefundsAvailable={automaticRefundsAvailable}
@@ -194,6 +212,13 @@ export const EventDetailsPanel = ({
                 onStartChange={onStartChange}
                 onEndChange={onEndChange}
                 onNoFixedEndDateTimeChange={onNoFixedEndDateTimeChange}
+                onAutomatedSchedulingChange={onAutomatedSchedulingChange}
+                startTimingSource={startTimingSource}
+                endTimingSource={endTimingSource}
+                onResetStartToCalendar={onResetStartToCalendar}
+                onResetEndToCalendar={onResetEndToCalendar}
+                scheduleBoundaryError={scheduleBoundaryError}
+                scheduleBoundaryWarning={scheduleBoundaryWarning}
                 showScheduleControls={showScheduleTimingControls}
                 showRegistrationControls={showRegistrationTimingControls}
             /> : null}

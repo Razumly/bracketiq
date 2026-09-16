@@ -1,7 +1,12 @@
 'use client';
 
-import { Button, Group, TextInput } from '@mantine/core';
-import { MapPinned, Search } from 'lucide-react';
+import { MapPinned, Plus, Search } from 'lucide-react';
+import {
+  Button,
+  Group,
+  Text,
+  TextInput,
+} from '@/components/organization/organization-operation-ui';
 import LocationSearch from '@/components/location/LocationSearch';
 
 type DiscoverSearchControlsProps = {
@@ -10,6 +15,10 @@ type DiscoverSearchControlsProps = {
   placeholder?: string;
   onSearch: () => void;
   onOpenMap?: () => void;
+  onCreateEvent?: () => void;
+  showCreateEventButton?: boolean;
+  createEventDisabled?: boolean;
+  createEventHelperText?: string | null;
   searchLabel?: string;
 };
 
@@ -19,51 +28,68 @@ export default function DiscoverSearchControls({
   placeholder = 'Search discover...',
   onSearch,
   onOpenMap,
+  onCreateEvent,
+  showCreateEventButton = true,
+  createEventDisabled = false,
+  createEventHelperText = null,
   searchLabel = 'Search',
 }: DiscoverSearchControlsProps) {
   return (
-    <Group align="center" gap="sm" wrap="wrap" style={{ flex: 1, minWidth: 320 }}>
+    <Group
+      align="center"
+      gap="sm"
+      wrap="wrap"
+      className="discover-search-controls"
+      style={{ minWidth: 0, width: '100%', maxWidth: '100%' }}
+    >
       <form
+        className="discover-search-form"
         onSubmit={(event) => {
           event.preventDefault();
           onSearch();
         }}
-        style={{ display: 'flex', flex: '1 1 420px', minWidth: 300 }}
       >
         <TextInput
           aria-label={searchLabel}
           value={value}
           onChange={(event) => onValueChange(event.currentTarget.value)}
           placeholder={placeholder}
-          style={{ flex: 1, minWidth: 160 }}
-          styles={{
-            input: {
-              borderTopRightRadius: 0,
-              borderBottomRightRadius: 0,
-              borderRight: 0,
-            },
-          }}
+          leftSection={<Search aria-hidden="true" size={16} />}
+          className="discover-search-input min-w-0 flex-1"
         />
         <Button
           type="submit"
-          leftSection={<Search size={16} />}
-          style={{
-            borderTopLeftRadius: 0,
-            borderBottomLeftRadius: 0,
-            flexShrink: 0,
-          }}
+          variant="outline"
+          size="icon"
+          aria-label={searchLabel}
+          className="discover-search-submit"
         >
-          Search
+          <Search aria-hidden="true" size={16} />
         </Button>
       </form>
-      <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
+      <Group gap="xs" wrap="wrap" className="discover-search-actions">
         <LocationSearch />
         {onOpenMap && (
-          <Button variant="default" onClick={onOpenMap} leftSection={<MapPinned size={16} />}>
+          <Button variant="outline" onClick={onOpenMap} leftSection={<MapPinned aria-hidden="true" size={16} />}>
             Map
           </Button>
         )}
+        {onCreateEvent && showCreateEventButton && (
+          <Button
+            onClick={onCreateEvent}
+            disabled={createEventDisabled}
+            leftSection={<Plus aria-hidden="true" size={16} />}
+            className="discover-create-event"
+          >
+            Create event
+          </Button>
+        )}
       </Group>
+      {createEventHelperText && (
+        <Text size="xs" c={createEventDisabled ? 'red' : 'dimmed'} className="w-full">
+          {createEventHelperText}
+        </Text>
+      )}
     </Group>
   );
 }

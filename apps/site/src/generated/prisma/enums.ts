@@ -250,8 +250,7 @@ export const EventsEventTypeEnum = {
   EVENT: 'EVENT',
   LEAGUE: 'LEAGUE',
   WEEKLY_EVENT: 'WEEKLY_EVENT',
-  TRYOUT: 'TRYOUT',
-  AFFILIATE: 'AFFILIATE'
+  TRYOUT: 'TRYOUT'
 } as const
 
 export type EventsEventTypeEnum = (typeof EventsEventTypeEnum)[keyof typeof EventsEventTypeEnum]
@@ -307,16 +306,6 @@ export const RegistrationPaymentModeEnum = {
 } as const
 
 export type RegistrationPaymentModeEnum = (typeof RegistrationPaymentModeEnum)[keyof typeof RegistrationPaymentModeEnum]
-
-
-export const EventsOfficialSchedulingModeEnum = {
-  STAFFING: 'STAFFING',
-  TEAM_STAFFING: 'TEAM_STAFFING',
-  SCHEDULE: 'SCHEDULE',
-  OFF: 'OFF'
-} as const
-
-export type EventsOfficialSchedulingModeEnum = (typeof EventsOfficialSchedulingModeEnum)[keyof typeof EventsOfficialSchedulingModeEnum]
 
 
 export const StaffingPriorityEnum = {
@@ -751,6 +740,7 @@ export type BoldSignSyncOperationStatusEnum = (typeof BoldSignSyncOperationStatu
 
 
 export const ModerationReportTargetTypeEnum = {
+  TEAM_INVITATION: 'TEAM_INVITATION',
   CHAT_GROUP: 'CHAT_GROUP',
   EVENT: 'EVENT',
   BLOCK_USER: 'BLOCK_USER',
