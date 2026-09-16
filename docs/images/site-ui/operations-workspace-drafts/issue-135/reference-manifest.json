@@ -1,6 +1,6 @@
 {
   "issue": 135,
-  "status": "draft",
+  "status": "approved",
   "layoutFamily": "Operations workspace",
   "scope": "Six Event operations tabs with nine supplemental workflow references",
   "generation": {
@@ -33,7 +33,9 @@
     }
   ],
   "approval": {
-    "releaseOwnerApproved": false,
+    "releaseOwnerApproved": true,
+    "approvedBy": "camka14",
+    "approvedAt": "2026-09-16",
     "canonicalDirectory": "docs/images/site-ui/operations-workspace/"
   },
   "referencePolicy": {
@@ -429,12 +431,12 @@
     "Desktop companions support the approved desktop-reference requirement in Issue #125.",
     "Manage and Normal are visibility modes of one shared surface. Normal hides host-only controls and operational details; Manage shows them when the user has permission. Most references capture Manage, while Bracket captures Normal.",
     "Manage Schedule view uses day-specific time ranges instead of a visible-hour slider. Breaks and greyed unavailable resource ranges show where a match cannot be moved.",
-    "All references use one shared six-tab shell. They remain draft assets outside the canonical directory.",
+    "All references use one shared six-tab shell. Approved PNGs live in the canonical directory; the audit records remain in this draft directory.",
     "The generated replacements use the current 8 px rectangular radius and BracketIQ navy, orange, and teal design.",
     "Mobile references wrap the six tabs into two rows to keep every label visible.",
     "The schedule shows an available Court 3 drop target at 11:00 AM. Grey hatched Resource ranges remain unavailable.",
     "Loading, empty, error, conflict, and confirmation examples are separate reference states, not live components. Render only the state selected by current data, request outcome, and user action.",
-    "This replacement set remains unapproved. The existing commerce references for Issue #126 remain separate.",
+    "The 30-image reference set is approved. Its PNGs are canonical for Issue #135. The existing commerce references for Issue #126 remain separate.",
     "The supplemental set adds nine desktop and mobile pairs for nested workflows. It preserves the original 12 tab references.",
     "The mobile match editor shows the upper form and a complete footer. Rules and bracket fields remain available through scrolling, as shown in the desktop reference.",
     "Match incident and roster dialogs can open from Schedule. The shared bill dialog can open from Participants or Finance.",
