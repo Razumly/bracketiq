@@ -12,6 +12,7 @@ import type {
   AffiliateAgentErrorObservation,
   AffiliateAgentErrorRecordResult,
 } from "./affiliateAgentErrorObservations";
+import type { AffiliateAgentInvocationDiagnostic } from "./affiliateAgentInvocationDiagnostics";
 
 const affiliateAgentGatewayIdentifierSchema = z
   .string()
@@ -154,6 +155,7 @@ export type AffiliateAgentInvocationFailureEnvelope = Readonly<{
   occurredAt: string;
   evidenceRefs: readonly string[];
   safeSummary: string;
+  diagnostic?: AffiliateAgentInvocationDiagnostic;
 }>;
 
 type AffiliateAgentNonTerminalCommand = Exclude<

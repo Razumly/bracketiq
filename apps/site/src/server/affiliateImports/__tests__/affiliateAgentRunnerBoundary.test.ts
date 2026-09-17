@@ -28,6 +28,7 @@ const createDeferred = <T>(): Deferred<T> => {
 
 import {
   configureRunnerConnection,
+  parseAffiliateAgentRunnerInvocationDiagnostic,
   prepareWorkspaceForSupervisorCleanup,
   AFFILIATE_AGENT_RUNNER_PRE_RESERVATION_TIMEOUT_MILLISECONDS,
   AFFILIATE_AGENT_RUNNER_RESERVATION_LIFETIME_MILLISECONDS,
@@ -131,6 +132,16 @@ const TEST_MODEL_CONFIGURATION = {
   modelGatewayAddress: "http://model-gateway.internal",
   modelGatewayToken: "model-gateway-token",
   ompModel: "openai-codex/gpt-5.6-luna",
+} as const;
+const INVOCATION_DIAGNOSTIC = {
+  schemaVersion: 1,
+  event: "affiliate-agent-invocation-diagnostic",
+  driverCode: "OMP_SESSION_FAILED",
+  promptOutcome: "THREW",
+  assistantStopReason: "error",
+  assistantErrorCategory: "UNKNOWN",
+  assistantErrorStatus: null,
+  terminalFrameObserved: false,
 } as const;
 const STARTED_AT = "2026-08-20T18:00:00.000Z";
 const runSingleChildScenario = async (
@@ -796,6 +807,64 @@ describe("executable affiliate agent runner boundary", () => {
       7,
     );
     expect(event).toEqual({ kind: "EXIT", exitCode: 7 });
+  });
+  it("recovers one split invocation diagnostic after the command budget is exhausted", async () => {
+    const frame = Buffer.from(`${JSON.stringify(INVOCATION_DIAGNOSTIC)}\n`, "utf8");
+    const budgetExhaustingStderr = Buffer.alloc(
+      AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_MAX_TOTAL_BYTES,
+      "x",
+    );
+    const { event } = await runSingleChildScenario(
+      "",
+      7,
+      (child) => {
+        child.stderr.emit("data", budgetExhaustingStderr);
+        child.stderr.emit("data", frame.subarray(0, 17));
+        child.stderr.emit("data", frame.subarray(17));
+      },
+    );
+
+    expect(event).toEqual({
+      kind: "EXIT",
+      exitCode: 7,
+      diagnostic: INVOCATION_DIAGNOSTIC,
+    });
+    expect(parseAffiliateAgentRunnerInvocationDiagnostic(frame)).toEqual(
+      INVOCATION_DIAGNOSTIC,
+    );
+  });
+
+  it("falls back to generic EXIT for malformed or oversized invocation diagnostics", async () => {
+    const oversized = Buffer.from(`${JSON.stringify({
+      ...INVOCATION_DIAGNOSTIC,
+      privateMetadata: "x".repeat(2_000),
+    })}\n`, "utf8");
+    const { event } = await runSingleChildScenario(
+      "",
+      7,
+      (child) => child.stderr.emit("data", oversized),
+    );
+
+    expect(event).toEqual({ kind: "EXIT", exitCode: 7 });
+  });
+
+  it("does not downgrade an accepted terminal result when stderr has a diagnostic", async () => {
+    const frame = Buffer.from(`${JSON.stringify(INVOCATION_DIAGNOSTIC)}\n`, "utf8");
+    const terminal = JSON.stringify({
+      kind: "TERMINAL_SUBMISSION",
+      idempotencyKey: "child-terminal-key",
+      result: { disposition: "APPROVED" },
+    });
+    const { event } = await runSingleChildScenario(
+      terminal,
+      0,
+      (child) => {
+        child.stderr.emit("data", frame.subarray(0, 9));
+        child.stderr.emit("data", frame.subarray(9));
+      },
+    );
+
+    expect(event).toEqual(JSON.parse(terminal));
   });
   it("retains redacted command diagnostics through successful terminal completion", async () => {
     const secret = "credential-secret-😀";

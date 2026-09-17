@@ -45,6 +45,11 @@ import {
   parseAffiliateAgentCommandRejectionDiagnostic,
   type AffiliateAgentCommandRejectionDiagnostic,
 } from "../src/server/affiliateImports/affiliateAgentCommandDiagnostics";
+import {
+  AFFILIATE_AGENT_INVOCATION_DIAGNOSTIC_MAX_RECORD_BYTES,
+  parseAffiliateAgentInvocationDiagnostic,
+  type AffiliateAgentInvocationDiagnostic,
+} from "../src/server/affiliateImports/affiliateAgentInvocationDiagnostics";
 
 
 
@@ -734,6 +739,67 @@ const stderrTailBytesFor = (stderrTail: string | Uint8Array): number => (
     MAX_STDERR_TAIL_BYTES,
   )
 );
+const invocationDiagnosticTailFor = (
+  stderrTail: string | Uint8Array,
+): Buffer => {
+  const bytes = typeof stderrTail === "string"
+    ? Buffer.from(stderrTail, "utf8")
+    : Buffer.from(stderrTail);
+  return bytes.byteLength > MAX_STDERR_TAIL_BYTES
+    ? bytes.subarray(bytes.byteLength - MAX_STDERR_TAIL_BYTES)
+    : bytes;
+};
+
+const invocationDiagnosticFromStderrLine = (
+  line: string,
+): AffiliateAgentInvocationDiagnostic | null => {
+  const normalized = line.trim();
+  let candidateEnd = normalized.length;
+  while (candidateEnd > 0) {
+    const candidateStart = normalized.lastIndexOf("{", candidateEnd - 1);
+    if (candidateStart < 0) return null;
+    const candidate = normalized.slice(candidateStart, candidateEnd);
+    if (
+      Buffer.byteLength(candidate, "utf8")
+        <= AFFILIATE_AGENT_INVOCATION_DIAGNOSTIC_MAX_RECORD_BYTES
+    ) {
+      try {
+        const diagnostic = parseAffiliateAgentInvocationDiagnostic(JSON.parse(candidate));
+        if (diagnostic !== null) return diagnostic;
+      } catch {
+        // Continue searching for a complete JSON object after unstructured stderr.
+      }
+    }
+    candidateEnd = candidateStart;
+  }
+  return null;
+};
+
+export const parseAffiliateAgentRunnerInvocationDiagnostic = (
+  stderrTail: string | Uint8Array,
+): AffiliateAgentInvocationDiagnostic | null => {
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(
+      invocationDiagnosticTailFor(stderrTail),
+    );
+  } catch {
+    // The bounded tail can begin in the middle of a multi-byte stderr code point.
+    text = new TextDecoder("utf-8").decode(invocationDiagnosticTailFor(stderrTail));
+  }
+  let parsedDiagnostic: AffiliateAgentInvocationDiagnostic | null = null;
+  let lineStart = 0;
+  while (lineStart < text.length) {
+    const newlineIndex = text.indexOf("\n", lineStart);
+    if (newlineIndex < 0) break;
+    const line = text.slice(lineStart, newlineIndex);
+    lineStart = newlineIndex + 1;
+    const diagnostic = invocationDiagnosticFromStderrLine(line);
+    if (diagnostic !== null) parsedDiagnostic = diagnostic;
+  }
+  return parsedDiagnostic;
+};
+
 
 export type AffiliateAgentRunnerChildFailureDiagnosticInput = Readonly<{
   exitCode: number | null;
@@ -1163,6 +1229,8 @@ type ChildRuntimeState = {
   output: string;
   stdoutBytes: number;
   stderrTail: Buffer;
+  invocationDiagnostic: AffiliateAgentInvocationDiagnostic | null;
+  hasParsedInvocationDiagnostic: boolean;
   stderrBytes: number;
   hasOutputOverflow: boolean;
   hasOutputDecodeError: boolean;
@@ -1225,6 +1293,16 @@ const appendChildStderr = (
   const combined = Buffer.concat([state.stderrTail, bytes]);
   const start = Math.max(0, combined.byteLength - MAX_STDERR_TAIL_BYTES);
   state.stderrTail = Buffer.from(combined.subarray(start));
+};
+const invocationDiagnosticForState = (
+  state: ChildRuntimeState,
+): AffiliateAgentInvocationDiagnostic | null => {
+  if (state.hasParsedInvocationDiagnostic) return state.invocationDiagnostic;
+  state.hasParsedInvocationDiagnostic = true;
+  state.invocationDiagnostic = parseAffiliateAgentRunnerInvocationDiagnostic(
+    state.stderrTail,
+  );
+  return state.invocationDiagnostic;
 };
 const logAffiliateAgentCommandRejectionDiagnostic = (
   active: ActiveInvocation,
@@ -1367,11 +1445,18 @@ const publishChildExit = (
 ): void => {
   if (!isCurrentChild(state) || state.hasPublishedExit) return;
   state.hasPublishedExit = true;
-  const publishedEvent = event.kind === "EXIT"
-    && event.reason === undefined
-    && state.active.pendingExitReason !== null
-    ? { ...event, reason: state.active.pendingExitReason }
-    : event;
+  let publishedEvent = event;
+  if (event.kind === "EXIT") {
+    let exitEvent: Extract<AffiliateAgentProcessEvent, { kind: "EXIT" }> = event;
+    if (exitEvent.reason === undefined && state.active.pendingExitReason !== null) {
+      exitEvent = { ...exitEvent, reason: state.active.pendingExitReason };
+    }
+    const diagnostic = invocationDiagnosticForState(state);
+    if (diagnostic !== null) {
+      exitEvent = { ...exitEvent, diagnostic };
+    }
+    publishedEvent = exitEvent;
+  }
   state.active.publishExit = null;
   state.active.pendingExitReason = null;
   state.active.child = null;
@@ -1736,6 +1821,8 @@ const spawnChild = (
     output: "",
     stdoutBytes: 0,
     stderrTail: Buffer.alloc(0),
+    invocationDiagnostic: null,
+    hasParsedInvocationDiagnostic: false,
     stderrBytes: 0,
     hasOutputOverflow: false,
     hasOutputDecodeError: false,

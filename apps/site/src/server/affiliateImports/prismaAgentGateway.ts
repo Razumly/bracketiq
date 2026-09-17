@@ -121,8 +121,8 @@ import {
   canonicalizeAffiliateAgentValue,
   parseAffiliateAgentCaptureMetadata,
   hashAffiliateAgentValue,
-  type AffiliateAgentCaptureMetadata,
   renderAffiliateAgentPrompt,
+  type AffiliateAgentCaptureMetadata,
   type AffiliateAgentProducerClaimEnvelopeForHistoricalRead,
   type AffiliateAgentClaimEnvelope,
   type AffiliateAgentCommand,
@@ -134,6 +134,11 @@ import {
   type AffiliateAgentRole,
   type AffiliateAgentTerminalResultEnvelope,
 } from "./agentGatewayContracts";
+import {
+  affiliateAgentInvocationDiagnosticSchema,
+  parseAffiliateAgentInvocationDiagnostic,
+  type AffiliateAgentInvocationDiagnostic,
+} from "./affiliateAgentInvocationDiagnostics";
 import type {
   AffiliateOperationalAlertInput,
   AffiliateOperationalAlertWriter,
@@ -1043,6 +1048,12 @@ const invocationFailureInputSchema = z
     occurredAt: gatewayInputStringSchema,
     evidenceRefs: z.array(gatewayIdentifierSchema).max(100),
     safeSummary: gatewayInputStringSchema.max(MAX_INVOCATION_FAILURE_SUMMARY_CHARACTERS),
+    diagnostic: affiliateAgentInvocationDiagnosticSchema
+      .optional()
+      .refine(
+        (value) => value === undefined || parseAffiliateAgentInvocationDiagnostic(value) !== null,
+        "The invocation diagnostic is invalid.",
+      ),
   })
   .strict();
 
@@ -8610,15 +8621,32 @@ const assertInvocationFailureIdentity = (
   }
 };
 
+const validatedInvocationDiagnosticFor = (
+  failure: InvocationFailureEnvelope,
+): AffiliateAgentInvocationDiagnostic | undefined => {
+  if (!Object.prototype.hasOwnProperty.call(failure, "diagnostic")) {
+    return undefined;
+  }
+  const diagnostic = parseAffiliateAgentInvocationDiagnostic(failure.diagnostic);
+  if (diagnostic === null) {
+    throw gatewayError(
+      "RESULT_SCHEMA_INVALID",
+      "The invocation failure diagnostic is invalid.",
+    );
+  }
+  return diagnostic;
+};
+
 const assertInvocationFailureEnvelope = (
   failure: InvocationFailureEnvelope,
   authorized: AuthorizedClaim,
   now: Date,
-): void => {
+): AffiliateAgentInvocationDiagnostic | undefined => {
   assertInvocationFailureTiming(failure, authorized, now);
   assertInvocationFailureSummary(failure);
   assertInvocationFailureEvidenceRefs(failure);
   assertInvocationFailureIdentity(failure, authorized);
+  return validatedInvocationDiagnosticFor(failure);
 };
 
 const recordInvocationFailureTransaction = (
@@ -8628,6 +8656,7 @@ const recordInvocationFailureTransaction = (
   input: Extract<AffiliateAgentClaimOperation, { kind: "RECORD_FAILURE" }>,
   requestHash: string,
   now: Date,
+  diagnostic?: AffiliateAgentInvocationDiagnostic,
 ): Promise<AffiliateAgentInvocationFailedResult> => {
   const failure = input.failure;
   return (async () => {
@@ -8651,6 +8680,7 @@ const recordInvocationFailureTransaction = (
       failedAt: now,
       safeSummary: failure.safeSummary.trim(),
       evidenceRefs: failure.evidenceRefs,
+      ...(diagnostic === undefined ? {} : { diagnostic }),
       claimStatus: "FAILED",
       claimCasFailure: "GATEWAY_ERROR",
       actorKind: "AGENT_INVOCATION",
@@ -8708,7 +8738,11 @@ const executeInvocationFailureTransaction = (
         requestHash,
       );
       if (replay) return replay;
-      assertInvocationFailureEnvelope(input.failure, authorized, now);
+      const diagnostic = assertInvocationFailureEnvelope(
+        input.failure,
+        authorized,
+        now,
+      );
       return recordInvocationFailureTransaction(
         transaction,
         dependencies,
@@ -8716,6 +8750,7 @@ const executeInvocationFailureTransaction = (
         input,
         requestHash,
         now,
+        diagnostic,
       );
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },

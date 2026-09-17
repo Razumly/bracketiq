@@ -18,6 +18,10 @@ import {
   type AffiliateAgentErrorObservation,
 } from "./affiliateAgentErrorObservations";
 import { AFFILIATE_AGENT_ROLES } from "./agentGatewayContracts";
+import {
+  parseAffiliateAgentInvocationDiagnostic,
+  type AffiliateAgentInvocationDiagnostic,
+} from "./affiliateAgentInvocationDiagnostics";
 
 export const AFFILIATE_AGENT_ERROR_HISTORY_SCHEMA_VERSION = 1 as const;
 export const AFFILIATE_AGENT_ERROR_HISTORY_DEFAULT_MAX_RESULTS = 100 as const;
@@ -552,6 +556,7 @@ export type AffiliateAgentErrorHistoryRow = Readonly<{
   source: AffiliateAgentErrorHistorySource | null;
   receipt: AffiliateAgentErrorHistoryReceipt | null;
   finalReceipt: AffiliateAgentErrorHistoryReceipt | null;
+  invocationDiagnostic: AffiliateAgentInvocationDiagnostic | null;
   retention: Readonly<{
     eventClass: typeof RETENTION_CLASSES[number] | "UNKNOWN";
     eventDeadline: string | null;
@@ -735,6 +740,7 @@ type ParsedAffiliateAgentErrorEvent = Readonly<{
   observation: AffiliateAgentErrorObservation | null;
   limit: AffiliateAgentErrorHistoryRow["limit"];
   malformedPayload: boolean;
+  invocationDiagnostic?: AffiliateAgentInvocationDiagnostic | null;
 }>;
 
 type ParsedTerminalEffectReasonCodes = Readonly<{
@@ -921,6 +927,11 @@ const parseErrorEvent = (
   }
 
   const eventRecord = recordValue(payload);
+  const hasDiagnostic = eventRecord !== null
+    && Object.prototype.hasOwnProperty.call(eventRecord, "diagnostic");
+  const invocationDiagnostic = hasDiagnostic
+    ? parseAffiliateAgentInvocationDiagnostic(eventRecord?.diagnostic)
+    : null;
   const failureCode = safeHistoryErrorCode(
     Array.isArray(eventRecord?.failureCode)
       ? eventRecord?.failureCode[0]
@@ -929,7 +940,10 @@ const parseErrorEvent = (
   const payloadReasonCodes = Array.isArray(eventRecord?.reasonCodes)
     ? eventRecord.reasonCodes
     : [];
-  const eventReason = payloadReasonCodes
+  const persistedReasonCodes = Array.isArray(storedReasonCodes)
+    ? storedReasonCodes
+    : [];
+  const eventReason = [...payloadReasonCodes, ...persistedReasonCodes]
     .map((value) => safeHistoryErrorCode(value))
     .find((value): value is HistoryErrorCode => value !== null);
   const invocationCode = (failureCode && invocationFailureCodeSet.has(failureCode)
@@ -948,7 +962,9 @@ const parseErrorEvent = (
     }),
     observation: null,
     limit: null,
-    malformedPayload: invocationCode === null,
+    malformedPayload: invocationCode === null
+      || (hasDiagnostic && invocationDiagnostic === null),
+    invocationDiagnostic,
   };
 };
 
@@ -981,7 +997,7 @@ const eventClassificationFor = (
       origin: "GATEWAY",
       sourceKind: "INVOCATION_FAILURE",
     }),
-    malformedPayload: false,
+    malformedPayload: parsed.malformedPayload,
   };
 };
 
@@ -1191,6 +1207,7 @@ const normalizeEvent = (input: Readonly<{
     source: input.source,
     receipt: input.receipt,
     finalReceipt: input.finalReceipt,
+    invocationDiagnostic: parsed.invocationDiagnostic ?? null,
     retention: {
       eventClass: safeRetentionClass(input.event.retentionClass),
       eventDeadline: safeDate(input.event.retentionDeadline),
@@ -1236,6 +1253,7 @@ const receiptOnlyRowFor = (input: Readonly<{
   source: input.source,
   receipt: input.receipt,
   finalReceipt: input.finalReceipt,
+  invocationDiagnostic: null,
   retention: {
     eventClass: input.receipt.retentionClass,
     eventDeadline: input.receipt.retentionDeadline,

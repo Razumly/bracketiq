@@ -50,52 +50,82 @@ The operator selected OMP with two ChatGPT accounts. The governed affiliate work
 - [x] (2026-09-16) Deploy finite commit diagnostics and complete one Fort Greene retry.
 - [x] (2026-09-16) Add durable agent error history and verify the read-only review report.
 - [x] (2026-09-16) Deploy durable error history and stop the bounded trial after the canary contract gap.
+- [x] (2026-09-17) Implement bounded, redacted invocation-failure diagnostics and preserve the existing failure boundary.
+- [x] (2026-09-17) Complete the independent Standards and Spec source reviews against fixed base `a49d29d1f0af1a1d228ef194becbf6c726d96d56`.
+- [ ] (2026-09-17) Publish and roll out the matched site, Gateway, governed, and model images after the source gates, without changing the deployment, role/prompt, or Supply Contract authority.
+- [ ] (2026-09-17) Run one Atlantic generation-2 producer claim from the diagnostic workload; admit its independent reviewer only if the producer commits a package, then stop the scoped workers.
+- [ ] (2026-09-17) Record the rollout, retry, diagnostic-retention, protected-state, and final stopped-boundary evidence.
 
 ## Current approval record
 
-Conditional `AUTH SETUP` approval (recorded 2026-09-07): after source
-review/checks pass, publish the governed affiliate OMP images and start **only**
-`affiliate-model-auth-broker`, `affiliate-model-gateway`, and two temporary
-login helpers. Existing BracketIQ Gateway and workers must stay unchanged. No
-mapping claim, RootRunner, or workload restart is authorized by this approval.
-Workload Linux/root-runner/canary deployment requires later separate approval.
-This is not authorization to start anything before the source review/checks
-pass.
+### Current authorization — 2026-09-17
 
-The operator subsequently approved the bounded workload canary: replace the
-governed affiliate Gateway and root runner with the published OMP images;
-run Linux containment checks; start only `mapping-producer-1` and
+The operator authorized a diagnostic-only rollout after the source gates and
+independent Standards and Spec reviews pass. The fixed source baseline for
+review is `a49d29d1f0af1a1d228ef194becbf6c726d96d56`. After those gates, publish
+and deploy the matched site, Gateway, governed worker, and model-service
+images from the newly integrated diagnostic commit. Main must record its exact
+SHA and verify image exports before release; do not republish pre-rollout
+source `635a382858a814dfdc338a4d207977747d2cc0dd`.
+Keep deployment contract 14
+(`2f953a9295b0cc901b7a71a1ed49e9711f150eeae34ba70eb69a6efa354fed91`),
+role/prompt version 13 and their authority hashes, and Supply Contract 1
+(`c808492a7d60741b508978987441a0a31f59602a5e5321789d9865823f6098cf`)
+unchanged.
+
+The current workload is
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v14-club-guidance-trial/omp-workload.v14.env`.
+The next diagnostic workload is
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v14-invocation-diagnostic-trial/omp-workload.v14.env`.
+Keep admission closed during the matched rollout. After fresh preflight,
+open one exact producer lease for Atlantic Volleyball Academy's existing
+Gateway job `87d9395a-116d-44fb-9550-7019f00ae04e`, which is
+`RETRY_WAIT` at claim generation 1 with invocation failure count 1. Do not
+reset either value and do not allow generation 3.
+
+Close admission after the generation-2 claim is acquired. Admit its exact
+independent reviewer only if generation 2 commits a package. Keep any
+approval staged and inactive. Stop on another invocation failure, an
+unexpected claim, an unresolved receipt, a diagnostic delivery failure, or a
+protected-state change. Other three sources remain paused and unadmitted.
+Do not capture a source, activate a mapping, publish a source or candidate,
+enable automatic scraping or automation, or change coverage or replenishment.
+
+This authorization explicitly supersedes the older AUTH SETUP and bounded
+workload restrictions below for this named diagnostic rollout and one
+generation-2 Atlantic retry. It does not authorize any other runtime,
+collection, activation, publication, or automation work.
+
+### Historical authorization (superseded)
+
+The conditional `AUTH SETUP` approval recorded 2026-09-07 required that,
+after source review/checks pass, the governed affiliate OMP images be
+published and **only** `affiliate-model-auth-broker`,
+`affiliate-model-gateway`, and two temporary login helpers be started.
+Existing BracketIQ Gateway and workers had to stay unchanged. No mapping
+claim, RootRunner, or workload restart was authorized by that approval.
+Workload Linux/root-runner/canary deployment required later separate approval.
+This was not authorization to start anything before the source review/checks
+passed.
+
+The subsequent bounded workload approval authorized replacement of the
+governed affiliate Gateway and root runner with the published OMP images,
+Linux containment checks, and only `mapping-producer-1` and
 `supply-reviewer-1` for Gateway job
-`d7a1fe71-c76e-4191-a3f3-610c737d683e`; then close admission and stop the
-canary workers. Preserve both prior failures and the legacy repair hold.
-No new source, activation, publication, automatic scraping, coverage,
-replenishment, site runtime, or mobile runtime change is authorized.
+`d7a1fe71-c76e-4191-a3f3-610c737d683e`; it then required admission closure
+and worker shutdown. It preserved both prior failures and the legacy repair
+hold. It did not authorize new source, activation, publication, automatic
+scraping, coverage, replenishment, site runtime, or mobile runtime changes.
 
-Before admission, read-only checks confirmed this job was the sole claimable
-producer job. It was `RETRY_WAIT` with failure count 2 and no active claim.
-The root was generation 1, `PRE_MAPPED`, and held. The current 24-sport catalog
-matches the stored hash
+Historical pre-admission checks found that job `d7a1fe71-c76e-4191-a3f3-610c737d683e`
+was the sole claimable producer job, in `RETRY_WAIT` with failure count 2 and
+no active claim. Its root was generation 1, `PRE_MAPPED`, and held. The
+historical 24-sport catalog matched hash
 `e4c4adada1e0b73f071ff367713e3c0d777cf22df846618edda81e9e01059c66`.
-
-The published image's old probe used Bun as the privileged launcher. A real
-Linux comparison showed that Bun 1.3.14 `spawnSync` ignored its UID/GID
-options, while Node launched UID 1002/GID 1001 with zero capabilities.
-The probe source now uses Node, matching the actual production runner.
-The corrected probe was mounted read-only into disposable containers using
-the published image. Both producer and reviewer checks passed with
-`NoNewPrivs=1`, zero capabilities, sibling write denial, and reviewer-root
-write denial. A real pinned SDK constructor also passed under UID 1002.
-No sandbox policy was loosened. The published workload executables did not
-change; only the diagnostic probe was corrected.
-
-Prepared workload contract version 3 hashes to
+The old workload contract was version 3 with hash
 `15c37807d319b38b1c8558bfb3b1b84a16e5a85e4734aaf861d2f1259e4a7679`.
-The active Supply Contract remains version 1 with hash
-`c808492a7d60741b508978987441a0a31f59602a5e5321789d9865823f6098cf`.
 Preparation wrote private files only; it did not change the database or the
 canonical deployment environment.
-
-
 ## Surprises & Discoveries
 
 
@@ -132,7 +162,7 @@ Decision: Use a private OMP auth broker and a separate private OMP model gateway
 
 Decision: Inject model gateway configuration from the root runner, not from the signed supervisor launch payload. Reason: supervisors do not need model credentials. Preserve the existing small launch environment allowlist. Date: 2026-09-07.
 
-Decision: Expose only claim-bound Gateway operations as model tools. The trusted driver binds authorization, claim identity, and idempotency keys. The model cannot choose an HTTP host, path, credential, worker identity, or execution command. The Gateway remains the final authorization and validation authority. Date: 2026-09-07.
+Decision: Expose only claim-bound Gateway operations as model tools. The trusted tool bridge binds authorization, claim identity, and idempotency keys. The model cannot choose an HTTP host, path, credential, worker identity, or execution command. The Gateway remains the final authorization and validation authority. Date: 2026-09-07.
 
 Decision: Preserve the existing two failed invocations and retry counter. Do not reset the job to hide Codex failures. Validate OMP before consuming another claim attempt. Date: 2026-09-07.
 
@@ -163,25 +193,93 @@ Gateway events and verified claim authority. Do not expose a model tool,
 store raw input, or change work state. Keep one explicit limit event when a
 claim reaches 32 observations or 16 KiB. This makes bounded retention visible.
 
+Decision (2026-09-17): Use the existing durable failure ledger as the
+retention boundary for invocation diagnostics. Persist only the strict,
+allowlisted diagnostic fields in `CLAIM_INVOCATION_FAILED`; keep historical
+rows readable, make no schema change, and retain no raw error, prompt,
+response, credential, identity, or provider data. Treat the diagnostic as
+evidence only: never derive authorization, disposition, or retry policy from
+it.
+
 ## Outcomes & Retrospective
 
 
-The corrected version-4 runtime is deployed. Both linked producer attempts ran. Softball produced a verified sport assessment but no package because validation returned internal errors. Boomtown committed a validated version-2 mapping and reached independent review. The reviewer selected APPROVED, but its terminal effect is UNKNOWN and the review job requires reconciliation. This is partial repair progress, not a completed approval. Admission is closed; mapper 1, reviewer 1, and the root runner are stopped. Both model services and the Gateway remain healthy. Holds, private organization state, and all original job/claim/receipt rows remain preserved.
+The current state is a closed-admission, stopped boundary after Atlantic
+Volleyball Academy's generation-1 invocation failure. The fixed source
+baseline is `a49d29d1f0af1a1d228ef194becbf6c726d96d56` on branch
+`workstream/affiliate-invocation-diagnostics`; pre-rollout deployed source is
+`635a382858a814dfdc338a4d207977747d2cc0dd`. The newly integrated diagnostic
+source, matched image rollout, and generation-2 retry remain pending source
+review, release, and image-export verification.
+
+Atlantic Gateway job `87d9395a-116d-44fb-9550-7019f00ae04e` remains
+`RETRY_WAIT` at claim generation 1 with invocation failure count 1. No
+generation-2 claim or reviewer ran. Houston Select FC, Chicago Central Hockey
+Club, and Sports Zone Academy Softball remain paused and unadmitted. The
+complete approved NYC source, root, mapping, jobs, claims, receipts, and
+error history remain preserved. No source capture, mapping activation,
+candidate publication, or automatic scraping/automation occurred.
+
+### Historical outcome (superseded)
+
+The earlier corrected version-4 runtime was deployed. Its linked producer and
+reviewer attempts, partial repair result, closed admission, stopped workers,
+and retained holds remain historical records. That outcome is not the current
+Atlantic diagnostic boundary.
 
 ## Context and Orientation
 
 
-The working tree is `/Users/elesesy/StudioProjects/bracketiq-affiliate-collection`, on `workstream/affiliate-legacy-admission`. The canonical repository is `Razumly/bracketiq`. `apps/site` owns the backend. Run npm and TypeScript commands from that directory. Do not change the mobile build graph.
+The working tree is `/Users/elesesy/StudioProjects/bracketiq-affiliate-collection`,
+on `workstream/affiliate-invocation-diagnostics`. The fixed source baseline is
+`a49d29d1f0af1a1d228ef194becbf6c726d96d56`; pre-rollout deployed source is
+`635a382858a814dfdc338a4d207977747d2cc0dd`. The newly integrated diagnostic
+commit is not yet recorded here; Main must record its exact SHA after source
+gates and before image publication. The canonical repository is
+`Razumly/bracketiq`. `apps/site` owns the backend. Run npm and TypeScript
+commands from that directory. Do not change the mobile build graph.
 
-`apps/site/scripts/run-affiliate-agent-runner.ts` is the privileged runner. It verifies signed Unix-socket requests, creates private per-invocation cgroups, drops to a child UID, bounds stdout and stderr, and proves process cleanup. Before this cutover, it seeded `.codex/auth.json` and started `codex exec`. The OMP source removes that path. Existing bounded diagnostic changes in this runner and `apps/site/scripts/__tests__/runAffiliateAgentRunnerDiagnostics.test.ts` remain.
+`apps/site/scripts/run-affiliate-agent-runner.ts` is the privileged runner. It
+verifies signed Unix-socket requests, creates private per-invocation cgroups,
+drops to a child UID, bounds stdout and stderr, and proves process cleanup.
+The OMP source removes the old `.codex/auth.json` path. The runner now carries
+only bounded, redacted command and invocation diagnostics; those fields are
+evidence and do not control authorization, disposition, or retry policy.
 
-`apps/site/src/server/affiliateImports/agentSupervisor.ts` builds the child launch request and confirms terminal submissions. `apps/site/scripts/run-affiliate-agent-supervisor.ts` implements the HTTP Gateway client and workspace ownership. The Gateway operation endpoint is the configured path prefix plus `/perform`. Its request has a fixed `kind`, trusted claim `authorization`, and operation-specific fields.
+`apps/site/src/server/affiliateImports/agentSupervisor.ts` builds the child
+launch request and confirms terminal submissions.
+`apps/site/scripts/run-affiliate-agent-supervisor.ts` implements the HTTP
+Gateway client and workspace ownership. The Gateway operation endpoint is the
+configured path prefix plus `/perform`. Its request has a fixed `kind`,
+trusted claim `authorization`, and operation-specific fields.
 
-`apps/site/src/server/affiliateImports/agentGatewayContracts.ts` owns current role contracts, prompt hashes, claim schemas, terminal schemas, and execution classes. `apps/site/src/server/affiliateImports/affiliateFleetCutover.ts` and the preflight script verify the deployment. `apps/site/deploy/affiliate-governed/compose.yml` and its Dockerfiles define the private runtime. The existing Codex sandbox profiles enabled namespaces for bubblewrap. Reassess them for OMP; do not retain unnecessary namespace privileges only to preserve old hashes.
+`apps/site/src/server/affiliateImports/agentGatewayContracts.ts` owns current
+role contracts, prompt hashes, claim schemas, terminal schemas, and execution
+classes. `apps/site/src/server/affiliateImports/affiliateFleetCutover.ts` and
+the preflight script verify the deployment.
+`apps/site/deploy/affiliate-governed/compose.yml` and its Dockerfiles define
+the private runtime. Deployment contract 14, role/prompt version 13, and
+Supply Contract 1 remain the current authority; their hashes are unchanged.
 
-The admitted Gateway job is `d7a1fe71-c76e-4191-a3f3-610c737d683e`. Its legacy mapping job is `50957179-8e51-42f0-a0db-2fc4791bdc79`. Its Supply Source is `a8764a56-2da2-4382-82d1-eee317b05143`. The Gateway job is now `COMPLETED` with `CONTRACT_GAP` and two historical failures. The mapping job is `REVIEW_REQUIRED`. The root remains lifecycle generation 1, `PRE_MAPPED`, and held by `LEGACY_SPORT_REPAIR`. Admission is closed and canary workers are stopped. The prior admission report hash is `778e0233ecb85e4424c4238026511ef6f7bc6871fc8ffc045970ff1b345219b0`. Do not admit another source. Do not remove the hold.
+The current workload is
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v14-club-guidance-trial/omp-workload.v14.env`;
+the next diagnostic workload is
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v14-invocation-diagnostic-trial/omp-workload.v14.env`.
+The active Atlantic Gateway job is
+`87d9395a-116d-44fb-9550-7019f00ae04e`, `RETRY_WAIT` at generation 1 with
+invocation failure count 1. Admission is closed. The other three sources are
+paused and unadmitted. The complete approved NYC source, root, mapping, jobs,
+claims, receipts, and error history remain preserved.
 
 Production access uses `ssh bracketiq-prod`. The private deployment file is `/home/bracketiq/.config/bracketiq-affiliate-agents/governed-deployment.env`. Never print it. The production database remains on its private Docker network. The OMP broker and model gateway must not join that network.
+
+### Historical context (superseded)
+
+The previous living context used branch `workstream/affiliate-legacy-admission`
+and identified Gateway job `d7a1fe71-c76e-4191-a3f3-610c737d683e` with its
+legacy mapping job and held root. Those identifiers and states remain in the
+historical rollout sections below; they are not the current Atlantic retry
+scope.
 
 ## Plan of Work
 
@@ -5104,3 +5202,133 @@ created. Private runtime and evidence files remain for audit.
 
 Plan revision: record the mandatory batch stop, retained process failure,
 unadmitted sources, diagnostic limit, and verified safe final state.
+
+### Authorized invocation diagnostics and one Atlantic retry
+
+
+The user authorized a diagnostic source change, its matched production
+deployment, and one Atlantic Volleyball Academy retry. The other three
+sources remain paused. Do not recapture a page, activate a mapping, publish
+a candidate, or enable source automation.
+
+The offline investigation reproduced the retained runner signature with
+`OMP_NO_TERMINAL_RESULT`. This is an inference from the exact 45-byte
+signature, not a recovered driver message. The SDK can resolve a prompt
+after a normal stop, an assistant error, or an aborted response. The driver
+does not retain the final assistant outcome before disposal. The retained
+Atlantic capture is also an application shell: its deterministic quality
+check rejects 38 meaningful text characters and zero headings. A local
+source-backed unresolved-sport `CONTRACT_GAP` draft passed. Do not infer the
+model's final stop reason from that source limitation.
+
+Add one strict diagnostic contract in
+`apps/site/src/server/affiliateImports/affiliateAgentInvocationDiagnostics.ts`.
+It contains only a schema version, fixed event name, allowlisted driver code,
+prompt outcome, allowlisted assistant stop reason and error category, bounded
+HTTP error status, and terminal-frame presence. Limit a serialized record to
+1,024 bytes. Reject unknown fields. Do not retain free-form error messages,
+prompts, responses, reasoning, credentials, account data, or provider payloads.
+Bind job, claim, generation, worker, and invocation IDs through the existing
+supervisor and Gateway context, not through child-supplied diagnostic fields.
+
+Capture assistant outcome while the session exists. Preserve the last
+observed assistant outcome if SDK recovery prunes its message. Snapshot it
+before disposal. Record whether the prompt returned or threw. Emit one
+newline-terminated structured diagnostic on driver failure. Preserve exit
+codes, accepted terminal-result precedence, and cleanup behavior.
+
+Recover the final valid record from the runner's existing bounded stderr
+tail. This gives the final failure a separate bounded slot without consuming
+the command-error budget. Carry an optional `diagnostic` through the `EXIT`
+process event, runner parser, supervisor failure reconciliation, and strict
+Gateway failure envelope. Save it in
+`CLAIM_INVOCATION_FAILED.payload.diagnostic` inside the existing failure
+transaction. The failure event keeps indefinite retention. Expose only its
+validated fields as `invocationDiagnostic` in the read-only error-history
+report. Old failure rows remain readable and unchanged. No migration is
+needed.
+
+The source implementation has two owners. The driver owner changes the new
+diagnostic module, OMP driver, runner, process-event type, runner parser, and
+focused boundary tests. The persistence owner changes supervisor failure
+handling, the Gateway failure envelope and parser, failure persistence,
+error-history projection, and focused persistence/report tests. Main owns
+integration, validation, review coordination, and runtime operations. The
+shared field contract is recorded in `local://invocation-diagnostic-contract.json`.
+
+Verify capture before disposal, strict redaction, bounded framing, malformed
+record handling, terminal-result precedence, same-claim correlation,
+idempotent failure replay, transaction rollback, and old-history reads.
+Run the complete affected suites once after both owners finish. Use an
+offline smoke probe to exercise the real diagnostic path. Review the change
+against `a49d29d1f0af1a1d228ef194becbf6c726d96d56` on separate Standards and
+Spec axes before publication.
+
+Keep deployment contract 14, role/prompt version 13, Supply Contract 1, and
+all authority hashes unchanged. Verify compiled role and prompt exports
+against the deployed bundle. Publish matched site, governed, and Gateway
+images after Site CI passes. Update the site, Gateway, runner, selected
+workers, and image-coupled model services. Keep admission closed during the
+rollout. Preserve all credentials, unrelated runtimes, and legacy timer state.
+
+Retry the existing Gateway job
+`87d9395a-116d-44fb-9550-7019f00ae04e`. Its baseline is claim generation 1 and
+invocation failure count 1. Do not reset either value or create another
+admission cycle. After fresh preflight, open one exact producer lease for
+generation 2. Close admission after that claim is acquired. Stop on a further
+invocation failure, unexpected claim, unresolved receipt, diagnostic delivery
+failure, or protected-state change. Do not allow generation 3.
+
+If generation 2 commits a package, admit only its exact independent reviewer
+child after fresh preflight. An approval remains staged and inactive. After
+the terminal outcome, close admission and stop the scoped workers. Preserve
+Atlantic's original claim, receipts, and failure event. Preserve the complete
+approved NYC checkpoint, five working mappings, five held roots, Pickleball
+history, published candidates, unrelated queued captures, and the other
+three unadmitted sources.
+
+Acceptance requires the emitted diagnostic to remain readable after a failed
+invocation and cleanup, or a successful bounded producer/reviewer result with
+the diagnostic failure path proved offline. Record the exact retry outcome;
+do not promise source approval. Record the release hashes, fresh preflight,
+protected-state comparisons, and final stopped boundary.
+
+Plan revision: define bounded durable invocation diagnostics and the separately
+authorized matched deployment and generation-2 Atlantic retry.
+
+### Invocation diagnostic source gate
+
+
+The final source gate passed 327 tests across 10 suites. This includes the
+real PostgreSQL Gateway integration suite, bounded runner framing, diagnostic
+redaction, historical error reporting, and owned lifecycle cleanup coverage.
+The isolated database used all 219 migrations and had no pending migration.
+TypeScript and targeted ESLint passed.
+
+A real Bun 1.3.14 driver run with an invalid private test input exited with
+code 1 and empty stdout. It emitted exactly one sanitized structured setup
+diagnostic as the final stderr record. The private test value was absent.
+The late-mutation/pruning reproduction failed before correction and passed
+after correction. No model request or production write was needed for these
+probes.
+
+All four independent review axes are clear. Review corrections preserve a
+newer pruned assistant outcome, real persisted failure markers, setup signal
+behavior, bounded abort handling, cleanup-only diagnostics, final emission
+order, and current source authority. The lifecycle suite imports only the
+owned seam; the external SDK loads inside the actual invocation.
+
+Compiled role and prompt exports exactly match the deployed version-13
+exports. The deployment-14 authority bundle is unchanged. The source is ready
+for the newly integrated diagnostic commit, Site CI, and matched publication.
+No diagnostic image has been deployed and no generation-2 claim has run at
+this checkpoint.
+
+Source review and probe records are
+`local://invocation-diagnostic-review.json`,
+`local://invocation-diagnostic-final-tests.txt`,
+`local://invocation-diagnostic-driver-smoke.json`, and
+`local://invocation-diagnostic-pruning-after.json`.
+
+Plan revision: record the verified diagnostic source gate and corrected review
+findings before publication.

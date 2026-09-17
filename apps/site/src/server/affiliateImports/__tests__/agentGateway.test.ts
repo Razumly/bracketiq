@@ -16,6 +16,7 @@ import {
   AFFILIATE_AGENT_ERROR_MAX_TOTAL_BYTES,
   affiliateAgentErrorObservationFor,
 } from "../affiliateAgentErrorObservations";
+import type { AffiliateAgentInvocationDiagnostic } from "../affiliateAgentInvocationDiagnostics";
 
 import {
   AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX,
@@ -2594,6 +2595,7 @@ const failureOperationFor = (
     "SCHEMA_CORRECTIONS_EXHAUSTED"
   >,
   occurredAt = "2026-08-20T18:00:00.000Z",
+  diagnostic?: AffiliateAgentInvocationDiagnostic,
 ) => ({
   kind: "RECORD_FAILURE" as const,
   idempotencyKey,
@@ -2612,6 +2614,7 @@ const failureOperationFor = (
     occurredAt,
     evidenceRefs: [] as readonly string[],
     safeSummary: `The invocation failed with ${code}.`,
+    ...(diagnostic === undefined ? {} : { diagnostic }),
   } satisfies AffiliateAgentInvocationFailureEnvelope,
 });
 
@@ -9158,6 +9161,61 @@ describe("Prisma affiliate Agent Gateway", () => {
   });
 
 
+
+  it("persists and replays a strict invocation diagnostic without accepting unsafe fields", async () => {
+    const harness = createGatewayClaimHarness();
+    const grant = await harness.gateway.claim(harness.request);
+    if (!grant) throw new Error("Expected one Coverage Planner claim.");
+    const diagnostic: AffiliateAgentInvocationDiagnostic = {
+      schemaVersion: 1,
+      event: "affiliate-agent-invocation-diagnostic",
+      driverCode: "OMP_NO_TERMINAL_RESULT",
+      promptOutcome: "THREW",
+      assistantStopReason: "error",
+      assistantErrorCategory: "UNKNOWN",
+      assistantErrorStatus: null,
+      terminalFrameObserved: false,
+    };
+    const request = failureOperationFor(
+      grant,
+      "strict-diagnostic-failure",
+      "PROCESS_CRASH",
+      "2026-08-20T18:00:00.000Z",
+      diagnostic,
+    );
+
+    const failed = await harness.reconciler.reconcileInvocation(request);
+    expect(failed).toMatchObject({
+      kind: "INVOCATION_FAILED",
+      failureCode: "PROCESS_CRASH",
+    });
+    const failureEvent = harness.state.events.find(
+      (event) => event.eventType === "CLAIM_INVOCATION_FAILED",
+    );
+    expect(failureEvent).toMatchObject({
+      payload: { diagnostic },
+    });
+    await expect(harness.reconciler.reconcileInvocation(request)).resolves.toEqual(failed);
+
+    await expect(
+      harness.reconciler.reconcileInvocation({
+        ...request,
+        failure: {
+          ...request.failure,
+          diagnostic: {
+            ...diagnostic,
+            unsafeField: "must-not-persist",
+          },
+        },
+      } as never),
+    ).rejects.toMatchObject({
+      code: "INTERNAL_ERROR",
+      safeMessage: "The invocation reconciliation request is invalid.",
+    });
+    expect(harness.state.events.filter(
+      (event) => event.eventType === "CLAIM_INVOCATION_FAILED",
+    )).toHaveLength(1);
+  });
 
   it("reconciles the five supervisor-reportable invocation failure codes", async () => {
     const failureCodes = [

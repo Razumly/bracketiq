@@ -562,6 +562,52 @@ describe("affiliate agent error history report", () => {
     expect(JSON.stringify(report)).not.toContain("private old schema prose");
     expect(JSON.stringify(report)).not.toContain("private");
   });
+  it("reports only strict invocation diagnostics and redacts malformed stored values", () => {
+    const diagnostic = {
+      schemaVersion: 1,
+      event: "affiliate-agent-invocation-diagnostic",
+      driverCode: "OMP_NO_TERMINAL_RESULT",
+      promptOutcome: "THREW",
+      assistantStopReason: "error",
+      assistantErrorCategory: "UNKNOWN",
+      assistantErrorStatus: null,
+      terminalFrameObserved: false,
+    };
+    const valid = {
+      ...eventFor("event-diagnostic-valid", {
+        diagnostic,
+      }),
+      eventType: "CLAIM_INVOCATION_FAILED",
+      reasonCodes: ["PROCESS_CRASH"],
+    };
+    const invalid = {
+      ...eventFor("event-diagnostic-invalid", {
+        diagnostic: {
+          ...diagnostic,
+          unsafeField: "private-diagnostic-value",
+        },
+      }),
+      eventType: "CLAIM_INVOCATION_FAILED",
+      reasonCodes: ["PROCESS_CRASH"],
+    };
+
+    const report = buildAffiliateAgentErrorHistoryReport({
+      filters: { maxResults: 10 },
+      events: [valid, invalid],
+    });
+
+    expect(report.rows[0]).toMatchObject({
+      invocationDiagnostic: diagnostic,
+      markers: { malformedPayload: false },
+    });
+    expect(report.rows[1]).toMatchObject({
+      invocationDiagnostic: null,
+      markers: { malformedPayload: true },
+    });
+    expect(JSON.stringify(report)).not.toContain("unsafeField");
+    expect(JSON.stringify(report)).not.toContain("private-diagnostic-value");
+  });
+
   it("keeps authoritative invocation and lease failures neutral and finite", () => {
     const invocation = {
       ...eventFor("event-invocation", { privateSummary: "do not expose" }),
@@ -591,6 +637,8 @@ describe("affiliate agent error history report", () => {
         sourceKind: "CLAIM_LEASE_FAILURE",
       }),
     ]);
+    expect(report.rows.map((row) => row.invocationDiagnostic)).toEqual([null, null]);
+    expect(report.rows.map((row) => row.markers.malformedPayload)).toEqual([false, false]);
     expect(JSON.stringify(report)).not.toContain("private");
   });
 

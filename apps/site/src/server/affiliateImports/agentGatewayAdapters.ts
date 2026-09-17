@@ -120,6 +120,7 @@ import type {
   AffiliateAgentWorkspaceAttestation,
 } from "./agentGateway";
 
+import type { AffiliateAgentInvocationDiagnostic } from "./affiliateAgentInvocationDiagnostics";
 type AffiliateAgentNonTerminalCommand = Exclude<
   AffiliateAgentCommand,
   Readonly<{ type: "SUBMIT_TERMINAL_RESULT" }>
@@ -359,7 +360,12 @@ export type AffiliateAgentProcessEvent =
       idempotencyKey: string;
       result: unknown;
     }>
-  | Readonly<{ kind: "EXIT"; exitCode: number; reason?: "TIMEOUT" }>;
+  | Readonly<{
+      kind: "EXIT";
+      exitCode: number;
+      reason?: "TIMEOUT";
+      diagnostic?: AffiliateAgentInvocationDiagnostic;
+    }>;
 export type AffiliateAgentProcessInput = Readonly<{
   kind: "SCHEMA_CORRECTION";
   correctionPrompt: string;

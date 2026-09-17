@@ -1413,6 +1413,35 @@ describe("affiliate agent one-claim supervisor", () => {
     expect(harness.terminate).toHaveBeenCalledTimes(1);
     expect(harness.destroyWorkspace).toHaveBeenCalledTimes(1);
   });
+  it("carries bounded runner diagnostics through process cleanup and failure reconciliation", async () => {
+    const diagnostic = {
+      schemaVersion: 1 as const,
+      event: "affiliate-agent-invocation-diagnostic" as const,
+      driverCode: "OMP_NO_TERMINAL_RESULT" as const,
+      promptOutcome: "THREW" as const,
+      assistantStopReason: "error" as const,
+      assistantErrorCategory: "UNKNOWN" as const,
+      assistantErrorStatus: null,
+      terminalFrameObserved: false,
+    };
+    const harness = createSupervisorHarness({
+      processEvents: [{ kind: "EXIT", exitCode: 17, diagnostic }],
+    });
+
+    await expect(
+      runAffiliateAgentInvocation(harness.dependencies, supervisorInput()),
+    ).resolves.toBe("INVOCATION_FAILED");
+
+    const request = harness.reconcileInvocation.mock.calls[0][0] as
+      AffiliateAgentInvocationReconciliationRequest;
+    expect(request.failure.diagnostic).toEqual(diagnostic);
+    expect(harness.terminate.mock.invocationCallOrder[0]).toBeLessThan(
+      harness.reconcileInvocation.mock.invocationCallOrder[0],
+    );
+    expect(harness.destroyWorkspace.mock.invocationCallOrder[0]).toBeGreaterThan(
+      harness.reconcileInvocation.mock.invocationCallOrder[0],
+    );
+  });
   it("preserves a runner hard-deadline timeout when the runner reports first", async () => {
     const harness = createSupervisorHarness({
       processEvents: [{ kind: "EXIT", exitCode: 1, reason: "TIMEOUT" }],

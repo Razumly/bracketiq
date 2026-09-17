@@ -2,6 +2,10 @@ import type {
   AffiliateAgentProcessEvent,
   AffiliateAgentProcessInput,
 } from "./agentGatewayAdapters";
+import {
+  parseAffiliateAgentInvocationDiagnostic,
+  type AffiliateAgentInvocationDiagnostic,
+} from "./affiliateAgentInvocationDiagnostics";
 
 export const AFFILIATE_AGENT_WORKER_ID_MAX_LENGTH = 64 as const;
 export const AFFILIATE_AGENT_INVOCATION_ID_MAX_LENGTH = 128 as const;
@@ -124,22 +128,27 @@ type AffiliateAgentRunnerExitEventRecord =
     kind: "EXIT";
     exitCode: number;
     reason?: "TIMEOUT";
+    diagnostic?: AffiliateAgentInvocationDiagnostic;
   }>;
 
 const isExitEventRecord = (
   value: AffiliateAgentRunnerResponseRecord,
-): value is AffiliateAgentRunnerExitEventRecord => (
-  value.kind === "EXIT"
-  && (
-    hasResponseKeys(value, ["kind", "exitCode"])
-    || (
-      hasResponseKeys(value, ["kind", "exitCode", "reason"])
-      && value.reason === "TIMEOUT"
-    )
-  )
-  && typeof value.exitCode === "number"
-  && Number.isInteger(value.exitCode)
-);
+): value is AffiliateAgentRunnerExitEventRecord => {
+  if (
+    value.kind !== "EXIT"
+    || typeof value.exitCode !== "number"
+    || !Number.isInteger(value.exitCode)
+  ) return false;
+  const keys = Object.keys(value);
+  const hasReason = Object.prototype.hasOwnProperty.call(value, "reason");
+  const hasDiagnostic = Object.prototype.hasOwnProperty.call(value, "diagnostic");
+  if (
+    keys.length !== 2 + Number(hasReason) + Number(hasDiagnostic)
+    || !keys.every(key => key === "kind" || key === "exitCode" || key === "reason" || key === "diagnostic")
+  ) return false;
+  if (hasReason && value.reason !== "TIMEOUT") return false;
+  return !hasDiagnostic || parseAffiliateAgentInvocationDiagnostic(value.diagnostic) !== null;
+};
 const isTerminalSubmissionEventRecord = (
   value: AffiliateAgentRunnerResponseRecord,
 ): value is AffiliateAgentRunnerTerminalSubmissionEventRecord => (
@@ -163,10 +172,14 @@ const parseAffiliateAgentRunnerProcessEvent = (
     };
   }
   if (isExitEventRecord(value)) {
+    const diagnostic = Object.prototype.hasOwnProperty.call(value, "diagnostic")
+      ? parseAffiliateAgentInvocationDiagnostic(value.diagnostic)
+      : null;
     return {
       kind: "EXIT",
       exitCode: value.exitCode,
       ...(value.reason === "TIMEOUT" ? { reason: value.reason } : {}),
+      ...(diagnostic === null ? {} : { diagnostic }),
     };
   }
   return invalidRunnerResponse();

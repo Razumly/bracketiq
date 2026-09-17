@@ -24,6 +24,24 @@ describe("affiliate agent runner response protocol", () => {
       requestId: "deadline-request",
       event: { kind: "EXIT", exitCode: 1, reason: "TIMEOUT" },
     },
+    {
+      kind: "EVENT",
+      requestId: "failure-request",
+      event: {
+        kind: "EXIT",
+        exitCode: 1,
+        diagnostic: {
+          schemaVersion: 1,
+          event: "affiliate-agent-invocation-diagnostic",
+          driverCode: "OMP_SESSION_FAILED",
+          promptOutcome: "THREW",
+          assistantStopReason: "error",
+          assistantErrorCategory: "UNKNOWN",
+          assistantErrorStatus: null,
+          terminalFrameObserved: false,
+        },
+      },
+    },
     { kind: "STARTED", requestId: "launch-request" },
     {
       kind: "ERROR",
@@ -86,6 +104,49 @@ describe("affiliate agent runner response protocol", () => {
         kind: "EVENT",
         requestId: "launch-request",
         event: { kind: "EXIT", exitCode: 0, reason: "unexpected" },
+      },
+    ],
+    [
+      "EXIT event with an unknown diagnostic driver code",
+      {
+        kind: "EVENT",
+        requestId: "launch-request",
+        event: {
+          kind: "EXIT",
+          exitCode: 1,
+          diagnostic: {
+            schemaVersion: 1,
+            event: "affiliate-agent-invocation-diagnostic",
+            driverCode: "OMP_PROVIDER_SECRET",
+            promptOutcome: "THREW",
+            assistantStopReason: null,
+            assistantErrorCategory: "NONE",
+            assistantErrorStatus: null,
+            terminalFrameObserved: false,
+          },
+        },
+      },
+    ],
+    [
+      "EXIT event with an oversized diagnostic record",
+      {
+        kind: "EVENT",
+        requestId: "launch-request",
+        event: {
+          kind: "EXIT",
+          exitCode: 1,
+          diagnostic: {
+            schemaVersion: 1,
+            event: "affiliate-agent-invocation-diagnostic",
+            driverCode: "OMP_DRIVER_FAILED",
+            promptOutcome: "THREW",
+            assistantStopReason: null,
+            assistantErrorCategory: "NONE",
+            assistantErrorStatus: null,
+            terminalFrameObserved: false,
+            privateMetadata: "x".repeat(2_000),
+          },
+        },
       },
     ],
     [

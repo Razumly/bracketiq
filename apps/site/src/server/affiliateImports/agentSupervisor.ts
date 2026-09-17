@@ -12,6 +12,10 @@ import {
   type AffiliateAgentSubmitResultOutcome,
   type AffiliateAgentWorkspaceAttestation,
 } from "./agentGateway";
+import {
+  parseAffiliateAgentInvocationDiagnostic,
+  type AffiliateAgentInvocationDiagnostic,
+} from "./affiliateAgentInvocationDiagnostics";
 import type {
   AffiliateAgentInvocationReconciliationRequest,
   AffiliateAgentInvocationReconciliationResult,
@@ -290,6 +294,7 @@ type SupervisorState = {
   processSession: AffiliateAgentProcessSession | null;
   lease: SupervisorLease | null;
   lateWorkspaceCleanup: Promise<void> | null;
+  invocationDiagnostic: AffiliateAgentInvocationDiagnostic | null;
 };
 
 const createSupervisorState = (
@@ -302,6 +307,7 @@ const createSupervisorState = (
   processSession: null,
   lease: null,
   lateWorkspaceCleanup: null,
+  invocationDiagnostic: null,
 });
 
 const waitForShutdown = <T>(
@@ -787,6 +793,9 @@ const reconcileInvocationFailure = async (
     occurredAt: dependencies.clock.now().toISOString(),
     evidenceRefs: [],
     safeSummary: failureSummaryFor(failureCode),
+    ...(context.state.invocationDiagnostic === null
+      ? {}
+      : { diagnostic: context.state.invocationDiagnostic }),
   };
   const failureRequest: AffiliateAgentInvocationReconciliationRequest = {
     kind: "RECORD_FAILURE",
@@ -905,7 +914,12 @@ type SupervisorProcessResultEvent = Extract<
 >;
 
 type SupervisorProcessWakeDecision =
-  | Readonly<{ kind: "FAILURE"; failureCode: SupervisorFailureCode; error?: unknown }>
+  | Readonly<{
+      kind: "FAILURE";
+      failureCode: SupervisorFailureCode;
+      error?: unknown;
+      diagnostic?: AffiliateAgentInvocationDiagnostic;
+    }>
   | Readonly<{ kind: "SHUTDOWN" }>
   | Readonly<{ kind: "READY" }>
   | Readonly<{ kind: "RESULT"; event: SupervisorProcessResultEvent }>;
@@ -924,6 +938,7 @@ const processEventWakeDecision = (
       : { kind: "READY" };
   }
   if (event.kind === "EXIT") {
+    const diagnostic = parseAffiliateAgentInvocationDiagnostic(event.diagnostic);
     return {
       kind: "FAILURE",
       failureCode: event.reason === "TIMEOUT"
@@ -931,6 +946,7 @@ const processEventWakeDecision = (
         : event.exitCode === 0
           ? "MALFORMED_OUTPUT"
           : "PROCESS_CRASH",
+      ...(diagnostic === null ? {} : { diagnostic }),
     };
   }
   if (!isProcessReady || event.kind !== "TERMINAL_SUBMISSION") {
@@ -1037,7 +1053,11 @@ const supervisionFailureOutcome = async (
   context: SupervisorContext,
   failureCode: SupervisorFailureCode,
   error: unknown,
+  diagnostic?: AffiliateAgentInvocationDiagnostic,
 ): Promise<AffiliateAgentSupervisorOutcome> => {
+  if (diagnostic !== undefined) {
+    context.state.invocationDiagnostic = diagnostic;
+  }
   if (admissionHaltRequiredFor(error)) {
     await haltAdmission(context.state, error);
     throw error;
@@ -1091,6 +1111,7 @@ const superviseProcess = async (
         context,
         decision.failureCode,
         decision.error,
+        decision.diagnostic,
       );
     }
     if (decision.kind === "READY") {

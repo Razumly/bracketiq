@@ -25,6 +25,7 @@ import type {
   AffiliateAgentReviewerEffectRecoveryRequest,
   AffiliateAgentReviewerEffectRecoveryReport,
 } from "../agentGateway";
+import type { AffiliateAgentInvocationDiagnostic } from "../affiliateAgentInvocationDiagnostics";
 import {
   buildAffiliateSupplyContractManifest,
   normalizeAffiliateSupplyIdentity,
@@ -2552,6 +2553,7 @@ const failureOperationFor = (
     "SCHEMA_CORRECTIONS_EXHAUSTED"
   >,
   occurredAt: string,
+  diagnostic?: AffiliateAgentInvocationDiagnostic,
 ) => ({
   kind: "RECORD_FAILURE" as const,
   idempotencyKey,
@@ -2570,6 +2572,7 @@ const failureOperationFor = (
     occurredAt,
     evidenceRefs: [] as readonly string[],
     safeSummary: `The invocation failed with ${code}.`,
+    ...(diagnostic === undefined ? {} : { diagnostic }),
   },
 });
 
@@ -5136,7 +5139,45 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
     expect(receipts.filter((receipt) => receipt.operationKind === "SUBMIT_RESULT")).toEqual([
       expect.objectContaining({ id: accepted.receiptId, status: "SUCCEEDED" }),
     ]);
+
     expect(terminalEvents).toBe(1);
+  });
+  it("persists a validated invocation diagnostic in the atomic failure event and replays it idempotently", async () => {
+    const jobId = await seedCoverageJob("invocation-diagnostic");
+    const harness = createGatewayHarness("invocation-diagnostic");
+    const grant = await claimOrThrow(
+      harness.gateway,
+      requestFor("invocation-diagnostic", "COVERAGE_PLANNER", INITIAL_TIME),
+    );
+    const diagnostic: AffiliateAgentInvocationDiagnostic = {
+      schemaVersion: 1,
+      event: "affiliate-agent-invocation-diagnostic",
+      driverCode: "OMP_NO_TERMINAL_RESULT",
+      promptOutcome: "THREW",
+      assistantStopReason: "error",
+      assistantErrorCategory: "UNKNOWN",
+      assistantErrorStatus: null,
+      terminalFrameObserved: false,
+    };
+    const request = failureOperationFor(
+      grant,
+      `${RUN_PREFIX}-invocation-diagnostic-failure`,
+      "PROCESS_CRASH",
+      INITIAL_TIME.toISOString(),
+      diagnostic,
+    );
+
+    const failed = await harness.reconciler.reconcileInvocation(request);
+    expect(failed).toMatchObject({
+      kind: "INVOCATION_FAILED",
+      failureCode: "PROCESS_CRASH",
+      invocationFailureCount: 1,
+    });
+    const event = await prisma.affiliateAgentGatewayEvents.findFirstOrThrow({
+      where: { jobId, eventType: "CLAIM_INVOCATION_FAILED" },
+    });
+    expect(event.payload).toMatchObject({ diagnostic });
+    await expect(harness.reconciler.reconcileInvocation(request)).resolves.toEqual(failed);
   });
 
   it("uses +5 and +15 retries, blocks failure three immediately, and records trusted reconciliation", async () => {

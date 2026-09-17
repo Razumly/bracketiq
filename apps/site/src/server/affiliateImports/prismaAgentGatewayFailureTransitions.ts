@@ -16,6 +16,10 @@ import {
   isAffiliateAgentSingleClaimJob,
   hashAffiliateAgentValue,
 } from "./agentGatewayContracts";
+import {
+  serializeAffiliateAgentInvocationDiagnostic,
+  type AffiliateAgentInvocationDiagnostic,
+} from "./affiliateAgentInvocationDiagnostics";
 
 export class AffiliateAgentClaimRaceError extends Error {}
 
@@ -44,6 +48,7 @@ type InvocationFailureTransitionInput = Readonly<{
   failedAt: Date;
   safeSummary: string;
   evidenceRefs: readonly string[];
+  diagnostic?: AffiliateAgentInvocationDiagnostic;
   claimStatus: "FAILED" | "EXPIRED";
   claimCasFailure: "GATEWAY_ERROR" | "RACE";
   actorKind: "AGENT_INVOCATION" | "GATEWAY_RECONCILER";
@@ -69,6 +74,11 @@ export const recordInvocationFailureTransition = async (
   const nextAttemptAt = isPipelineBlocked
     ? null
     : new Date(input.failedAt.getTime() + retryDelay! * 1_000);
+  const serializedDiagnostic = input.diagnostic === undefined
+    ? undefined
+    : JSON.parse(
+      serializeAffiliateAgentInvocationDiagnostic(input.diagnostic),
+    ) as Prisma.InputJsonValue;
   const receiptId = input.dependencies.identifiers.create("receipt");
   const response: AffiliateAgentInvocationFailedResult = {
     kind: "INVOCATION_FAILED",
@@ -181,6 +191,9 @@ export const recordInvocationFailureTransition = async (
         invocationFailureCount,
         nextAttemptAt: nextAttemptAt?.toISOString() ?? null,
         isPipelineBlocked,
+        ...(serializedDiagnostic === undefined
+          ? {}
+          : { diagnostic: serializedDiagnostic }),
         ...(input.eventType === "CLAIM_EXPIRED"
           ? { terminalFailureReceiptId: receiptId }
           : {}),
