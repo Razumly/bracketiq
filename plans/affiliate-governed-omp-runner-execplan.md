@@ -4877,3 +4877,92 @@ network requests. The temporary smoke script was removed.
 
 Plan revision: record the stored-anchor audit, versioned guidance correction,
 and separately authorized one-source retry.
+
+### Approved canonical CLUB action retry
+
+
+The one-source retry is complete. Source commit
+`635a382858a814dfdc338a4d207977747d2cc0dd` passed Site CI run `35183306874`.
+Publication runs `35183689205` and `35183689118` passed. The deployed images are:
+
+    ghcr.io/razumly/bracketiq-site@sha256:3fe1143222922456e170a3e878fcffa3f04e273aba13e639cd08c171168c7549
+    ghcr.io/razumly/bracketiq-affiliate-governed@sha256:213b262fd3822f92374d57387f6780fe6773a4dadc230aa1642dd6e062f0cda2
+    ghcr.io/razumly/bracketiq-affiliate-gateway@sha256:e27776006d5eadc7b206e0d0100cd81771f7d5d09884127e008745e70453b946
+
+Both governed images exported the exact checked role and prompt objects.
+Deployment contract 14 has hash
+`2f953a9295b0cc901b7a71a1ed49e9711f150eeae34ba70eb69a6efa354fed91`.
+All four role and prompt versions are 13. Supply Contract 1 and its hash
+remain unchanged. No migration ran. The site, Gateway, auth broker, and
+model gateway are healthy on the matched images.
+
+Fresh producer preflight passed with no warning or blocking finding. Its hash
+is `e220ef90378fb9db11b0b239e8b4d4278bc813f971301d6ef253cf6787748246`.
+After producer completion, a second stopped-fleet preflight passed before
+review. Its hash is
+`0f93eabe359aa2aef60ff612b1fdc4387e27986f31fe3e462fa00f106c48a58f`.
+Producer and reviewer sandbox probes passed. Both workers reported ready
+while admission remained closed.
+
+The exact-source admission used reviewed hash
+`a9337a44a6ed86a7beb37fbad1b7c2e3accbf404c11c5131a8ae9518a07eb2b5`.
+It reused the working source, governed root, stored run, and stored page.
+It created one new Gateway producer job,
+`b94cabeb-07b8-46d6-b834-2a20db1708f7`. Claim
+`agw-claim-e3034a6a-c5fd-4761-a9c6-c114337afb46` completed generation 1 with
+`BOUNDED_REPAIR_SUBMITTED` and zero invocation failures.
+
+The committed package hash is
+`fa69cfb2b902abddbafe312ef5fecd4e13255cac352d5fbcfc41e90929ed8336`.
+Commit receipt `agw-receipt-0cd9841f-1b17-4554-9af5-4fa37cac938c` succeeded.
+The package selects `header .header-display-desktop .header-title-logo a`
+as an `href` attribute with the `absoluteUrl` transform. This resolves the
+organization's homepage as official information, not as registration.
+The package retains source wording and resolves Beach Volleyball from the
+same first-party evidence.
+
+Reviewer job `4bbec384-1e8b-45fa-ae66-94e6d07d4bdf` used independent claim
+`agw-claim-21e5bd8d-1934-4882-97eb-33a4565313bb`. Its separate workspace was
+`READ_ONLY`. It approved the exact committed package in generation 1 with
+zero invocation failures. Its terminal receipt is
+`agw-receipt-3447dedc-94fa-4e35-b81f-7ff65d3bbc44`.
+Admission was closed immediately after each scoped claim.
+
+Approval is staging only. The source and root have matching `APPROVED`
+pending-mapping records. Mapping
+`agw-artifact-b6305242-112a-4ab3-9523-631e1c035a5b` is inactive. The reviewer
+set its validation time. The public source still uses
+`affiliate_mapping_nyc_beach_volleyball_v1`. Its content and validation state
+are unchanged. The root remains `PRE_MAPPED` with generation 3, disabled
+automation, and zero target contribution. The legacy mapping job is
+`COMPLETED`. No activation or publication was performed.
+
+The retry retained 12 producer error observations and 7 reviewer error
+observations. These cover rejected package inputs, artifact requests, and
+terminal drafts. The read-only report returns 21 observations, including
+the 2 original canary observations. All use `INDEFINITE` retention. No limit
+marker, truncation, diagnostic delivery failure, or invocation failure was
+observed. Successful completion does not erase these errors.
+
+Admission is closed. The runner, producer 1, and reviewer 1 are stopped.
+Final checks found zero active claims, active job pointers, unresolved
+receipts, reconciliation claims/jobs, running captures, and Supply Targets.
+All 2,821 published candidate rows match the pre-retry fingerprint. Full-row
+hashes also match for the original canary job, claims, receipts, and errors;
+the five held roots; the four unselected mapping jobs; and the two unrelated
+queued captures. The protected Pickleball history and all five working
+mappings match the earlier baseline. Adjacent runtime identities and legacy
+service/timer states are unchanged. Public site readiness reports
+`status: ok` and `database: ready`.
+
+The operator checkpoint is
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v14-club-guidance-tools/trial-final-evidence.json`.
+The private workload and both preflight directories are under
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v14-club-guidance-trial`.
+Local evidence includes `local://club-guidance-final-evidence.json`,
+`local://club-guidance-error-history.json`, and
+`local://club-guidance-source-review.json`. The local transfer archive was
+removed. Remote source and evidence archives remain for audit.
+
+Plan revision: record the matched guidance rollout, one completed producer
+attempt, independent staging approval, retained errors, and verified shutdown.
