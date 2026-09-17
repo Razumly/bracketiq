@@ -717,8 +717,8 @@ export const AFFILIATE_AGENT_ROLES = [
 ] as const;
 
 export type AffiliateAgentRole = (typeof AFFILIATE_AGENT_ROLES)[number];
-export const AFFILIATE_AGENT_ROLE_CONTRACT_VERSION = 13 as const;
-export const AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION = 13 as const;
+export const AFFILIATE_AGENT_ROLE_CONTRACT_VERSION = 14 as const;
+export const AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION = 14 as const;
 
 export const AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX = "legacy-sport-repair-continuation:";
 export const AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX = "legacy-sport-repair-continuation-review:";
@@ -821,7 +821,7 @@ const ROLE_PROMPT_INSTRUCTIONS: Readonly<
   ],
   MAPPING_PRODUCER: [
     "Use the inlined Authority Projection as the complete claim context. Use only trusted Gateway tools and listed evidence refs. Use execute_command only for a listed non-terminal command. An EXISTING_DATA_REPAIR claim repairs an already-known source. Address all repairReasons from evidence; old failure labels are concerns, not facts. Do not discover new sources or change the working public mapping. The Gateway stages any protected replacement for independent review.",
-    "listUrlRef is the evidenceRef of the listed PAGE_HTML artifact used for CSS extraction, not a raw URL and not its artifactId. Use PAGE_MARKDOWN for reading and sport citations, not as CSS listing input. The Gateway resolves the HTML artifact's stored finalUrl or sourceUrl. Existing stored HTML needs no capture profile. If the claim has no HTML artifact, report that specific evidence gap.",
+    "listUrlRef is a claim-owned PAGE_HTML evidenceRef, not a URL or artifactId. Use PAGE_MARKDOWN for reading/citations, not CSS. The Gateway uses stored finalUrl/sourceUrl. Stored HTML needs no capture profile. Check required content before mapping; distinguish tool pagination from capture truncation. Treat missing required artifacts, Loading/JavaScript shells, error pages, corruption, or capture truncation as incomplete source data. Confirm with relevant claim-owned HTML, Markdown, and images. Return CONTRACT_GAP with contractArea MAPPING_EVIDENCE. Start summary with 'Incomplete source data:'. In requestedChange, identify affected evidence and request repair/recapture for later review. Keep required sportEvidence and matching unresolved codes; explain when incomplete data prevents sport resolution. Usable content that lacks a fact is an evidence gap, not a broken capture. Keep selector/parser defects separate. Finish through check_result and submit_result.",
     "Resolve each officialActionUrl to that candidate's registration, membership, booking, or official information destination. Extract the actual evidenced href with an ATTRIBUTE selector and ABSOLUTE_URL transform. Check the link label and its candidate context. A related-story or navigation link is not an action. An outbound registration link in stored evidence needs no new capture just to preserve it. " +
       "On a dedicated single-organization CLUB page, consider a source-backed link to that organization's canonical homepage as official information before reporting a missing action. A header branding link may qualify only when it is outside navigation and belongs to that organization. Check the actual anchor and its ancestors. Do not treat the homepage as registration or booking. Do not use a metadata-only canonical element or invent a URL.",
     SOURCE_ENTITY_INSTRUCTION + " Report a contract gap when the supplied source cannot support the entity. Build only the closed declarative package shape; keep live writes behind the Gateway.",

@@ -55,8 +55,29 @@ The operator selected OMP with two ChatGPT accounts. The governed affiliate work
 - [x] (2026-09-17) Publish and roll out diagnostic source `d00f6e89b0f9b65ea9b7d04c04fe73dfae03fe5d` with unchanged deployment, role/prompt, and Supply Contract authority.
 - [x] (2026-09-17) Complete Atlantic generation 2 with `CONTRACT_GAP`; no package or reviewer was created, and the scoped workers are stopped.
 - [x] (2026-09-17) Record release, retry, retained-error, protected-state, and final stopped-boundary evidence.
+- [x] (2026-09-17) Clarify incomplete-source-data guidance and verify the existing review-later contract without a deployment or retry.
 
 ## Current approval record
+
+### Current source-only work — 2026-09-17
+
+The user requested that the producer identify broken or incomplete stored
+source data and preserve it for later review. Update and verify the producer
+prompt in source only. The existing `CONTRACT_GAP` / `MAPPING_EVIDENCE`
+contract already retains the summary and requested correction and sends an
+existing-data mapping job to `HUMAN_REVIEW_REQUIRED`.
+
+Use the summary label `Incomplete source data:` for a confirmed capture
+defect. Keep genuine missing facts and selector/parser defects distinct.
+Keep sport evidence and unresolved reason codes valid. Request evidence
+repair for later review instead of guessing a sport or ending without a
+structured result.
+
+Source role/prompt version 14 carries this instruction change. Production
+remains on deployed source `d00f6e89b0f9b65ea9b7d04c04fe73dfae03fe5d`,
+role/prompt version 13, deployment contract 14, and Supply Contract 1.
+This source-only work does not authorize image publication, deployment,
+worker startup, a claim, capture, activation, or candidate publication.
 
 ### Consumed authorization — 2026-09-17
 
@@ -196,8 +217,21 @@ response, credential, identity, or provider data. Treat the diagnostic as
 evidence only: never derive authorization, disposition, or retry policy from
 it.
 
+Decision (2026-09-17): Diagnose capture usability before missing source facts.
+Reuse `CONTRACT_GAP`, `MAPPING_EVIDENCE`, and the existing human-review state.
+Use `Incomplete source data:` as the summary label for confirmed missing or
+unusable captured content. Keep genuine source ambiguity and extraction
+defects distinct. This is a source-only role/prompt version-14 change; it
+does not alter production authority or add another database status.
+
 ## Outcomes & Retrospective
 
+
+The current source-only work clarifies incomplete-data diagnosis in the
+producer prompt. Source role/prompt version 14 is not deployed. Its label and
+repair request use the existing review-later result contract. Production
+continues to use role/prompt version 13 and the stopped diagnostic boundary
+recorded below.
 
 The diagnostic release from source
 `d00f6e89b0f9b65ea9b7d04c04fe73dfae03fe5d` is deployed. All four source
@@ -231,8 +265,8 @@ Atlantic diagnostic boundary.
 
 
 The working tree is `/Users/elesesy/StudioProjects/bracketiq-affiliate-collection`,
-on `workstream/affiliate-invocation-diagnostics`. The fixed review base is
-`a49d29d1f0af1a1d228ef194becbf6c726d96d56`. The integrated and deployed
+on `workstream/affiliate-incomplete-source-guidance`. The fixed source-only
+review base is `19ac99711b9f798ab2bd4f3d250260fa80426a09`. The integrated and deployed
 diagnostic source is `d00f6e89b0f9b65ea9b7d04c04fe73dfae03fe5d`.
 Pre-rollout source `635a382858a814dfdc338a4d207977747d2cc0dd` remains
 historical. The canonical repository is `Razumly/bracketiq`. `apps/site`
@@ -5415,3 +5449,58 @@ Remote release, source, and evidence files remain for audit.
 Plan revision: record the verified diagnostic deployment, completed
 generation-2 evidence-gap result, conditional review skip, preserved history,
 consumed authorization, and final stopped state.
+
+### Source-only incomplete-data guidance
+
+
+The capture-quality evaluator already rejects loading-only and script-heavy
+application shells. The mapping result contract already supports a
+review-later outcome: `CONTRACT_GAP` with `contractArea: MAPPING_EVIDENCE`.
+For an existing-data repair, the Gateway stores the result summary and
+requested change and sets the legacy mapping job to `HUMAN_REVIEW_REQUIRED`.
+It does not discard the working mapping or treat that terminal outcome as
+an invocation failure.
+
+The producer prompt did not explicitly make capture usability the first
+diagnosis. Its missing-fact rules could lead with an unresolved sport variant
+even when the retained page was an incomplete application shell. Replace
+the existing HTML-evidence instruction with guidance that identifies
+incomplete stored data, distinguishes pagination from capture truncation,
+and requests evidence repair for later review. Use the summary label
+`Incomplete source data:`. Keep the existing structured disposition,
+sport-assessment requirements, unresolved reason codes, and review state.
+Do not add a new database status or unsupported reason code.
+
+Increment source role and prompt versions from 13 to 14 because the generated
+instruction hashes change. Keep all live records and runtime settings
+unchanged. Validate the generated prompt limits, the existing terminal draft
+shape, and the affected contract and admission tests. This source change is
+not a deployment and does not reclassify Atlantic's stored result.
+
+Plan revision: record the existing review-later behavior and the source-only
+instruction correction for incomplete captured data.
+
+The source-only guidance gate passed 190 tests across the Gateway,
+existing-data admission, and supervisor suites. TypeScript and targeted
+ESLint passed. Independent Standards and Spec reviews found no remaining
+issue. The generated producer prompt has 16 instructions and a maximum
+instruction length of 968 characters, below the existing 1,000-character
+limit.
+
+An offline replay used the retained Atlantic claim and evidence with the
+accepted unresolved-sport assessment. The revised summary began
+`Incomplete source data:` and the requested change asked for evidence repair
+for later review. The existing checker returned `DRAFT_VALID` with zero
+network calls. This proves claim-snapshot compatibility, not future model
+compliance or live approval. The temporary smoke script was removed.
+
+Source role/prompt version 14 is ready but not deployed. Production remains
+on source `d00f6e89b0f9b65ea9b7d04c04fe73dfae03fe5d` and role/prompt version
+13. No stored result was relabeled. No database status, reason-code enum,
+capture, claim, image, or runtime was changed.
+
+Verification is recorded in `local://incomplete-source-guidance-review.json`
+and `artifact://7503`.
+
+Plan revision: record the reviewed source-only guidance and compatible
+incomplete-data terminal draft.
