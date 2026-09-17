@@ -4809,3 +4809,71 @@ source export remain for operation and audit.
 
 Plan revision: record the matched deployment, live durable-error proof,
 non-passing canary, conditional batch stop, and verified preserved state.
+
+### Canonical CLUB action guidance and one-source retry
+
+
+The user authorized corrected producer guidance and one governed retry for
+NYC Beach Volleyball. Reuse mapping job
+`01c49362-0ba0-4483-a9b7-7a69f9bc9f52`, stored run
+`8aae8b70-45ab-44f0-9d07-e11a9120be04`, and stored page
+`4579c7da-e7f5-4e55-a2c2-b98c3ffc1572`. Do not admit the other four sources.
+Do not capture another page, publish a listing, or enable source automation.
+
+The retained HTML has SHA-256
+`946cd1087ea59eaa7cca3d16cefd94dd28e16894696384c5a50d08bca101db9b`.
+Its header branding anchor is outside navigation. The selector
+`header[data-test="header"] .header-title-logo > a[href="/"]` resolves to
+`https://www.nycbeachvb.com/`. Offline extraction and action validation passed
+with this anchor. Navigation choices failed with `ACTION_NAVIGATION`.
+The metadata-only canonical element failed with `ACTION_NOT_EVIDENCED`.
+The replay made zero network requests. It did not approve a package.
+
+Update `MAPPING_PRODUCER` guidance in
+`apps/site/src/server/affiliateImports/agentGatewayContracts.ts`.
+Explain the existing official-information option for a dedicated CLUB page.
+Keep the actual-anchor requirement, navigation rejection, closed package
+schema, and independent review boundary unchanged. Increment the role and
+prompt versions from 12 to 13. Use deployment contract 14 for the new hashes.
+Supply Contract 1 and database schemas remain unchanged.
+
+Use the existing exact-source `/existing-repair/admission` API.
+It supports a new cycle with changed deployment authority and preserves
+completed jobs. Do not reset the completed Gateway job or its claim.
+A read-only preview of the exact stored run and page passed before the
+change. Create a fresh preview after deployment. Apply only its reviewed hash.
+
+Run the focused entity-action and Gateway contract suites from `apps/site`.
+Run targeted ESLint and TypeScript checks. Review the source change against
+`5932a9d10c12ba92fcfd4635c0ddadffa851851e` on separate Standards and Spec axes.
+Publish matched site, governed, and Gateway images only after the source gate.
+Update the site, Gateway, and image-coupled model services. Preserve adjacent
+runtime identities and keep admission closed during the update.
+
+Capture fresh stopped-fleet preflight evidence. Start only the runner,
+producer 1, and reviewer 1 for the bounded attempt. Admit the exact producer
+job. Admit an independent reviewer only if the producer commits a valid
+package. Close admission after each bounded claim. Stop the scoped workers
+after the terminal result. Preserve all earlier error observations.
+
+Final acceptance requires the exact producer and reviewer outcomes, current
+authority hashes, immutable image references, and a protected-state comparison.
+A terminal gap or rejection is a valid stop, not approval. Keep public data,
+working mappings, the five holds, the protected Pickleball history, the two
+unrelated queued captures, and all other queued sources unchanged.
+
+The source gate passed. The entity-action suite passed 56 tests. The Gateway
+and existing-data admission suites passed 137 tests. TypeScript and targeted
+ESLint passed. Standards and Spec reviewers reported no findings against the
+fixed base. Their review included current authority checks and historical
+version-12 readers.
+
+The initial prompt edit exceeded the existing 16-instruction limit. The
+correction joins the new guidance to the existing action instruction. Both
+the instruction-count and character limits remain unchanged. A retained-page
+smoke check passed with the new version-13 exports. It accepted the branding
+anchor and rejected navigation and metadata-only alternatives. It made zero
+network requests. The temporary smoke script was removed.
+
+Plan revision: record the stored-anchor audit, versioned guidance correction,
+and separately authorized one-source retry.

@@ -717,8 +717,8 @@ export const AFFILIATE_AGENT_ROLES = [
 ] as const;
 
 export type AffiliateAgentRole = (typeof AFFILIATE_AGENT_ROLES)[number];
-export const AFFILIATE_AGENT_ROLE_CONTRACT_VERSION = 12 as const;
-export const AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION = 12 as const;
+export const AFFILIATE_AGENT_ROLE_CONTRACT_VERSION = 13 as const;
+export const AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION = 13 as const;
 
 export const AFFILIATE_AGENT_CONTINUATION_PRODUCER_PREFIX = "legacy-sport-repair-continuation:";
 export const AFFILIATE_AGENT_CONTINUATION_REVIEWER_PREFIX = "legacy-sport-repair-continuation-review:";
@@ -822,7 +822,8 @@ const ROLE_PROMPT_INSTRUCTIONS: Readonly<
   MAPPING_PRODUCER: [
     "Use the inlined Authority Projection as the complete claim context. Use only trusted Gateway tools and listed evidence refs. Use execute_command only for a listed non-terminal command. An EXISTING_DATA_REPAIR claim repairs an already-known source. Address all repairReasons from evidence; old failure labels are concerns, not facts. Do not discover new sources or change the working public mapping. The Gateway stages any protected replacement for independent review.",
     "listUrlRef is the evidenceRef of the listed PAGE_HTML artifact used for CSS extraction, not a raw URL and not its artifactId. Use PAGE_MARKDOWN for reading and sport citations, not as CSS listing input. The Gateway resolves the HTML artifact's stored finalUrl or sourceUrl. Existing stored HTML needs no capture profile. If the claim has no HTML artifact, report that specific evidence gap.",
-    "Resolve each officialActionUrl to that candidate's registration, membership, booking, or official information destination. Extract the actual evidenced href with an ATTRIBUTE selector and ABSOLUTE_URL transform. Check the link label and its candidate context. A related-story or navigation link is not an action. An outbound registration link in stored evidence needs no new capture just to preserve it.",
+    "Resolve each officialActionUrl to that candidate's registration, membership, booking, or official information destination. Extract the actual evidenced href with an ATTRIBUTE selector and ABSOLUTE_URL transform. Check the link label and its candidate context. A related-story or navigation link is not an action. An outbound registration link in stored evidence needs no new capture just to preserve it. " +
+      "On a dedicated single-organization CLUB page, consider a source-backed link to that organization's canonical homepage as official information before reporting a missing action. A header branding link may qualify only when it is outside navigation and belongs to that organization. Check the actual anchor and its ancestors. Do not treat the homepage as registration or booking. Do not use a metadata-only canonical element or invent a URL.",
     SOURCE_ENTITY_INSTRUCTION + " Report a contract gap when the supplied source cannot support the entity. Build only the closed declarative package shape; keep live writes behind the Gateway.",
     SOURCE_DESCRIPTION_INSTRUCTION,
     "Map a description field for every EVENT and CLUB package. Select relevant source prose from the claim-owned PAGE_HTML. Use TEXT or a source text ATTRIBUTE with NONE or TRIM; do not create a CONSTANT description. Select prose without navigation or repeated headings. Read all relevant claim-owned prose before declaring descriptions missing. If suitable prose exists only outside a supported selector scope, report that extraction limit. If suitable prose is absent, report the description evidence gap instead of inventing copy or using schedule/status notes.",

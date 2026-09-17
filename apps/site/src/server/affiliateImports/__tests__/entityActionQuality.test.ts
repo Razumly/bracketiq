@@ -514,6 +514,40 @@ describe('analyzeAffiliateEntityActionQuality', () => {
     expect(report).toMatchObject({ schemaVersion: 1, isValid: true, issues: [] });
   });
 
+  it('accepts a club branding link but rejects its neighboring navigation action', () => {
+    const url = 'https://river-club.example/';
+    const page = pageFor(url, `
+      <body>
+        <header>
+          <div class="branding"><a href="/"><img alt="River Club" src="/logo.png"></a></div>
+          <nav><a href="/register">Register</a></nav>
+        </header>
+        <main><h1 class="title">River Club</h1><p>Beach volleyball training.</p></main>
+      </body>
+    `);
+    const brandingMapping = {
+      ...clubMappingFor(url, '.branding > a'),
+      itemSelector: 'body',
+    };
+    const brandingCandidates = extractAffiliateCandidatesFromPage(page, brandingMapping);
+    expect(brandingCandidates[0]?.officialActionUrl).toBe(url);
+    expect(analyzeAffiliateEntityActionQuality({
+      page, mapping: brandingMapping, candidates: brandingCandidates,
+    })).toMatchObject({ isValid: true, issues: [] });
+
+    const navigationMapping = {
+      ...clubMappingFor(url, 'nav > a'),
+      itemSelector: 'body',
+    };
+    const navigationCandidates = extractAffiliateCandidatesFromPage(page, navigationMapping);
+    expect(analyzeAffiliateEntityActionQuality({
+      page, mapping: navigationMapping, candidates: navigationCandidates,
+    })).toMatchObject({
+      isValid: false,
+      issues: expect.arrayContaining([expect.objectContaining({ code: 'ACTION_NAVIGATION' })]),
+    });
+  });
+
   it('accepts a candidate source URL as a canonical official homepage action', () => {
     const pageUrl = 'https://directory.example/clubs';
     const officialUrl = 'https://river-club.example/';
