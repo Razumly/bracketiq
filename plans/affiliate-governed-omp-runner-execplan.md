@@ -52,49 +52,44 @@ The operator selected OMP with two ChatGPT accounts. The governed affiliate work
 - [x] (2026-09-16) Deploy durable error history and stop the bounded trial after the canary contract gap.
 - [x] (2026-09-17) Implement bounded, redacted invocation-failure diagnostics and preserve the existing failure boundary.
 - [x] (2026-09-17) Complete the independent Standards and Spec source reviews against fixed base `a49d29d1f0af1a1d228ef194becbf6c726d96d56`.
-- [ ] (2026-09-17) Publish and roll out the matched site, Gateway, governed, and model images after the source gates, without changing the deployment, role/prompt, or Supply Contract authority.
-- [ ] (2026-09-17) Run one Atlantic generation-2 producer claim from the diagnostic workload; admit its independent reviewer only if the producer commits a package, then stop the scoped workers.
-- [ ] (2026-09-17) Record the rollout, retry, diagnostic-retention, protected-state, and final stopped-boundary evidence.
+- [x] (2026-09-17) Publish and roll out diagnostic source `d00f6e89b0f9b65ea9b7d04c04fe73dfae03fe5d` with unchanged deployment, role/prompt, and Supply Contract authority.
+- [x] (2026-09-17) Complete Atlantic generation 2 with `CONTRACT_GAP`; no package or reviewer was created, and the scoped workers are stopped.
+- [x] (2026-09-17) Record release, retry, retained-error, protected-state, and final stopped-boundary evidence.
 
 ## Current approval record
 
-### Current authorization — 2026-09-17
+### Consumed authorization — 2026-09-17
 
-The operator authorized a diagnostic-only rollout after the source gates and
-independent Standards and Spec reviews pass. The fixed source baseline for
-review is `a49d29d1f0af1a1d228ef194becbf6c726d96d56`. After those gates, publish
-and deploy the matched site, Gateway, governed worker, and model-service
-images from the newly integrated diagnostic commit. Main must record its exact
-SHA and verify image exports before release; do not republish pre-rollout
-source `635a382858a814dfdc338a4d207977747d2cc0dd`.
-Keep deployment contract 14
-(`2f953a9295b0cc901b7a71a1ed49e9711f150eeae34ba70eb69a6efa354fed91`),
-role/prompt version 13 and their authority hashes, and Supply Contract 1
-(`c808492a7d60741b508978987441a0a31f59602a5e5321789d9865823f6098cf`)
-unchanged.
+The authorized diagnostic rollout and one Atlantic generation-2 retry are
+complete. This record grants no further image publication, deployment,
+runtime change, claim, source capture, activation, or candidate publication.
+A new instruction is required for further work.
 
-The current workload is
-`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v14-club-guidance-trial/omp-workload.v14.env`.
-The next diagnostic workload is
+Source `d00f6e89b0f9b65ea9b7d04c04fe73dfae03fe5d` passed source review,
+local checks, integrated checks, and Site CI before matched publication.
+The site, Gateway, governed worker, and image-coupled model services now use
+that diagnostic release. Deployment contract 14 remains
+`2f953a9295b0cc901b7a71a1ed49e9711f150eeae34ba70eb69a6efa354fed91`.
+Role/prompt version 13 and all authority hashes are unchanged. Supply
+Contract 1 remains
+`c808492a7d60741b508978987441a0a31f59602a5e5321789d9865823f6098cf`.
+
+The current private workload is
 `/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v14-invocation-diagnostic-trial/omp-workload.v14.env`.
-Keep admission closed during the matched rollout. After fresh preflight,
-open one exact producer lease for Atlantic Volleyball Academy's existing
-Gateway job `87d9395a-116d-44fb-9550-7019f00ae04e`, which is
-`RETRY_WAIT` at claim generation 1 with invocation failure count 1. Do not
-reset either value and do not allow generation 3.
+Admission is closed. The runner, producer 1, and reviewer 1 are stopped.
+The site, Gateway, and model services are healthy.
 
-Close admission after the generation-2 claim is acquired. Admit its exact
-independent reviewer only if generation 2 commits a package. Keep any
-approval staged and inactive. Stop on another invocation failure, an
-unexpected claim, an unresolved receipt, a diagnostic delivery failure, or a
-protected-state change. Other three sources remain paused and unadmitted.
-Do not capture a source, activate a mapping, publish a source or candidate,
-enable automatic scraping or automation, or change coverage or replenishment.
+Atlantic Gateway job `87d9395a-116d-44fb-9550-7019f00ae04e` is
+`COMPLETED` at generation 2 with `CONTRACT_GAP`. Its invocation failure
+count remains 1 from the preserved first claim. Generation 2 committed no
+package, so independent review was not applicable. No generation-3 claim ran.
+The other three sources remain paused and unadmitted.
 
-This authorization explicitly supersedes the older AUTH SETUP and bounded
-workload restrictions below for this named diagnostic rollout and one
-generation-2 Atlantic retry. It does not authorize any other runtime,
-collection, activation, publication, or automation work.
+The complete approved NYC checkpoint, working mappings, held roots,
+Pickleball history, published candidates, and unrelated queued captures are
+preserved. No source capture, activation, publication, or automation
+enablement occurred. The historical approvals below describe completed
+operations and do not grant new runtime authority.
 
 ### Historical authorization (superseded)
 
@@ -204,21 +199,26 @@ it.
 ## Outcomes & Retrospective
 
 
-The current state is a closed-admission, stopped boundary after Atlantic
-Volleyball Academy's generation-1 invocation failure. The fixed source
-baseline is `a49d29d1f0af1a1d228ef194becbf6c726d96d56` on branch
-`workstream/affiliate-invocation-diagnostics`; pre-rollout deployed source is
-`635a382858a814dfdc338a4d207977747d2cc0dd`. The newly integrated diagnostic
-source, matched image rollout, and generation-2 retry remain pending source
-review, release, and image-export verification.
+The diagnostic release from source
+`d00f6e89b0f9b65ea9b7d04c04fe73dfae03fe5d` is deployed. All four source
+review axes passed. The final local gate passed 327 tests, TypeScript, and
+targeted ESLint. The integrated database/lifecycle gate passed 59 tests.
+The published worker image passed a real Bun diagnostic-redaction smoke
+check, and both governed images matched the reviewed source hashes and
+unchanged role/prompt exports.
 
-Atlantic Gateway job `87d9395a-116d-44fb-9550-7019f00ae04e` remains
-`RETRY_WAIT` at claim generation 1 with invocation failure count 1. No
-generation-2 claim or reviewer ran. Houston Select FC, Chicago Central Hockey
-Club, and Sports Zone Academy Softball remain paused and unadmitted. The
-complete approved NYC source, root, mapping, jobs, claims, receipts, and
-error history remain preserved. No source capture, mapping activation,
-candidate publication, or automatic scraping/automation occurred.
+Atlantic's generation-2 claim completed with `CONTRACT_GAP` and no new
+invocation failure. The retained page does not establish indoor, beach, or
+grass volleyball. No package or reviewer job was created. One corrected
+local draft error remains in the durable history. The first failed claim
+and its records are unchanged. This retry did not reproduce the original
+process failure, so it did not generate a new invocation-failure diagnostic.
+Do not infer that logging changed the model's earlier behavior.
+
+Admission is closed and the scoped workers are stopped. The other three
+sources remain paused. Protected-state comparisons passed, including the
+approved NYC package and all 2,821 published candidates. No capture,
+activation, publication, or automation enablement occurred.
 
 ### Historical outcome (superseded)
 
@@ -231,13 +231,13 @@ Atlantic diagnostic boundary.
 
 
 The working tree is `/Users/elesesy/StudioProjects/bracketiq-affiliate-collection`,
-on `workstream/affiliate-invocation-diagnostics`. The fixed source baseline is
-`a49d29d1f0af1a1d228ef194becbf6c726d96d56`; pre-rollout deployed source is
-`635a382858a814dfdc338a4d207977747d2cc0dd`. The newly integrated diagnostic
-commit is not yet recorded here; Main must record its exact SHA after source
-gates and before image publication. The canonical repository is
-`Razumly/bracketiq`. `apps/site` owns the backend. Run npm and TypeScript
-commands from that directory. Do not change the mobile build graph.
+on `workstream/affiliate-invocation-diagnostics`. The fixed review base is
+`a49d29d1f0af1a1d228ef194becbf6c726d96d56`. The integrated and deployed
+diagnostic source is `d00f6e89b0f9b65ea9b7d04c04fe73dfae03fe5d`.
+Pre-rollout source `635a382858a814dfdc338a4d207977747d2cc0dd` remains
+historical. The canonical repository is `Razumly/bracketiq`. `apps/site`
+owns the backend. Run npm and TypeScript commands from that directory.
+Do not change the mobile build graph.
 
 `apps/site/scripts/run-affiliate-agent-runner.ts` is the privileged runner. It
 verifies signed Unix-socket requests, creates private per-invocation cgroups,
@@ -261,17 +261,19 @@ the preflight script verify the deployment.
 the private runtime. Deployment contract 14, role/prompt version 13, and
 Supply Contract 1 remain the current authority; their hashes are unchanged.
 
-The current workload is
-`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v14-club-guidance-trial/omp-workload.v14.env`;
-the next diagnostic workload is
+The current private workload is
 `/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v14-invocation-diagnostic-trial/omp-workload.v14.env`.
-The active Atlantic Gateway job is
-`87d9395a-116d-44fb-9550-7019f00ae04e`, `RETRY_WAIT` at generation 1 with
-invocation failure count 1. Admission is closed. The other three sources are
-paused and unadmitted. The complete approved NYC source, root, mapping, jobs,
-claims, receipts, and error history remain preserved.
+Atlantic Gateway job `87d9395a-116d-44fb-9550-7019f00ae04e` is
+`COMPLETED` at generation 2 with `CONTRACT_GAP` and historical invocation
+failure count 1. Its legacy mapping job is `HUMAN_REVIEW_REQUIRED`.
+Admission is closed and the scoped workers are stopped. The other three
+sources remain paused and unadmitted. The complete approved NYC checkpoint
+is unchanged.
 
-Production access uses `ssh bracketiq-prod`. The private deployment file is `/home/bracketiq/.config/bracketiq-affiliate-agents/governed-deployment.env`. Never print it. The production database remains on its private Docker network. The OMP broker and model gateway must not join that network.
+Production access uses `ssh bracketiq-prod`. Use the named private workload
+and its guarded release configuration. Never print environment or credential
+contents. Production PostgreSQL stays on its private Docker network. The OMP
+broker and model gateway must not join that network.
 
 ### Historical context (superseded)
 
@@ -5332,3 +5334,84 @@ Source review and probe records are
 
 Plan revision: record the verified diagnostic source gate and corrected review
 findings before publication.
+
+### Deployed invocation diagnostics and completed Atlantic retry
+
+
+Source `d00f6e89b0f9b65ea9b7d04c04fe73dfae03fe5d` passed Site CI
+`35261600634`. Site image publication `35262375423` and governed image
+publication `35262375484` passed. The immutable images are:
+
+    ghcr.io/razumly/bracketiq-site@sha256:ba16c344fbdccff65b3acdf73156454ec4097fff505bdafb07c7af365563d64b
+    ghcr.io/razumly/bracketiq-affiliate-governed@sha256:c2ddf4eed9c8dac0d4675ce9985578907b17fecf857bea9aadcc746de3a4d604
+    ghcr.io/razumly/bracketiq-affiliate-gateway@sha256:3f0975eb257a585ec37be106622d6a1be6f3bba4675125f7dd481e5fec097294
+
+Before deployment, both governed images matched the checked role/prompt
+exports and critical diagnostic source hashes. A real Bun invocation inside
+the published worker image emitted one final sanitized setup diagnostic.
+It had no production network access and exposed no private test value.
+The full deployment authority bundle remained byte-equivalent in content:
+deployment contract 14, role/prompt version 13, and Supply Contract 1.
+No migration ran.
+
+Fresh stopped-fleet preflight passed with no warning or blocking finding.
+Its report hash is
+`2b4d210d1383789415911a756c4ec50b32075b5b9530d71e27e6d0356543016b`.
+The runner and selected workers passed sandbox/readiness checks while
+admission stayed closed. The old Atlantic failure remained readable without
+a malformed-history marker or invented diagnostic.
+
+One exact lease admitted generation 2 of Gateway job
+`87d9395a-116d-44fb-9550-7019f00ae04e`. Claim
+`agw-claim-8e068de0-b027-4dc0-8561-e5f129d63bc7` used a fresh workspace.
+Admission closed after claim acquisition. No counter was reset.
+The claim completed with `CONTRACT_GAP`; terminal receipt
+`agw-receipt-e5a9d3c0-67ba-484c-b0af-4fcdebdaea45` and result hash
+`394b4910be8165db7a399de4f2ccf401ad8a2c2659ae078615b4f1a47dc7baf6`
+remain recorded.
+
+The producer cited the first-party title from the original HTML and retained
+`Volleyball` as `VARIANT_UNRESOLVED`. It selected no canonical sport.
+The terminal reason codes are `CONTRACT_REQUIREMENT_MISSING` and
+`SPORT_VARIANT_UNRESOLVED`. It requested first-party evidence that distinguishes
+indoor, beach, or grass volleyball. No package was committed. No reviewer was
+created because independent review requires a committed package.
+
+Generation 2 had no invocation failure. The job's failure count remains 1
+from generation 1. One `LOCAL_DRAFT_INVALID` observation at
+`result.reasonCodes` is retained as event
+`agw-event-653d1061-75d5-4c8c-b41a-be6734daced9`; the producer corrected it.
+No diagnostic delivery failure, unknown receipt, orphan pending receipt, or
+limit marker was observed. The new invocation-failure path did not fire in
+production because the retry reached its normal terminal boundary. Its
+retention and redaction were proved by the source, database, and image checks.
+
+The legacy mapping job is now `HUMAN_REVIEW_REQUIRED`. The root remains
+`PRE_MAPPED` at generation 1, with no pending mapping, disabled automation,
+and zero target contribution. The working source still uses
+`affiliate_mapping_atlantic_volleyball_academy_v1`.
+
+Admission is closed. The runner, producer 1, and reviewer 1 are stopped.
+The matched site, Gateway, and model services are healthy. All protected
+comparisons passed: Atlantic's first claim, receipts, and events; the complete
+approved NYC checkpoint; five working mappings; five held roots; Pickleball
+history; all 2,821 published candidates; two unrelated queued captures; and
+the three unadmitted sources. Active claims, active pointers, unresolved
+receipts, reconciliation claims/jobs, running captures, and Supply Targets
+are zero. No generation 3, source capture, activation, publication, or
+automation enablement occurred.
+
+The complete operator checkpoint is
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v14-invocation-diagnostic-tools/trial-final-evidence.json`.
+The local copy is `local://invocation-diagnostic-final-evidence.json`.
+The read-only report command is:
+
+    ssh bracketiq-prod python3 /home/bracketiq/.config/bracketiq-affiliate-agents/omp-v14-invocation-diagnostic-tools/report-agent-errors.py --job-id 87d9395a-116d-44fb-9550-7019f00ae04e
+
+Both logical test databases created for this change and the local source
+transfer archive were removed. The local PostgreSQL servers were not stopped.
+Remote release, source, and evidence files remain for audit.
+
+Plan revision: record the verified diagnostic deployment, completed
+generation-2 evidence-gap result, conditional review skip, preserved history,
+consumed authorization, and final stopped state.
