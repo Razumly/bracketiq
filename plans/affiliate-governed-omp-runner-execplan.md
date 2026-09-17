@@ -4966,3 +4966,141 @@ removed. Remote source and evidence archives remain for audit.
 
 Plan revision: record the matched guidance rollout, one completed producer
 attempt, independent staging approval, retained errors, and verified shutdown.
+
+### Authorized remaining four-source trial
+
+
+The user authorized the remaining four-source trial after the NYC Beach
+Volleyball approval. Keep source revision
+`635a382858a814dfdc338a4d207977747d2cc0dd`, deployment contract 14, role and
+prompt version 13, and Supply Contract 1 unchanged. Do not publish another
+image or deploy another release.
+
+Process these exact mapping jobs in order. Atlantic Volleyball Academy uses
+`369c79d8-53e2-4cd2-a096-856610377e25`. Houston Select FC uses
+`26ce6094-29b6-4a52-8bc7-3d1c39af75b7`. Chicago Central Hockey Club uses
+`d63acdc6-b287-4a55-86da-48eeca493a56`. Sports Zone Academy Softball uses
+`9de89788-b33b-4255-9506-5fc649fd996e`.
+
+Use each source's previously selected stored run and page. Initial read-only
+previews found all four eligible. Each preview reuses the working source and
+creates its missing governed root. Re-preview one exact source immediately
+before admission. Apply only that preview's reviewed hash. Do not reset an
+old claim, admit another source, or make a new capture.
+
+Renew stopped-fleet preflight before each producer and reviewer claim.
+Use only the Gateway, runner, producer 1, and reviewer 1 controls needed for
+that operation. Preserve the site, model services, dormant workers, and
+legacy services and timers. Open an exact-job lease for one claim. Close
+admission after the claim is acquired. Admit an independent read-only reviewer
+only for the exact package committed by that producer.
+
+Run one producer attempt per source. A terminal evidence gap is an outcome,
+not permission to invent evidence or bypass a guard. Record a reviewer
+rejection without admitting an extra repair attempt. Stop the batch on an
+invocation failure, unresolved receipt, diagnostic delivery failure, unexpected
+claim, or protected-state change. Do not activate a mapping, publish a
+candidate, enable automation, or admit an executor.
+
+The starting checkpoint is `local://four-source-trial-baseline.json`.
+Its operator copy is
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v14-club-guidance-tools/four-source-trial-baseline.json`.
+It protects the five working mappings, the five held roots, Pickleball
+history, all 2,821 published candidates, the two unrelated queued captures,
+and the complete approved NYC source, root, mapping, job, claim, receipt,
+and error history. The initial admission previews are in
+`local://four-source-trial-initial-previews.json`.
+
+After each source, record the terminal producer and reviewer outcomes.
+Compare protected-state hashes before the next source. At the final boundary,
+close admission and stop the scoped workers. Require zero active claims,
+active pointers, unresolved receipts, reconciliation claims/jobs, running
+captures, and Supply Targets. Compare the combined retained error history
+with the NYC baseline. Record repeated input errors without changing runtime
+guidance during this trial.
+
+Plan revision: record the four exact sources, unchanged release authority,
+single-claim limits, stop conditions, and preserved NYC approval.
+
+### Four-source trial stopped on the first invocation failure
+
+
+The batch stopped at its required failure boundary. No source code, image,
+role contract, prompt, or Supply Contract changed during this trial.
+Fresh stopped-fleet preflight passed with hash
+`0f80ab4ef8fee317fa8ab108e12614408baa754b697cc1628747d59e3d1b709c`.
+The scoped workers passed their sandbox probes and reported ready with
+admission closed.
+
+Atlantic Volleyball Academy used reviewed admission hash
+`692d48073964d86ccc1921a9030d0fc28cc26d2174f65c0f3b4d385cd364472a`.
+The Gateway reused the working source and created governed root
+`6c6e5d34-ca15-42f3-95d4-b57fc97a7d97`. Producer job
+`87d9395a-116d-44fb-9550-7019f00ae04e` acquired generation 1 as claim
+`agw-claim-be90804f-2e5b-43aa-b785-45ca2231969a`.
+Admission was closed after that claim was acquired.
+
+The claim started at `2026-09-17T15:16:02.264Z`. It completed two artifact
+reads and a heartbeat. It failed at `2026-09-17T15:17:14.356Z` with
+`PROCESS_CRASH`. The runner recorded child exit code 1, zero stdout bytes,
+45 stderr bytes, no output overflow, no decode error, no classified failure
+signal, and no spawn error. No package validation or commit command ran.
+No pending mapping or reviewer job was created.
+
+Failure receipt `agw-receipt-c4954e2e-0e53-4122-aa63-ac8bd25686c4` succeeded.
+Event `agw-event-bb540aa5-9eaa-40af-904b-9f286dabe9c7` records
+`CLAIM_INVOCATION_FAILED`. Both records have indefinite retention. The job is
+`RETRY_WAIT` with invocation failure count 1. Its next-attempt time is
+`2026-09-17T15:22:14.356Z`, but closed admission and stopped workers prevent
+another claim. No automatic retry was run. The legacy mapping job remains
+`GOVERNED_REPAIR_PENDING`. The new root remains `PRE_MAPPED` at generation 1,
+with automation disabled and zero target contribution.
+
+The underlying driver error is not established. The child prints a
+sanitized `OMP_*` code to stderr, but the current runner diagnostic retains
+only byte counts and classified signals. The failed claim has only its two
+source artifacts; it has no diagnostic artifact. The OMP session is in
+memory, and the runner destroys the invocation workspace during cleanup.
+The bounded producer and model-gateway logs contain no additional cause.
+The authentication broker recorded normal stream and usage events without
+an error in the inspected interval. These observations do not establish a
+provider, authentication, source-evidence, or model cause.
+
+Houston Select FC, Chicago Central Hockey Club, and Sports Zone Academy
+Softball were not admitted. Their mapping jobs remain `QUEUED`, with attempt
+count zero, no worker, no lease, and no Gateway job. Independent review did
+not run because Atlantic committed no package. The remaining three sources
+require a new trial instruction after the invocation failure is addressed.
+
+Admission is closed. The runner, producer 1, and reviewer 1 are stopped.
+Final checks found zero active claims, active job pointers, unresolved
+receipts, reconciliation claims/jobs, running captures, and Supply Targets.
+All protected-state comparisons passed. The five working mappings, five
+held roots, Pickleball history, all 2,821 published candidates, and two
+unrelated queued captures are unchanged. The complete approved NYC source,
+root, inactive mapping, jobs, claims, receipts, and error history are
+unchanged. The site and both model-service container identities are unchanged.
+Adjacent runtime identities and legacy service/timer states are preserved.
+
+The new result is one platform invocation failure and zero new agent
+tool/validation error observations. The NYC baseline still contains its
+21 observations. The other three sources produced no error data because
+they did not run. Do not treat this stopped batch as a four-source success
+or infer a shared mapping defect from the process failure.
+
+The next diagnostic change should retain the allowlisted driver failure
+code before cleanup. Preserve redaction and the claim boundary. Then
+reproduce the failure in an authorized bounded attempt before selecting a
+fix. This trial did not change the runner, weaken a guard, restart the model
+services, or resume a failed job.
+
+The complete operator checkpoint is
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v14-club-guidance-tools/four-source-trial-final-evidence.json`.
+Local copies include `local://four-source-trial-final-evidence.json`,
+`local://four-atlantic-failure-report.json`,
+`local://four-atlantic-crash-logs.json`, and
+`local://four-source-unadmitted.json`. No temporary repository script was
+created. Private runtime and evidence files remain for audit.
+
+Plan revision: record the mandatory batch stop, retained process failure,
+unadmitted sources, diagnostic limit, and verified safe final state.
