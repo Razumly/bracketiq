@@ -62,8 +62,56 @@ The operator selected OMP with two ChatGPT accounts. The governed affiliate work
 - [x] (2026-09-18) Complete Houston Select FC, Chicago Central Hockey Club, and Sports Zone Academy Softball sequentially on the current release.
 - [x] (2026-09-18) Obtain independent staging-only approval for all three committed packages; preserve Atlantic's incomplete-data review hold.
 - [x] (2026-09-18) Verify all protected checkpoints and finish the batch with closed admission and stopped workers.
+- [x] (2026-09-18) Test one EVENT, RENTAL, and CLUB source from the current `NEEDS_REVIEW` cohort using stored evidence only.
+- [x] (2026-09-18) Preserve existing human-review holds and defer all evidence-repair work until the current review pass is complete.
+- [x] (2026-09-18) Record the mixed batch outcomes and finish with closed admission and stopped workers.
 
 ## Current approval record
+
+### Completed mixed pending-data review authorization — 2026-09-18
+
+The exact three-source batch is complete. Its runtime and claim
+authorization is consumed. No further source, retry, capture, activation,
+publication, or automation change is authorized by this record.
+
+The batch used source `b00ca5a6248623e55c28acd6ce83ff39dfa74b83`,
+deployment contract 15, role/prompt version 14, and Supply Contract 1.
+No code, image, or deployment changed. Evidence repairs remain deferred
+until the remaining current-data review is complete.
+
+The read-only census found 168 `NEEDS_REVIEW` candidates: 46 EVENT rows,
+25 RENTAL rows, and 97 CLUB rows. Pin this current cohort. This batch
+selected one source of each kind, covering three current pending candidates:
+Nevada Police and Fire Games job `fb481ec1-5ca1-460f-a67d-1eef98ca3a83`,
+York College Athletics Facility Rentals job
+`f0999834-30d0-496b-a731-03249d88adcd`, and 516 Elite Volleyball job
+`0db9d1a4-9c63-4620-a370-d2aa6b0291e6`.
+
+All three exact-source previews were eligible with existing stored HTML and
+Markdown. Each admission reused the working source and created its missing
+governed root. Each exact source and pinned run/page was previewed again
+before admission. Only its reviewed hash was applied. The evidence selections
+are in `local://mixed-review-selected-sources.json`.
+
+Gateway preflight was refreshed with admission closed before each claim.
+Only the runner, producer 1, and reviewer 1 ran. Each source received one
+producer claim. The two committed packages received independent reviewer
+claims. Admission closed after each claim was acquired. Both approved
+replacements remain staged and inactive.
+Do not admit an additional producer-repair child without a new instruction.
+
+Leave all pre-existing `HUMAN_REVIEW_REQUIRED` mapping jobs unchanged.
+Do not reset lease metadata or retry evidence holds. A newly identified
+evidence gap must be labeled and held for the later evidence-repair pass.
+Do not recapture a page, discover a source, guess missing facts, activate a
+mapping, publish a candidate, or enable automation.
+
+Stop on an invocation failure, unresolved receipt, diagnostic delivery
+failure, unexpected claim, or protected-state change. Preserve the existing
+pending-candidate rows, public records, previous approved packages, Atlantic
+hold, and other protected history. This is a bounded source-level review;
+it does not authorize an unattended review of the whole cohort or changing
+pending candidate statuses in place.
 
 ### Completed three-source test authorization — 2026-09-18
 
@@ -281,8 +329,46 @@ behavior across different sites without combining it with a code rollout,
 new capture, or public activation. Preserve Atlantic's incomplete-data hold
 as a separate evidence-repair task.
 
+Decision (2026-09-18): Review one current EVENT, RENTAL, and CLUB source with
+stored evidence. Keep all existing human-review jobs unchanged. Defer new
+evidence gaps instead of starting recapture or reducing the source scope.
+This tests the current review path without treating incomplete evidence as
+available mapping work.
+
+Decision (2026-09-18): Separate protected mapping content from the exact
+Supply Source link created by admission. The initial whole-row check included
+that link and its update timestamp. Retained pre-admission and post-admission
+snapshots confirmed unchanged content, version, notes, ownership, validation,
+and activation. Keep whole-row checks for unadmitted mappings. Require the
+exact admitted root link for admitted mappings.
+
 ## Outcomes & Retrospective
 
+
+The mixed current-data batch completed with two approved staged packages and
+one new human-review hold. Nevada Police and Fire Games passed EVENT repair
+and review with Grass Soccer. 516 Elite Volleyball passed CLUB repair and
+review with Beach Volleyball and Indoor Volleyball.
+
+York College Athletics Facility Rentals ended with `CONTRACT_GAP` in
+`MAPPING_EVIDENCE`. Its retained form resolves Tennis but does not establish
+the soccer variant for Turf Soccer Field. Swimming and Running are
+blacklisted. The mapping job is `HUMAN_REVIEW_REQUIRED`; no package or reviewer
+was created. No evidence repair, recapture, or partial-source exclusion ran.
+
+All five generation-1 claims completed without invocation failures. Twelve
+tool/input observations remain retained indefinitely: seven from producers
+and five from reviewers. No retention-limit marker was recorded.
+
+The 168 pinned pending candidate rows and 378 pre-existing human-review
+mapping jobs are unchanged. Public records, working mapping content, prior
+approved packages, and the Atlantic hold are unchanged. Admission is closed.
+The runner, producer, and reviewer are stopped. The live site, Gateway, model
+gateway, and auth broker remain healthy. This batch proves EVENT approval,
+CLUB approval, and RENTAL escalation. It does not prove successful RENTAL
+repair or completion of the whole pending-data cohort.
+
+### Earlier three-source CLUB outcome (historical)
 
 The three-source current-release test passed. Houston Select FC, Chicago
 Central Hockey Club, and Sports Zone Academy Softball each produced a valid
@@ -335,7 +421,7 @@ Atlantic diagnostic boundary.
 
 
 The working tree is `/Users/elesesy/StudioProjects/bracketiq-affiliate-collection`,
-on `workstream/affiliate-three-source-repair-test`. The reviewed and deployed
+on `workstream/affiliate-mixed-pending-review`. The reviewed and deployed
 prompt source is `b00ca5a6248623e55c28acd6ce83ff39dfa74b83`.
 The earlier diagnostic source `d00f6e89b0f9b65ea9b7d04c04fe73dfae03fe5d`
 remains part of the preserved rollout history. The canonical repository is
@@ -5825,3 +5911,156 @@ also remain staged until a separately authorized lifecycle operation.
 
 Plan revision: record three independent approvals, retained error patterns,
 unchanged public data, consumed batch authority, and final stopped state.
+
+### Authorized mixed pending-data review batch
+
+
+The next bounded review batch uses one source from each supported kind in
+the current pending-data cohort. The initial census distinguishes
+`NEEDS_REVIEW` candidates from existing `HUMAN_REVIEW_REQUIRED` mapping holds.
+There are 168 pending candidate rows and 378 pre-existing human-review mapping
+jobs. These are different queues; do not treat a parked evidence gap as newly
+available mapping work.
+
+Exact previews accepted Nevada Police and Fire Games (EVENT), York College
+Athletics Facility Rentals (RENTAL), and 516 Elite Volleyball (CLUB).
+Chico High School Football Stadium Facilities was considered but held by
+`MAPPING_JOB_HAS_ACTIVE_LEASE`. Its approved legacy mapping row retains
+historical worker/claim metadata. No lease field was reset or bypassed.
+
+Pin the selected evidence runs and pages:
+
+    EVENT: bb0e44c9-086f-459a-8619-c42f93177795 / 833f2245-8124-45a8-81d2-d70b27ec17df
+    RENTAL: b30cad55-8b75-4ae0-a47a-5a9866bd0461 / 777d9c4f-662a-4c7e-a076-8625f68348c7
+    CLUB: c2f32c8b-b7e5-4e78-b45c-ff4f903d7e08 / 68bff487-88bb-4787-98f3-cf71e5c322ef
+
+The baseline is `local://mixed-review-baseline.json`, with an operator copy
+under the current private tool root as `mixed-review-baseline.json`.
+It pins all 168 current pending candidate rows, the 378 existing human-review
+mapping rows, the three selected working mappings, and all earlier protected
+NYC, Atlantic, Houston, Chicago, Sports Zone, hold, Pickleball, publication,
+and capture checkpoints. Selected approvals remain replacements staged
+alongside the working mappings; the pending-data cohort must not be silently
+rewritten or marked published.
+
+Plan revision: record the mixed current-data cohort, exact source/evidence
+scope, skipped lease-guarded rental, and deferred evidence-repair priority.
+
+### Completed mixed pending-data review batch
+
+The batch completed on 2026-09-18 with the unchanged version-15 release and
+role/prompt version 14. Five fresh Gateway preflight reports and five exact
+generation-1 claims are retained. No retry generation or additional
+producer-repair child was admitted.
+
+| Kind | Source | Outcome | Sport result |
+| --- | --- | --- | --- |
+| EVENT | Nevada Police and Fire Games | Independent approval; replacement staged and inactive | Grass Soccer |
+| RENTAL | York College Athletics Facility Rentals | Human-review hold; no package or reviewer | Tennis resolved; Turf Soccer Field variant unresolved; Swimming and Running blacklisted |
+| CLUB | 516 Elite Volleyball | Independent approval; replacement staged and inactive | Beach Volleyball and Indoor Volleyball |
+
+The EVENT producer returned `BOUNDED_REPAIR_SUBMITTED`. Its reviewer approved
+package `108eca51ffff4e2497943e05200b6d7fc5951467e81bb18211679f4e7ec19c65`.
+The retained first-party page supports the outdoor grass-field setting and
+the registration action.
+
+    Producer job: f783722f-e93c-4733-867a-af3919815a32
+    Producer claim: agw-claim-a684503c-9c24-4ac3-800c-68bf7b56eec5
+    Reviewer job: dbce740d-af78-4f84-b65c-23bde57b251b
+    Reviewer claim: agw-claim-7fcfac2a-b391-4f3d-a1b7-5c24bedd6dbf
+
+The RENTAL producer returned `CONTRACT_GAP` in `MAPPING_EVIDENCE`.
+Mapping job `f0999834-30d0-496b-a731-03249d88adcd` is now
+`HUMAN_REVIEW_REQUIRED`. Its form lists Turf Soccer Field but does not
+establish an indoor or outdoor setting. The producer requested source
+clarification or an authenticated scope that excludes the unresolved label.
+Neither action ran. Tennis remains the only resolved executable sport.
+Swimming Pool and Indoor/Outdoor Track remain excluded under the blacklist.
+This is a new deferred evidence hold, separate from the 378 preserved holds.
+
+    Producer job: ecf378a9-7ee7-4e29-9de8-c09223daa037
+    Producer claim: agw-claim-ba506daf-8873-4953-b323-eebd1357641f
+    Reviewer job: none
+
+The CLUB producer returned `PACKAGE_COMMITTED`. Its reviewer approved
+package `0dab805fa2542bffed1feeb98e88e0acdbbc2dd1e504d2ad03d45c33498a15e2`.
+The retained homepage supports both volleyball variants and the official
+club tryout registration action.
+
+    Producer job: 0149a16c-bcd6-4ebb-b62d-7bc5942a49ff
+    Producer claim: agw-claim-c01e57bd-d0e2-48a6-a2d0-1c81810ff1ed
+    Reviewer job: 6ac6d08c-39c5-4e36-bad0-6fa5c8794210
+    Reviewer claim: agw-claim-7a375dbb-0485-4837-9994-50aad3931646
+
+Both accepted mapping jobs are `COMPLETED`. Their source and root pending
+mapping records are `APPROVED`. Both replacement mapping rows have
+`isActive = false`. The existing active mapping IDs did not change.
+All three roots remain `PRE_MAPPED`, with target contribution zero and
+automation disabled. Source automation remains disabled.
+
+#### Retained error observations
+
+All twelve observations have `INDEFINITE` retention. No diagnostic limit
+marker or invocation failure was recorded.
+
+| Observation | Count | Role |
+| --- | ---: | --- |
+| `ARTIFACT_VIEW_INVALID` | 5 | Reviewer |
+| Local command schema error at `command.data.candidatePackage` | 2 | Producer |
+| `LOCAL_DRAFT_INVALID` at sport determination `sourceLabels` | 2 | Producer |
+| Local command schema error at `command` | 1 | Producer |
+| `CITATION_TEXT_LIMIT` | 1 | Producer |
+| `PACKAGE_NO_CANDIDATES` | 1 | Producer |
+
+Reviewer artifact-view selection remains a repeated interface error. The
+producer observations were corrected within their original claims. No
+code or prompt change was made during this batch.
+
+#### Preservation check correction
+
+The initial whole-row mapping hash flagged Nevada's authorized Supply Source
+link. Admission was already closed. The operator stopped the scoped workers
+before inspection. The raw hash included `supplySourceId` and `updatedAt`.
+
+The retained preview and post-admission snapshots matched for all protected
+mapping fields. Their only stable-state difference was the new root link:
+`null` became `502d2fa0-b3ab-4c57-bf82-2740746e39dd`. The admission code
+explicitly makes this link. All other protected scopes matched the baseline.
+
+The corrected check preserves mapping content, version, notes, ownership,
+validation, and activation. It also requires the exact admitted root link.
+Unadmitted mappings retain the original whole-row check. Each later claim
+boundary and the final stopped boundary passed this check.
+
+#### Final preserved boundary
+
+The pinned pending-candidate count remains 168. Its row hash remains
+`5cba709fe6cd261242f7e38c9e98f8c0`. The 378 pre-existing human-review mapping
+rows retain hash `b566822783a3723a5bfa82e1a13dff16`. Those counts and hashes
+exclude no selected pending candidate and do not count York's new hold as
+an old hold.
+
+The earlier NYC checkpoint, Atlantic history and incomplete-data hold,
+Houston, Chicago, Sports Zone, other protected holds, Pickleball exclusions,
+public records, and capture checkpoints are unchanged. No candidate status
+was rewritten. No capture, discovery, activation, publication, or automation
+enablement occurred.
+
+The final boundary has closed admission and zero active claims, active
+pointers, unresolved receipts, reconciliation work, running captures, or
+supply target contribution. The runner, producer 1, and reviewer 1 are
+stopped. Legacy automation services and timers remain inactive and disabled.
+The site, Gateway, model gateway, and auth broker remain healthy.
+`/api/health/ready` returned `status: ok` and `database: ready`.
+
+The complete proof is `local://mixed-review-final-evidence.json`. An exact
+98,573-byte copy is retained with mode `0600` at
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v15-incomplete-data-tools/mixed-review-final-evidence.json`.
+Its SHA-256 is
+`dec3c21db42f52ffadfe0e9920216d757a1362b0d90e7597afa82e3a30b49552`.
+It includes the baseline, all claim results, preflight reports, error groups,
+preservation-check correction, deferred evidence outcome, and shutdown proof.
+
+Plan revision: record the two staged approvals, deferred rental evidence
+hold, corrected structural-link check, retained errors, unchanged current
+cohort, and consumed mixed-batch authorization.
