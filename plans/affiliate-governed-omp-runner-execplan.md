@@ -56,30 +56,44 @@ The operator selected OMP with two ChatGPT accounts. The governed affiliate work
 - [x] (2026-09-17) Complete Atlantic generation 2 with `CONTRACT_GAP`; no package or reviewer was created, and the scoped workers are stopped.
 - [x] (2026-09-17) Record release, retry, retained-error, protected-state, and final stopped-boundary evidence.
 - [x] (2026-09-17) Clarify incomplete-source-data guidance and verify the existing review-later contract without a deployment or retry.
+- [x] (2026-09-17) Publish and deploy reviewed prompt source `b00ca5a6248623e55c28acd6ce83ff39dfa74b83` with deployment contract 15 and role/prompt version 14.
+- [x] (2026-09-17) Complete one new Atlantic admission cycle with the required incomplete-data label and preserve both prior claims.
+- [x] (2026-09-17) Verify the human-review hold, unchanged protected state, and stopped canary workers; the authorized standby reviewer acquired no claim.
 
 ## Current approval record
 
-### Current source-only work — 2026-09-17
+### Completed labeling-canary authorization — 2026-09-17
 
-The user requested that the producer identify broken or incomplete stored
-source data and preserve it for later review. Update and verify the producer
-prompt in source only. The existing `CONTRACT_GAP` / `MAPPING_EVIDENCE`
-contract already retains the summary and requested correction and sends an
-existing-data mapping job to `HUMAN_REVIEW_REQUIRED`.
+The authorized prompt rollout and single labeling canary are complete.
+This authorization is consumed. It grants no further runtime change,
+claim, capture, package approval, activation, publication, or automation.
+The other three sources remain paused.
 
-Use the summary label `Incomplete source data:` for a confirmed capture
-defect. Keep genuine missing facts and selector/parser defects distinct.
-Keep sport evidence and unresolved reason codes valid. Request evidence
-repair for later review instead of guessing a sport or ending without a
-structured result.
+Production now uses source
+`b00ca5a6248623e55c28acd6ce83ff39dfa74b83`, deployment contract 15, and
+role/prompt version 14. The deployment hash is
+`01d24b2f6ea324bf48a075d0126973e2ed7556977dec9c626c92c00ca8e16d0b`.
+Supply Contract 1 remains unchanged. The current private workload is
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v15-incomplete-data-canary/omp-workload.v15.env`.
 
-Source role/prompt version 14 carries this instruction change. Production
-remains on deployed source `d00f6e89b0f9b65ea9b7d04c04fe73dfae03fe5d`,
-role/prompt version 13, deployment contract 14, and Supply Contract 1.
-This source-only work does not authorize image publication, deployment,
-worker startup, a claim, capture, activation, or candidate publication.
+The user separately approved reviewer 1 in standby because producer
+readiness requires a healthy expected reviewer. No reviewer lease was
+opened and no reviewer claim ran. The runner, producer 1, and reviewer 1
+are now stopped. Admission is closed.
 
-### Consumed authorization — 2026-09-17
+New Gateway job `85d3f046-00ec-41f4-a613-4df398a8290c` completed one
+producer claim with `CONTRACT_GAP` under `MAPPING_EVIDENCE`. Its summary
+starts `Incomplete source data:` and requests repaired or rendered
+first-party evidence for later review. The mapping job is
+`HUMAN_REVIEW_REQUIRED`. No package was committed or approved.
+
+Completed Gateway job `87d9395a-116d-44fb-9550-7019f00ae04e`, both prior
+claims, and all of their receipts and events are unchanged. The approved
+NYC checkpoint, working mappings, held roots, Pickleball history, published
+candidates, and unrelated captures are preserved. A new instruction is
+required for any additional operation.
+
+### Historical diagnostic authorization (consumed)
 
 The authorized diagnostic rollout and one Atlantic generation-2 retry are
 complete. This record grants no further image publication, deployment,
@@ -227,11 +241,19 @@ does not alter production authority or add another database status.
 ## Outcomes & Retrospective
 
 
-The current source-only work clarifies incomplete-data diagnosis in the
-producer prompt. Source role/prompt version 14 is not deployed. Its label and
-repair request use the existing review-later result contract. Production
-continues to use role/prompt version 13 and the stopped diagnostic boundary
-recorded below.
+Prompt source `b00ca5a6248623e55c28acd6ce83ff39dfa74b83` is deployed with
+role/prompt version 14 and deployment contract 15. The one-source canary
+passed: Atlantic was explicitly labeled as incomplete source data and
+returned to `HUMAN_REVIEW_REQUIRED`. The producer requested evidence repair
+instead of guessing a sport or ending without a result. It recorded zero
+invocation failures and zero tool-error observations.
+
+The readiness gate required reviewer 1 in standby. The user authorized that
+state change separately; no reviewer claim ran. All scoped workers are
+stopped and admission is closed. No source capture, package approval,
+activation, candidate publication, or automation enablement occurred.
+
+### Earlier diagnostic outcome (historical)
 
 The diagnostic release from source
 `d00f6e89b0f9b65ea9b7d04c04fe73dfae03fe5d` is deployed. All four source
@@ -265,13 +287,12 @@ Atlantic diagnostic boundary.
 
 
 The working tree is `/Users/elesesy/StudioProjects/bracketiq-affiliate-collection`,
-on `workstream/affiliate-incomplete-source-guidance`. The fixed source-only
-review base is `19ac99711b9f798ab2bd4f3d250260fa80426a09`. The integrated and deployed
-diagnostic source is `d00f6e89b0f9b65ea9b7d04c04fe73dfae03fe5d`.
-Pre-rollout source `635a382858a814dfdc338a4d207977747d2cc0dd` remains
-historical. The canonical repository is `Razumly/bracketiq`. `apps/site`
-owns the backend. Run npm and TypeScript commands from that directory.
-Do not change the mobile build graph.
+on `workstream/affiliate-incomplete-label-canary`. The reviewed and deployed
+prompt source is `b00ca5a6248623e55c28acd6ce83ff39dfa74b83`.
+The earlier diagnostic source `d00f6e89b0f9b65ea9b7d04c04fe73dfae03fe5d`
+remains part of the preserved rollout history. The canonical repository is
+`Razumly/bracketiq`. `apps/site` owns the backend. Run npm and TypeScript
+commands from that directory. Do not change the mobile build graph.
 
 `apps/site/scripts/run-affiliate-agent-runner.ts` is the privileged runner. It
 verifies signed Unix-socket requests, creates private per-invocation cgroups,
@@ -292,17 +313,18 @@ role contracts, prompt hashes, claim schemas, terminal schemas, and execution
 classes. `apps/site/src/server/affiliateImports/affiliateFleetCutover.ts` and
 the preflight script verify the deployment.
 `apps/site/deploy/affiliate-governed/compose.yml` and its Dockerfiles define
-the private runtime. Deployment contract 14, role/prompt version 13, and
-Supply Contract 1 remain the current authority; their hashes are unchanged.
+the private runtime. Deployment contract 15, role/prompt version 14, and
+Supply Contract 1 are current. The Supply Contract hash is unchanged.
 
 The current private workload is
-`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v14-invocation-diagnostic-trial/omp-workload.v14.env`.
-Atlantic Gateway job `87d9395a-116d-44fb-9550-7019f00ae04e` is
-`COMPLETED` at generation 2 with `CONTRACT_GAP` and historical invocation
-failure count 1. Its legacy mapping job is `HUMAN_REVIEW_REQUIRED`.
-Admission is closed and the scoped workers are stopped. The other three
-sources remain paused and unadmitted. The complete approved NYC checkpoint
-is unchanged.
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v15-incomplete-data-canary/omp-workload.v15.env`.
+Atlantic's labeling Gateway job `85d3f046-00ec-41f4-a613-4df398a8290c`
+completed generation 1 with `CONTRACT_GAP` and zero invocation failures.
+Legacy mapping job `369c79d8-53e2-4cd2-a096-856610377e25` is
+`HUMAN_REVIEW_REQUIRED`. Its stored summary identifies incomplete source data.
+The earlier Gateway job and both claims remain unchanged. Admission is
+closed and all scoped workers are stopped. The other three sources remain
+paused and unadmitted. The approved NYC checkpoint is unchanged.
 
 Production access uses `ssh bracketiq-prod`. Use the named private workload
 and its guarded release configuration. Never print environment or credential
@@ -5504,3 +5526,130 @@ and `artifact://7503`.
 
 Plan revision: record the reviewed source-only guidance and compatible
 incomplete-data terminal draft.
+
+### Authorized incomplete-data labeling rollout
+
+
+The user authorized the matched prompt rollout and one Atlantic labeling
+canary. The source revision is
+`b00ca5a6248623e55c28acd6ce83ff39dfa74b83`; Site CI `35270983497` passed.
+Use the existing guarded deployment process with deployment contract 15 and
+role/prompt version 14. The Supply Contract stays unchanged.
+
+The initial protected-state check passed. Admission is closed, the scoped
+workers are stopped, and the current diagnostic release is healthy. Preserve
+the complete old Atlantic Gateway job, both claims, all receipts and events,
+the approved NYC checkpoint, five working mappings, five held roots,
+Pickleball history, all 2,821 published candidates, two unrelated queued
+captures, and the three unadmitted sources. The baseline is
+`local://incomplete-label-canary-baseline.json`.
+
+An initial parallel SSH inspection returned a transient connection refusal.
+A single-connection check succeeded, public database readiness passed, and
+the complete protected-state read then passed through one bounded connection.
+No runtime change was made during that access check.
+
+The expected canary result is a review-later data-quality diagnosis, not an
+approved mapping. Re-preview the exact source after the new authority is
+deployed. Apply only the reviewed admission hash. Run one producer claim.
+Keep reviewer admission closed. Do not capture another page or continue to
+another source.
+
+Plan revision: record the current rollout authority, exact retained evidence,
+preserved prior cycles, producer-only claim scope, and labeling acceptance criteria.
+
+The first producer-only startup did not reach admission readiness. The
+Gateway requires a healthy expected reviewer for every producer claim
+(`run-affiliate-agent-gateway.ts:936-949`). No claim or admission cycle ran.
+The runner and producer were stopped with admission closed and no active
+claims or unresolved receipts.
+
+The user then selected `Start standby reviewer`. This explicitly permits
+`supply-reviewer-1` to run for readiness during this single canary. It does
+not permit a reviewer lease or package approval. Refresh preflight, start the
+runner and both scoped workers, admit only the exact producer job, then stop
+all three workers. Do not weaken or bypass the readiness gate.
+
+Plan revision: record the readiness dependency and the separate standby
+reviewer authorization.
+
+### Completed incomplete-data labeling canary
+
+
+Source `b00ca5a6248623e55c28acd6ce83ff39dfa74b83` passed Site CI
+`35270983497`. Site publication `35295726934` and governed publication
+`35295726943` passed. The deployed immutable images are:
+
+    ghcr.io/razumly/bracketiq-site@sha256:167b04eaeccfce0502330e27d55a141e37bae7a1d65e8b169d77f36bfc866083
+    ghcr.io/razumly/bracketiq-affiliate-governed@sha256:7272809428f85b36a2cf055b0257ab45c026b1566772c75f884ca5271d6226fa
+    ghcr.io/razumly/bracketiq-affiliate-gateway@sha256:6549c7d32401722da06df76bed95294e097d6d5e1dc439f0d86f6678d4def4ea
+
+Both governed images matched the reviewed role/prompt exports and critical
+source hashes, including the prompt contract file. The published worker
+image also passed the real Bun diagnostic-redaction smoke check without
+production network access. Deployment contract 15 has hash
+`01d24b2f6ea324bf48a075d0126973e2ed7556977dec9c626c92c00ca8e16d0b`.
+All role and prompt versions are 14. Supply Contract 1 is unchanged.
+No migration ran.
+
+Initial stopped-fleet preflight passed with hash
+`660868ea357639765a5cc417abd3523d8130632fec04dd8133d3892ae3865c22`.
+Producer-only startup then failed its readiness check because the Gateway
+requires a healthy expected reviewer. No claim had run. The workers were
+stopped and the user explicitly selected `Start standby reviewer`.
+
+Fresh preflight for the authorized standby configuration passed with hash
+`73b71772af7f6e6299765ce63e1c68579d9cbbcf3a317fa56e20f1201a1b9d4f`.
+Both scoped workers reported ready with admission closed. Only the producer
+received an exact-job lease. The reviewer supplied a healthy heartbeat but
+received no lease or claim.
+
+The new admission reused the working source, governed root, stored run
+`7dc35ec8-2aa4-4d55-b505-312d53c5b0f0`, and page
+`61d4a0ab-7965-4a1b-9c24-d5f2f8de9efc`. Its reviewed hash was
+`906c6953d8d7f1cb06a45514a14d2fa2b00672e01cbb17a1fb8efa7815b1828f`.
+It created Gateway job `85d3f046-00ec-41f4-a613-4df398a8290c` without
+resetting or reopening the earlier job. Claim
+`agw-claim-f67f885d-8df2-4e17-b7b6-04ee594f39e0` ran generation 1 with
+producer prompt hash
+`85e59c7806d216ab6f78a4442d1456a0081bcbf771323685aeb43f6dd8a90894`.
+
+The producer stored this summary:
+
+> Incomplete source data: the retained HTML and Markdown expose a JavaScript/loading shell rather than the organization's primary content, so the CLUB mapping cannot be completed from this capture.
+
+It returned `CONTRACT_GAP` with `contractArea: MAPPING_EVIDENCE` and
+requested JavaScript-rendered homepage content or retained first-party
+About, Programs, or Facilities evidence for later review. It retained
+`Volleyball` as `VARIANT_UNRESOLVED`, selected no canonical sport, and
+identified the capture gap as the cause of the missing evidence.
+
+Terminal receipt `agw-receipt-3630a141-bbcf-4de8-b388-f5684fd1b6b3` and result
+hash `c78ba2c5bb91ccb73869d8edf69fc4216cba27e4e35c7379c4ca1727efbf666e`
+are recorded. The Gateway job is `COMPLETED`; the legacy mapping job is
+`HUMAN_REVIEW_REQUIRED`. The summary and repair request are retained in its
+terminal result. There are zero invocation failures, tool-error observations,
+package commits, and reviewer jobs for this canary.
+
+Final checks verified one producer claim since rollout preparation and zero
+reviewer claims. No new capture, guessed sport, approval, activation,
+publication, or automation enablement occurred. Admission is closed and the
+runner, producer 1, and standby reviewer 1 are stopped. The matched site,
+Gateway, and model services are healthy. Public readiness reports
+`status: ok` and `database: ready`.
+
+All protected comparisons passed. The earlier Atlantic job, both claims,
+receipts, and events are unchanged. The approved NYC checkpoint, five
+working mappings, five held roots, Pickleball history, all 2,821 published
+candidates, two unrelated queued captures, and the three unadmitted sources
+are unchanged. Active claims, active pointers, unresolved receipts,
+reconciliation claims/jobs, running captures, and Supply Targets are zero.
+
+The operator checkpoint is
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v15-incomplete-data-tools/canary-final-evidence.json`.
+The local copy is `local://incomplete-label-final-evidence.json`.
+The local source transfer archive was removed. Remote release and evidence
+files remain for audit. The rollout and standby authorization are consumed.
+
+Plan revision: record the verified version-15 rollout, explicit incomplete-data
+label, human-review routing, standby-only dependency, and safe final state.
