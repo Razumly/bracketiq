@@ -59,10 +59,46 @@ The operator selected OMP with two ChatGPT accounts. The governed affiliate work
 - [x] (2026-09-17) Publish and deploy reviewed prompt source `b00ca5a6248623e55c28acd6ce83ff39dfa74b83` with deployment contract 15 and role/prompt version 14.
 - [x] (2026-09-17) Complete one new Atlantic admission cycle with the required incomplete-data label and preserve both prior claims.
 - [x] (2026-09-17) Verify the human-review hold, unchanged protected state, and stopped canary workers; the authorized standby reviewer acquired no claim.
+- [x] (2026-09-18) Complete Houston Select FC, Chicago Central Hockey Club, and Sports Zone Academy Softball sequentially on the current release.
+- [x] (2026-09-18) Obtain independent staging-only approval for all three committed packages; preserve Atlantic's incomplete-data review hold.
+- [x] (2026-09-18) Verify all protected checkpoints and finish the batch with closed admission and stopped workers.
 
 ## Current approval record
 
-### Completed labeling-canary authorization — 2026-09-17
+### Completed three-source test authorization — 2026-09-18
+
+The authorized three-source test is complete. Its runtime and claim
+authorization is consumed. No further source, retry, capture, activation,
+publication, or automation change is authorized by this record.
+
+Houston Select FC, Chicago Central Hockey Club, and Sports Zone Academy
+Softball each completed one producer claim and one independent read-only
+reviewer claim. All three packages are `APPROVED` in their pending-mapping
+records. They remain inactive. The working public mappings are unchanged.
+
+The batch used source `b00ca5a6248623e55c28acd6ce83ff39dfa74b83`,
+deployment contract 15, role/prompt version 14, and Supply Contract 1.
+No source code, image, deployment, or business policy changed. Fresh
+preflight preceded all six claims. Admission closed after each exact claim.
+
+All six claims completed in generation 1 with zero invocation failures.
+Seventeen tool/input error observations remain in indefinite history:
+seven producer observations and ten reviewer observations. No limit marker
+or diagnostic delivery failure was observed.
+
+Admission is closed. The runner, producer 1, and reviewer 1 are stopped.
+There are no active claims, active pointers, unresolved receipts,
+reconciliation claims/jobs, running captures, or Supply Targets. Site and
+model-service identities, adjacent runtimes, and legacy timer state are
+unchanged.
+
+The complete approved NYC checkpoint and Atlantic incomplete-data checkpoint
+are unchanged. Five working mappings, five held roots, Pickleball history,
+all 2,821 published candidates, and two unrelated queued captures are
+preserved. The new approvals are staged repairs, not activated or published
+replacements. Further batch work or evidence repair requires a new instruction.
+
+### Historical labeling-canary authorization (consumed)
 
 The authorized prompt rollout and single labeling canary are complete.
 This authorization is consumed. It grants no further runtime change,
@@ -238,20 +274,32 @@ unusable captured content. Keep genuine source ambiguity and extraction
 defects distinct. This is a source-only role/prompt version-14 change; it
 does not alter production authority or add another database status.
 
+Decision (2026-09-18): Test the remaining three CLUB sources sequentially on
+the already verified release. Use one producer claim and one independent
+reviewer claim for each committed package. This tests repair and approval
+behavior across different sites without combining it with a code rollout,
+new capture, or public activation. Preserve Atlantic's incomplete-data hold
+as a separate evidence-repair task.
+
 ## Outcomes & Retrospective
 
 
-Prompt source `b00ca5a6248623e55c28acd6ce83ff39dfa74b83` is deployed with
-role/prompt version 14 and deployment contract 15. The one-source canary
-passed: Atlantic was explicitly labeled as incomplete source data and
-returned to `HUMAN_REVIEW_REQUIRED`. The producer requested evidence repair
-instead of guessing a sport or ending without a result. It recorded zero
-invocation failures and zero tool-error observations.
+The three-source current-release test passed. Houston Select FC, Chicago
+Central Hockey Club, and Sports Zone Academy Softball each produced a valid
+package and received independent approval. The packages remain staged and
+inactive; public working mappings did not change.
 
-The readiness gate required reviewer 1 in standby. The user authorized that
-state change separately; no reviewer claim ran. All scoped workers are
-stopped and admission is closed. No source capture, package approval,
-activation, candidate publication, or automation enablement occurred.
+The six generation-1 claims had zero invocation failures and retained
+17 corrected tool/input observations. Reviewer artifact-view/reference use
+accounts for ten of those observations and remains a focused improvement
+target. The batch does not prove unattended operation or EVENT/RENTAL repair
+behavior because all three sources are CLUB mappings.
+
+The earlier Atlantic canary remains `HUMAN_REVIEW_REQUIRED` with its explicit
+incomplete-source-data summary. That hold still needs evidence repair; it is
+not a completed mapping repair. The approved NYC checkpoint is unchanged.
+Admission is closed and all scoped workers are stopped. No source capture,
+activation, publication, or automation enablement occurred.
 
 ### Earlier diagnostic outcome (historical)
 
@@ -287,7 +335,7 @@ Atlantic diagnostic boundary.
 
 
 The working tree is `/Users/elesesy/StudioProjects/bracketiq-affiliate-collection`,
-on `workstream/affiliate-incomplete-label-canary`. The reviewed and deployed
+on `workstream/affiliate-three-source-repair-test`. The reviewed and deployed
 prompt source is `b00ca5a6248623e55c28acd6ce83ff39dfa74b83`.
 The earlier diagnostic source `d00f6e89b0f9b65ea9b7d04c04fe73dfae03fe5d`
 remains part of the preserved rollout history. The canonical repository is
@@ -322,9 +370,11 @@ Atlantic's labeling Gateway job `85d3f046-00ec-41f4-a613-4df398a8290c`
 completed generation 1 with `CONTRACT_GAP` and zero invocation failures.
 Legacy mapping job `369c79d8-53e2-4cd2-a096-856610377e25` is
 `HUMAN_REVIEW_REQUIRED`. Its stored summary identifies incomplete source data.
-The earlier Gateway job and both claims remain unchanged. Admission is
-closed and all scoped workers are stopped. The other three sources remain
-paused and unadmitted. The approved NYC checkpoint is unchanged.
+The earlier Gateway job and both claims remain unchanged. Houston, Chicago,
+and Sports Zone now have independently approved, inactive pending mappings.
+Their legacy mapping jobs are `COMPLETED`; their public working mappings
+remain unchanged. Admission is closed and all scoped workers are stopped.
+The approved NYC checkpoint is unchanged.
 
 Production access uses `ssh bracketiq-prod`. Use the named private workload
 and its guarded release configuration. Never print environment or credential
@@ -5653,3 +5703,125 @@ files remain for audit. The rollout and standby authorization are consumed.
 
 Plan revision: record the verified version-15 rollout, explicit incomplete-data
 label, human-review routing, standby-only dependency, and safe final state.
+
+### Authorized current-release three-source repair test
+
+
+The user approved the next three-source batch after the incomplete-data
+labeling canary passed. The current version-15 release is healthy, admission
+is closed, and all scoped workers are stopped. Initial exact-source previews
+found Houston, Chicago, and Sports Zone eligible. Each admission reuses its
+working source and creates its missing governed root.
+
+The baseline is `local://repair-three-baseline.json`, with an operator copy
+at
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v15-incomplete-data-tools/repair-three-baseline.json`.
+It protects the complete Atlantic labeling checkpoint in addition to the
+earlier NYC, mapping, hold, publication, and capture invariants. Initial
+previews are `local://repair-three-initial-previews.json`.
+
+Use one producer claim and, only for a committed package, one independent
+reviewer claim per source. Record a semantic evidence gap or reviewer repair
+request as that source's outcome. Do not add a retry or recapture to make the
+batch appear successful. Check all protected hashes before advancing.
+
+Plan revision: record the current-release three-source authorization,
+conditional review scope, stop conditions, and expanded protected baseline.
+
+### Completed current-release three-source repair test
+
+
+The batch completed on source
+`b00ca5a6248623e55c28acd6ce83ff39dfa74b83`, deployment contract 15, and
+role/prompt version 14. No new code or images were deployed. All three
+sources used their selected stored evidence. All six producer/reviewer
+claims completed in generation 1 without an invocation failure.
+
+Houston Select FC producer job
+`4aa3db0f-3673-44ba-9f3f-73865c1b6dd8` used claim
+`agw-claim-030bba6a-ea79-4185-bac7-e76e5f27ed1c`. It returned
+`BOUNDED_REPAIR_SUBMITTED` for package
+`1d32c038d80be4c17e9cbc9aa285060b55b8293ee92681a06060ece5e79b05bb`.
+Reviewer job `cb996eeb-d95d-4231-9b34-77194e1488b6`, claim
+`agw-claim-88ccf46f-cebb-40a1-92f2-bc93990a4350`, approved that exact package.
+The retained sport union is Grass Soccer and Indoor Soccer. The reviewer
+verified first-party club prose and the exact PlayMetrics tryout registration
+action. Producer and reviewer retained two error observations each.
+
+Chicago Central Hockey Club producer job
+`25009ff5-cbc2-4627-8690-938bc4060d8d` used claim
+`agw-claim-5346af34-806e-4f7e-8404-a67717aa8fac`. It returned
+`BOUNDED_REPAIR_SUBMITTED` for package
+`37d3200995ce05dbad10cfb7b12b26d8483d24333e6054b5c6eb4e958195f7bc`.
+Reviewer job `79b7f8dd-3461-407f-a9b2-42012caa0c97`, claim
+`agw-claim-283c2de5-efc4-4ab3-9cb3-11ed43d96541`, approved the package.
+The retained sport is Hockey. The reviewer verified the named club, source
+program prose, and same-site registration action. The producer retained one
+error observation and the reviewer retained three.
+
+Sports Zone Academy Softball producer job
+`7e5e57d1-1396-4988-9387-1e18bda8086f` used claim
+`agw-claim-60dd7871-b017-420e-8a82-658ab63404cc`. It returned
+`PACKAGE_COMMITTED` for package
+`fec1d5649be6f9c0587cdcc09f0294b3fc9437c7dc4e374af5b8c92f0281f378`.
+Reviewer job `6ef2285a-1d56-41a0-bfa6-0568ca0d33d7`, claim
+`agw-claim-d8223e4d-10cb-4b9c-af02-ff32f4d973c8`, approved the package.
+The retained sport is Softball. The reviewer verified the first-party program
+description and the organization's homepage as the official-information
+destination. The producer retained four error observations and the reviewer
+retained five.
+
+Each reviewer used a separate `READ_ONLY` workspace and its producer's exact
+committed package hash. Each source and governed root has a matching
+`APPROVED` pending-mapping record. Pending mappings
+`agw-artifact-b7f3f0f7-aaa3-4061-9b67-89b69ac3ba75` (Houston),
+`agw-artifact-916f7a92-b778-4341-a2ab-423fe5c8a9a2` (Chicago), and
+`agw-artifact-61f20fbd-ad33-4103-9818-7e54d8d5909c` (Sports Zone) are inactive.
+The working version-1 mapping IDs, content, and validation state are unchanged.
+All three new roots remain `PRE_MAPPED` at generation 3, with automation
+disabled and zero target contribution.
+
+The read-only diagnostic comparison found 17 observations, all with
+`INDEFINITE` retention and no limit marker. Seven reviewer observations are
+`ARTIFACT_VIEW_INVALID`; three are `ARTIFACT_NOT_PERMITTED`. Producer
+observations comprise four local command-schema errors, two entity/action
+validation errors, and one missing-required-fields error. The agents reached
+valid terminal outcomes after these errors. Do not erase the errors or
+describe the batch as error-free.
+
+Fresh preflight ran before every claim. During Chicago reviewer preparation,
+the local controller checked the helper's exit code immediately after its
+ready banner and briefly saw no exit code. The helper had succeeded and
+exited 0. The controller confirmed that settled result and used the same
+preflight. It did not repeat an admission or consume an extra claim. Future
+control steps now wait for the ready helper to settle before checking exit.
+This was an operator control check, not an agent invocation failure.
+
+Final verification found exactly six selected claims, all completed at
+generation 1 with no failure code. No capture, discovery, or executor command
+ran. No new capture run was created for the selected intakes. Admission is
+closed; the runner, producer 1, and reviewer 1 are stopped. Active claims,
+active pointers, unresolved receipts, reconciliation claims/jobs, running
+captures, and Supply Targets are zero.
+
+The complete NYC approval and Atlantic incomplete-data checkpoint passed
+their full-row hash comparisons. All five working mappings, five held roots,
+Pickleball history, all 2,821 published candidates, and the two unrelated
+queued captures are unchanged. The site and both model-service identities
+are unchanged. Adjacent runtimes and legacy service/timer states are
+preserved. Public readiness reports `status: ok` and `database: ready`.
+
+The complete operator checkpoint is
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v15-incomplete-data-tools/repair-three-final-evidence.json`.
+The local copy is `local://repair-three-final-evidence.json`. Detailed source
+states and grouped errors are in `local://repair-three-final-verification.json`.
+All six preflight hashes are in `local://repair-three-preflights.json`.
+No temporary repository script or test database was created for this batch.
+
+This result supports another bounded, representative test batch, not an
+unattended backlog run. EVENT and RENTAL paths still need representation.
+Atlantic remains a separate evidence-repair task. The three approved packages
+also remain staged until a separately authorized lifecycle operation.
+
+Plan revision: record three independent approvals, retained error patterns,
+unchanged public data, consumed batch authority, and final stopped state.
