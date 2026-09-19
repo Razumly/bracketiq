@@ -65,8 +65,69 @@ The operator selected OMP with two ChatGPT accounts. The governed affiliate work
 - [x] (2026-09-18) Test one EVENT, RENTAL, and CLUB source from the current `NEEDS_REVIEW` cohort using stored evidence only.
 - [x] (2026-09-18) Preserve existing human-review holds and defer all evidence-repair work until the current review pass is complete.
 - [x] (2026-09-18) Record the mixed batch outcomes and finish with closed admission and stopped workers.
+- [x] (2026-09-19) Check the proposed two-per-kind batch and obtain approval for six eligible CLUB sources instead.
+- [x] (2026-09-19) Pin all six retained run/page selections and freeze the 168 pending candidates and 379 existing human-review jobs.
+- [ ] (2026-09-19, blocked) Complete the six CLUB reviews. Asphalt's first producer claim failed; the other five sources were not admitted.
+- [x] (2026-09-19) Stop on the first invocation failure and verify closed admission, stopped workers, unchanged protected state, and deferred evidence repairs.
 
 ## Current approval record
+
+### Stopped six-CLUB batch authorization — 2026-09-19
+
+The batch stopped at its first invocation failure. Its runtime and claim
+authorization is consumed. The six reviews are not complete. No retry,
+reviewer claim, or remaining-source claim is authorized by this record.
+
+The user authorized a larger six-source batch with sequential claims.
+Read-only admission checks could not supply the proposed two EVENT, two
+RENTAL, and two CLUB sources under the existing hold and lease rules.
+The user then selected **Run six CLUB sources**. This is a batch-size test,
+not additional EVENT or RENTAL coverage.
+
+The run used unchanged source `b00ca5a6248623e55c28acd6ce83ff39dfa74b83`,
+deployment contract 15, role/prompt version 14, and Supply Contract 1.
+Fresh preflight passed with admission closed. The runner, producer 1, and
+reviewer 1 started. Only Asphalt's producer received a claim. Admission
+closed after that claim was acquired. All scoped workers stopped after
+the failure. The standby reviewer acquired no claim.
+
+The original authorized sources and mapping jobs were:
+
+| Source | Mapping job |
+| --- | --- |
+| Asphalt Green Soccer Overview | `4260ec23-a0b4-48b2-8de3-4e00c85648c0` |
+| Barça Academy Austin | `0659379b-ae80-48c8-a5c6-41e39ce63928` |
+| Brooklyn Force Soccer Club | `b6395ac8-2d07-41c4-b1a2-567d47796cd0` |
+| DV7 Soccer Academy New York | `d189a8cf-ffee-4346-8329-f593f1115b93` |
+| Downtown United Soccer Club | `e8b650aa-f97d-46ab-94ad-0b73a334d539` |
+| High Octane Training Volleyball NYC | `9c921fa9-03dc-442c-b594-2f53b1ab023f` |
+
+All six exact run/page selections passed bounded preview. They are recorded
+in `local://six-club-selected-sources.json`. Only Asphalt was admitted after
+its exact-source preview. It committed a package but did not complete its
+terminal result. No reviewer job was created. The other five sources remain
+unadmitted, with their mapping jobs `QUEUED`.
+
+The protected baseline is `local://six-club-baseline.json`. Its private
+operator copy is under the version-15 tool root. It pins all 168 current
+pending candidate rows, all 379 existing human-review mapping jobs, all six
+working mappings and organizations, and the earlier protected checkpoints.
+It also pins both prior completed batches, including York's new evidence
+hold. Approved replacements must remain staged and inactive.
+
+Stop on an invocation failure, diagnostic delivery failure, unresolved
+receipt, unexpected claim, or protected-content change. Keep the exact
+admitted Supply Source links separate from protected working mapping content.
+Do not reset legacy claim metadata, create missing mapping jobs, repair
+evidence, recapture, discover sources, activate mappings, publish candidates,
+enable automation, change application code, publish images, or deploy.
+
+The rejected mixed-kind selection remains in
+`local://six-review-selection-blocker.json`. Fourteen legacy EVENT/RENTAL
+jobs retain old worker and claim fields. Eleven previews report the lease
+guard. Three report ambiguous evidence runs and also retain those fields.
+Other unheld EVENT/RENTAL sources lack mapping jobs. None of these records
+was reset or bypassed.
 
 ### Completed mixed pending-data review authorization — 2026-09-18
 
@@ -342,8 +403,39 @@ snapshots confirmed unchanged content, version, notes, ownership, validation,
 and activation. Keep whole-row checks for unadmitted mappings. Require the
 exact admitted root link for admitted mappings.
 
+Decision (2026-09-19): Stop the six-CLUB batch after Asphalt's generation-1
+invocation failed. Preserve its committed, inactive, unreviewed mapping.
+Do not reset the failed claim, discard its committed package, admit a
+reviewer, or continue the remaining five sources. The next investigation
+must distinguish the rejected terminal result from a provider or process
+failure. A retry must account for the existing committed package.
+
 ## Outcomes & Retrospective
 
+
+The six-CLUB batch stopped on its first producer claim. Asphalt Green
+validated and committed a replacement mapping. The Gateway then rejected
+three terminal submissions with `TERMINAL_DISPOSITION_NOT_PERMITTED`.
+No reviewer job was created.
+
+The new durable diagnostic reports `OMP_NO_TERMINAL_RESULT`. The prompt
+returned, the assistant stop reason was `stop`, no assistant error was
+recorded, and no terminal frame was observed. The supervisor classified
+the invocation as `PROCESS_CRASH`; the Gateway job is `RETRY_WAIT`.
+The generic failure code is not evidence of a provider error or an
+operating-system crash.
+
+Asphalt's replacement remains `STAGED`, inactive, and unreviewed. The other
+five sources remain unadmitted. All 168 pending candidates, all 379 existing
+human-review mapping jobs, prior approved packages, existing working
+mapping content, and deferred legacy claim metadata are unchanged.
+Admission is closed. The scoped workers are stopped. The site is healthy.
+
+This attempt does not establish that six-source processing is reliable.
+It also does not show a concurrency failure: only one claim ran. No retry,
+code change, deployment, or evidence repair was attempted.
+
+### Earlier mixed current-data outcome (historical)
 
 The mixed current-data batch completed with two approved staged packages and
 one new human-review hold. Nevada Police and Fire Games passed EVENT repair
@@ -421,7 +513,7 @@ Atlantic diagnostic boundary.
 
 
 The working tree is `/Users/elesesy/StudioProjects/bracketiq-affiliate-collection`,
-on `workstream/affiliate-mixed-pending-review`. The reviewed and deployed
+on `workstream/affiliate-six-club-review`. The reviewed and deployed
 prompt source is `b00ca5a6248623e55c28acd6ce83ff39dfa74b83`.
 The earlier diagnostic source `d00f6e89b0f9b65ea9b7d04c04fe73dfae03fe5d`
 remains part of the preserved rollout history. The canonical repository is
@@ -6064,3 +6156,119 @@ preservation-check correction, deferred evidence outcome, and shutdown proof.
 Plan revision: record the two staged approvals, deferred rental evidence
 hold, corrected structural-link check, retained errors, unchanged current
 cohort, and consumed mixed-batch authorization.
+
+### Stopped six-CLUB batch — 2026-09-19
+
+The user approved six CLUB sources after read-only checks blocked the
+original two-per-kind selection. All six exact-source evidence selections
+passed preview. The runtime and contract versions did not change.
+
+Fresh preflight report
+`077232793c567d4d4bb9b06027fbb0f36fb70c47cad72746640cadc7fbc7b20a`
+passed before the first claim. Exact-source admission report
+`a72cb61542f5c3590a5d60301f18cced0f35b5c7518792fd9510ab33f0c8e457`
+admitted only Asphalt Green Soccer Overview.
+
+    Mapping job: 4260ec23-a0b4-48b2-8de3-4e00c85648c0
+    Gateway job: 5cc813c9-9efd-459e-afa2-e9a2f3278b5b
+    Producer claim: agw-claim-d5d28e9f-3595-425a-adf9-cd126231b005
+    Supply Source: 8c17b1a6-e64e-4f7e-acdf-741c13a974c9
+    Claim generation: 1
+
+The producer corrected one local package-schema error. It then completed
+`VALIDATE_DECLARATIVE_PACKAGE` and `COMMIT_DECLARATIVE_PACKAGE`.
+The committed package hash is
+`f17456e1e6c6b41addf93b482bf1e943205d6041214a8dea73edc52162a4cb4c`.
+The commit receipt is
+`agw-receipt-4529d759-a134-40af-a12e-73b058d4bc7f`.
+
+The staged mapping is
+`agw-artifact-a18b70c9-1f05-4b5b-b69f-b1be432ffbb1`.
+It proposes Grass Soccer and Indoor Soccer. These determinations have not
+received independent review. The mapping has `isActive = false` and
+`validatedAt = null`. Its pending state is `STAGED`. The existing active
+mapping ID remains `affiliate_mapping_asphalt_green_soccer_overview_v1`.
+
+#### Failure and retained diagnostic
+
+After the commit, three `submit_result` calls were rejected with
+`TERMINAL_DISPOSITION_NOT_PERMITTED`. The model then stopped without an
+accepted terminal result. Failure event
+`agw-event-a2e6ace0-10c9-4d0f-a57c-0c8dab7f3978` retains:
+
+    driverCode: OMP_NO_TERMINAL_RESULT
+    promptOutcome: RETURNED
+    assistantStopReason: stop
+    assistantErrorCategory: NONE
+    assistantErrorStatus: null
+    terminalFrameObserved: false
+
+The claim is `FAILED` with `safeFailureCode = PROCESS_CRASH`.
+The Gateway job is `RETRY_WAIT`, with invocation failure count one.
+Its recorded next-attempt time is `2026-09-19T06:10:37.280Z`; that time does
+not authorize another claim. Admission remains closed and workers are
+stopped. No generation-2 claim exists.
+
+Four tool/input error events and the invocation-failure event have
+`INDEFINITE` retention. No diagnostic limit or delivery-failure marker was
+recorded. The claim diagnostic deadline is `2026-10-03T06:05:37.280Z`;
+the failure event and its bounded diagnostic have no retention deadline.
+
+The retained error observations do not include the rejected disposition
+value. This inspection identifies the completion failure but does not prove
+which guidance, tool input, or contract behavior caused it. No live replay
+or code fix was authorized or attempted.
+
+#### Stop result and remaining work
+
+The monitor exited with the required stop signal after the first failure.
+Admission closed. The guarded shutdown stopped the runner, producer 1, and
+reviewer 1. No reviewer job was created or claimed. No additional source
+was admitted.
+
+Asphalt's legacy mapping job remains `GOVERNED_REPAIR_PENDING`. Its root
+remains `PRE_MAPPED`, at generation 2, with target contribution zero and
+automation disabled. The committed package is not an approval.
+
+These five sources retain their original working mappings, have no governed
+root or pending replacement from this run, and retain `QUEUED` mapping jobs:
+
+- Barça Academy Austin.
+- Brooklyn Force Soccer Club.
+- DV7 Soccer Academy New York.
+- Downtown United Soccer Club.
+- High Octane Training Volleyball NYC.
+
+All protected comparisons passed after the failure and at the final stopped
+boundary. The 168 pinned pending candidate rows retain hash
+`5cba709fe6cd261242f7e38c9e98f8c0`. The 379 pre-existing human-review mapping
+rows retain hash `ec7594874706bdac7658b42bbdfac9e9`. The earlier approvals,
+Atlantic and York evidence holds, working mapping content and validation,
+organizations, public records, and deferred legacy claim metadata remain
+unchanged.
+
+Final counts are zero active claims, active pointers, unresolved receipts,
+reconciliation work, running captures, and supply target contribution.
+The site, Gateway, model gateway, and auth broker remain healthy.
+`/api/health/ready` returned `status: ok` and `database: ready`.
+No recapture, discovery, evidence repair, activation, publication, automation
+enablement, application code change, or deployment occurred.
+
+#### Evidence record
+
+The baseline is `local://six-club-baseline.json`. Its private copy is
+150,366 bytes with SHA-256
+`7d5bdc701606d0a45bece1bc71af0fa3ad7ac61da039806906a2401760728f20`.
+
+The final proof is `local://six-club-stopped-evidence.json`. An exact
+182,471-byte copy is retained with mode `0600` at
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-v15-incomplete-data-tools/six-club-stopped-evidence.json`.
+Its SHA-256 is
+`65d4d45973a113d37070e5d7256fdedbd11ad71831d4adf5990e3c7b0161d4d7`.
+It includes the selection blocker, revised authorization scope, baseline,
+preflight, failed claim, committed package state, retained diagnostics,
+unstarted-source verification, and stopped-runtime proof.
+
+Plan revision: record the six-CLUB scope change, first-claim completion
+failure, staged unreviewed package, five unstarted sources, preserved
+checkpoints, and consumed batch authorization.
